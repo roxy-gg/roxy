@@ -314,6 +314,32 @@ export function keyForContents(wc: Electron.WebContents): string | null {
   return null
 }
 
+/**
+ * An open tab currently sitting on `origin`, across every session's browser.
+ *
+ * Session storage is scoped to one browsing context, so relaying it needs a
+ * LIVE tab on the target origin - there is nothing else to write into.
+ * Prefers a session's ACTIVE tab, since that is the one the user is looking at.
+ */
+export function contentsForOrigin(origin: string): Electron.WebContents | null {
+  let fallback: Electron.WebContents | null = null
+  for (const s of sessions.values()) {
+    for (const t of s.tabs) {
+      if (t.view.webContents.isDestroyed()) continue
+      let tabOrigin: string
+      try {
+        tabOrigin = new URL(t.view.webContents.getURL()).origin
+      } catch {
+        continue
+      }
+      if (tabOrigin !== origin) continue
+      if (t.id === s.activeTabId) return t.view.webContents
+      fallback ??= t.view.webContents
+    }
+  }
+  return fallback
+}
+
 /** Label a session's window (usually the project folder), so windows are tellable apart. */
 export function setLabel(key: string, label: string): void {
   if (key === DEFAULT_KEY) return

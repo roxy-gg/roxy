@@ -36,11 +36,12 @@
     "icons:providers": "node script/copy-provider-icons.mjs",
     "smoke:shared": "esbuild test/shared.ts --bundle --platform=node --format=cjs --packages=external --outfile=test/.out/shared.cjs && node test/.out/shared.cjs",
     "smoke:app": "esbuild test/smoke.ts --bundle --platform=node --format=cjs --packages=external --outfile=test/.out/smoke.cjs && electron test/.out/smoke.cjs",
-    "smoke": "npm run smoke:shared && npm run smoke:store && npm run smoke:cookies && npm run smoke:app",
+    "smoke": "npm run smoke:shared && npm run smoke:store && npm run smoke:cookies && npm run smoke:relay && npm run smoke:app",
     "smoke:cliproxy": "esbuild test/cliproxy.ts --bundle --platform=node --format=cjs --packages=external --outfile=test/.out/cliproxy.cjs && electron test/.out/cliproxy.cjs",
     "worktree:setup": "npm ci --prefer-offline --no-audit --no-fund && electron-builder install-app-deps",
     "smoke:store": "node test/store-guard.mjs",
-    "smoke:cookies": "esbuild test/cookies.ts --bundle --platform=node --format=cjs --packages=external --outfile=test/.out/cookies.cjs && electron test/.out/cookies.cjs"
+    "smoke:cookies": "esbuild test/cookies.ts --bundle --platform=node --format=cjs --packages=external --outfile=test/.out/cookies.cjs && electron test/.out/cookies.cjs",
+    "smoke:relay": "esbuild test/relay.ts --bundle --platform=node --format=cjs --packages=external --outfile=test/.out/relay.cjs && electron test/.out/relay.cjs"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^2.0.85",
