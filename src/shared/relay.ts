@@ -4,9 +4,25 @@
  *
  * The relay moves a site's session (cookies + origin storage) from a real
  * browser into Roxy's browser partition, so you can debug a signed-in site
- * without signing in again. It is deliberately ONE-WAY (browser -> Roxy) and
- * deliberately manual: nothing is captured without a click in the extension,
- * and nothing is applied without a second confirmation inside Roxy.
+ * without signing in again. It is deliberately ONE-WAY (browser -> Roxy).
+ *
+ * CONSENT MODEL. A site starts at zero access: the extension holds no host
+ * permission for it, so it cannot read its cookies at all. The first transfer
+ * is fully manual (click in the extension, approve in Roxy). At that point the
+ * user may mark the origin TRUSTED, after which sends and imports for THAT
+ * ORIGIN happen with no further clicks.
+ *
+ * The lists are deliberately asymmetric, because they fail in opposite
+ * directions:
+ *
+ *   - TRUST is exact-origin and opt-in. `https://app.example.com` never
+ *     implies `https://admin.example.com`. Broad trust would be a footgun, and
+ *     Chrome enforces the same shape anyway: auto-send can only ever reach an
+ *     origin the user separately granted host access to.
+ *   - BLOCKS match broadly and win over everything. `example.com` blocks the
+ *     apex and every subdomain, is checked before trust, and is enforced in
+ *     BOTH the extension and Roxy — so a stale unpacked extension cannot
+ *     relay a blocked site even if its cached prefs are out of date.
  *
  * THREAT MODEL. A snapshot is live credentials. The relay listens on loopback,
  * which any process on the machine — and, via a form POST or an <img> tag, any
@@ -150,6 +166,10 @@ export interface RelayStatus {
   pairingExpiresAt?: number
   /** Snapshots waiting on the user's yes/no. */
   pending: PendingSnapshot[]
+  /** Automation settings (trusted origins, blocklist, master switch). */
+  prefs: RelayPrefs
+  /** The most recent transfers, newest first, for the activity list. */
+  recent: RelayTransfer[]
 }
 
 /** What the user chose to apply from a pending snapshot. */
@@ -183,4 +203,114 @@ export function isImportableOrigin(origin: string): boolean {
   } catch {
     return false
   }
+}
+
+/**
+ * Automation preferences. Owned by Roxy; the extension caches a copy and
+ * refreshes it on every heartbeat, so Roxy stays the single source of truth.
+ */
+export interface RelayPrefs {
+  /** Master switch. Off means every transfer is manual, as before. */
+  autoSend: boolean
+  /**
+   * Origins that send and import without prompting. EXACT origins only —
+   * scheme, host and port must all match.
+   */
+  trusted: string[]
+  /**
+   * Host patterns that may never be relayed, whatever else is set. Matches the
+   * apex and all subdomains; see `isBlockedHost`.
+   */
+  blocked: string[]
+}
+
+export const DEFAULT_RELAY_PREFS: RelayPrefs = {
+  autoSend: true,
+  trusted: [],
+  // Empty by default. A shipped list would be both presumptuous and dangerously
+  // incomplete — it reads as "we protected you", when the real protection is
+  // that nothing is trusted until you say so.
+  blocked: []
+}
+
+/**
+ * Minimum gap between automatic sends for one origin.
+ *
+ * Auto-send is driven partly by `chrome.cookies.onChanged`, which fires
+ * constantly on a busy site — every analytics ping can rewrite a cookie. This
+ * both stops a redundant flood and is what makes the token-refresh case work:
+ * the new token arrives shortly after it rotates, not 200 times a minute.
+ */
+export const AUTO_SEND_COOLDOWN_MS = 15_000
+
+/**
+ * Normalize a blocklist entry to a bare host.
+ *
+ * Users paste whatever is in their address bar, so tolerate a scheme, a port,
+ * a path, a `*.` prefix and a trailing dot. Everything reduces to the host,
+ * which is the only part matching operates on.
+ */
+function normalizePattern(raw: string): string {
+  return raw
+    .trim()
+    .toLowerCase()
+    .replace(/^https?:\/\//, '')
+    .replace(/^\*\./, '')
+    .split('/')[0]
+    .replace(/:\d+$/, '')
+    .replace(/\.$/, '')
+}
+
+/**
+ * Does `host` fall under any blocklist pattern?
+ *
+ * Matching is suffix-anchored on a DOT BOUNDARY, which is what stops the two
+ * classic bypasses: `example.com` must not match `notexample.com` (no boundary)
+ * and must not match `example.com.evil.net` (not a suffix). Blocking is
+ * deliberately broad — an entry covers the apex and every subdomain — because
+ * for a safety net over-matching is the safe direction to err.
+ */
+export function isBlockedHost(host: string, patterns: string[]): boolean {
+  const h = host.trim().toLowerCase().replace(/\.$/, '')
+  if (!h) return true // unparseable host: refuse rather than guess
+  for (const raw of patterns) {
+    const p = normalizePattern(raw)
+    if (!p) continue
+    if (h === p || h.endsWith(`.${p}`)) return true
+  }
+  return false
+}
+
+/** Convenience: block check straight from an origin string. */
+export function isBlockedOrigin(origin: string, patterns: string[]): boolean {
+  try {
+    return isBlockedHost(new URL(origin).hostname, patterns)
+  } catch {
+    return true // if we cannot parse it, we cannot clear it
+  }
+}
+
+/**
+ * May this origin be relayed without asking?
+ *
+ * Blocks are evaluated FIRST and cannot be overridden by trust — adding a
+ * domain to the blocklist must be sufficient on its own, without also hunting
+ * through the trusted list to revoke it.
+ */
+export function isAutoAllowed(origin: string, prefs: RelayPrefs): boolean {
+  if (!prefs.autoSend) return false
+  if (isBlockedOrigin(origin, prefs.blocked)) return false
+  return prefs.trusted.includes(origin)
+}
+
+/** One completed automatic transfer, for the activity list in Settings. */
+export interface RelayTransfer {
+  origin: string
+  at: number
+  cookies: number
+  localStorage: number
+  sessionStorage: number
+  /** Set when the transfer was applied without prompting. */
+  auto: boolean
+  error?: string
 }

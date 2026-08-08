@@ -2,7 +2,7 @@
  * The typed contract exposed to the renderer as `window.roxy`.
  * Implemented in src/preload/index.ts, handled in src/main/ipc/*.
  */
-import type { RelayImportChoice, RelayImportResult, RelayStatus } from './relay'
+import type { RelayImportChoice, RelayImportResult, RelayPrefs, RelayStatus } from './relay'
 import type {
   AddMessageInput,
   AppSettings,
@@ -911,8 +911,16 @@ export interface RoxyApi {
     cancelPairing(): Promise<void>
     /** Revoke the paired extension's token. */
     unpair(): Promise<void>
-    /** Apply a queued snapshot. This is the only path that writes it. */
-    apply(id: string, choice: RelayImportChoice): Promise<RelayImportResult>
+    /**
+     * Apply a queued snapshot. This is the only path that writes it.
+     * `trust` also marks the origin, so future transfers skip the prompt.
+     */
+    apply(id: string, choice: RelayImportChoice, trust?: boolean): Promise<RelayImportResult>
+    /** Update automation settings (auto-send switch, trusted list, blocklist). */
+    setPrefs(prefs: Partial<RelayPrefs>): Promise<RelayPrefs>
+    /** Mark an origin as needing no further confirmation. */
+    trustOrigin(origin: string): Promise<RelayPrefs>
+    untrustOrigin(origin: string): Promise<RelayPrefs>
     /** Discard a queued snapshot untouched. */
     reject(id: string): Promise<void>
     /** Copy the bundled extension to Documents; returns where it landed. */

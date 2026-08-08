@@ -22,18 +22,24 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
 import { BrowserWindow } from 'electron'
 import {
+  AUTO_SEND_COOLDOWN_MS,
+  DEFAULT_RELAY_PREFS,
   MAX_SNAPSHOT_BYTES,
   PAIRING_TTL_MS,
   RELAY_HEADER,
   RELAY_PORT,
   RELAY_PROTOCOL_VERSION,
+  isAutoAllowed,
+  isBlockedOrigin,
   isImportableOrigin,
   type PendingSnapshot,
   type RelayCookie,
   type RelayImportChoice,
   type RelayImportResult,
+  type RelayPrefs,
   type RelaySnapshot,
-  type RelayStatus
+  type RelayStatus,
+  type RelayTransfer
 } from '../../shared/relay'
 import { CHANNELS } from '../../shared/ipc'
 import { decryptSecret, encryptSecret } from './secure'
@@ -60,6 +66,12 @@ interface State {
   lastTransferAt?: number
   /** Snapshots awaiting approval, newest last. Values live ONLY here. */
   pending: { meta: PendingSnapshot; snapshot: RelaySnapshot }[]
+  /** Automation settings: master switch, trusted origins, blocklist. */
+  prefs: RelayPrefs
+  /** Recent transfers for the Settings activity list. Never includes values. */
+  recent: RelayTransfer[]
+  /** origin -> last auto-apply time, for the per-origin cooldown. */
+  lastAuto: Map<string, number>
 }
 
 const state: State = {
@@ -67,8 +79,14 @@ const state: State = {
   port: RELAY_PORT,
   pairing: null,
   code: null,
-  pending: []
+  pending: [],
+  prefs: { ...DEFAULT_RELAY_PREFS },
+  recent: [],
+  lastAuto: new Map()
 }
+
+/** How many transfers to remember for the activity list. */
+const MAX_RECENT = 20
 
 /**
  * Cap on parked snapshots. A paired-but-malicious extension could otherwise
@@ -185,8 +203,48 @@ export function status(): RelayStatus {
     lastSeenAt: state.lastSeenAt,
     lastTransferAt: state.lastTransferAt,
     pairingExpiresAt: state.code?.expiresAt,
-    pending: state.pending.map((p) => p.meta)
+    pending: state.pending.map((p) => p.meta),
+    prefs: state.prefs,
+    recent: state.recent
   }
+}
+
+/** Automation settings, as the extension needs them. */
+export function prefs(): RelayPrefs {
+  return state.prefs
+}
+
+/**
+ * Replace the automation settings.
+ *
+ * Adding a block also revokes any trust for origins it now covers. Without
+ * that, blocking `example.com` while `https://app.example.com` sat in the
+ * trusted list would leave a contradiction on screen — and although
+ * `isAutoAllowed` checks blocks first (so it would be honoured), a UI that
+ * displays a trusted entry which silently does nothing is a bug waiting to be
+ * misread.
+ */
+export function setPrefs(next: Partial<RelayPrefs>): RelayPrefs {
+  const merged: RelayPrefs = { ...state.prefs, ...next }
+  merged.trusted = merged.trusted.filter((o) => !isBlockedOrigin(o, merged.blocked))
+  state.prefs = merged
+  persistPrefs()
+  broadcast()
+  return state.prefs
+}
+
+/** Mark an origin as needing no further confirmation. */
+export function trustOrigin(origin: string): RelayPrefs {
+  if (!isImportableOrigin(origin)) throw new Error(`Cannot trust "${origin}".`)
+  if (isBlockedOrigin(origin, state.prefs.blocked)) {
+    throw new Error('That site is on the blocklist. Remove it there first.')
+  }
+  if (state.prefs.trusted.includes(origin)) return state.prefs
+  return setPrefs({ trusted: [...state.prefs.trusted, origin] })
+}
+
+export function untrustOrigin(origin: string): RelayPrefs {
+  return setPrefs({ trusted: state.prefs.trusted.filter((o) => o !== origin) })
 }
 
 /** Rough byte size of the credential material, for the confirmation prompt. */
@@ -349,7 +407,11 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
   if (url.pathname === '/hello') {
     state.lastSeenAt = Date.now()
     broadcast()
-    return void json(res, 200, { ok: true, v: RELAY_PROTOCOL_VERSION })
+    // The extension caches prefs so it can decide whether to auto-send without
+    // a round trip. Returning them on every heartbeat keeps Roxy the single
+    // source of truth: a block takes effect within one heartbeat, and the
+    // server enforces it independently anyway (see /snapshot).
+    return void json(res, 200, { ok: true, v: RELAY_PROTOCOL_VERSION, prefs: state.prefs })
   }
 
   if (url.pathname === '/snapshot') {
@@ -366,6 +428,35 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
     const snapshot = parseSnapshot(raw)
     if (!snapshot) return void json(res, 400, { error: 'unsupported or malformed snapshot' })
 
+    // THE BLOCKLIST IS ENFORCED HERE, not just in the extension. The extension
+    // decides whether to SEND; this decides whether we will even hold it. An
+    // extension running stale prefs — or simply an older build — must not be
+    // able to relay a blocked site.
+    if (isBlockedOrigin(snapshot.origin, state.prefs.blocked)) {
+      return void json(res, 403, { error: 'that site is blocked in Roxy' })
+    }
+
+    state.lastSeenAt = Date.now()
+
+    // Trusted origin: apply now, no prompt. This is the "no clicking" path.
+    if (isAutoAllowed(snapshot.origin, state.prefs)) {
+      const last = state.lastAuto.get(snapshot.origin) ?? 0
+      if (Date.now() - last < AUTO_SEND_COOLDOWN_MS) {
+        // Not an error: the extension is allowed to be chatty, we just decline
+        // to redo the work. Reported so it can back off.
+        return void json(res, 200, { applied: false, throttled: true })
+      }
+      state.lastAuto.set(snapshot.origin, Date.now())
+      const result = await applySnapshot(snapshot, {
+        cookies: true,
+        localStorage: true,
+        sessionStorage: true
+      })
+      record(snapshot, result, true)
+      broadcast()
+      return void json(res, 200, { applied: true })
+    }
+
     const partitioned = snapshot.cookies.filter((c) => c.partitionKey?.topLevelSite).length
     const meta: PendingSnapshot = {
       id: randomUUID(),
@@ -380,7 +471,6 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
       approxBytes: sizeOf(snapshot)
     }
     state.pending.push({ meta, snapshot })
-    state.lastSeenAt = Date.now()
     broadcast()
     // Bring Roxy forward: the snapshot is useless until the user answers, and
     // they just clicked "Send" in another app and are looking for the result.
@@ -457,22 +547,20 @@ export function markTransferred(): void {
 }
 
 /**
- * Apply a parked snapshot. This is the ONLY path that writes a relayed session
- * into the browser partition, and it runs only when the renderer says the user
- * approved it — the listener above can never reach here on its own.
+ * Apply a snapshot to the browser partition.
+ *
+ * Split out from `applyPending` so the auto path and the manual path share one
+ * implementation — two copies would drift, and this one writes credentials.
  *
  * Partitioned (CHIPS) cookies are counted and skipped, not imported: Electron
  * 33's cookie API has no `partitionKey`, so the best we could do is write them
  * into the unpartitioned jar, which puts them in the wrong place. Reporting
  * "3 skipped" is honest; silently misplacing them is not.
  */
-export async function applyPending(
-  id: string,
+async function applySnapshot(
+  snapshot: RelaySnapshot,
   choice: RelayImportChoice
 ): Promise<RelayImportResult> {
-  const snapshot = takePending(id)
-  if (!snapshot) throw new Error('That transfer is no longer waiting for approval.')
-
   const result: RelayImportResult = {
     cookiesImported: 0,
     cookiesFailed: 0,
@@ -531,7 +619,42 @@ export async function applyPending(
     }
   }
 
-  markTransferred()
+  state.lastTransferAt = Date.now()
+  return result
+}
+
+/** Remember a completed transfer for the Settings activity list. */
+function record(snapshot: RelaySnapshot, result: RelayImportResult, auto: boolean): void {
+  state.recent.unshift({
+    origin: snapshot.origin,
+    at: Date.now(),
+    cookies: result.cookiesImported,
+    localStorage: result.localStorageImported,
+    sessionStorage: result.sessionStorageImported,
+    auto,
+    error: result.errors[0]
+  })
+  state.recent.length = Math.min(state.recent.length, MAX_RECENT)
+}
+
+/**
+ * Apply a parked snapshot after the user approved it in the UI.
+ *
+ * `trust` marks the origin so future transfers skip the prompt entirely — the
+ * "approve once, then never again" path.
+ */
+export async function applyPending(
+  id: string,
+  choice: RelayImportChoice,
+  trust = false
+): Promise<RelayImportResult> {
+  const snapshot = takePending(id)
+  if (!snapshot) throw new Error('That transfer is no longer waiting for approval.')
+
+  const result = await applySnapshot(snapshot, choice)
+  record(snapshot, result, false)
+  if (trust) trustOrigin(snapshot.origin)
+  broadcast()
   return result
 }
 
@@ -553,11 +676,39 @@ function persist(): void {
   repo.setRelayPairing(JSON.stringify(payload))
 }
 
+/**
+ * Automation prefs are stored in the CLEAR, unlike the token.
+ *
+ * They are a list of hostnames, not a credential — encrypting them would imply
+ * a protection safeStorage does not provide here, and would make the blocklist
+ * unreadable (and so unfixable) if the keychain ever changed.
+ */
+function persistPrefs(): void {
+  repo.setRelayPrefs(JSON.stringify(state.prefs))
+}
+
 function load(): void {
-  const raw = repo.getRelayPairing()
-  if (!raw) return
+  const rawPrefs = repo.getRelayPrefs()
+  if (rawPrefs) {
+    try {
+      // Merge over the defaults so a prefs blob written by an older version
+      // (missing a field we since added) cannot produce `undefined` where the
+      // code expects an array.
+      const parsed = JSON.parse(rawPrefs) as Partial<RelayPrefs>
+      state.prefs = {
+        autoSend: parsed.autoSend ?? DEFAULT_RELAY_PREFS.autoSend,
+        trusted: Array.isArray(parsed.trusted) ? parsed.trusted : [],
+        blocked: Array.isArray(parsed.blocked) ? parsed.blocked : []
+      }
+    } catch {
+      state.prefs = { ...DEFAULT_RELAY_PREFS }
+    }
+  }
+
+  const row = repo.getRelayPairing()
+  if (!row) return
   try {
-    state.pairing = JSON.parse(decryptSecret(JSON.parse(raw)))
+    state.pairing = JSON.parse(decryptSecret(JSON.parse(row)))
   } catch {
     // Unreadable (keychain changed, DB copied between machines) — drop it and
     // make the user re-pair rather than leave a half-broken connection.

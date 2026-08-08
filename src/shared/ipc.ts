@@ -224,6 +224,9 @@ export const CHANNELS = {
   relayReject: 'relay:reject',
   relayInstallExtension: 'relay:install-extension',
   relayRevealExtension: 'relay:reveal-extension',
+  relaySetPrefs: 'relay:set-prefs',
+  relayTrustOrigin: 'relay:trust-origin',
+  relayUntrustOrigin: 'relay:untrust-origin',
   /** main -> renderer: relay status changed (paired, snapshot queued, ...) */
   relayState: 'relay:state',
 

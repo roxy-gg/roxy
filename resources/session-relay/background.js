@@ -17,6 +17,19 @@ const RELAY_HEADER = 'x-roxy-relay'
 /** Heartbeat cadence. Drives the "Connected" dot in Roxy's Settings. */
 const HEARTBEAT_MINUTES = 1
 
+/**
+ * Roxy's automation prefs, refreshed on every heartbeat.
+ *
+ * Cached so an auto-send decision costs no round trip, but never authoritative:
+ * Roxy re-checks the blocklist server-side on every snapshot, so a stale cache
+ * here cannot leak a blocked site.
+ */
+let prefs = { autoSend: false, trusted: [], blocked: [] }
+
+/** origin -> last auto-send, so a chatty site cannot spam Roxy. */
+const lastSent = new Map()
+const COOLDOWN_MS = 15_000
+
 async function getToken() {
   const { token } = await chrome.storage.local.get('token')
   return token || null
@@ -57,6 +70,9 @@ async function pair(code) {
   if (r.ok && r.json?.token) {
     await chrome.storage.local.set({ token: r.json.token })
     startHeartbeat()
+    // Pull prefs straight away rather than waiting up to a minute for the
+    // first heartbeat — otherwise a freshly trusted site would not auto-send.
+    void heartbeat()
     return { ok: true }
   }
   return { ok: false, error: r.json?.error || `Pairing failed (${r.status}).` }
@@ -89,7 +105,165 @@ async function heartbeat() {
   // 401 means Roxy revoked us (the user hit Disconnect). Drop the dead token
   // so the popup prompts to pair again instead of failing silently forever.
   if (r.status === 401) await chrome.storage.local.remove('token')
+  else if (r.json?.prefs) prefs = r.json.prefs
 }
+
+/**
+ * Suffix match on a dot boundary — the same rule as Roxy's `isBlockedHost`.
+ *
+ * The two boundaries that matter: `example.com` must not match
+ * `notexample.com` (no dot) nor `example.com.evil.net` (not a suffix).
+ */
+function isBlocked(host) {
+  const h = String(host || '')
+    .toLowerCase()
+    .replace(/\.$/, '')
+  if (!h) return true
+  return prefs.blocked.some((raw) => {
+    const p = String(raw)
+      .trim()
+      .toLowerCase()
+      .replace(/^https?:\/\//, '')
+      .replace(/^\*\./, '')
+      .split('/')[0]
+      .replace(/:\d+$/, '')
+      .replace(/\.$/, '')
+    return p && (h === p || h.endsWith(`.${p}`))
+  })
+}
+
+/** Is this origin cleared for a hands-off transfer? */
+function mayAutoSend(origin) {
+  if (!prefs.autoSend) return false
+  let host
+  try {
+    host = new URL(origin).hostname
+  } catch {
+    return false
+  }
+  if (isBlocked(host)) return false
+  return prefs.trusted.includes(origin)
+}
+
+/**
+ * Capture and send a trusted origin without any UI.
+ *
+ * Runs only for origins the user already granted host access to, so it never
+ * triggers a permission prompt: `permissions.contains` is checked first and a
+ * miss simply means "not ready yet, wait for a manual send".
+ */
+async function autoSend(origin, tabId) {
+  if (!mayAutoSend(origin)) return
+  const last = lastSent.get(origin) ?? 0
+  if (Date.now() - last < COOLDOWN_MS) return
+
+  const allowed = await chrome.permissions.contains({ origins: [`${origin}/*`] }).catch(() => false)
+  if (!allowed) return
+
+  lastSent.set(origin, Date.now())
+  try {
+    const cookies = await chrome.cookies.getAll({ url: `${origin}/` })
+    // Nothing to relay yet (signed out, or cookies not set). Don't send an
+    // empty session — it would overwrite nothing but still churn.
+    if (!cookies.length) return
+
+    const snapshot = {
+      v: 1,
+      origin,
+      capturedAt: Date.now(),
+      cookies: cookies.map(toRow)
+    }
+
+    // localStorage needs the page. Best-effort: a backgrounded or discarded tab
+    // cannot be scripted, and cookies alone are still worth sending.
+    if (tabId != null) {
+      try {
+        const [res] = await chrome.scripting.executeScript({
+          target: { tabId },
+          func: () => {
+            const out = {}
+            for (let i = 0; i < localStorage.length; i++) {
+              const k = localStorage.key(i)
+              if (k != null) out[k] = localStorage.getItem(k) ?? ''
+            }
+            return out
+          }
+        })
+        if (res?.result) snapshot.localStorage = res.result
+      } catch {
+        // Not scriptable right now; cookies still go.
+      }
+    }
+
+    await sendSnapshot(snapshot)
+  } catch {
+    // Auto-send is invisible, so a failure must stay invisible too — the next
+    // cookie change or navigation will try again.
+  }
+}
+
+/** chrome.cookies.Cookie -> the wire shape (see shared/relay.ts). */
+function toRow(c) {
+  const row = {
+    name: c.name,
+    value: c.value,
+    domain: c.domain,
+    path: c.path,
+    secure: c.secure,
+    httpOnly: c.httpOnly,
+    hostOnly: c.hostOnly,
+    session: c.session,
+    sameSite: c.sameSite ?? 'unspecified'
+  }
+  if (typeof c.expirationDate === 'number') row.expirationDate = c.expirationDate
+  if (c.partitionKey) row.partitionKey = c.partitionKey
+  return row
+}
+
+/** The active tab's origin, or null when it isn't a website. */
+async function activeOrigin() {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
+  if (!tab?.url) return null
+  try {
+    const u = new URL(tab.url)
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return null
+    return { origin: u.origin, tabId: tab.id }
+  } catch {
+    return null
+  }
+}
+
+// A cookie changing is the signal that matters: it is what happens when a
+// token rotates mid-session, which is the case auto-send exists for. The
+// cooldown upstream keeps a busy site from turning this into a flood.
+chrome.cookies.onChanged.addListener(async (change) => {
+  if (change.cause === 'evicted' || change.cause === 'expired') return
+  const active = await activeOrigin()
+  if (!active) return
+  // Only react to cookies that actually belong to the tab in front of the
+  // user, so a background tab's analytics cannot drive a transfer.
+  const domain = String(change.cookie?.domain ?? '').replace(/^\./, '')
+  let host
+  try {
+    host = new URL(active.origin).hostname
+  } catch {
+    return
+  }
+  if (host !== domain && !host.endsWith(`.${domain}`)) return
+  autoSend(active.origin, active.tabId)
+})
+
+// Landing on a trusted site should hand its session over without waiting for a
+// cookie to change.
+chrome.tabs.onUpdated.addListener((tabId, info, tab) => {
+  if (info.status !== 'complete' || !tab.active || !tab.url) return
+  try {
+    const u = new URL(tab.url)
+    if (u.protocol === 'http:' || u.protocol === 'https:') autoSend(u.origin, tabId)
+  } catch {
+    // Not a website.
+  }
+})
 
 function startHeartbeat() {
   chrome.alarms.create('roxy-heartbeat', { periodInMinutes: HEARTBEAT_MINUTES })
@@ -101,6 +275,11 @@ chrome.alarms?.onAlarm.addListener((alarm) => {
 
 chrome.runtime.onStartup.addListener(startHeartbeat)
 chrome.runtime.onInstalled.addListener(startHeartbeat)
+
+// A service worker is torn down aggressively and respawned on demand, so the
+// cached prefs start empty on every wake. Refresh immediately rather than
+// leaving auto-send dormant until the next alarm fires.
+void heartbeat()
 
 /** Send a captured snapshot. Returns Roxy's verdict for the popup to render. */
 async function sendSnapshot(snapshot) {
@@ -135,4 +314,4 @@ chrome.runtime.onMessage.addListener((msg, _sender, respond) => {
 // worker over the DevTools Protocol. `chrome.runtime.sendMessage` cannot be
 // used there: a service worker sending to itself has no receiver. Nothing on a
 // web page can reach this object — it lives in the worker's own global scope.
-globalThis.__roxyRelay = { pair, sendSnapshot, getToken }
+globalThis.__roxyRelay = { pair, sendSnapshot, getToken, heartbeat, prefs: () => prefs }

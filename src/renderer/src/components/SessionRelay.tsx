@@ -97,12 +97,16 @@ function PendingCard({ snapshot }: { snapshot: PendingSnapshot }): JSX.Element {
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState<RelayImportResult | null>(null)
   const [error, setError] = useState<string | null>(null)
+  // Ticked by default: someone approving a transfer almost always wants the
+  // next one to be silent. It is the whole point of the feature, and it stays
+  // reversible from the trusted-sites list.
+  const [trust, setTrust] = useState(true)
 
   const apply = async (): Promise<void> => {
     setBusy(true)
     setError(null)
     try {
-      setResult(await api.relay.apply(snapshot.id, choice))
+      setResult(await api.relay.apply(snapshot.id, choice, trust))
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -177,6 +181,21 @@ function PendingCard({ snapshot }: { snapshot: PendingSnapshot }): JSX.Element {
       <p className="mt-2 text-[11px] text-text-subtle">
         Values are hidden and stay in Roxy&apos;s main process until you import.
       </p>
+
+      <label className="mt-2.5 flex cursor-default items-start gap-2 text-xs text-text-muted">
+        <input
+          type="checkbox"
+          checked={trust}
+          onChange={(e) => setTrust(e.target.checked)}
+          className="mt-0.5 h-3 w-3 accent-[var(--color-accent)]"
+        />
+        <span>
+          Always allow <span className="font-mono text-[11px] text-text">{snapshot.origin}</span>
+          <span className="block text-[11px] text-text-subtle">
+            Future sessions from this exact origin import automatically. Nothing else is covered.
+          </span>
+        </span>
+      </label>
 
       {error && <p className="mt-2 text-[11px] text-danger">{error}</p>}
 
@@ -521,6 +540,153 @@ function ManageBody({
           Disconnect
         </Btn>
       </div>
+
+      <Automation status={status} />
+    </div>
+  )
+}
+
+/**
+ * The hands-off settings: master switch, the sites that skip the prompt, and
+ * the blocklist that overrides both.
+ */
+function Automation({ status }: { status: RelayStatus | null }): JSX.Element {
+  const prefs = status?.prefs
+  const [blockDraft, setBlockDraft] = useState('')
+  const [error, setError] = useState<string | null>(null)
+
+  const addBlock = async (): Promise<void> => {
+    const v = blockDraft.trim()
+    if (!v || !prefs) return
+    setError(null)
+    try {
+      await api.relay.setPrefs({ blocked: [...prefs.blocked, v] })
+      setBlockDraft('')
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    }
+  }
+
+  if (!prefs) return <></>
+
+  return (
+    <div className="mt-5 border-t border-border pt-4">
+      <label className="flex cursor-default items-start gap-2">
+        <input
+          type="checkbox"
+          checked={prefs.autoSend}
+          onChange={(e) => void api.relay.setPrefs({ autoSend: e.target.checked })}
+          className="mt-0.5 h-3 w-3 accent-[var(--color-accent)]"
+        />
+        <span className="text-xs text-text">
+          Transfer trusted sites automatically
+          <span className="block text-[11px] text-text-subtle">
+            Sessions from the sites below move to Roxy with no clicks, and refresh when their
+            cookies change. Everything else still asks first.
+          </span>
+        </span>
+      </label>
+
+      {/* Trusted */}
+      <div className="mt-4">
+        <div className="text-[11px] font-medium uppercase tracking-wide text-text-subtle">
+          Trusted sites ({prefs.trusted.length})
+        </div>
+        {prefs.trusted.length === 0 ? (
+          <p className="mt-1.5 text-[11px] text-text-subtle">
+            None yet. Tick &ldquo;Always allow&rdquo; when you approve a transfer.
+          </p>
+        ) : (
+          <ul className="mt-1.5 space-y-1">
+            {prefs.trusted.map((o) => (
+              <li key={o} className="flex items-center gap-2">
+                <code className="min-w-0 flex-1 truncate font-mono text-[11px] text-text-muted">
+                  {o}
+                </code>
+                <button
+                  type="button"
+                  title="Stop trusting this site"
+                  onClick={() => void api.relay.untrustOrigin(o)}
+                  className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-text-subtle hover:bg-surface-2 hover:text-text"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      {/* Blocked */}
+      <div className="mt-4">
+        <div className="text-[11px] font-medium uppercase tracking-wide text-text-subtle">
+          Never transfer
+        </div>
+        <p className="mt-1 text-[11px] text-text-subtle">
+          Covers the domain and all its subdomains, and overrides trust. Enforced by Roxy as well as
+          the extension.
+        </p>
+        <div className="mt-1.5 flex gap-1.5">
+          <input
+            value={blockDraft}
+            onChange={(e) => setBlockDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') void addBlock()
+            }}
+            placeholder="bank.com"
+            spellCheck={false}
+            className="h-7 min-w-0 flex-1 rounded-md border border-border bg-surface-2 px-2 font-mono text-[11px] text-text outline-none placeholder:text-text-subtle focus:border-accent"
+          />
+          <Btn onClick={() => void addBlock()}>Add</Btn>
+        </div>
+        {error && <p className="mt-1.5 text-[11px] text-danger">{error}</p>}
+        {prefs.blocked.length > 0 && (
+          <ul className="mt-1.5 space-y-1">
+            {prefs.blocked.map((b) => (
+              <li key={b} className="flex items-center gap-2">
+                <code className="min-w-0 flex-1 truncate font-mono text-[11px] text-text-muted">
+                  {b}
+                </code>
+                <button
+                  type="button"
+                  title="Remove from the blocklist"
+                  onClick={() =>
+                    void api.relay.setPrefs({ blocked: prefs.blocked.filter((x) => x !== b) })
+                  }
+                  className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-text-subtle hover:bg-surface-2 hover:text-text"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      {/* Activity — the audit trail for transfers that happened with no prompt. */}
+      {status.recent.length > 0 && (
+        <div className="mt-4">
+          <div className="text-[11px] font-medium uppercase tracking-wide text-text-subtle">
+            Recent transfers
+          </div>
+          <ul className="mt-1.5 space-y-1">
+            {status.recent.slice(0, 8).map((t, i) => (
+              <li key={i} className="flex items-baseline gap-2 text-[11px]">
+                <code className="min-w-0 flex-1 truncate font-mono text-text-muted">
+                  {t.origin}
+                </code>
+                <span className="shrink-0 text-text-subtle">
+                  {t.cookies}c{t.localStorage ? ` · ${t.localStorage}ls` : ''}
+                  {t.auto ? ' · auto' : ''}
+                </span>
+                <span className="shrink-0 tabular-nums text-text-subtle">
+                  {new Date(t.at).toLocaleTimeString()}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </div>
   )
 }

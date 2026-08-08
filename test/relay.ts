@@ -20,7 +20,14 @@
  */
 import { app } from 'electron'
 import { connect } from 'node:net'
-import { RELAY_HEADER, RELAY_PORT } from '../src/shared/relay'
+import {
+  DEFAULT_RELAY_PREFS,
+  RELAY_HEADER,
+  RELAY_PORT,
+  isAutoAllowed,
+  isBlockedHost,
+  type RelayPrefs
+} from '../src/shared/relay'
 import * as relay from '../src/main/services/relay'
 
 let failures = 0
@@ -98,7 +105,7 @@ function raw(
 }
 
 /** A syntactically valid snapshot, so rejections are about AUTH, not shape. */
-function snapshot(origin = 'https://example.com'): unknown {
+function snapshot(origin: string = 'https://example.com'): unknown {
   return {
     v: 1,
     origin,
@@ -235,6 +242,97 @@ async function main(): Promise<void> {
     headers: { origin: 'https://evil.com', host: HOST }
   })
   check('preflight refuses a website origin', pre.status === 403, pre.status)
+
+  // --- the blocklist and trust rules ---------------------------------------
+  // These decide whether credentials move without asking, so the matching
+  // edge cases are asserted directly rather than inferred from behaviour.
+  const B = (host: string, patterns: string[]): boolean => isBlockedHost(host, patterns)
+
+  check('blocks an exact host', B('example.com', ['example.com']))
+  check('blocks a subdomain', B('app.example.com', ['example.com']))
+  check('blocks a deep subdomain', B('a.b.example.com', ['example.com']))
+  check('does NOT block a lookalike suffix', !B('notexample.com', ['example.com']))
+  check(
+    'does NOT block a domain that merely contains it',
+    !B('example.com.evil.net', ['example.com'])
+  )
+  check('does NOT block an unrelated host', !B('other.com', ['example.com']))
+  check('ignores case', B('APP.Example.COM', ['example.com']))
+  check('tolerates a scheme in the pattern', B('app.example.com', ['https://example.com']))
+  check('tolerates a *. prefix', B('app.example.com', ['*.example.com']))
+  check('tolerates a path and port', B('app.example.com', ['example.com:8443/foo']))
+  check('tolerates a trailing dot', B('example.com.', ['example.com']))
+  check('an empty host is refused, not allowed', B('', ['example.com']))
+  check('an empty pattern matches nothing', !B('example.com', ['']))
+
+  const prefsFor = (trusted: string[], blocked: string[]): RelayPrefs => ({
+    autoSend: true,
+    trusted,
+    blocked
+  })
+
+  check(
+    'a trusted origin is auto-allowed',
+    isAutoAllowed('https://app.example.com', prefsFor(['https://app.example.com'], []))
+  )
+  check(
+    'trust is EXACT: a sibling subdomain is not covered',
+    !isAutoAllowed('https://admin.example.com', prefsFor(['https://app.example.com'], []))
+  )
+  check(
+    'trust is EXACT: a different scheme is not covered',
+    !isAutoAllowed('http://app.example.com', prefsFor(['https://app.example.com'], []))
+  )
+  check(
+    'a block BEATS trust',
+    !isAutoAllowed(
+      'https://app.example.com',
+      prefsFor(['https://app.example.com'], ['example.com'])
+    )
+  )
+  check(
+    'the master switch disables everything',
+    !isAutoAllowed('https://app.example.com', {
+      autoSend: false,
+      trusted: ['https://app.example.com'],
+      blocked: []
+    })
+  )
+  check(
+    'an untrusted origin is not auto-allowed',
+    !isAutoAllowed('https://x.com', prefsFor([], []))
+  )
+
+  // Blocking must also REVOKE trust, so the UI can never show a trusted entry
+  // that silently does nothing.
+  relay.setPrefs({ autoSend: true, trusted: ['https://app.example.com'], blocked: [] })
+  check('trust is stored', relay.status().prefs.trusted.length === 1)
+  relay.setPrefs({ blocked: ['example.com'] })
+  check(
+    'adding a block revokes trust it now covers',
+    relay.status().prefs.trusted.length === 0,
+    JSON.stringify(relay.status().prefs)
+  )
+  let threw = false
+  try {
+    relay.trustOrigin('https://app.example.com')
+  } catch {
+    threw = true
+  }
+  check('trusting a blocked origin is refused', threw)
+
+  // A blocked origin must be refused at the WIRE, not merely un-automated —
+  // a stale extension must not be able to relay it.
+  const blockedSend = await call('/snapshot', {
+    origin: EXT_ORIGIN,
+    host: HOST,
+    token,
+    body: snapshot('https://app.example.com')
+  })
+  check('a blocked origin is rejected on arrival', blockedSend.status === 403, blockedSend.status)
+  check('  and nothing was queued', relay.status().pending.length === 0)
+
+  relay.setPrefs({ ...DEFAULT_RELAY_PREFS })
 
   // --- snapshots queue, they do NOT apply ----------------------------------
   r = await call('/snapshot', { origin: EXT_ORIGIN, host: HOST, token, body: snapshot() })

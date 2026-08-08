@@ -27,7 +27,7 @@ import { existsSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import * as relay from '../src/main/services/relay'
-import { RELAY_EXTENSION_ID } from '../src/shared/relay'
+import { DEFAULT_RELAY_PREFS, RELAY_EXTENSION_ID } from '../src/shared/relay'
 
 const CDP_PORT = 9333
 const EXT = resolve('resources/session-relay')
@@ -212,6 +212,58 @@ async function main(): Promise<void> {
       `__roxyRelay.sendSnapshot({ v: 1, origin: 'https://example.com', capturedAt: Date.now(), cookies: [] })`
     )) as { ok?: boolean }
     check('after Disconnect the extension is refused', after?.ok === false, JSON.stringify(after))
+
+    // ---- the no-clicks path ------------------------------------------------
+    // Re-pair, trust the origin, and assert a snapshot is APPLIED on arrival
+    // rather than queued. This is the behaviour the feature exists for.
+    const { code: code2 } = relay.beginPairing()
+    await inSw(`__roxyRelay.pair('${code2}')`)
+    relay.setPrefs({ autoSend: true, trusted: ['https://example.com'], blocked: [] })
+
+    const auto = (await inSw(`__roxyRelay.sendSnapshot({
+      v: 1,
+      origin: 'https://example.com',
+      capturedAt: Date.now(),
+      cookies: [{
+        name: 'auto', value: 'no-clicks', domain: '.example.com', path: '/',
+        secure: true, httpOnly: false, hostOnly: false, session: true, sameSite: 'lax'
+      }]
+    })`)) as { ok?: boolean }
+    check('a trusted origin transfers with no prompt', auto?.ok === true, JSON.stringify(auto))
+    check('  nothing was queued for approval', relay.status().pending.length === 0)
+    check('  and it is recorded as automatic', relay.status().recent[0]?.auto === true)
+    check(
+      '  with the cookie actually applied',
+      relay.status().recent[0]?.cookies === 1,
+      JSON.stringify(relay.status().recent[0])
+    )
+
+    // The cooldown must stop a chatty site from re-sending in a loop.
+    const again = (await inSw(`__roxyRelay.sendSnapshot({
+      v: 1, origin: 'https://example.com', capturedAt: Date.now(),
+      cookies: [{
+        name: 'auto', value: 'again', domain: '.example.com', path: '/',
+        secure: true, httpOnly: false, hostOnly: false, session: true, sameSite: 'lax'
+      }]
+    })`)) as { ok?: boolean }
+    check('an immediate repeat is throttled, not reapplied', again?.ok === true)
+    check('  still only one recorded transfer', relay.status().recent.length === 1)
+
+    // A blocked domain must be refused even though the origin is trusted.
+    relay.setPrefs({ blocked: ['example.com'] })
+    const blocked = (await inSw(`__roxyRelay.sendSnapshot({
+      v: 1, origin: 'https://example.com', capturedAt: Date.now(), cookies: []
+    })`)) as { ok?: boolean; error?: string }
+    check('the blocklist refuses a trusted origin', blocked?.ok === false, JSON.stringify(blocked))
+    check('  and trust was revoked by the block', relay.status().prefs.trusted.length === 0)
+
+    // The extension must learn about the block from the heartbeat, so it stops
+    // even trying — the server check is a backstop, not the only guard.
+    await inSw(`__roxyRelay.heartbeat()`)
+    const cached = (await inSw(`JSON.stringify(__roxyRelay.prefs())`)) as string
+    check('the extension picked up the blocklist', cached.includes('example.com'), cached)
+
+    relay.setPrefs({ ...DEFAULT_RELAY_PREFS })
 
     client.close()
   } finally {
