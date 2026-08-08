@@ -1,6 +1,6 @@
 {
   "name": "roxy",
-  "version": "0.0.84",
+  "version": "0.0.85",
   "description": "Roxy — an open-source AI coding agent for engineers.",
   "main": "./out/main/index.js",
   "author": "Roxy (https://github.com/roxy-gg/roxy)",
@@ -41,7 +41,8 @@
     "worktree:setup": "npm ci --prefer-offline --no-audit --no-fund && electron-builder install-app-deps",
     "smoke:store": "node test/store-guard.mjs",
     "smoke:cookies": "esbuild test/cookies.ts --bundle --platform=node --format=cjs --packages=external --outfile=test/.out/cookies.cjs && electron test/.out/cookies.cjs",
-    "smoke:relay": "esbuild test/relay.ts --bundle --platform=node --format=cjs --packages=external --outfile=test/.out/relay.cjs && electron test/.out/relay.cjs"
+    "smoke:relay": "esbuild test/relay.ts --bundle --platform=node --format=cjs --packages=external --outfile=test/.out/relay.cjs && electron test/.out/relay.cjs",
+    "e2e:relay": "esbuild test/relay-e2e.ts --bundle --platform=node --format=cjs --packages=external --outfile=test/.out/relay-e2e.cjs && electron test/.out/relay-e2e.cjs"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^2.0.85",

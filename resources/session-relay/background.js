@@ -130,3 +130,9 @@ chrome.runtime.onMessage.addListener((msg, _sender, respond) => {
   // Keep the message channel open for the async respond above.
   return true
 })
+
+// Exposed for the end-to-end harness (test/relay-e2e.ts), which drives this
+// worker over the DevTools Protocol. `chrome.runtime.sendMessage` cannot be
+// used there: a service worker sending to itself has no receiver. Nothing on a
+// web page can reach this object — it lives in the worker's own global scope.
+globalThis.__roxyRelay = { pair, sendSnapshot, getToken }
