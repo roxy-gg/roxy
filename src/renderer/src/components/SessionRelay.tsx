@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { createPortal } from 'react-dom'
 import {
   Check,
   Globe,
@@ -303,11 +304,41 @@ function SetupDialog({
     if (paired && pairing) setPairing(null)
   }, [paired, pairing])
 
+  // Closing by any route (Escape, scrim, the X) should drop a live pairing
+  // code: it is short-lived and single-purpose, so leaving one valid after the
+  // user walked away is needless exposure.
+  const close = useCallback((): void => {
+    if (pairing) void api.relay.cancelPairing()
+    onClose()
+  }, [onClose, pairing])
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') close()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [close])
+
   const relayNotListening = status && !status.listening
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-6">
-      <div className="max-h-full w-full max-w-lg overflow-y-auto sq sq-xl sq-ring rounded-xl border border-border bg-surface">
+  // Portal to <body>: this dialog is rendered from INSIDE the Session Relay
+  // card, which is `overflow-hidden` to clip its rounded corners — without the
+  // portal the dialog is clipped to that card. It also makes the dialog immune
+  // to any future ancestor with `overflow`, `transform` or `filter`, all of
+  // which would otherwise trap a `position: fixed` child.
+  return createPortal(
+    <div
+      className="animate-scrim-in fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-6"
+      onClick={close}
+      role="dialog"
+      aria-modal="true"
+      aria-label={paired ? 'Session Relay' : 'Connect a browser'}
+    >
+      <div
+        className="animate-modal-in max-h-full w-full max-w-lg overflow-y-auto sq sq-2xl sq-ring rounded-2xl border border-border bg-surface"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="flex items-center gap-2 border-b border-border px-4 py-3">
           <Globe className="h-4 w-4 text-text-muted" />
           <div className="text-sm font-medium text-text">
@@ -315,7 +346,7 @@ function SetupDialog({
           </div>
           <button
             type="button"
-            onClick={onClose}
+            onClick={close}
             className="press-scale ml-auto flex h-6 w-6 items-center justify-center rounded-md text-text-muted hover:bg-surface-2 hover:text-text"
           >
             <X className="h-3.5 w-3.5" />
@@ -433,7 +464,8 @@ function SetupDialog({
           </div>
         )}
       </div>
-    </div>
+    </div>,
+    document.body
   )
 }
 

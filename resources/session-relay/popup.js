@@ -110,6 +110,7 @@ async function renderSend() {
         <label class="row"><input type="checkbox" id="c-session" /> Session storage <span class="count" id="n-session"></span></label>
       </div>
       <button id="send">Send session</button>
+      <div class="hint" id="count-hint"></div>
       <div id="msg"></div>
       <hr />
       <button class="ghost" id="disconnect">Disconnect from Roxy</button>
@@ -139,7 +140,16 @@ async function renderSend() {
       const granted = await chrome.permissions.request({ origins: [`${origin}/*`] })
       if (!granted) throw new Error('Access to this site was not granted.')
 
+      // Now that cookies are readable, show the true counts rather than the
+      // dashes that were there a moment ago.
+      void refreshCounts(tab, origin)
+
       const snapshot = await capture(tab, origin, want)
+      // Sending zero cookies for a site you are signed into looks like success
+      // but is not, so warn instead of silently relaying an empty session.
+      if (want.cookies && snapshot.cookies.length === 0) {
+        throw new Error('No cookies were readable for this site. Try reloading the page.')
+      }
       send.textContent = 'Sending…'
       const r = await chrome.runtime.sendMessage({ type: 'send', snapshot })
       if (!r?.ok) throw new Error(r?.error ?? 'Roxy rejected the transfer.')
@@ -156,25 +166,52 @@ async function renderSend() {
   })
 
   // Show counts up front so the user knows what they're about to hand over.
-  preview(tab, origin).then(({ cookies, local, session }) => {
-    app.querySelector('#n-cookies').textContent = cookies == null ? '' : String(cookies)
-    app.querySelector('#n-local').textContent = local == null ? '—' : String(local)
-    app.querySelector('#n-session').textContent = session == null ? '—' : String(session)
-  })
+  void refreshCounts(tab, origin)
+}
+
+/** Fill in the three counts, distinguishing "none" from "not allowed to look". */
+async function refreshCounts(tab, origin) {
+  const { cookies, local, session } = await preview(tab, origin)
+  const set = (id, v) => {
+    const node = app.querySelector(id)
+    if (node) node.textContent = v == null ? '—' : String(v)
+  }
+  set('#n-cookies', cookies)
+  set('#n-local', local)
+  set('#n-session', session)
+
+  // A dash means "unknown until you grant access", which is not obvious on its
+  // own — say so, or an empty-looking list reads as "there is nothing here".
+  const hint = app.querySelector('#count-hint')
+  if (hint)
+    hint.textContent = cookies == null ? 'Counts appear once you allow access to this site.' : ''
 }
 
 /**
- * Counts for the checkboxes. Best-effort: without site permission yet we can
- * still read cookies (that permission is separate), but storage needs the page,
- * so those stay "—" until the user sends.
+ * Counts for the checkboxes.
+ *
+ * `null` means UNKNOWN, not zero. The distinction matters: until the user
+ * grants host access for this origin, `chrome.cookies.getAll` returns an empty
+ * array rather than failing — "This method only retrieves cookies for domains
+ * that the extension has host permissions to." Rendering that as `0` would
+ * claim a signed-in site has no cookies, which is exactly backwards.
+ *
+ * Storage is readable earlier because `activeTab` grants a temporary host
+ * permission when the user opens the popup, and `chrome.scripting` honours it.
+ * The cookies API does not, so the two can legitimately disagree.
  */
 async function preview(tab, origin) {
   const out = { cookies: null, local: null, session: null }
-  try {
-    out.cookies = (await chrome.cookies.getAll({ url: origin + '/' })).length
-  } catch {
-    /* no cookie access yet */
+
+  const allowed = await chrome.permissions.contains({ origins: [`${origin}/*`] }).catch(() => false)
+  if (allowed) {
+    try {
+      out.cookies = (await chrome.cookies.getAll({ url: `${origin}/` })).length
+    } catch {
+      // Left as null: unknown, not zero.
+    }
   }
+
   try {
     const [res] = await chrome.scripting.executeScript({
       target: { tabId: tab.id },
@@ -185,7 +222,7 @@ async function preview(tab, origin) {
       out.session = res.result[1]
     }
   } catch {
-    /* needs permission; counts fill in after the user grants it */
+    // Page blocks injection (a chrome:// page, a PDF viewer): stays unknown.
   }
   return out
 }
