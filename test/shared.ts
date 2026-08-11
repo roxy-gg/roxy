@@ -224,6 +224,8 @@ import {
   MAX_MENU_H,
   type Rect
 } from '../src/renderer/src/lib/anchor'
+import { rowOffsets, visibleRange, OVERSCAN } from '../src/renderer/src/lib/windowing'
+import { buildModelIndex, buildModelRows } from '../src/renderer/src/lib/modelRows'
 import {
   contextMenuItems as clipboardMenuItems,
   hasUsableItems,
@@ -4264,6 +4266,212 @@ async function main(): Promise<void> {
     }
   }
   check('menu: height cap is bounded on every viewport', overTall === 0, String(overTall))
+
+  // ---- list windowing (renderer/lib/windowing) -------------------------------
+  //
+  // The regression this exists for: the model picker mounted EVERY model of
+  // every connected provider at once. A gateway provider reports 300-600 models
+  // and the menu lists them all, so opening it built ~450 rows / ~5,000 DOM
+  // nodes in one commit - measured at ~200ms of React commit plus ~60ms of
+  // layout, in the same frame its open animation started. That is what "the
+  // model picker feels laggy" was.
+  //
+  // The safety property is the one worth pinning: whatever slice we mount, it
+  // must contain every row the viewport can actually see. Miss one and the user
+  // scrolls into a hole.
+  const ROW_H = 28
+  const HEADER_H = 28
+  let holes = 0
+  let unbounded = 0
+  let badSpacers = 0
+  let ranges = 0
+  for (const count of [0, 1, 5, 14, 30, 200, 463, 3000]) {
+    // Mixed heights: a header every so often, so the prefix-sum path is
+    // exercised rather than a single uniform stride.
+    const heights = Array.from({ length: count }, (_, i) => (i % 37 === 0 ? HEADER_H : ROW_H))
+    const offsets = rowOffsets(heights)
+    const total = count ? offsets[count] : 0
+    for (const viewH of [120, 360, 700]) {
+      const maxTop = Math.max(0, total - viewH)
+      for (let top = 0; top <= maxTop; top += 7) {
+        const { first, last } = visibleRange(offsets, count, top, viewH)
+        ranges++
+        if (first < 0 || last > count || first > last) unbounded++
+        // Every row intersecting the band must be inside [first, last).
+        for (let i = 0; i < count; i++) {
+          if (offsets[i + 1] > top && offsets[i] < top + viewH && !(i >= first && i < last)) {
+            holes++
+            break
+          }
+        }
+        // Spacers + mounted rows must reconstruct the full scroll height, or
+        // the scrollbar lies about how much list there is.
+        const rebuilt = offsets[first] + (offsets[last] - offsets[first]) + (total - offsets[last])
+        if (Math.abs(rebuilt - total) > 1e-9) badSpacers++
+        // The whole point: mount count follows the VIEWPORT, not the catalog.
+        if (last - first > Math.ceil(viewH / ROW_H) + 2 * OVERSCAN + 2) unbounded++
+      }
+    }
+  }
+  check(`windowing: ${ranges} ranges produced (grid is non-trivial)`, ranges > 400)
+  check('windowing: never skips a row the viewport can see', holes === 0, `${holes} holes`)
+  check('windowing: mount count is bounded by the viewport', unbounded === 0, `${unbounded}`)
+  check('windowing: spacers preserve the total scroll height', badSpacers === 0, `${badSpacers}`)
+
+  // An empty list must not produce a range to render (or the spacers would be
+  // NaN-height divs).
+  const emptyRange = visibleRange(rowOffsets([]), 0, 0, 360)
+  check('windowing: an empty list mounts nothing', emptyRange.first === 0 && emptyRange.last === 0)
+
+  // Rubber-band scrolling reports a NEGATIVE scrollTop on macOS; it must clamp
+  // to the top rather than index out of the offsets array.
+  const rubber = visibleRange(rowOffsets(new Array(50).fill(ROW_H)), 50, -120, 360)
+  check(
+    'windowing: a negative scrollTop clamps to the top',
+    rubber.first === 0 && rubber.last > 0 && rubber.last <= 50,
+    JSON.stringify(rubber)
+  )
+
+  // The real shape from a 4-provider setup (30 + 399 + 6 + 6 models, plus the
+  // Latest/provider headers): 463 rows, and opening must mount ~20 of them.
+  const realHeights: number[] = []
+  for (const n of [5, 30, 5, 399, 2, 6, 2, 6]) {
+    realHeights.push(HEADER_H)
+    for (let i = 0; i < n; i++) realHeights.push(ROW_H)
+  }
+  const realOffsets = rowOffsets(realHeights)
+  const opened = visibleRange(realOffsets, realHeights.length, 0, 360)
+  check(
+    `windowing: a 463-row picker mounts ${opened.last - opened.first} rows on open`,
+    realHeights.length > 400 && opened.last - opened.first < 30,
+    `${opened.last - opened.first} of ${realHeights.length}`
+  )
+  // Scrolled to the very bottom it must still terminate exactly on the last row.
+  const bottom = visibleRange(
+    realOffsets,
+    realHeights.length,
+    realOffsets[realHeights.length] - 360,
+    360
+  )
+  check('windowing: the last row is reachable', bottom.last === realHeights.length)
+
+  // ---- model picker rows (renderer/lib/modelRows) ----------------------------
+  //
+  // The regression this exists for: rows were keyed by `provider:model`, which
+  // LOOKS unique and is not. The same model shows up in up to three sections at
+  // once - Pinned, its provider's Latest, and that provider's full catalog - so
+  // sibling rows collided on their React key. Combined with windowing (which
+  // remounts a different slice on every scroll) React reused the wrong DOM node
+  // and rows visibly duplicated and stuck to the viewport while scrolling.
+  //
+  // Keys are cheap to get wrong and invisible in review, so assert them.
+  const mkModel = (id: string, name: string) => ({ id, name, reasoning: true, toolCall: true })
+  const pickerProviders = [
+    { id: 'github-copilot', name: 'GitHub Copilot' },
+    { id: 'roxy', name: 'Roxy.gg Inference' }
+  ]
+  const pickerCatalogs = {
+    'github-copilot': [
+      mkModel('claude-opus-5', 'Claude Opus 5'),
+      mkModel('gpt-5.6-sol', 'GPT-5.6 Sol'),
+      mkModel('gemini-3.6-flash', 'Gemini 3.6 Flash')
+    ],
+    roxy: [mkModel('anthropic/claude-opus-5', 'Claude Opus 5'), mkModel('x/other', 'Other Model')]
+  }
+  // Exactly the shape of the real bug report: the recents are also in the
+  // catalog, and one of them is pinned too.
+  const pickerRecent = {
+    'github-copilot': [{ model: 'claude-opus-5' }, { model: 'gpt-5.6-sol' }],
+    roxy: [{ model: 'anthropic/claude-opus-5' }]
+  }
+  const pickerPinned = [{ providerId: 'github-copilot', model: 'claude-opus-5' }]
+  const pickerIndex = buildModelIndex(pickerCatalogs)
+
+  const rowsFor = (query: string) =>
+    buildModelRows({
+      providers: pickerProviders,
+      catalogs: pickerCatalogs,
+      recent: pickerRecent,
+      pinned: pickerPinned,
+      index: pickerIndex,
+      query
+    })
+
+  let dupeKeys = ''
+  for (const query of ['', 'claude', 'opus 5', 'gpt', 'zzz', '  ']) {
+    const keys = rowsFor(query).map((r) => r.key)
+    const seen = new Set<string>()
+    for (const k of keys) {
+      if (seen.has(k)) {
+        dupeKeys = `"${query}" -> ${k}`
+        break
+      }
+      seen.add(k)
+    }
+    if (dupeKeys) break
+  }
+  check('picker rows: every React key is unique', dupeKeys === '', dupeKeys)
+
+  // The duplicate-key case must still RENDER the model in each section - the
+  // fix is a unique key, not dropping the row.
+  const baseRows = rowsFor('')
+  const opusRows = baseRows.filter((r) => r.kind === 'model' && r.modelId === 'claude-opus-5')
+  check(
+    'picker rows: a pinned+recent+catalog model still appears in each section',
+    opusRows.length === 2, // pinned + catalog; suppressed under Latest because pinned
+    String(opusRows.length)
+  )
+
+  // A pinned model must not ALSO be repeated under Latest - it is already shown
+  // at the top, and a 5-row shortcut section should not waste a row on it.
+  const latestIdx = baseRows.findIndex(
+    (r) => r.kind === 'header' && r.key === 'h:latest:github-copilot'
+  )
+  const copilotIdx = baseRows.findIndex((r) => r.kind === 'header' && r.key === 'h:github-copilot')
+  const latestSection = baseRows.slice(latestIdx + 1, copilotIdx)
+  check(
+    'picker rows: a pinned model is not repeated under Latest',
+    latestSection.every((r) => r.kind === 'model' && r.modelId !== 'claude-opus-5')
+  )
+
+  // Searching collapses the shortcuts: repeating Pinned/Latest above the
+  // matches would show the same model three times in a short result list.
+  const searched = rowsFor('opus')
+  check(
+    'picker rows: a query drops the Pinned and Latest sections',
+    !searched.some(
+      (r) => r.kind === 'header' && (r.key === 'h:pinned' || r.key.startsWith('h:latest:'))
+    )
+  )
+  check(
+    'picker rows: a query still matches on name across providers',
+    searched.filter((r) => r.kind === 'model').length === 2
+  )
+  check('picker rows: a non-matching query yields nothing', rowsFor('zzzz').length === 0)
+
+  // A pin whose provider was disconnected (or whose model left the catalog)
+  // would otherwise render an unselectable row.
+  const staleRows = buildModelRows({
+    providers: pickerProviders,
+    catalogs: pickerCatalogs,
+    recent: {},
+    pinned: [{ providerId: 'deleted-provider', model: 'ghost' }],
+    index: pickerIndex,
+    query: ''
+  })
+  check(
+    'picker rows: a pin for a disconnected provider is dropped',
+    !staleRows.some((r) => r.kind === 'header' && r.key === 'h:pinned')
+  )
+
+  // Every model row must carry its capability flags, or the Brain/Wrench icons
+  // silently stop rendering.
+  check(
+    'picker rows: model rows keep their catalog info',
+    baseRows
+      .filter((r) => r.kind === 'model')
+      .every((r) => r.kind === 'model' && r.info !== undefined)
+  )
 
   // ---- context menus open AT THE CURSOR (sidebar right-click) --------------
   //
