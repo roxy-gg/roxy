@@ -54,6 +54,15 @@ interface RoxyStore {
   providers: ConnectedProvider[]
   /** models.dev model lists per provider id (lazy-loaded + cached). */
   modelCatalog: Record<string, ModelInfo[]>
+  /**
+   * Providers whose catalog has been REQUESTED and settled, however it settled.
+   *
+   * Distinct from `modelCatalog` having a key, because an empty result is not
+   * cached (a starting-up proxy has to be retried). Without this the picker
+   * cannot tell "still fetching" from "genuinely has no models", and blanked
+   * the whole menu behind whichever provider was slowest.
+   */
+  modelsTried: Record<string, boolean>
   /** Last 5 distinct model picks per provider, lazy-loaded + refreshed on selection. */
   recentModels: Record<string, { model: string; usedAt: number }[]>
   /**
@@ -310,6 +319,16 @@ const deltaHandlers = new Map<string, (event: LlmEvent) => void>()
 const chatRequests = new Map<string, string>()
 /** Cross-render cache of models.dev lists so we fetch each provider once. */
 const modelCatalogCache = new Map<string, ModelInfo[]>()
+/**
+ * In-flight `ensureModels` calls, keyed by provider.
+ *
+ * The picker asks for every connected provider in one tick, and the composer's
+ * other controls ask for the active one on the same tick. Without this each
+ * caller awaits its own IPC round trip - and for a subscription provider
+ * `models:list` can BOOT THE SIDECAR, so the duplicates aren't merely wasteful,
+ * they queue behind a process launch. One promise per provider, shared.
+ */
+const modelCatalogInflight = new Map<string, Promise<void>>()
 /** Loaded once per app session — `ensurePinnedModels` is called from every ModelPicker mount. */
 let pinnedModelsLoaded = false
 /** Set when a remote turn lands while a local send streams into the shared chat. */
@@ -723,6 +742,7 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
   telemetryEnabled: true,
   providers: [],
   modelCatalog: {},
+  modelsTried: {},
   recentModels: {},
   pinnedModels: [],
   chats: [],
@@ -1166,13 +1186,35 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
     const existing = get().modelCatalog[providerId]
     if (existing && existing.length > 0) return
     const cached = modelCatalogCache.get(providerId)
-    const list = cached && cached.length > 0 ? cached : await api.models.list(providerId)
-    // Only cache non-empty lists. If the proxy or connection is starting up,
-    // we want to try again on the next mount/action rather than caching an empty list forever.
-    if (list.length > 0) {
-      modelCatalogCache.set(providerId, list)
-      set((s) => ({ modelCatalog: { ...s.modelCatalog, [providerId]: list } }))
+    if (cached && cached.length > 0) {
+      set((s) => ({ modelCatalog: { ...s.modelCatalog, [providerId]: cached } }))
+      return
     }
+    // Share one round trip between every caller that asks in the same tick.
+    const pending = modelCatalogInflight.get(providerId)
+    if (pending) return pending
+    const load = (async () => {
+      try {
+        const list = await api.models.list(providerId)
+        // Only cache non-empty lists. If the proxy or connection is starting up,
+        // we want to try again on the next mount/action rather than caching an
+        // empty list forever.
+        if (list.length > 0) {
+          modelCatalogCache.set(providerId, list)
+          set((s) => ({ modelCatalog: { ...s.modelCatalog, [providerId]: list } }))
+        }
+      } catch {
+        // Leave the catalog untouched - the picker shows the provider as empty
+        // and the next mount retries.
+      } finally {
+        // Mark the attempt either way, so the picker can stop showing a
+        // provider as "loading" once it has actually been asked.
+        modelCatalogInflight.delete(providerId)
+        set((s) => ({ modelsTried: { ...s.modelsTried, [providerId]: true } }))
+      }
+    })()
+    modelCatalogInflight.set(providerId, load)
+    return load
   },
 
   ensureRecentModels: async (providerId) => {
