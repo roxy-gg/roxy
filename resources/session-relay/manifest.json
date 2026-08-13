@@ -1,0 +1,28 @@
+{
+  "manifest_version": 3,
+  "name": "Roxy Session Relay",
+  "version": "1.0.0",
+  "description": "Send a site's cookies and storage to the Roxy app, so you can debug a signed-in page without signing in again.",
+
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAzJm9L3DATBNEUCb8T0VgC+46UXFa4KtpS9Kzz24MXeeHonZjESbCfBSJzjnMBMSdAWmAY2Spa3v7ozCGibL0Jy05tlPVfE8eJ1n98T2gW72Od3eBi7ToaDHiDPmuYKa1qxbb0CQTpyLvwRSJWyo8J16TMiGcShojtw/o+Ek1xfSaFT5JVy/klid7VSSSk/eCwqppVp0zAouoX/TtYMogaQlcXSNZfL4AuayYi+9Utd3y29A4K97Pe0RucFk6bMGm4Q+ypqA+HTxzDGekHYQMVmZQcjQ4iFsxOYcvNJyqPmrR64+mbqHltYo7Pie1TZ74gOl1ba6dQdmUaDg2vZChhwIDAQAB",
+
+  "permissions": ["activeTab", "alarms", "cookies", "scripting", "storage"],
+
+  "host_permissions": ["http://127.0.0.1/*"],
+
+  "optional_host_permissions": ["http://*/*", "https://*/*"],
+
+  "action": {
+    "default_title": "Roxy Session Relay",
+    "default_popup": "popup.html"
+  },
+
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'; connect-src http://127.0.0.1:4317"
+  }
+}

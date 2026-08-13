@@ -6,6 +6,7 @@ import macDockIcon from '../../resources/icon-mac.png?asset'
 import { registerIpc } from './ipc'
 import { getDb } from './db/database'
 import { startLoopScheduler } from './services/loops'
+import { start as startRelay, stop as stopRelay } from './services/relay'
 import { listModels } from './services/models'
 import { backfillUsageFromHistory } from './services/usage'
 import { listConnectedProviders } from './db/repo'
@@ -111,6 +112,9 @@ app.whenReady().then(() => {
   // own storage - a failure in it can't touch either.
   initTracking()
   startLoopScheduler()
+  // The Session Relay listener. Loopback-only and inert until an extension
+  // pairs, so starting it unconditionally costs one idle socket.
+  void startRelay()
   // Sweep tool-output spill files older than the retention window (best-effort).
   void cleanupToolOutputs()
   // One-time: seed the usage/cost table from existing message history so the
@@ -146,6 +150,7 @@ app.on('will-quit', () => {
   killAllBackground()
   cancelAllBackgroundJobs()
   closeAllBrowsers()
+  stopRelay()
   shutdownAllLsp()
   void shutdownAllMcp()
   shutdownRemote()

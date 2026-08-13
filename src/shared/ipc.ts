@@ -212,6 +212,24 @@ export const CHANNELS = {
    */
   browserChromeHeight: 'browser:chrome-height',
 
+  /**
+   * Session Relay - the paired browser extension that transfers a site's
+   * cookies/storage into Roxy. See shared/relay.ts for the protocol.
+   */
+  relayStatus: 'relay:status',
+  relayBeginPairing: 'relay:begin-pairing',
+  relayCancelPairing: 'relay:cancel-pairing',
+  relayUnpair: 'relay:unpair',
+  relayApply: 'relay:apply',
+  relayReject: 'relay:reject',
+  relayInstallExtension: 'relay:install-extension',
+  relayRevealExtension: 'relay:reveal-extension',
+  relaySetPrefs: 'relay:set-prefs',
+  relayTrustOrigin: 'relay:trust-origin',
+  relayUntrustOrigin: 'relay:untrust-origin',
+  /** main -> renderer: relay status changed (paired, snapshot queued, ...) */
+  relayState: 'relay:state',
+
   /** renderer -> main: a session's background processes (the Services panel) */
   servicesList: 'services:list',
   /** renderer -> main: full buffered output of one service, for the log view */

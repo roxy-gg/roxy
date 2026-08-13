@@ -133,6 +133,48 @@ function setSetting(key: string, value: string | null): void {
   ).run(key, value)
 }
 
+// ---- Session Relay pairing ---------------------------------------------
+// The relay's bearer token, encrypted by the caller (see services/relay.ts)
+// before it gets here. Stored as one JSON blob in `settings` for the same
+// reason the forge host map below is: a single row, no relations, and
+// therefore no migration - which matters because migrations are append-only.
+//
+// NOT in `credentials`: that table is keyed by provider_id with a foreign key
+// into `providers`, and the relay is not a model provider.
+
+const RELAY_PAIRING_KEY = 'session_relay_pairing'
+
+/** The stored relay pairing blob, or null when nothing is paired. */
+export function getRelayPairing(): string | null {
+  const row = getDb().prepare('SELECT value FROM settings WHERE key = ?').get(RELAY_PAIRING_KEY) as
+    | { value: string }
+    | undefined
+  return row?.value ?? null
+}
+
+/** Persist (or clear, with null) the relay pairing blob. */
+export function setRelayPairing(value: string | null): void {
+  setSetting(RELAY_PAIRING_KEY, value)
+}
+
+// The relay's automation prefs (auto-send switch, trusted origins, blocklist).
+// Stored in the clear: these are hostnames, not credentials, and a blocklist
+// you cannot read is a blocklist you cannot fix.
+const RELAY_PREFS_KEY = 'session_relay_prefs'
+
+/** The stored relay automation prefs, or null before anything is set. */
+export function getRelayPrefs(): string | null {
+  const row = getDb().prepare('SELECT value FROM settings WHERE key = ?').get(RELAY_PREFS_KEY) as
+    | { value: string }
+    | undefined
+  return row?.value ?? null
+}
+
+/** Persist (or clear, with null) the relay automation prefs. */
+export function setRelayPrefs(value: string | null): void {
+  setSetting(RELAY_PREFS_KEY, value)
+}
+
 // ---- Forge host overrides ----------------------------------------------
 // Which software an UNRECOGNISED git host runs (`git.mycorp.com` -> gitlab).
 // Only consulted when auto-detection fails, so a stale or mistaken answer can

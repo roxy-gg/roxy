@@ -2,6 +2,7 @@
  * The typed contract exposed to the renderer as `window.roxy`.
  * Implemented in src/preload/index.ts, handled in src/main/ipc/*.
  */
+import type { RelayImportChoice, RelayImportResult, RelayPrefs, RelayStatus } from './relay'
 import type {
   AddMessageInput,
   AppSettings,
@@ -897,6 +898,36 @@ export interface RoxyApi {
     clear(host?: string): Promise<number>
     /** Import a Cookie-Editor / EditThisCookie JSON blob. Rejects only on malformed JSON. */
     importJson(text: string): Promise<CookieImportResult>
+  }
+  /**
+   * Session Relay - a paired browser extension that hands a site's live
+   * session (cookies + storage) to Roxy. Nothing is applied without the user
+   * confirming the specific transfer; see shared/relay.ts for the threat model.
+   */
+  relay: {
+    status(): Promise<RelayStatus>
+    /** Mint a pairing code for the user to type into the extension. */
+    beginPairing(): Promise<{ code: string; expiresAt: number; port: number }>
+    cancelPairing(): Promise<void>
+    /** Revoke the paired extension's token. */
+    unpair(): Promise<void>
+    /**
+     * Apply a queued snapshot. This is the only path that writes it.
+     * `trust` also marks the origin, so future transfers skip the prompt.
+     */
+    apply(id: string, choice: RelayImportChoice, trust?: boolean): Promise<RelayImportResult>
+    /** Update automation settings (auto-send switch, trusted list, blocklist). */
+    setPrefs(prefs: Partial<RelayPrefs>): Promise<RelayPrefs>
+    /** Mark an origin as needing no further confirmation. */
+    trustOrigin(origin: string): Promise<RelayPrefs>
+    untrustOrigin(origin: string): Promise<RelayPrefs>
+    /** Discard a queued snapshot untouched. */
+    reject(id: string): Promise<void>
+    /** Copy the bundled extension to Documents; returns where it landed. */
+    installExtension(): Promise<{ path: string; version: string }>
+    revealExtension(): Promise<void>
+    /** Subscribe to relay status; returns an unsubscribe fn. */
+    onState(callback: (status: RelayStatus) => void): () => void
   }
   services: {
     /** Background processes owned by a session (includes its subagents'). */

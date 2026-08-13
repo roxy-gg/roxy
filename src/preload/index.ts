@@ -14,6 +14,7 @@ import type {
   UpdateState
 } from '../shared/api'
 import type { CliProxyState } from '../shared/cliproxy'
+import type { RelayStatus } from '../shared/relay'
 
 /**
  * The typed bridge exposed to the renderer as `window.roxy`. Every method maps
@@ -231,6 +232,25 @@ const roxy: RoxyApi = {
     remove: (row) => ipcRenderer.invoke(CHANNELS.cookiesRemove, row),
     clear: (host) => ipcRenderer.invoke(CHANNELS.cookiesClear, host),
     importJson: (text) => ipcRenderer.invoke(CHANNELS.cookiesImport, text)
+  },
+  relay: {
+    status: () => ipcRenderer.invoke(CHANNELS.relayStatus),
+    beginPairing: () => ipcRenderer.invoke(CHANNELS.relayBeginPairing),
+    cancelPairing: () => ipcRenderer.invoke(CHANNELS.relayCancelPairing),
+    unpair: () => ipcRenderer.invoke(CHANNELS.relayUnpair),
+    apply: (id, choice, trust) => ipcRenderer.invoke(CHANNELS.relayApply, id, choice, trust),
+    setPrefs: (prefs) => ipcRenderer.invoke(CHANNELS.relaySetPrefs, prefs),
+    trustOrigin: (origin) => ipcRenderer.invoke(CHANNELS.relayTrustOrigin, origin),
+    untrustOrigin: (origin) => ipcRenderer.invoke(CHANNELS.relayUntrustOrigin, origin),
+    reject: (id) => ipcRenderer.invoke(CHANNELS.relayReject, id),
+    installExtension: () => ipcRenderer.invoke(CHANNELS.relayInstallExtension),
+    revealExtension: () => ipcRenderer.invoke(CHANNELS.relayRevealExtension),
+    onState: (callback) => {
+      const handler = (_event: Electron.IpcRendererEvent, status: RelayStatus): void =>
+        callback(status)
+      ipcRenderer.on(CHANNELS.relayState, handler)
+      return () => ipcRenderer.removeListener(CHANNELS.relayState, handler)
+    }
   },
   services: {
     list: (sessionId) => ipcRenderer.invoke(CHANNELS.servicesList, sessionId),

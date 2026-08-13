@@ -30,6 +30,8 @@ import * as copilot from '../services/copilot'
 import * as cliproxy from '../services/cliproxy'
 import * as browser from '../services/browser'
 import * as cookies from '../services/cookies'
+import * as relay from '../services/relay'
+import * as relayInstall from '../services/relay-install'
 import { listModels } from '../services/models'
 import { pickDefaultModel } from '../../shared/models'
 import { CLIPROXY_PROVIDER_IDS, accountsFor, isCliProxyProvider } from '../../shared/cliproxy'
@@ -49,6 +51,7 @@ import { sessionCwd } from '../services/workspace'
 import * as git from '../services/git'
 import * as forge from '../services/forge'
 import type { ForgeKind } from '../../shared/forge'
+import type { RelayImportChoice, RelayPrefs } from '../../shared/relay'
 import { pruneWorktrees, removeWorktreeForChat, renameWorkstreamBranch } from '../services/worktree'
 import { checkForUpdates, quitAndInstall, getUpdateState } from '../services/updater'
 import {
@@ -780,6 +783,26 @@ export function registerIpc(): void {
   ipcMain.handle(CHANNELS.browserChromeHeight, (e, height: number) =>
     browser.setChromeHeight(height, keyOf(e))
   )
+
+  // ---- session relay (the paired browser extension) ----
+  // The relay listener itself is NOT reachable from here; these only drive
+  // pairing and the user's approve/reject of a queued snapshot. See
+  // services/relay.ts for why that split is the safety boundary.
+  ipcMain.handle(CHANNELS.relayStatus, () => relay.status())
+  ipcMain.handle(CHANNELS.relayBeginPairing, () => relay.beginPairing())
+  ipcMain.handle(CHANNELS.relayCancelPairing, () => relay.cancelPairing())
+  ipcMain.handle(CHANNELS.relayUnpair, () => relay.unpair())
+  ipcMain.handle(
+    CHANNELS.relayApply,
+    (_e, id: string, choice: RelayImportChoice, trust?: boolean) =>
+      relay.applyPending(id, choice, trust)
+  )
+  ipcMain.handle(CHANNELS.relayReject, (_e, id: string) => relay.rejectPending(id))
+  ipcMain.handle(CHANNELS.relayInstallExtension, () => relayInstall.install())
+  ipcMain.handle(CHANNELS.relayRevealExtension, () => relayInstall.reveal())
+  ipcMain.handle(CHANNELS.relaySetPrefs, (_e, p: Partial<RelayPrefs>) => relay.setPrefs(p))
+  ipcMain.handle(CHANNELS.relayTrustOrigin, (_e, o: string) => relay.trustOrigin(o))
+  ipcMain.handle(CHANNELS.relayUntrustOrigin, (_e, o: string) => relay.untrustOrigin(o))
 
   // ---- services (a session's background processes) ----
   // Every handler resolves the ROOT session first: a subagent's dev server is
