@@ -136,6 +136,26 @@ const MAX_DIFF_SIDE = 100_000
 const MAX_IMAGE_BYTES = 3_000_000
 const MAX_BG_OUTPUT = 200_000
 const FG_TIMEOUT_MAX = 600_000
+/**
+ * How long to keep draining stdout after the command's own process has exited.
+ *
+ * `close` fires only once every stdio pipe is closed, and a pipe OUTLIVES the
+ * process that was handed it: `pythonw app.py`, `start`, `Start-Process`, a
+ * daemonized server — anything that leaves a grandchild alive keeps our read end
+ * open indefinitely, because the grandchild inherited it. So `exit` (the command
+ * itself is genuinely finished) is the real completion signal, and `close` is
+ * only a best-effort chance to collect the last few buffered bytes.
+ */
+const EXIT_DRAIN_MS = 150
+/**
+ * How long to wait for a killed process to actually die before resolving anyway.
+ *
+ * `killProc` can fail to land — an elevated process, or a taskkill that can't
+ * reach a grandchild that reparented itself. Cancel must resolve the call
+ * regardless: the user asked for this card to stop, and the harness owes the
+ * model a result for this tool-call id no matter what the OS did.
+ */
+const KILL_GRACE_MS = 2000
 const IGNORE = ['**/node_modules/**', '**/.git/**', '**/dist/**', '**/out/**']
 
 /** A long-running command started by `bash` with background:true — it keeps running after the call returns. */
@@ -466,36 +486,59 @@ function runBash(
       timedOut = true
       killProc(child)
     }, timeoutMs)
+    let stopped = false
+    // Fires once, whichever path below gets there first. Cancel MUST be able to
+    // win a race against a `close` that may never come, and the promise must
+    // still settle exactly once if that `close` does arrive afterwards.
+    let settled = false
+    let killTimer: NodeJS.Timeout | undefined
+    let drainTimer: NodeJS.Timeout | undefined
+    const cleanup = (): void => {
+      clearTimeout(timer)
+      if (killTimer) clearTimeout(killTimer)
+      if (drainTimer) clearTimeout(drainTimer)
+      opts.signal?.removeEventListener('abort', onAbort)
+    }
+    const settle = (result: ToolResult): void => {
+      if (settled) return
+      settled = true
+      cleanup()
+      resolve(result)
+    }
+    /** Resolve as cancelled — the shared ending for every abort path. */
+    const finishStopped = (): void => {
+      if (settled) return
+      const msg = `\n[stopped]`
+      onChunk?.(msg)
+      settle({ ok: false, output: (acc + msg).trimEnd() || TOOL_ABORTED })
+    }
     // Stop kills the command for real — same teardown as the timeout, including
     // the process tree (see killProc). This is the single biggest reason Stop
     // used to feel stuck: a `npm test` or a hung curl held the turn open for its
     // full timeout (up to 10 minutes) with nothing the user could do about it.
-    let stopped = false
-    const onAbort = (): void => {
+    function onAbort(): void {
       stopped = true
       killProc(child)
+      // Never wait forever on the kill landing. `close` needs every inherited
+      // pipe shut, and a grandchild we couldn't reach still holds one; `exit`
+      // needs the process to actually die, which an elevated one may refuse to
+      // do. Either way the user gets their card back.
+      killTimer = setTimeout(finishStopped, KILL_GRACE_MS)
     }
     opts.signal?.addEventListener('abort', onAbort, { once: true })
-    const cleanup = (): void => {
-      clearTimeout(timer)
-      opts.signal?.removeEventListener('abort', onAbort)
-    }
     child.on('error', (e) => {
-      cleanup()
       if (stopped) {
-        resolve({ ok: false, output: `${acc}\n[${TOOL_ABORTED}]`.trimEnd() })
+        settle({ ok: false, output: `${acc}\n[${TOOL_ABORTED}]`.trimEnd() })
         return
       }
       const msg = `\n[error: ${e.message}]`
       onChunk?.(msg)
-      resolve({ ok: false, output: (acc + msg).trimEnd() })
+      settle({ ok: false, output: (acc + msg).trimEnd() })
     })
-    child.on('close', (code) => {
-      cleanup()
+    /** The command finished (or was killed) — build its result. */
+    const finish = (code: number | null): void => {
       if (stopped) {
-        const msg = `\n[stopped]`
-        onChunk?.(msg)
-        resolve({ ok: false, output: (acc + msg).trimEnd() || TOOL_ABORTED })
+        finishStopped()
         return
       }
       const exitCode = code ?? (timedOut ? 124 : 0)
@@ -505,10 +548,25 @@ function runBash(
           ? `\n[exit ${exitCode}]`
           : ''
       if (suffix) onChunk?.(suffix)
-      resolve({
+      settle({
         ok: !timedOut && exitCode === 0,
         output: (acc + suffix).trimEnd() || '(no output)'
       })
+    }
+    // `exit`, not `close`, is what "the command is done" means here. `close`
+    // also waits for the stdio pipes, and a pipe OUTLIVES the process it was
+    // given to: any command that leaves a grandchild running (`pythonw app.py`,
+    // `start`, `Start-Process`, a daemonized server) hands it our stdout, and
+    // that grandchild holds the pipe open for as long as it lives. Waiting on
+    // `close` there means waiting FOREVER — the card spins with its output
+    // already printed, the turn never advances, and the cancel button aborts a
+    // signal whose only listener kills a shell that exited minutes ago. Give
+    // `close` a short grace period to deliver trailing buffered output, then
+    // finish on the exit code we already have.
+    child.on('exit', (code) => {
+      if (settled) return
+      drainTimer = setTimeout(() => finish(code), EXIT_DRAIN_MS)
+      child.once('close', () => finish(code))
     })
   })
 }
