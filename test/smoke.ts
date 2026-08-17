@@ -101,7 +101,7 @@ import {
   abortableDelay,
   MODEL_FATAL_ATTEMPTS
 } from '../src/main/harness/agent'
-import { ModelHttpError } from '../src/main/services/llm'
+import { COPILOT_EDITOR_HEADERS, ModelHttpError } from '../src/main/services/llm'
 import { getUsageStats } from '../src/main/services/usage'
 import { consumeAiSdkStream } from '../src/main/services/aisdk'
 import { APICallError } from 'ai'
@@ -3661,6 +3661,14 @@ async function main(): Promise<void> {
   // `streamTurn` rides those out. These checks lock in the classification + the
   // retry policy without touching the network (fake model call, skipped backoff).
   try {
+    check(
+      'Copilot requests include the editor identity required by token exchange',
+      COPILOT_EDITOR_HEADERS['Copilot-Integration-Id'] === 'vscode-chat' &&
+        COPILOT_EDITOR_HEADERS['Editor-Version'].startsWith('vscode/') &&
+        COPILOT_EDITOR_HEADERS['Editor-Plugin-Version'].startsWith('copilot-chat/') &&
+        COPILOT_EDITOR_HEADERS['User-Agent'].startsWith('GitHubCopilotChat/')
+    )
+
     const apiErr = (statusCode: number, responseBody = ''): APICallError =>
       new APICallError({
         message: `api ${statusCode}`,
