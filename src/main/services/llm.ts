@@ -17,6 +17,12 @@ import { ensureRunning as ensureCliProxy, localApiKey as cliProxyKey } from './c
 
 const COPILOT_TOKEN_URL = 'https://api.github.com/copilot_internal/v2/token'
 const COPILOT_CHAT_URL = 'https://api.githubcopilot.com/chat/completions'
+export const COPILOT_EDITOR_HEADERS = {
+  'User-Agent': 'GitHubCopilotChat/0.26.7',
+  'Editor-Version': 'vscode/1.99.3',
+  'Editor-Plugin-Version': 'copilot-chat/0.26.7',
+  'Copilot-Integration-Id': 'vscode-chat'
+} as const
 
 /**
  * A failed model HTTP request that carries the status code, so the agent loop can
@@ -107,16 +113,22 @@ async function getCopilotToken(force = false): Promise<string> {
   const res = await fetch(COPILOT_TOKEN_URL, {
     headers: {
       Authorization: `token ${github}`,
-      'User-Agent': 'Roxy',
-      Accept: 'application/json'
+      Accept: 'application/json',
+      ...COPILOT_EDITOR_HEADERS
     }
   })
   if (!res.ok) {
     const body = await res.text().catch(() => '')
-    if (res.status === 401 || res.status === 403) {
+    if (res.status === 401) {
       throw new ModelHttpError(
         res.status,
-        `Copilot token exchange failed (${res.status}). Your GitHub account may not have an active Copilot subscription.`
+        'GitHub authorization expired. Reconnect GitHub Copilot in Settings and try again.'
+      )
+    }
+    if (res.status === 403) {
+      throw new ModelHttpError(
+        res.status,
+        'GitHub denied Copilot access. Verify that this account has an active Copilot subscription, then reconnect it in Settings.'
       )
     }
     throw new ModelHttpError(
@@ -160,11 +172,8 @@ function copilotHeaders(token: string, vision = false): Record<string, string> {
   return {
     Authorization: `Bearer ${token}`,
     'Content-Type': 'application/json',
-    'Copilot-Integration-Id': 'vscode-chat',
-    'Editor-Version': 'Roxy/0.0.1',
-    'Editor-Plugin-Version': 'Roxy/0.0.1',
+    ...COPILOT_EDITOR_HEADERS,
     'Openai-Intent': 'conversation-panel',
-    'User-Agent': 'Roxy',
     ...(vision ? { 'Copilot-Vision-Request': 'true' } : {})
   }
 }
