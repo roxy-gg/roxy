@@ -116,6 +116,7 @@ import {
   _resetTracking,
   _queueDepth
 } from '../src/main/services/track'
+import { isSeedProviderId } from '../src/shared/providers'
 import { createServer } from 'node:http'
 
 let pass = 0
@@ -4071,7 +4072,8 @@ async function main(): Promise<void> {
       'track: an event has no fields beyond name/clientId/ts/props',
       Object.keys(first?.events?.[0] ?? {})
         .sort()
-        .join(',') === 'clientId,name,ts'
+        .join(',') === 'clientId,name,ts',
+      Object.keys(first?.events?.[0] ?? {}).join(',')
     )
 
     // 3. The id survives a restart — that is what makes retention measurable.
@@ -4090,6 +4092,63 @@ async function main(): Promise<void> {
     await settled(1)
     const props = batches[0]?.events?.[0]?.props
     check('track: props round-trip', props?.ok === true && props?.durationMs === 1234)
+
+    // 4b. A prompt reports its provider, and NOTHING else. The exact key set is
+    //     the assertion on purpose: this is the guard that fails when someone
+    //     helpfully adds `model` (or `cwd`) alongside the provider.
+    batches = []
+    hits = 0
+    track('prompt', { provider: 'openai' })
+    await flush()
+    await settled(1)
+    const promptProps = batches[0]?.events?.[0]?.props
+    check(
+      'track: a prompt carries props with only a provider key',
+      Object.keys(promptProps ?? {})
+        .sort()
+        .join(',') === 'provider',
+      Object.keys(promptProps ?? {}).join(',')
+    )
+    check('track: the provider round-trips', promptProps?.provider === 'openai')
+
+    // 4c. The allow-list is what stops a private endpoint from becoming a
+    //     near-unique fingerprint. Drive it through track() with a raw id rather
+    //     than pre-mapping it in the test: that is the difference between
+    //     asserting the sanitizer exists and asserting it is actually wired in.
+    check('track: a shipped provider id is allow-listed', isSeedProviderId('github-copilot'))
+    check(
+      'track: an unknown provider id is not allow-listed',
+      !isSeedProviderId('acme-internal-gateway')
+    )
+    batches = []
+    hits = 0
+    track('prompt', { provider: 'acme-internal-gateway' })
+    await flush()
+    await settled(1)
+    check(
+      'track: an unrecognized provider is replaced with "other"',
+      batches[0]?.events?.[0]?.props?.provider === 'other',
+      String(batches[0]?.events?.[0]?.props?.provider)
+    )
+    check(
+      'track: a custom provider id appears nowhere on the wire',
+      !JSON.stringify(batches).includes('acme-internal-gateway')
+    )
+
+    // 4d. A private endpoint is configured against the shipped
+    //     `openai-compatible` id (the URL lives in a separate column and is
+    //     never passed here), so that install reports as `openai-compatible` -
+    //     indistinguishable from every other one. That is the intended outcome,
+    //     not an accident, so pin it.
+    batches = []
+    hits = 0
+    track('prompt', { provider: 'openai-compatible' })
+    await flush()
+    await settled(1)
+    check(
+      'track: a custom-endpoint install reports only its seed id',
+      batches[0]?.events?.[0]?.props?.provider === 'openai-compatible'
+    )
 
     // 5. Opting out is immediate: queued events are dropped and nothing sends.
     batches = []

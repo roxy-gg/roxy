@@ -63,8 +63,15 @@ export async function runSessionTurn(
   // Usage tracking wraps the whole turn HERE, not at either caller: this is the
   // one function both the local (renderer) and remote (phone) paths go through,
   // so counting here is the only way the two can't drift. It records that a turn
-  // happened and how it ended - never what was said, which model ran, or where.
-  track('prompt')
+  // happened, which backend served it, and how it ended - never what was said,
+  // which model ran, or where.
+  //
+  // The provider rides along so roxy.gg/stats can show which backends people
+  // actually point Roxy at - the provider only, never the model. Passed raw:
+  // `track` collapses it to the shipped seed list, which matters here because
+  // this fires BEFORE the turn resolves a provider, so an id that isn't even
+  // connected still reaches it.
+  track('prompt', { provider: input.providerId })
   const startedAt = Date.now()
   try {
     const result = await runTurn(input, emit, signal)

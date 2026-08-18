@@ -390,8 +390,10 @@ export default function Settings(): JSX.Element {
             <div className="text-sm font-medium text-text">Send anonymous usage data</div>
             <p className="mt-0.5 text-xs text-text-muted">
               Counts of things like app launches and finished turns, tied to a random id generated
-              on this machine. Never your prompts, code, file paths, repo names, model, or provider.
-              It is the only way we can tell whether a release helped or broke things.
+              on this machine. Never your prompts, code, file paths, repo names, or model. It does
+              include which provider served each turn, matched against our built-in list so a custom
+              endpoint is only ever recorded as &ldquo;other&rdquo;. It is the only way we can tell
+              whether a release helped or broke things.
             </p>
           </div>
           <Switch checked={telemetryEnabled} onChange={(v) => void setTelemetryEnabled(v)} />

@@ -3,9 +3,15 @@
  *
  * WHAT IT SENDS: a random UUID minted once at install, an event name, and the
  * coarse build facts (platform, arch, app version, stable/dev). No account, no
- * IP, no file paths, no prompt text, no model or provider, no repo names. The
- * server HMACs the id before storing it, so a row can't be mapped back to the
- * id this client holds.
+ * IP, no file paths, no prompt text, no model, no repo names. The server HMACs
+ * the id before storing it, so a row cannot be mapped back to the id this client
+ * holds.
+ *
+ * THE ONE EXCEPTION is `prompt`, which carries which PROVIDER served the turn.
+ * `sanitize` below maps it through the shipped seed list on the way into the
+ * queue, so it can only ever be one of the ~50 ids already public in this repo -
+ * a custom endpoint is recorded as `other`. The MODEL is still never sent: it is
+ * far higher-cardinality and isn't what the public chart shows.
  *
  * WHY IT'S SHAPED LIKE THIS:
  *  - **Never blocks the app.** Every call is fire-and-forget and every failure
@@ -23,6 +29,7 @@
  * who opted out must stay opted out across one. It also means tracking has no
  * dependency on the database being open or mid-migration.
  */
+import { isSeedProviderId } from '../../shared/providers'
 import { randomUUID } from 'node:crypto'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -37,7 +44,11 @@ function endpoint(): string {
 export type TrackEvent =
   /** App launched. The DAU heartbeat — sent exactly once per process start. */
   | 'app_open'
-  /** A turn was submitted to the agent. The "real usage" signal. */
+  /**
+   * A turn was submitted to the agent. The "real usage" signal. Carries
+   * `{ provider }` - an allow-listed provider id, or `other` for anything
+   * that isn't in the shipped seed list.
+   */
   | 'prompt'
   /** An agent turn finished. Carries `{ ok, durationMs }`. */
   | 'turn_end'
@@ -52,6 +63,29 @@ export type TrackEvent =
 
 /** Only scalars — the server rejects nested objects and arrays anyway. */
 type Props = Record<string, string | number | boolean>
+
+/**
+ * Collapse a `provider` prop to the shipped seed list, mapping anything else to
+ * `other`.
+ *
+ * Done HERE rather than at the call site so the guarantee is structural. The
+ * provider is the one identifying-ish field this module sends, and the reason
+ * it's safe to send is that it can only ever be one of ~50 ids already public in
+ * this repo. A private id like `acme-internal-gateway` would be near-unique and
+ * would tag every event this install ever sends - so it must be impossible to
+ * report by construction, not merely absent from the current caller.
+ *
+ * The raw value is REPLACED, not copied alongside, or the allow-list would be
+ * decorative.
+ */
+function sanitize(props?: Props): Props | undefined {
+  if (!props || !('provider' in props)) return props
+  const raw = props.provider
+  return {
+    ...props,
+    provider: typeof raw === 'string' && isSeedProviderId(raw) ? raw : 'other'
+  }
+}
 
 interface QueuedEvent {
   name: TrackEvent
@@ -148,7 +182,7 @@ export function isTrackingEnabled(): boolean {
 export function track(name: TrackEvent, props?: Props): void {
   if (!enabled || !deviceId) return
   if (queue.length >= MAX_QUEUE) return // shed rather than grow without bound
-  queue.push({ name, clientId: randomUUID(), ts: Date.now(), props })
+  queue.push({ name, clientId: randomUUID(), ts: Date.now(), props: sanitize(props) })
 }
 
 /**

@@ -18,7 +18,12 @@ import {
   SUBAGENTS,
   DEFAULT_AGENT_ID
 } from '../src/shared/agents'
-import { SEED_PROVIDERS, resolveSeed, isConnectableNow } from '../src/shared/providers'
+import {
+  SEED_PROVIDERS,
+  resolveSeed,
+  isConnectableNow,
+  isSeedProviderId
+} from '../src/shared/providers'
 import {
   CLAUDE_PROVIDER_ID,
   CLIPROXY_PROVIDER_IDS,
@@ -345,6 +350,20 @@ check(
   typeof resolveSeed('__x__').wire === 'string'
 )
 check('isConnectableNow returns boolean', typeof isConnectableNow(SEED_PROVIDERS[0]) === 'boolean')
+// The telemetry allow-list. `resolveSeed` answers "what settings does this id
+// imply" and so must accept anything; `isSeedProviderId` answers "did WE ship
+// this id" and so must reject everything else. They deliberately disagree on an
+// unknown id, which is the whole reason the second one exists.
+check(
+  'isSeedProviderId: every shipped id is allow-listed',
+  SEED_PROVIDERS.every((p) => isSeedProviderId(p.id))
+)
+check('isSeedProviderId: an unshipped id is not', !isSeedProviderId('acme-internal-gateway'))
+check('isSeedProviderId: the empty string is not', !isSeedProviderId(''))
+check(
+  'isSeedProviderId is stricter than resolveSeed',
+  resolveSeed('__x__').id === '__x__' && !isSeedProviderId('__x__')
+)
 
 // ---- subscription providers (CLIProxyAPI sidecar) ----
 // Both are seeded the same way, so assert them the same way rather than writing

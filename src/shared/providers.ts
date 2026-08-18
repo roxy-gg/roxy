@@ -524,6 +524,20 @@ export function resolveSeed(providerId: string): SeedProvider {
   return SEED_BY_ID.get(providerId) ?? { ...DEFAULT_SEED, id: providerId, name: providerId }
 }
 
+/**
+ * Whether `id` is one of the ids in this file — i.e. a value from a closed set
+ * we ship, not something that arrived from outside the app.
+ *
+ * Exists for usage tracking. `resolveSeed` deliberately PRESERVES an unknown id
+ * (so a provider we have not seeded still works), which is exactly what makes
+ * `providerId` the wrong thing to report as-is: anything unrecognized would ride
+ * along as a free-form string on an otherwise anonymous event. Callers that
+ * report a provider must funnel it through here and send a constant for a miss.
+ */
+export function isSeedProviderId(id: string): boolean {
+  return SEED_BY_ID.has(id)
+}
+
 /** Human-readable label for an auth method. */
 export const AUTH_LABELS: Record<ProviderAuth, string> = {
   'api-key': 'API key',
