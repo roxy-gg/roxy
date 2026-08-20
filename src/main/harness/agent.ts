@@ -66,6 +66,14 @@ import {
 import { startSubagentRun } from '../services/subagent-stream'
 import { startToolRun } from '../services/tool-runs'
 import {
+  recordRetry,
+  recordStep,
+  recordSubagent,
+  recordTool,
+  recordTrim
+} from '../services/turn-metrics'
+import { trackFeature } from '../services/track'
+import {
   messagesHaveImages,
   openAiContent,
   openAiReasoning,
@@ -237,6 +245,16 @@ function describeModelError(e: unknown): string {
 interface StreamTurnDeps {
   runOnce?: typeof streamOnce
   delay?: (ms: number, signal: AbortSignal) => Promise<void>
+  /**
+   * Called once per transient failure that this function decides to ride out.
+   *
+   * Not a test seam - this one is used in production, by turn metrics. Retries
+   * are invisible to the user by design (that is the entire point of the retry
+   * loop), which is exactly why they are worth counting: a provider silently
+   * costing three retries per turn is degrading badly, and nothing else in the
+   * app would ever show it.
+   */
+  onRetry?: () => void
 }
 
 /**
@@ -301,6 +319,9 @@ export async function streamTurn(
       const transient = isTransientModelError(e)
       if (!transient && attempt + 1 >= MODEL_FATAL_ATTEMPTS) throw e
       const ms = nextRetryDelay(attempt)
+      // Counted here rather than at the catch, so it reflects retries we actually
+      // took - not failures that were about to be rethrown.
+      deps.onRetry?.()
       console.warn(
         `[agent] model turn failed (${describeModelError(e)}); ` +
           `retrying in ${Math.round(ms / 1000)}s (attempt ${attempt + 1}${
@@ -1054,7 +1075,8 @@ export async function runAgentTurn(opts: RunTurnOptions): Promise<void> {
     reasoning,
     effort: reasoningEffort,
     contextLimit,
-    depth: 0
+    depth: 0,
+    metricsId: chatId
   })
 }
 
@@ -1094,6 +1116,16 @@ interface LoopOptions {
   /** Token budget for the rolling conversation (drops oldest tool results to fit). */
   contextLimit?: number
   depth: number
+  /**
+   * The TOP-level session this loop's work belongs to, for turn metrics only.
+   *
+   * Distinct from `sessionId`, which a subagent overrides with its own sub-chat
+   * id so its spend lands in the right usage row. Metrics need the opposite: a
+   * subagent's steps and tokens are part of the turn the USER started, and
+   * attributing them to a sub-session (which has no collector) would silently
+   * drop the most expensive half of any delegating turn.
+   */
+  metricsId?: string
 }
 
 /**
@@ -1106,13 +1138,15 @@ function recordCall(
   model: string,
   sessionId: string | undefined,
   usage: TokenUsage | null
-): void {
-  if (!usage) return
+): number {
+  if (!usage) return 0
   try {
     const cost = usageCost(usage, modelCost(providerId, model))
     repo.recordUsage({ chatId: sessionId ?? null, providerId, model, usage, cost })
+    return cost
   } catch {
     // ignore — never let usage accounting interfere with the actual turn
+    return 0
   }
 }
 
@@ -1139,7 +1173,8 @@ async function runLoop(o: LoopOptions): Promise<string> {
     reasoning,
     effort,
     contextLimit,
-    depth
+    depth,
+    metricsId
   } = o
   let lastText = ''
 
@@ -1162,16 +1197,27 @@ async function runLoop(o: LoopOptions): Promise<string> {
       providerId,
       vision,
       model,
-      trimConvo(convo, contextLimit),
+      trimConvo(convo, contextLimit, metricsId),
       signal,
       reasoning,
       effort,
       liveTools,
       onText,
-      onReasoning
+      onReasoning,
+      { onRetry: () => recordRetry(metricsId) }
     )
     // Record this model call's usage/cost (subagents pass their own sessionId).
-    recordCall(providerId, model, sessionId, usage)
+    const cost = recordCall(providerId, model, sessionId, usage)
+    // ...and the same call's shape into the in-flight turn summary. Attributed
+    // to `metricsId` (the TOP-level session) rather than `sessionId`, so a
+    // subagent's model calls roll up into the turn the user actually started -
+    // its own sub-session has no collector and its work would otherwise vanish.
+    recordStep(
+      metricsId,
+      model,
+      usage ? { input: usage.input, output: usage.output, cacheRead: usage.cacheRead } : null,
+      cost
+    )
     if (text) lastText = text
     if (toolCalls.length === 0) return lastText // model finished with prose
 
@@ -1230,7 +1276,8 @@ async function runLoop(o: LoopOptions): Promise<string> {
           depth,
           mcpTools: liveMcpTools,
           skillTools,
-          skillInfo
+          skillInfo,
+          metricsId
         })
         return { id: tc.id, content: result.slice(0, 12_000) }
       } catch (e) {
@@ -1242,6 +1289,13 @@ async function runLoop(o: LoopOptions): Promise<string> {
     // Started here, not awaited, so the subagents run while the sequential tools
     // below execute. runTask never throws (runSubagent handles its own errors,
     // and the guard inside turns any setup failure into a task_error).
+    // Delegation is one of the strongest signals we have about how Roxy is
+    // really used - a session that fans out to subagents is a different product
+    // from one that answers questions - so count the spawns and flag the
+    // capability once per session.
+    for (let i = 0; i < tasks.length; i++) recordSubagent(metricsId)
+    if (tasks.length > 0) trackFeature(metricsId, 'subagent')
+
     const tasksSettled = runTasksByWriteCapability(tasks, {
       isWriteCapable: (tc) => isWriteCapableSubagent(parseTaskInput(tc.args).subagentType),
       limit: MAX_PARALLEL_SUBAGENTS,
@@ -1317,6 +1371,15 @@ async function runLoop(o: LoopOptions): Promise<string> {
         image: result.image,
         diff: result.diff
       })
+      // Count the call. `recordTool` collapses the name through the closed
+      // vocabulary, so an MCP tool reports as the literal `mcp` and its
+      // server id (which is user-chosen, and often an employer's internal
+      // service name) never leaves the process.
+      recordTool(metricsId, tc.name, result.ok)
+      if (tc.name.startsWith('mcp__')) trackFeature(metricsId, 'mcp_server')
+      else if (tc.name === SKILL_TOOL_NAME) trackFeature(metricsId, 'skill')
+      else if (tc.name.startsWith('browser_')) trackFeature(metricsId, 'browser')
+      else if (tc.name.startsWith('loop_')) trackFeature(metricsId, 'loop')
       // Full output still streams to the UI (tool-end above); for the model's
       // rolling context, spill oversized results to disk and keep a head/tail
       // preview + a read-tool pointer instead of a blind 8k cut (Phase 9.3).
@@ -1374,6 +1437,12 @@ interface SubagentOptions {
   skillTools?: ToolSchema[]
   /** The discovered-skills prompt block to inject into the subagent's system prompt. */
   skillInfo?: string
+  /**
+   * The TOP-level session this delegation belongs to, for turn metrics only.
+   * Inherited verbatim from the parent loop so a subagent's model steps, tokens
+   * and cost roll up into the turn the user actually started.
+   */
+  metricsId?: string
 }
 
 /** Spawn a subagent: a focused child run of the same loop, returned as a `task` result. */
@@ -1396,7 +1465,8 @@ async function runSubagent(o: SubagentOptions): Promise<string> {
     depth,
     mcpTools,
     skillTools,
-    skillInfo
+    skillInfo,
+    metricsId
   } = o
   const { description, prompt, subagentType, background } = input
   const fail = (msg: string): string => {
@@ -1545,7 +1615,10 @@ async function runSubagent(o: SubagentOptions): Promise<string> {
         reasoning,
         effort,
         contextLimit,
-        depth: depth + 1
+        depth: depth + 1,
+        // Inherited, not re-derived: every level of delegation reports into the
+        // one turn the user started.
+        metricsId
       })
       // A cancel lands BETWEEN steps, where runLoop returns normally with a
       // partial report — so reaching here says nothing about whether the work
@@ -1595,6 +1668,10 @@ async function runSubagent(o: SubagentOptions): Promise<string> {
 
     // Its own signal — the launching turn ending must NOT cancel it (that's the
     // whole point). Session delete / app quit cancel it via the registry.
+    // A detached background task is the most autonomous thing Roxy does - the
+    // user walks away and it keeps working - so its adoption is worth its own
+    // signal rather than being folded into the subagent count.
+    trackFeature(metricsId, 'background_task')
     const { jobId, signal: bgSignal } = registerBackgroundJob({
       sessionId: parentChatId,
       subChatId,
@@ -1928,9 +2005,19 @@ function msgTokens(m: OpenAiMessage): number {
  * trimmed too. Prevents a long tool-heavy loop from blowing past 100% (the
  * "Tool Results 101%" overflow).
  */
-function trimConvo(convo: OpenAiMessage[], budget = 200_000): OpenAiMessage[] {
+function trimConvo(
+  convo: OpenAiMessage[],
+  budget = 200_000,
+  /** Session whose turn metrics record that a trim happened (telemetry only). */
+  sessionId?: string
+): OpenAiMessage[] {
   const cap = Math.max(8000, budget - 12_000) // leave room for the model's reply
   if (convo.reduce((n, m) => n + msgTokens(m), 0) <= cap) return convo
+  // Past this line the conversation did not fit and something was dropped. Worth
+  // reporting: a turn that trimmed has silently lost context the user believes
+  // the agent still has, which is a leading indicator of "it forgot what I said"
+  // complaints and is otherwise invisible from the outside.
+  recordTrim(sessionId)
   // Stage 1 — prune older tool outputs to a preview before dropping any turn.
   const pruned = pruneToolMessages(convo, { keepRecentTokens: Math.min(KEEP_RECENT_TOKENS, cap) })
   const total = pruned.reduce((n, m) => n + msgTokens(m), 0)

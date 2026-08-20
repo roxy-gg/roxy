@@ -17,7 +17,9 @@ import { protectedSubChatIds } from './subagent-stream'
 import { setLabel as setBrowserLabel } from './browser'
 import { sessionCwd } from './workspace'
 import { materializePendingWorktree } from './worktree'
-import { track } from './track'
+import { markActivation, track, trackFeature, trackToolUse } from './track'
+import { beginTurn, finishTurn } from './turn-metrics'
+import { modelFamily, reportableAgent } from '../../shared/telemetry'
 import path from 'node:path'
 
 /**
@@ -63,26 +65,94 @@ export async function runSessionTurn(
   // Usage tracking wraps the whole turn HERE, not at either caller: this is the
   // one function both the local (renderer) and remote (phone) paths go through,
   // so counting here is the only way the two can't drift. It records that a turn
-  // happened, which backend served it, and how it ended - never what was said,
-  // which model ran, or where.
+  // happened, which backend served it, how hard it worked and how it ended -
+  // never what was said or where.
   //
   // The provider rides along so roxy.gg/stats can show which backends people
-  // actually point Roxy at - the provider only, never the model. Passed raw:
+  // actually point Roxy at - the provider only, never the model id. Passed raw:
   // `track` collapses it to the shipped seed list, which matters here because
   // this fires BEFORE the turn resolves a provider, so an id that isn't even
-  // connected still reaches it.
-  track('prompt', { provider: input.providerId })
+  // connected still reaches it. The agent mode goes through its own classifier.
+  const agent = reportableAgent(input.agentId)
+  track('prompt', { provider: input.providerId, agent })
+  markActivation('first_prompt')
+  // Plan mode is a distinct way of using the product (read-only, no edits), and
+  // its share is the difference between "people trust it to write code" and
+  // "people use it to read code". Deduped per session by `trackFeature`.
+  if (agent === 'plan') trackFeature(input.sessionId, 'plan_mode')
+
+  // Open a collector for this session. The harness accumulates into it as the
+  // turn runs (model steps, tool calls, tokens, cost) and `finishTurn` below
+  // folds the whole thing into ONE event - so a 200-step overnight run costs
+  // the same ingest volume as a one-line question.
+  beginTurn(input.sessionId)
   const startedAt = Date.now()
   try {
     const result = await runTurn(input, emit, signal)
-    track('turn_end', { ok: result.ok, durationMs: Date.now() - startedAt })
+    // An abort is a DIFFERENT fact from an error and must not be flattened into
+    // one: a user pressing Stop usually means the agent went off the rails (our
+    // problem), while an error usually means the provider fell over (theirs).
+    // Reported as `ok:false` in both cases for continuity with the historical
+    // series, with `outcome` carrying the distinction.
+    const outcome = result.ok ? 'ok' : signal.aborted ? 'stopped' : 'error'
+    reportTurn(input, outcome, startedAt, result.error)
+    if (result.ok) markActivation('first_turn_ok')
     return result
   } catch (e) {
     // runTurn maps its own failures, so reaching here means an unexpected one.
     // Count it as a failed turn and rethrow untouched - tracking never changes
     // behaviour.
-    track('turn_end', { ok: false, durationMs: Date.now() - startedAt })
+    reportTurn(
+      input,
+      signal.aborted ? 'stopped' : 'error',
+      startedAt,
+      e instanceof Error ? e.message : String(e)
+    )
     throw e
+  }
+}
+
+/**
+ * Emit the `turn_end` summary plus this turn's per-tool events.
+ *
+ * Wrapped in its own try/catch and never awaited: telemetry sits directly on
+ * the turn's return path, and the one thing it must never do is turn a
+ * successful answer into a thrown error because a counter misbehaved.
+ *
+ * The error TEXT is passed only to the classifier, which returns one of a fixed
+ * set of kinds - the message itself never reaches the queue. Provider errors
+ * routinely embed the request URL, an account id, or a partial key.
+ */
+function reportTurn(
+  input: LlmStartInput,
+  outcome: 'ok' | 'stopped' | 'error',
+  startedAt: number,
+  errorText?: string
+): void {
+  try {
+    const done = finishTurn(input.sessionId, outcome, { text: errorText })
+    if (!done) {
+      // No collector (the turn never opened one, e.g. a very early failure).
+      // Still report the bare fact, so a crash before the harness starts can't
+      // silently vanish from the failure rate.
+      track('turn_end', {
+        ok: outcome === 'ok',
+        outcome,
+        durationMs: Date.now() - startedAt,
+        model: modelFamily(input.model)
+      })
+      return
+    }
+    const props = done.errorKind ? { ...done.summary, errorKind: done.errorKind } : done.summary
+    // The collector records the family of the model that actually STREAMED. A
+    // turn that failed before any model call has none, so fall back to the one
+    // the session asked for - otherwise every failed turn reports `other` and
+    // the error breakdown can't be split by model at all.
+    if (props.model === 'other') props.model = modelFamily(input.model)
+    track('turn_end', props)
+    trackToolUse(done.toolCounts.map((t) => ({ tool: t.tool, calls: t.calls, errors: t.errors })))
+  } catch {
+    /* telemetry must never break a turn */
   }
 }
 
@@ -100,6 +170,10 @@ async function runTurn(
   // in its project folder, not a chat that refuses to answer.
   try {
     const materialized = await materializePendingWorktree(input.sessionId)
+    // A session that materialized its own git worktree is running as a
+    // workstream - isolated branch, isolated tree. Counted only on success, so
+    // the number means "sessions that got one", not "sessions that asked".
+    if (materialized.ok) trackFeature(input.sessionId, 'worktree')
     if (materialized.error) emit({ type: 'text', delta: `_${materialized.error}_\n\n` })
   } catch (e) {
     console.warn('[worktree] materialize failed; running in the project folder:', e)

@@ -7,6 +7,7 @@
  */
 import * as repo from '../db/repo'
 import { streamChat } from './llm'
+import { trackFeature } from './track'
 import { getAgent } from '../../shared/agents'
 import { AGENT_PROMPT_TEXT } from '../../shared/prompt-text'
 import { messagesToCompact } from '../../shared/context'
@@ -55,6 +56,10 @@ export async function compactChat(
 ): Promise<Chat> {
   const existing = repo.getChat(chatId)
   if (!existing) throw new Error('Chat not found')
+  // A session that needed compacting is a session that outgrew its context
+  // window - the clearest signal we have that people run genuinely long,
+  // sustained work rather than one-shot questions.
+  trackFeature(chatId, 'compaction')
   const all = repo.listMessages(chatId).filter((m) => m.role === 'user' || m.role === 'assistant')
   if (all.length === 0) return existing
 

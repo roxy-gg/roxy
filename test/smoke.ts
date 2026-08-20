@@ -116,6 +116,18 @@ import {
   _resetTracking,
   _queueDepth
 } from '../src/main/services/track'
+import { markActivation, trackFeature, trackToolUse } from '../src/main/services/track'
+import {
+  beginTurn,
+  finishTurn,
+  recordRetry,
+  recordStep,
+  recordSubagent,
+  recordTool,
+  recordTrim,
+  _liveTurnCount,
+  _resetTurnMetrics
+} from '../src/main/services/turn-metrics'
 import { isSeedProviderId } from '../src/shared/providers'
 import { createServer } from 'node:http'
 
@@ -4241,6 +4253,186 @@ async function main(): Promise<void> {
     check(
       'track: the update is not re-reported on the next launch',
       (batches[0]?.events ?? []).every((e) => e.name !== 'update')
+    )
+
+    // 10b. The rich turn summary.
+    //
+    // This is the event the whole product-metrics layer exists for, so the
+    // assertions are about SHAPE and about what must never be in it. Driven
+    // through the real collector rather than by hand-building props: that is
+    // the difference between testing the wire format and testing the pipeline
+    // that fills it.
+    await reset()
+    initTracking()
+    await settled(1)
+    _resetTurnMetrics()
+    batches = []
+    hits = 0
+
+    beginTurn('sess-metrics')
+    recordStep(
+      'sess-metrics',
+      'claude-sonnet-4-5',
+      { input: 10_000, output: 500, cacheRead: 8000 },
+      0.03
+    )
+    recordStep(
+      'sess-metrics',
+      'claude-sonnet-4-5',
+      { input: 12_000, output: 300, cacheRead: 0 },
+      0.02
+    )
+    recordTool('sess-metrics', 'bash', true)
+    recordTool('sess-metrics', 'bash', false)
+    recordTool('sess-metrics', 'mcp__acme_internal_billing__query', true)
+    recordSubagent('sess-metrics')
+    recordRetry('sess-metrics')
+    recordTrim('sess-metrics')
+    const done = finishTurn('sess-metrics', 'ok')
+    check('metrics: a finished turn produces a summary', !!done)
+    check('metrics: model steps are counted', done?.summary.steps === 2)
+    check('metrics: tokens sum across steps', done?.summary.inputTokens === 22_000)
+    check('metrics: cache reads are tracked separately', done?.summary.cacheReadTokens === 8000)
+    check(
+      'metrics: cost sums across steps',
+      done?.summary.costUsd === 0.05,
+      String(done?.summary.costUsd)
+    )
+    check(
+      'metrics: tool calls and failures are counted',
+      done?.summary.tools === 3 && done?.summary.toolErrors === 1
+    )
+    check('metrics: subagents are counted', done?.summary.subagents === 1)
+    check('metrics: silent retries are counted', done?.summary.retries === 1)
+    check('metrics: a context trim is flagged', done?.summary.trimmed === true)
+    check('metrics: the model reports as a FAMILY', done?.summary.model === 'claude-sonnet')
+    check('metrics: steps are also bucketed', done?.summary.stepBucket === '2-4')
+    // The collector must not leak: a finished turn is removed, so a long-lived
+    // process doesn't accumulate one entry per turn forever.
+    check('metrics: finishing a turn frees its collector', _liveTurnCount() === 0)
+    check(
+      'metrics: finishing an unknown turn is null, not a crash',
+      finishTurn('nope', 'ok') === null
+    )
+    // Per-tool counts come back separately, already collapsed.
+    const byTool = Object.fromEntries((done?.toolCounts ?? []).map((t) => [t.tool, t]))
+    check(
+      'metrics: per-tool calls are counted',
+      byTool.bash?.calls === 2 && byTool.bash?.errors === 1
+    )
+    check('metrics: an MCP tool is collapsed to `mcp`', !!byTool.mcp)
+    check(
+      'metrics: the MCP server name never reaches the summary',
+      !JSON.stringify(done).includes('acme_internal_billing')
+    )
+
+    // ...and the same summary must survive the wire unchanged.
+    track('turn_end', done!.summary)
+    trackToolUse(done!.toolCounts)
+    await flush()
+    await settled(1)
+    const sent = batches[0]?.events ?? []
+    const turnEnd = sent.find((e) => e.name === 'turn_end')
+    check(
+      'track: turn_end round-trips its counters',
+      turnEnd?.props?.steps === 2 && turnEnd?.props?.inputTokens === 22_000
+    )
+    check('track: turn_end carries the model family', turnEnd?.props?.model === 'claude-sonnet')
+    const toolEvents = sent.filter((e) => e.name === 'tool_use')
+    check(
+      'track: one tool_use event per distinct tool',
+      toolEvents.length === 2,
+      String(toolEvents.length)
+    )
+    check(
+      'track: no MCP server name is publishable',
+      !JSON.stringify(batches).includes('acme_internal_billing')
+    )
+    // Busiest-first ordering matters: if a turn ever exceeds the per-turn cap,
+    // the tools that survive must be the ones that actually ran.
+    check('track: tool_use is ordered busiest-first', toolEvents[0]?.props?.tool === 'bash')
+
+    // A failed turn carries a KIND, never the provider's message - which
+    // routinely embeds a private URL or a partial key.
+    batches = []
+    hits = 0
+    beginTurn('sess-fail')
+    const failed = finishTurn('sess-fail', 'error', {
+      status: 429,
+      text: 'You exceeded your current quota at https://acme.internal/v1 (key sk-abc123)'
+    })
+    check('metrics: an out-of-quota 429 classifies as billing', failed?.errorKind === 'billing')
+    track('turn_end', { ...failed!.summary, errorKind: failed!.errorKind! })
+    await flush()
+    await settled(1)
+    const failEvent = batches[0]?.events?.[0]
+    check('track: a failed turn reports its error KIND', failEvent?.props?.errorKind === 'billing')
+    check(
+      'track: the error message never reaches the wire',
+      !JSON.stringify(batches).includes('acme.internal')
+    )
+    check(
+      'track: an api key in an error never reaches the wire',
+      !JSON.stringify(batches).includes('sk-abc123')
+    )
+
+    // Stop is a DIFFERENT fact from an error: one is usually the agent going
+    // wrong (our problem), the other the provider (theirs). Flattening them
+    // into `ok: false` is exactly what this split exists to prevent.
+    beginTurn('sess-stop')
+    const stopped = finishTurn('sess-stop', 'stopped')
+    check('metrics: a stopped turn is not an error', stopped?.summary.outcome === 'stopped')
+    check('metrics: ...but is still not ok', stopped?.summary.ok === false)
+    check('metrics: a stopped turn has no errorKind', stopped?.errorKind === undefined)
+
+    // 10c. Activation is once per install, EVER - it spans launches by
+    //      definition, so an in-memory guard would re-report on every restart
+    //      and turn a funnel into a launch counter.
+    await reset()
+    initTracking()
+    await settled(1)
+    batches = []
+    hits = 0
+    check('activation: the first report goes through', markActivation('first_prompt') === true)
+    check('activation: a second report is suppressed', markActivation('first_prompt') === false)
+    await flush()
+    await settled(1)
+    const activations = batches
+      .flatMap((b) => b.events ?? [])
+      .filter((e) => e.name === 'activation')
+    check('activation: exactly one event was sent', activations.length === 1)
+    check('activation: it names the milestone', activations[0]?.props?.milestone === 'first_prompt')
+    // The part that matters: it must survive a restart.
+    _resetTracking()
+    initTracking()
+    await settled(1)
+    check('activation: a restart does not re-report it', markActivation('first_prompt') === false)
+    check(
+      'activation: a DIFFERENT milestone still reports',
+      markActivation('first_turn_ok') === true
+    )
+
+    // 10d. Features are deduped per SESSION, not per install: "how many
+    //      sessions use subagents" is the question, so re-reporting across
+    //      sessions is correct and re-reporting within one is not.
+    batches = []
+    hits = 0
+    trackFeature('sess-a', 'subagent')
+    trackFeature('sess-a', 'subagent')
+    trackFeature('sess-a', 'subagent')
+    trackFeature('sess-b', 'subagent')
+    trackFeature('sess-a', 'mcp_server')
+    await flush()
+    await settled(1)
+    const features = batches.flatMap((b) => b.events ?? []).filter((e) => e.name === 'feature')
+    check(
+      'feature: one session reports a feature once',
+      features.length === 3,
+      String(features.length)
+    )
+    check(
+      'feature: a second session reports it again',
+      features.filter((e) => e.props?.feature === 'subagent').length === 2
     )
 
     // 11. The kill switch beats everything, including the stored preference.

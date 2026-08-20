@@ -75,7 +75,13 @@ import {
   installSkillFromSource
 } from '../services/skills'
 import { runSessionTurn } from '../services/session-turn'
-import { isTrackingEnabled, setTrackingEnabled } from '../services/track'
+import {
+  isTrackingEnabled,
+  markActivation,
+  setTrackingEnabled,
+  track,
+  trackFeature
+} from '../services/track'
 import * as remote from '../services/remote'
 import { buildExport, applyImport } from '../services/portable'
 import { promises as fsp } from 'node:fs'
@@ -207,9 +213,17 @@ export function registerIpc(): void {
 
   // ---- providers ----
   ipcMain.handle(CHANNELS.providersList, () => repo.listConnectedProviders())
-  ipcMain.handle(CHANNELS.providersConnect, (_e, input: ConnectProviderInput) =>
-    repo.connectProvider(input)
-  )
+  ipcMain.handle(CHANNELS.providersConnect, (_e, input: ConnectProviderInput) => {
+    const connected = repo.connectProvider(input)
+    // "What did people set up" is a different question from "what did they end
+    // up using", and the gap between the two is where broken onboarding hides -
+    // a provider connected far more often than it serves a prompt is one whose
+    // auth flow half-works. The id goes through the same seed allow-list as
+    // every other provider field.
+    track('provider_connect', { provider: input.id })
+    markActivation('provider_connected')
+    return connected
+  })
   ipcMain.handle(CHANNELS.providersDisconnect, async (_e, id: string) => {
     // A subscription provider's credential lives in the sidecar, not in
     // `credentials` - so dropping the row alone would leave the OAuth tokens on
@@ -254,6 +268,10 @@ export function registerIpc(): void {
       : null
 
     const chat = repo.forkChat(id, { title: input?.title })
+    // Forking is a power-user move (branch a conversation at a decision point),
+    // so its adoption says something about how deeply people work in Roxy.
+    // Keyed by the NEW session, which is the one whose life just began.
+    trackFeature(chat.id, 'fork')
     if (!wantsWorktree) return chat
     // Parked, not created: like any new session, the worktree is materialized on
     // the first turn, so a fork that is opened and abandoned costs nothing.

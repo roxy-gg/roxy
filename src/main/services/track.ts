@@ -7,11 +7,24 @@
  * the id before storing it, so a row cannot be mapped back to the id this client
  * holds.
  *
- * THE ONE EXCEPTION is `prompt`, which carries which PROVIDER served the turn.
- * `sanitize` below maps it through the shipped seed list on the way into the
- * queue, so it can only ever be one of the ~50 ids already public in this repo -
- * a custom endpoint is recorded as `other`. The MODEL is still never sent: it is
- * far higher-cardinality and isn't what the public chart shows.
+ * THE EXCEPTIONS ARE ALL CLOSED VOCABULARIES. Some events carry a little shape:
+ * which PROVIDER served a turn, which model FAMILY, which built-in TOOL ran,
+ * which KIND of error ended it. Every one of those values is produced by a
+ * classifier in `shared/telemetry.ts` that maps ANY input to a fixed set of
+ * strings shipped in this repo, and `sanitize` below re-applies the provider
+ * allow-list at the queue boundary. The wire format therefore cannot express a
+ * model id, an MCP server name, a file path, or an error message - not by
+ * convention, but because no code path can put one there.
+ *
+ * The classifiers fail safe: an id nobody anticipated becomes `other` rather
+ * than leaking. A private endpoint is configured against the shipped
+ * `openai-compatible` seed id (its URL lives in a different column entirely and
+ * is never passed here), so that install is indistinguishable from every other
+ * custom-endpoint install.
+ *
+ * COUNTERS, NOT CONTENT. `turn_end` carries how many model steps a turn took,
+ * how many tools it ran, how many tokens it burned and what it cost. Those are
+ * measures of how much work happened, never of what the work was.
  *
  * WHY IT'S SHAPED LIKE THIS:
  *  - **Never blocks the app.** Every call is fire-and-forget and every failure
@@ -30,6 +43,7 @@
  * dependency on the database being open or mid-migration.
  */
 import { isSeedProviderId } from '../../shared/providers'
+import { isFeatureId, type ActivationMilestone, type FeatureId } from '../../shared/telemetry'
 import { randomUUID } from 'node:crypto'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -46,12 +60,54 @@ export type TrackEvent =
   | 'app_open'
   /**
    * A turn was submitted to the agent. The "real usage" signal. Carries
-   * `{ provider }` - an allow-listed provider id, or `other` for anything
-   * that isn't in the shipped seed list.
+   * `{ provider, agent }` - an allow-listed provider id (or `other`), and
+   * which agent mode was driving (build/plan/subagent).
    */
   | 'prompt'
-  /** An agent turn finished. Carries `{ ok, durationMs }`. */
+  /**
+   * An agent turn finished - the richest event we send, and the one that makes
+   * the difference between "someone pressed enter" and "we know how this
+   * product performs".
+   *
+   * Carries `{ ok, outcome, durationMs, steps, stepBucket, tools, toolErrors,
+   * subagents, inputTokens, outputTokens, cacheReadTokens, costUsd, model,
+   * retries, trimmed }` and, on a failure, `errorKind`. `model` is a coarse
+   * FAMILY (`claude-sonnet`, `gpt-5`, `llama`), never a model id.
+   */
   | 'turn_end'
+  /**
+   * One built-in tool was used during a turn, with how many times and how many
+   * of those failed. Emitted per distinct tool at the END of a turn rather than
+   * per call: a long autonomous run makes hundreds of tool calls, and one event
+   * each would swamp the ingest endpoint with the heaviest sessions - biasing
+   * every chart toward light usage.
+   *
+   * Carries `{ tool, calls, errors }`. `tool` is a built-in name or the literal
+   * `mcp`; an MCP server's own name is never sent.
+   */
+  | 'tool_use'
+  /**
+   * A one-time-per-install activation milestone (`provider_connected`,
+   * `first_prompt`, `first_turn_ok`). Carries `{ milestone }`.
+   *
+   * Sent at most once ever, tracked in the same JSON file as the install id, so
+   * the counts form a real funnel instead of being dominated by whoever
+   * relaunches the app most.
+   */
+  | 'activation'
+  /**
+   * A provider was connected. Carries `{ provider }`. Distinct from `prompt`'s
+   * provider: this is "what did people set up", which is a different question
+   * from "what did they end up using", and the gap between the two is where
+   * broken onboarding hides.
+   */
+  | 'provider_connect'
+  /**
+   * A capability surface was used for the first time in a session. Carries
+   * `{ feature }` from the fixed `FeatureId` set. Deduped per session so one
+   * enthusiastic user can't manufacture a trend.
+   */
+  | 'feature'
   /** Keeps a long-running session counted as active on later days. */
   | 'heartbeat'
   /** Remote Workspace paired with a phone. */
@@ -63,6 +119,14 @@ export type TrackEvent =
 
 /** Only scalars — the server rejects nested objects and arrays anyway. */
 type Props = Record<string, string | number | boolean>
+
+/**
+ * The server caps a batch at 50 events and drops the excess, so a turn that
+ * would emit more `tool_use` events than this reports only its most-used tools.
+ * Well above a normal turn's distinct-tool count; it exists so a pathological
+ * run can't spend the whole batch on one event type.
+ */
+const MAX_TOOL_EVENTS_PER_TURN = 12
 
 /**
  * Collapse a `provider` prop to the shipped seed list, mapping anything else to
@@ -99,6 +163,16 @@ interface StoredState {
   enabled?: boolean
   /** Last version that reported an `app_open`, so we can detect an update. */
   appVersion?: string
+  /**
+   * Activation milestones already reported, so each is sent at most once EVER.
+   *
+   * Stored next to the install id rather than in the settings table for the
+   * same reason the id is: a factory reset wipes settings, and someone whose
+   * `first_prompt` was re-reported after a reset would appear in the funnel
+   * twice, quietly inflating the one number that is supposed to be a count of
+   * distinct people getting through onboarding.
+   */
+  activated?: string[]
 }
 
 const FLUSH_INTERVAL_MS = 30_000
@@ -183,6 +257,66 @@ export function track(name: TrackEvent, props?: Props): void {
   if (!enabled || !deviceId) return
   if (queue.length >= MAX_QUEUE) return // shed rather than grow without bound
   queue.push({ name, clientId: randomUUID(), ts: Date.now(), props: sanitize(props) })
+}
+
+/**
+ * Report an activation milestone, at most once per install, ever.
+ *
+ * The dedupe is persisted rather than in-memory because the milestones span
+ * launches by definition: `first_prompt` usually happens in a different session
+ * from `provider_connected`, and an in-memory guard would re-report every one
+ * of them on every restart - turning a funnel into a launch counter.
+ *
+ * Returns whether it actually reported, which the tests assert on.
+ */
+export function markActivation(milestone: ActivationMilestone): boolean {
+  if (!enabled || !deviceId) return false
+  const state = readState()
+  const seen = Array.isArray(state.activated) ? state.activated : []
+  if (seen.includes(milestone)) return false
+  writeState({ ...state, activated: [...seen, milestone] })
+  track('activation', { milestone })
+  return true
+}
+
+/**
+ * Per-session feature dedupe.
+ *
+ * In memory, unlike activation: the question here is "how many SESSIONS use
+ * subagents", so re-reporting across launches is correct and desirable. What we
+ * must avoid is counting the same session's 200 subagent spawns as 200 signals,
+ * which would make one overnight run look like a fleet-wide trend.
+ *
+ * Bounded so a long-lived process with many sessions can't grow it without
+ * limit; evicting just means a later session re-reports, which is harmless.
+ */
+const featuresSeen = new Set<string>()
+const MAX_FEATURE_KEYS = 500
+
+/** Report that a session used a capability surface, once per session. */
+export function trackFeature(sessionId: string | undefined, feature: FeatureId): void {
+  if (!enabled || !deviceId) return
+  if (!isFeatureId(feature)) return
+  const key = `${sessionId ?? 'global'}\u0000${feature}`
+  if (featuresSeen.has(key)) return
+  if (featuresSeen.size >= MAX_FEATURE_KEYS) featuresSeen.clear()
+  featuresSeen.add(key)
+  track('feature', { feature })
+}
+
+/**
+ * Report per-tool usage for a finished turn.
+ *
+ * Takes the whole map at once so the cap is applied to the turn as a unit -
+ * emitting these one at a time from the caller would make it impossible to
+ * bound a turn's share of the batch.
+ */
+export function trackToolUse(tools: { tool: string; calls: number; errors: number }[]): void {
+  if (!enabled || !deviceId) return
+  // Busiest first, so if a turn exceeds the cap the tools that get dropped are
+  // the ones that ran once, not the one that ran two hundred times.
+  const ranked = [...tools].sort((a, b) => b.calls - a.calls).slice(0, MAX_TOOL_EVENTS_PER_TURN)
+  for (const t of ranked) track('tool_use', { tool: t.tool, calls: t.calls, errors: t.errors })
 }
 
 /**
@@ -299,6 +433,7 @@ export function _resetTracking(): void {
   deviceId = null
   enabled = true
   forcedOff = false
+  featuresSeen.clear()
 }
 
 /** Test-only: how many events are waiting to be sent. */
