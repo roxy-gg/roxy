@@ -42,6 +42,54 @@ import {
   upstreamFor
 } from '../src/shared/cliproxy'
 import { pickDefaultModel } from '../src/shared/models'
+import {
+  ACTIVATION_MILESTONES,
+  FEATURE_IDS,
+  bucketCount,
+  classifyTurnError,
+  isFeatureId,
+  modelFamily,
+  reportableAgent,
+  reportableToolName,
+  roundUsd,
+  safeTokens,
+  type ModelFamily,
+  type TurnErrorKind
+} from '../src/shared/telemetry'
+
+/** Every family/kind the classifiers may return - asserted to be exhaustive. */
+const MODEL_FAMILIES: ModelFamily[] = [
+  'claude-opus',
+  'claude-sonnet',
+  'claude-haiku',
+  'gpt-5',
+  'gpt-4',
+  'openai-reasoning',
+  'gpt-oss',
+  'gemini-pro',
+  'gemini-flash',
+  'grok',
+  'llama',
+  'qwen',
+  'deepseek',
+  'mistral',
+  'kimi',
+  'glm',
+  'command',
+  'gemma',
+  'phi',
+  'other'
+]
+const TURN_ERROR_KINDS: TurnErrorKind[] = [
+  'rate_limit',
+  'billing',
+  'auth',
+  'network',
+  'context_overflow',
+  'provider_error',
+  'bad_request',
+  'unknown'
+]
 import { randomSlug, uniqueSlug, slugToBranchSegment, isGeneratedSlug } from '../src/shared/slugs'
 import { formatInterval } from '../src/shared/format'
 import {
@@ -364,6 +412,182 @@ check(
   'isSeedProviderId is stricter than resolveSeed',
   resolveSeed('__x__').id === '__x__' && !isSeedProviderId('__x__')
 )
+
+// ---- telemetry vocabularies ----
+// Every function under test here is TOTAL: it maps arbitrary input to one of a
+// fixed set of strings that ship in this repo. That property is the entire
+// privacy guarantee of usage tracking, so it is asserted directly rather than
+// inferred from the callers.
+
+// Model FAMILY, never the model id. Real ids arrive gateway-prefixed, dated,
+// and vendor-qualified; all of those are the same family.
+check('modelFamily: bare anthropic id', modelFamily('claude-sonnet-4-5') === 'claude-sonnet')
+check('modelFamily: dated id', modelFamily('claude-3-5-sonnet-20241022') === 'claude-sonnet')
+check(
+  'modelFamily: gateway-prefixed id',
+  modelFamily('anthropic/claude-opus-4-1') === 'claude-opus'
+)
+check(
+  'modelFamily: bedrock-qualified id',
+  modelFamily('bedrock/anthropic.claude-haiku-4-v1:0') === 'claude-haiku'
+)
+check(
+  'modelFamily: an unknown Claude tier still reads as Claude',
+  modelFamily('claude-x') === 'claude-sonnet'
+)
+check('modelFamily: gpt-5', modelFamily('gpt-5-codex') === 'gpt-5')
+check('modelFamily: gpt-4o', modelFamily('gpt-4o-mini') === 'gpt-4')
+// Ordering matters: the reasoning line is a different product from gpt-4/5 and
+// must be matched before them.
+check('modelFamily: o3 is reasoning, not gpt', modelFamily('o3-mini') === 'openai-reasoning')
+check('modelFamily: o1 is reasoning', modelFamily('o1-preview') === 'openai-reasoning')
+// ...but a plain `gpt-oss` must NOT be swallowed by the reasoning pattern.
+check('modelFamily: gpt-oss is its own family', modelFamily('gpt-oss-120b') === 'gpt-oss')
+check(
+  'modelFamily: gemini flash beats gemini pro',
+  modelFamily('gemini-2.5-flash') === 'gemini-flash'
+)
+check('modelFamily: gemini pro', modelFamily('gemini-2.5-pro') === 'gemini-pro')
+check('modelFamily: local llama', modelFamily('llama3.3:70b') === 'llama')
+check('modelFamily: qwen', modelFamily('qwen2.5-coder:32b') === 'qwen')
+// THE case this whole indirection exists for: a private finetune name must not
+// survive, and none of it may appear in the output.
+check('modelFamily: a private finetune is `other`', modelFamily('acme-support-bot-v3') === 'other')
+check(
+  'modelFamily: null/empty are `other`',
+  modelFamily(null) === 'other' && modelFamily('') === 'other'
+)
+check(
+  'modelFamily: output is ALWAYS a shipped family',
+  ['acme-internal', '', 'x'.repeat(5000), '../../etc/passwd', 'gpt-4'].every((id) =>
+    MODEL_FAMILIES.includes(modelFamily(id))
+  )
+)
+
+// Error KIND, never the message. Providers disagree wildly about status codes
+// for the same condition, which is why text is consulted first.
+check(
+  'classifyTurnError: 429 is a rate limit',
+  classifyTurnError(429, 'slow down') === 'rate_limit'
+)
+// ...unless the text says it's really a billing wall, which OpenAI sends as 429.
+check(
+  'classifyTurnError: an out-of-quota 429 is billing, not a rate limit',
+  classifyTurnError(429, 'You exceeded your current quota') === 'billing'
+)
+check(
+  'classifyTurnError: Anthropic sends billing as a 400',
+  classifyTurnError(400, 'Your credit balance is too low') === 'billing'
+)
+check('classifyTurnError: 402 is billing', classifyTurnError(402, '') === 'billing')
+check('classifyTurnError: 401 is auth', classifyTurnError(401, '') === 'auth')
+check(
+  'classifyTurnError: a 400 naming auth is auth, not bad_request',
+  classifyTurnError(400, 'invalid api key') === 'auth'
+)
+check(
+  'classifyTurnError: context overflow beats bad_request',
+  classifyTurnError(400, "This model's maximum context length is 200000 tokens") ===
+    'context_overflow'
+)
+check('classifyTurnError: 500 is the provider', classifyTurnError(503, '') === 'provider_error')
+check(
+  'classifyTurnError: a plain 400 is our bug',
+  classifyTurnError(400, 'bad field') === 'bad_request'
+)
+check(
+  'classifyTurnError: a status-less socket drop is network',
+  classifyTurnError(undefined, 'fetch failed: ECONNRESET') === 'network'
+)
+check(
+  'classifyTurnError: nothing recognizable is unknown',
+  classifyTurnError(undefined, 'weird') === 'unknown'
+)
+check(
+  'classifyTurnError: no input at all is unknown',
+  classifyTurnError(undefined, undefined) === 'unknown'
+)
+check(
+  'classifyTurnError: output is ALWAYS a shipped kind',
+  [undefined, 0, 200, 418, 999].every((s) =>
+    TURN_ERROR_KINDS.includes(
+      classifyTurnError(s as number | undefined, 'https://secret.internal/v1 failed')
+    )
+  )
+)
+
+// Tool names: built-ins are public and safe; an MCP server's id is the user's
+// (often their employer's) and must never survive.
+check('reportableToolName: a built-in passes through', reportableToolName('bash') === 'bash')
+check(
+  'reportableToolName: an MCP tool collapses to `mcp`',
+  reportableToolName('mcp__github__list_prs') === 'mcp'
+)
+check(
+  'reportableToolName: a private MCP server name cannot survive',
+  reportableToolName('mcp__acme_internal_billing__query') === 'mcp'
+)
+check(
+  'reportableToolName: an unknown name is `other`',
+  reportableToolName('rm_rf_everything') === 'other'
+)
+check('reportableToolName: null is `other`', reportableToolName(null) === 'other')
+// The catalog and the reportable set must agree, or a tool ships and silently
+// reports as `other` forever.
+check(
+  'reportableToolName: every catalog tool is reportable',
+  TOOLS.every((t) => reportableToolName(t.id) === t.id),
+  TOOLS.filter((t) => reportableToolName(t.id) !== t.id)
+    .map((t) => t.id)
+    .join(',')
+)
+
+// Agent mode: the shipped primaries by name, everything else bucketed, so a
+// future custom-agent feature can't leak user-chosen names.
+check('reportableAgent: build', reportableAgent('build') === 'build')
+check('reportableAgent: plan', reportableAgent('plan') === 'plan')
+check('reportableAgent: a subagent type is bucketed', reportableAgent('explore') === 'subagent')
+check('reportableAgent: an unknown id is `other`', reportableAgent('my-custom-agent') === 'other')
+check('reportableAgent: undefined is `other`', reportableAgent(undefined) === 'other')
+
+// Buckets, for the distribution headline ("62% of turns run 5+ steps").
+check('bucketCount: zero', bucketCount(0) === '0')
+check(
+  'bucketCount: boundaries',
+  bucketCount(1) === '1' && bucketCount(4) === '2-4' && bucketCount(5) === '5-9'
+)
+check('bucketCount: top bucket', bucketCount(25) === '25+' && bucketCount(10_000) === '25+')
+check('bucketCount: garbage is zero', bucketCount(NaN) === '0' && bucketCount(-5) === '0')
+
+// Token counts mirror the server's validator, so a broken counter is caught
+// before it leaves the machine rather than silently dropped at ingest.
+check('safeTokens: a real count passes', safeTokens(12_000) === 12_000)
+check('safeTokens: zero is a real measurement', safeTokens(0) === 0)
+check('safeTokens: negative is rejected', safeTokens(-1) === 0)
+check('safeTokens: fractional is rejected', safeTokens(1.5) === 0)
+check('safeTokens: absurd is rejected', safeTokens(1e12) === 0)
+check(
+  'safeTokens: NaN/undefined are rejected',
+  safeTokens(NaN) === 0 && safeTokens(undefined) === 0
+)
+
+// Cost keeps enough precision that cheap models don't round to free.
+check('roundUsd: a sub-cent turn is not free', roundUsd(0.000123) === 0.000123)
+check('roundUsd: garbage is zero', roundUsd(NaN) === 0 && roundUsd(-1) === 0)
+check('roundUsd: absurd is capped', roundUsd(1e9) === 1000)
+
+// The activation funnel is ordered, and each step is reported at most once, so
+// the counts are directly comparable as a funnel.
+check(
+  'activation: the funnel is ordered',
+  ACTIVATION_MILESTONES.join(',') === 'provider_connected,first_prompt,first_turn_ok'
+)
+check('features: ids are unique', new Set(FEATURE_IDS).size === FEATURE_IDS.length)
+check(
+  'features: isFeatureId accepts every shipped id',
+  FEATURE_IDS.every((f) => isFeatureId(f))
+)
+check('features: isFeatureId rejects anything else', !isFeatureId('rm -rf'))
 
 // ---- subscription providers (CLIProxyAPI sidecar) ----
 // Both are seeded the same way, so assert them the same way rather than writing

@@ -389,11 +389,18 @@ export default function Settings(): JSX.Element {
           <div className="min-w-0">
             <div className="text-sm font-medium text-text">Send anonymous usage data</div>
             <p className="mt-0.5 text-xs text-text-muted">
-              Counts of things like app launches and finished turns, tied to a random id generated
-              on this machine. Never your prompts, code, file paths, repo names, or model. It does
-              include which provider served each turn, matched against our built-in list so a custom
-              endpoint is only ever recorded as &ldquo;other&rdquo;. It is the only way we can tell
-              whether a release helped or broke things.
+              Counts and timings &mdash; app launches, finished turns, how many steps and tools a
+              turn took, how many tokens it used and roughly what it cost &mdash; tied to a random
+              id generated on this machine. Never your prompts, your code, file paths, repo names,
+              or any error text.
+            </p>
+            <p className="mt-2 text-xs text-text-muted">
+              A few labels ride along, and each is matched against a fixed list built into the app:
+              which provider served a turn (a custom endpoint is only ever recorded as{' '}
+              &ldquo;other&rdquo;), which model <em>family</em> ran (&ldquo;claude-sonnet&rdquo;,
+              never the exact model id), which built-in tools ran (an MCP server&rsquo;s own name is
+              only ever recorded as &ldquo;mcp&rdquo;), and which <em>kind</em> of error ended a
+              failed turn. It is the only way we can tell whether a release helped or broke things.
             </p>
           </div>
           <Switch checked={telemetryEnabled} onChange={(v) => void setTelemetryEnabled(v)} />
