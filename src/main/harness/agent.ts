@@ -45,6 +45,16 @@ import * as repo from '../db/repo'
 import { runTool } from './tools'
 import { boundToolOutput } from '../services/tool-output-store'
 import { modelCost } from '../services/models'
+import {
+  applyResponsesEvent,
+  isChatUnsupported,
+  isResponsesOnly,
+  markResponsesOnly,
+  toResponsesInput,
+  toResponsesReasoning,
+  toResponsesTools,
+  type ResponsesEvent
+} from '../services/responses'
 import { usageCost } from '../../shared/cost'
 import {
   ensureMcpConnected,
@@ -1868,7 +1878,7 @@ async function streamOnce(
     })
   }
 
-  const payload = JSON.stringify({
+  const chatPayload = JSON.stringify({
     model,
     messages,
     tools,
@@ -1881,17 +1891,48 @@ async function streamOnce(
     // that ignore it just don't send one — we fall back to an estimate below.
     stream_options: { include_usage: true }
   })
+  // Responses-only models (the GPT-5.x family on Copilot) reject
+  // /chat/completions outright, so they need the other wire: `input` instead of
+  // `messages`, flattened tool schemas, nested reasoning effort. Claude and the
+  // chat-completions GPT models are untouched by this.
+  const responsesPayload = (): string =>
+    JSON.stringify({
+      model,
+      input: toResponsesInput(messages),
+      tools: toResponsesTools(tools),
+      tool_choice: 'auto',
+      ...toResponsesReasoning(reasoning, effort),
+      stream: true
+    })
   // Resolve a FRESH endpoint + auth on EVERY model call. For GitHub Copilot this
   // re-exchanges the short-lived Copilot token as it nears expiry, so a long
   // agent loop (many tool calls) never sends a stale token — the root cause of
   // the intermittent "IDE token expired" 401.
+  let useResponses = isResponsesOnly(providerId, model)
   const send = async (): Promise<Response> => {
-    const { url, headers } = await openaiEndpoint(providerId, { vision })
-    return fetch(url, { method: 'POST', headers, body: payload, signal })
+    const { url, headers } = await openaiEndpoint(providerId, { vision, responses: useResponses })
+    const body = useResponses ? responsesPayload() : chatPayload
+    return fetch(url, { method: 'POST', headers, body, signal })
   }
   // On a 401 the token was rejected (expiry race / clock skew) — drop it, wait,
   // and retry a few times before surfacing the error.
-  const res = await withCopilotRetry(providerId === 'github-copilot', send, signal)
+  let res = await withCopilotRetry(providerId === 'github-copilot', send, signal)
+  // A Responses-only model answers /chat/completions with exactly one error:
+  // 400 unsupported_api_for_model. Remember it (so later calls in this loop go
+  // straight there) and replay the turn on the Responses API.
+  if (!res.ok && !useResponses) {
+    const errBody = await res.text().catch(() => '')
+    if (isChatUnsupported(res.status, errBody)) {
+      markResponsesOnly(providerId, model)
+      useResponses = true
+      res = await withCopilotRetry(providerId === 'github-copilot', send, signal)
+    } else {
+      throw new ModelHttpError(
+        res.status,
+        `Model request failed (${res.status}). ${errBody.slice(0, 300)}`
+      )
+    }
+  }
   if (!res.ok || !res.body) {
     const body = await res.text().catch(() => '')
     throw new ModelHttpError(
@@ -1926,10 +1967,39 @@ async function streamOnce(
     return { text, toolCalls: toolCalls.filter((c) => c.name), usage: usage ?? estimateUsage() }
   }
 
-  // Parse one SSE line. Returns true on the `[DONE]` sentinel so the caller can
-  // stop. Shared by the streaming loop and the final drain below so the last
-  // frame is handled identically whichever way the stream ends.
-  const handleLine = (line: string): boolean => {
+  // The Responses wire carries the same information as semantic events rather
+  // than delta chunks, so it accumulates into the same `text`/`calls`/`usage`
+  // and the agent loop below stays wire-agnostic.
+  const handleResponsesLine = (line: string): boolean => {
+    const trimmed = line.trim()
+    if (!trimmed.startsWith('data:')) return false
+    const raw = trimmed.slice(5).trim()
+    if (raw === '[DONE]') return true
+    let ev: ResponsesEvent
+    try {
+      ev = JSON.parse(raw) as ResponsesEvent
+    } catch {
+      return false
+    }
+    return applyResponsesEvent(ev, {
+      onText: (d) => {
+        text += d
+        onText(d)
+      },
+      onReasoning,
+      onToolCall: (i, patch) => {
+        if (!calls[i]) calls[i] = { id: '', name: '', args: '' }
+        if (patch.id) calls[i].id = patch.id
+        if (patch.name) calls[i].name = patch.name
+        if (patch.args) calls[i].args += patch.args
+      },
+      onUsage: (u) => {
+        usage = u
+      }
+    })
+  }
+
+  const handleChatLine = (line: string): boolean => {
     const trimmed = line.trim()
     if (!trimmed.startsWith('data:')) return false
     const payload = trimmed.slice(5).trim()
@@ -1968,6 +2038,13 @@ async function streamOnce(
     }
     return false
   }
+
+  // Parse one SSE line on whichever wire this model speaks. Returns true on the
+  // terminal event so the caller can stop. Shared by the streaming loop and the
+  // final drain below so the last frame is handled identically whichever way the
+  // stream ends.
+  const handleLine = (line: string): boolean =>
+    useResponses ? handleResponsesLine(line) : handleChatLine(line)
 
   for (;;) {
     const { done, value } = await reader.read()

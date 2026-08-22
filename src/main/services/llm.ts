@@ -14,9 +14,19 @@ import type { ChatMessage } from '../../shared/api'
 import type { ReasoningEffort } from '../../shared/types'
 import { isCliProxyProvider } from '../../shared/cliproxy'
 import { ensureRunning as ensureCliProxy, localApiKey as cliProxyKey } from './cliproxy'
+import {
+  applyResponsesEvent,
+  isChatUnsupported,
+  isResponsesOnly,
+  markResponsesOnly,
+  toResponsesInput,
+  toResponsesReasoning,
+  type ResponsesEvent
+} from './responses'
 
 const COPILOT_TOKEN_URL = 'https://api.github.com/copilot_internal/v2/token'
 const COPILOT_CHAT_URL = 'https://api.githubcopilot.com/chat/completions'
+const COPILOT_RESPONSES_URL = 'https://api.githubcopilot.com/responses'
 export const COPILOT_EDITOR_HEADERS = {
   'User-Agent': 'GitHubCopilotChat/0.26.7',
   'Editor-Version': 'vscode/1.99.3',
@@ -197,13 +207,21 @@ async function resolveBaseUrl(providerId: string, stored: string | undefined): P
   return live.replace(/\/+$/, '')
 }
 
-/** Resolve the OpenAI-compatible chat endpoint + headers (Copilot or openai-chat). */
+/**
+ * Resolve the OpenAI-compatible chat endpoint + headers (Copilot or openai-chat).
+ *
+ * `responses: true` targets the Responses API instead, for the models that are
+ * only served there (see services/responses.ts).
+ */
 export async function openaiEndpoint(
   providerId: string,
-  opts: { vision?: boolean } = {}
+  opts: { vision?: boolean; responses?: boolean } = {}
 ): Promise<{ url: string; headers: Record<string, string> }> {
   if (providerId === 'github-copilot') {
-    return { url: COPILOT_CHAT_URL, headers: copilotHeaders(await getCopilotToken(), opts.vision) }
+    return {
+      url: opts.responses ? COPILOT_RESPONSES_URL : COPILOT_CHAT_URL,
+      headers: copilotHeaders(await getCopilotToken(), opts.vision)
+    }
   }
   const provider = repo.listConnectedProviders().find((p) => p.id === providerId)
   if (!provider) throw new Error(`Provider "${providerId}" is not connected.`)
@@ -214,7 +232,7 @@ export async function openaiEndpoint(
     : repo.getProviderToken(providerId)
   const base = await resolveBaseUrl(providerId, provider.baseURL)
   return {
-    url: `${base}/chat/completions`,
+    url: opts.responses ? `${base}/responses` : `${base}/chat/completions`,
     headers: {
       'Content-Type': 'application/json',
       ...(key ? { Authorization: `Bearer ${key}` } : {})
@@ -309,8 +327,30 @@ export async function streamChat(opts: StreamChatOptions): Promise<void> {
         body,
         signal
       })
-    const res = await withCopilotRetry(true, send, signal)
-    return readSse(res, (j) => emitOpenAi(j, onDelta))
+    // Responses-only models (GPT-5.x) 400 on /chat/completions. Skip straight to
+    // the Responses API once we've learned that for this model; otherwise try
+    // chat and fall back on that specific error. Claude stays on chat throughout.
+    if (!isResponsesOnly(providerId, model)) {
+      const res = await withCopilotRetry(true, send, signal)
+      if (res.ok) return readSse(res, (j) => emitOpenAi(j, onDelta))
+      const errBody = await res.text().catch(() => '')
+      if (!isChatUnsupported(res.status, errBody)) {
+        throw new ModelHttpError(
+          res.status,
+          `Model request failed (${res.status}). ${errBody.slice(0, 300)}`
+        )
+      }
+      markResponsesOnly(providerId, model)
+    }
+    return streamCopilotResponses({
+      model,
+      messages,
+      vision,
+      signal,
+      onDelta,
+      reasoning,
+      reasoningEffort
+    })
   }
 
   const provider = repo.listConnectedProviders().find((p) => p.id === providerId)
@@ -382,6 +422,79 @@ export async function streamChat(opts: StreamChatOptions): Promise<void> {
       })
       return readSse(res, (j) => emitOpenAi(j, onDelta))
     }
+  }
+}
+
+/**
+ * Stream a plain chat turn from Copilot's Responses API.
+ *
+ * Same job as the chat branch above, different wire: `input` instead of
+ * `messages`, nested `reasoning.effort`, and semantic SSE events.
+ */
+async function streamCopilotResponses(opts: {
+  model: string
+  messages: ChatMessage[]
+  vision: boolean
+  signal: AbortSignal
+  onDelta: (t: string) => void
+  reasoning?: boolean
+  reasoningEffort?: ReasoningEffort
+}): Promise<void> {
+  const body = JSON.stringify({
+    model: opts.model,
+    input: toResponsesInput(
+      opts.messages.map((m) => ({ role: m.role, content: openAiContent(m) }))
+    ),
+    ...toResponsesReasoning(opts.reasoning, opts.reasoningEffort),
+    stream: true
+  })
+  const send = async (): Promise<Response> =>
+    fetch(COPILOT_RESPONSES_URL, {
+      method: 'POST',
+      headers: copilotHeaders(await getCopilotToken(), opts.vision),
+      body,
+      signal: opts.signal
+    })
+  const res = await withCopilotRetry(true, send, opts.signal)
+  return readResponsesSse(res, opts.onDelta)
+}
+
+/** Read a Responses SSE body, forwarding text deltas. */
+async function readResponsesSse(res: Response, onDelta: (t: string) => void): Promise<void> {
+  if (!res.ok || !res.body) {
+    const body = await res.text().catch(() => '')
+    throw new ModelHttpError(
+      res.status,
+      `Model request failed (${res.status}). ${body.slice(0, 300)}`
+    )
+  }
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  const handleLine = (line: string): boolean => {
+    const trimmed = line.trim()
+    if (!trimmed.startsWith('data:')) return false
+    const payload = trimmed.slice(5).trim()
+    if (payload === '[DONE]') return true
+    try {
+      return applyResponsesEvent(JSON.parse(payload) as ResponsesEvent, { onText: onDelta })
+    } catch {
+      return false
+    }
+  }
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    const lines = buffer.split('\n')
+    buffer = lines.pop() ?? ''
+    for (const line of lines) {
+      if (handleLine(line)) return
+    }
+  }
+  buffer += decoder.decode()
+  for (const line of buffer.split('\n')) {
+    if (handleLine(line)) return
   }
 }
 
