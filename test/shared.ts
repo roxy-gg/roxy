@@ -284,6 +284,14 @@ import {
   hasUsableItems,
   type ClickContext
 } from '../src/shared/context-menu'
+import {
+  applyResponsesEvent,
+  isChatUnsupported,
+  toResponsesInput,
+  toResponsesReasoning,
+  toResponsesTools,
+  type ResponsesEvent
+} from '../src/main/services/responses'
 
 let pass = 0
 const fails: string[] = []
@@ -4919,6 +4927,147 @@ async function main(): Promise<void> {
     }
   }
   check('clipboard menu: no enabled row can ever be a no-op', dishonest === 0, String(dishonest))
+
+  // ---- Responses API translation (GPT-5.x on Copilot) ----
+  // Only the exact unsupported_api_for_model 400 may flip us to /responses; any
+  // other failure must surface, or a bad body silently retries on the wrong API.
+  check(
+    'responses: detects unsupported_api_for_model',
+    isChatUnsupported(
+      400,
+      '{"error":{"message":"model \\"gpt-5.6-sol\\" is not accessible via the /chat/completions endpoint","code":"unsupported_api_for_model"}}'
+    )
+  )
+  check(
+    'responses: unrelated 400 does not trigger fallback',
+    !isChatUnsupported(400, '{"error":{"message":"bad request","code":"invalid_request_error"}}')
+  )
+  check(
+    'responses: non-400 does not trigger fallback',
+    !isChatUnsupported(500, 'unsupported_api_for_model')
+  )
+
+  // A tool call + its result must survive the round trip as separate items,
+  // keeping call_id paired - that pairing is what Build mode runs on.
+  const respRoundTrip = toResponsesInput([
+    { role: 'system', content: 'be terse' },
+    { role: 'user', content: 'hi' },
+    {
+      role: 'assistant',
+      content: 'checking',
+      tool_calls: [
+        { id: 'call-1', type: 'function', function: { name: 'read', arguments: '{"p":"a.ts"}' } }
+      ]
+    },
+    { role: 'tool', tool_call_id: 'call-1', content: 'file body' }
+  ])
+  check('responses: input item count', respRoundTrip.length === 5, String(respRoundTrip.length))
+  const fc = respRoundTrip[3] as { type?: string; call_id?: string; name?: string }
+  check(
+    'responses: tool call becomes function_call item',
+    fc.type === 'function_call' && fc.call_id === 'call-1' && fc.name === 'read'
+  )
+  const fo = respRoundTrip[4] as { type?: string; call_id?: string; output?: string }
+  check(
+    'responses: tool result becomes function_call_output with matching id',
+    fo.type === 'function_call_output' && fo.call_id === 'call-1' && fo.output === 'file body'
+  )
+
+  // Images use input_image with a bare url string, not chat's nested image_url.
+  const imgInput = toResponsesInput([
+    {
+      role: 'user',
+      content: [
+        { type: 'text', text: 'what is this' },
+        { type: 'image_url', image_url: { url: 'data:image/png;base64,AAA' } }
+      ]
+    }
+  ])
+  const parts = (imgInput[0] as { content?: { type?: string; image_url?: string }[] }).content ?? []
+  check(
+    'responses: image becomes input_image with flat url',
+    parts[0]?.type === 'input_text' &&
+      parts[1]?.type === 'input_image' &&
+      parts[1]?.image_url === 'data:image/png;base64,AAA'
+  )
+
+  // Tools flatten (no nested `function`) and effort nests. Both are 400s if wrong.
+  const flatTools = toResponsesTools([
+    { type: 'function', function: { name: 'bash', description: 'run', parameters: {} } }
+  ]) as { type?: string; name?: string; function?: unknown }[]
+  check(
+    'responses: tool schema flattened',
+    flatTools[0].type === 'function' &&
+      flatTools[0].name === 'bash' &&
+      flatTools[0].function === undefined
+  )
+  check(
+    'responses: reasoning effort nests',
+    toResponsesReasoning(true, 'high').reasoning?.effort === 'high'
+  )
+  check('responses: no reasoning when unsupported', !toResponsesReasoning(false, 'high').reasoning)
+
+  // Replay a realistic event stream and assert we reconstruct text, the tool
+  // call, and usage - and that cached input tokens are not double-counted.
+  let rText = ''
+  const rCalls: { id: string; name: string; args: string }[] = []
+  let rUsage: { input: number; cacheRead: number; output: number } | null = null
+  const events: ResponsesEvent[] = [
+    { type: 'response.created' },
+    { type: 'response.output_text.delta', delta: 'Hel' },
+    { type: 'response.output_text.delta', delta: 'lo' },
+    {
+      type: 'response.output_item.added',
+      output_index: 0,
+      item: { type: 'function_call', call_id: 'c1', name: 'bash', arguments: '' }
+    },
+    { type: 'response.function_call_arguments.delta', output_index: 0, delta: '{"cmd"' },
+    { type: 'response.function_call_arguments.delta', output_index: 0, delta: ':"ls"}' },
+    {
+      type: 'response.completed',
+      response: {
+        usage: { input_tokens: 100, output_tokens: 20, input_tokens_details: { cached_tokens: 30 } }
+      }
+    }
+  ]
+  let terminated = false
+  for (const ev of events) {
+    terminated = applyResponsesEvent(ev, {
+      onText: (d) => {
+        rText += d
+      },
+      onToolCall: (i, p) => {
+        if (!rCalls[i]) rCalls[i] = { id: '', name: '', args: '' }
+        if (p.id) rCalls[i].id = p.id
+        if (p.name) rCalls[i].name = p.name
+        if (p.args) rCalls[i].args += p.args
+      },
+      onUsage: (u) => {
+        rUsage = u
+      }
+    })
+  }
+  check('responses: text deltas accumulate', rText === 'Hello', rText)
+  check(
+    'responses: tool call reassembled',
+    rCalls[0]?.id === 'c1' && rCalls[0]?.name === 'bash' && rCalls[0]?.args === '{"cmd":"ls"}',
+    JSON.stringify(rCalls[0])
+  )
+  check(
+    'responses: usage excludes cached from input',
+    rUsage?.input === 70 && rUsage?.cacheRead === 30 && rUsage?.output === 20,
+    JSON.stringify(rUsage)
+  )
+  check('responses: response.completed terminates the stream', terminated)
+  check(
+    'responses: failure events terminate the stream',
+    applyResponsesEvent({ type: 'response.failed' }, { onText: () => {} }) &&
+      applyResponsesEvent({ type: 'error' }, { onText: () => {} })
+  )
+  check(
+    'responses: unknown events are ignored',
+    !applyResponsesEvent({ type: 'response.in_progress' }, { onText: () => {} })
+  )
 
   if (fails.length) {
     console.error(`\nSHARED FAILED \u2014 ${fails.length} failing: ${fails.join(', ')}`)
