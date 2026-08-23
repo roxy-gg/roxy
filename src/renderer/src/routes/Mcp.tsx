@@ -7,7 +7,7 @@ export default function Mcp(): JSX.Element {
   return (
     <PageShell
       title="MCP Servers"
-      subtitle="Connect external Model Context Protocol tool servers (filesystem, GitHub, databases, browsers, …) to expand what Roxy can do. Servers are also read from a workspace .roxy/mcp.json, and the agent can add them itself with the mcp tool."
+      subtitle="Connect external Model Context Protocol tool servers (filesystem, GitHub, databases, browsers, …) to expand what Roxy can do. Edit any server's raw JSON with the { } button to debug it. Servers are also read from a workspace .roxy/mcp.json, and the agent can add them itself with the mcp tool."
       onBack={() => navigate('/')}
     >
       <McpServers showBackup />

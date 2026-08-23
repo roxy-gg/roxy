@@ -221,9 +221,11 @@ import {
   mcpToolToSchema,
   normalizeServerConfig,
   normalizeServerRecords,
+  parseMcpJson,
   qualifyToolName,
   renderMcpContent,
   sanitizeNamePart,
+  serializeServerConfig,
   type McpServerSummary
 } from '../src/shared/mcp'
 import {
@@ -2103,6 +2105,76 @@ check(
   'mcp recs: non-object → []',
   normalizeServerRecords(null).length === 0 && normalizeServerRecords([]).length === 0
 )
+
+// parseMcpJson: the Settings raw-JSON editor. Permissive about the wrapper,
+// strict about the config, and it explains itself when it says no.
+const pBare = parseMcpJson('{"type":"local","command":["npx","x"]}')
+check(
+  'mcp json: bare config accepted, no id',
+  pBare.ok && pBare.value.id === undefined && pBare.value.config.type === 'local'
+)
+const pWrapped = parseMcpJson('{"mcpServers":{"files":{"command":["npx","x"]}}}')
+check(
+  'mcp json: mcpServers wrapper yields id + config',
+  pWrapped.ok && pWrapped.value.id === 'files' && pWrapped.value.config.type === 'local'
+)
+check(
+  'mcp json: servers wrapper also works',
+  parseMcpJson('{"servers":{"s":{"url":"https://e.com"}}}').ok
+)
+const pMap = parseMcpJson('{"files":{"url":"https://e.com/mcp"}}')
+check('mcp json: bare {name: config} map', pMap.ok && pMap.value.id === 'files')
+check(
+  'mcp json: disabled:true carried through',
+  (() => {
+    const r = parseMcpJson('{"mcpServers":{"a":{"command":["x"],"disabled":true}}}')
+    return r.ok && r.value.enabled === false
+  })()
+)
+check(
+  'mcp json: silence about enabled stays undefined',
+  (() => {
+    const r = parseMcpJson('{"command":["x"]}')
+    return r.ok && r.value.enabled === undefined
+  })()
+)
+check(
+  'mcp json: syntax error explains itself',
+  (() => {
+    const r = parseMcpJson('{ nope }')
+    return !r.ok && r.error.startsWith('Invalid JSON:')
+  })()
+)
+check('mcp json: empty input rejected', !parseMcpJson('   ').ok && !parseMcpJson('[1,2]').ok)
+check(
+  'mcp json: config with neither command nor url rejected',
+  (() => {
+    const r = parseMcpJson('{"foo":"bar"}')
+    return !r.ok && r.error.includes('command')
+  })()
+)
+check(
+  'mcp json: multi-server paste refused by name',
+  (() => {
+    const r = parseMcpJson('{"mcpServers":{"a":{"command":["x"]},"b":{"url":"https://e.com"}}}')
+    return !r.ok && r.error.includes('a, b')
+  })()
+)
+check(
+  'mcp json: empty wrapper names the wrapper',
+  (() => {
+    const r = parseMcpJson('{"mcpServers":{}}')
+    return !r.ok && r.error.includes('mcpServers')
+  })()
+)
+// Round-trip: what the editor renders must parse back to the same config.
+const rtCfg = normalizeServerConfig({ command: ['npx', 'x'], env: { A: '1' }, timeout: 9000 })!
+const rt = parseMcpJson(serializeServerConfig(rtCfg))
+check(
+  'mcp json: serialize then parse round-trips',
+  rt.ok && JSON.stringify(rt.value.config) === JSON.stringify(rtCfg)
+)
+check('mcp json: serialized form is pretty-printed', serializeServerConfig(rtCfg).includes('\n  '))
 
 // qualifyToolName / isMcpToolName: provider-legal, namespaced, collision-resistant.
 check(
