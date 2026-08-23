@@ -113,6 +113,112 @@ export function normalizeServerRecords(raw: unknown): McpServerRecord[] {
   return out
 }
 
+// ---------------------------------------------------------------------------
+// Raw JSON editing (Settings' "edit raw config" escape hatch)
+// ---------------------------------------------------------------------------
+
+/** A single server parsed out of hand-written / pasted JSON. */
+export interface ParsedMcpJson {
+  /** Present when the JSON was a named map (`{ "mcpServers": { "<id>": … } }`). */
+  id?: string
+  config: McpServerConfig
+  /** Present only when the JSON explicitly said `enabled` / `disabled`. */
+  enabled?: boolean
+}
+
+export type ParseMcpJsonResult =
+  | { ok: true; value: ParsedMcpJson }
+  | { ok: false; error: string }
+
+/** The canonical, pretty-printed form of a config — what the raw editor shows. */
+export function serializeServerConfig(config: McpServerConfig): string {
+  return JSON.stringify(config, null, 2)
+}
+
+/**
+ * Parse hand-edited/pasted MCP JSON into one server. Deliberately permissive
+ * about the wrapper so a snippet copied from any server's README works:
+ *
+ *   { "type": "local", "command": ["npx", …] }        ← a bare config
+ *   { "mcpServers": { "files": { "command": … } } }   ← Claude Desktop style
+ *   { "servers": { "files": … } }                     ← VS Code style
+ *   { "files": { "command": … } }                     ← a bare one-entry map
+ *
+ * Returns a *message*, never throws: this is the debug path, so the reason a
+ * config was rejected matters more than the rejection.
+ */
+export function parseMcpJson(text: string): ParseMcpJsonResult {
+  const trimmed = text.trim()
+  if (!trimmed) return { ok: false, error: 'Enter some JSON.' }
+
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(trimmed)
+  } catch (e) {
+    return { ok: false, error: `Invalid JSON: ${e instanceof Error ? e.message : String(e)}` }
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return { ok: false, error: 'Expected a JSON object describing one MCP server.' }
+  }
+  const root = parsed as Record<string, unknown>
+
+  // 1. An explicit wrapper always wins — even when empty/broken, so the error
+  //    names the real problem instead of "not a valid config".
+  for (const key of ['mcpServers', 'servers'] as const) {
+    const wrapped = root[key]
+    if (wrapped && typeof wrapped === 'object' && !Array.isArray(wrapped)) {
+      return fromNamedMap(wrapped as Record<string, unknown>, key)
+    }
+  }
+
+  // 2. A bare config object.
+  const direct = normalizeServerConfig(root)
+  if (direct) return { ok: true, value: { config: direct, enabled: readEnabled(root) } }
+
+  // 3. A bare `{ name: config }` map (README snippets often drop the wrapper).
+  const keys = Object.keys(root)
+  if (keys.length && keys.every((k) => isPlainObject(root[k]))) {
+    return fromNamedMap(root, 'object')
+  }
+
+  return {
+    ok: false,
+    error:
+      'Not a valid MCP server config — needs a "command" (local, argv array) or a "url" (remote).'
+  }
+}
+
+/** Pull the single entry out of a `{ name: config }` map. */
+function fromNamedMap(map: Record<string, unknown>, label: string): ParseMcpJsonResult {
+  const entries = Object.entries(map).filter(([id]) => id.trim())
+  if (!entries.length) return { ok: false, error: `"${label}" has no server entries.` }
+  if (entries.length > 1) {
+    return {
+      ok: false,
+      error: `Found ${entries.length} servers (${entries.map(([id]) => id).join(', ')}) — paste one at a time.`
+    }
+  }
+  const [id, raw] = entries[0]
+  const config = normalizeServerConfig(raw)
+  if (!config) {
+    return { ok: false, error: `"${id}" is not a valid config — needs a "command" or a "url".` }
+  }
+  return { ok: true, value: { id: id.trim(), config, enabled: readEnabled(raw) } }
+}
+
+/** `enabled` / `disabled` as written, or undefined when the JSON is silent. */
+function readEnabled(raw: unknown): boolean | undefined {
+  if (!isPlainObject(raw)) return undefined
+  const o = raw as Record<string, unknown>
+  if (o.disabled === true || o.enabled === false) return false
+  if (o.disabled === false || o.enabled === true) return true
+  return undefined
+}
+
+function isPlainObject(v: unknown): boolean {
+  return !!v && typeof v === 'object' && !Array.isArray(v)
+}
+
 function normalizeCommand(command: unknown, args: unknown): string[] {
   if (Array.isArray(command)) {
     return command.filter((x): x is string => typeof x === 'string' && x.length > 0)

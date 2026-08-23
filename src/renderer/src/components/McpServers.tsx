@@ -1,9 +1,14 @@
 import { useEffect, useState } from 'react'
-import { Plug, Plus, RefreshCw, Trash2 } from 'lucide-react'
+import { Braces, Plug, Plus, RefreshCw, Trash2 } from 'lucide-react'
 import type { McpServerView } from '@shared/api'
-import type { McpServerConfig } from '@shared/mcp'
+import {
+  parseMcpJson,
+  serializeServerConfig,
+  type McpServerConfig,
+  type ParsedMcpJson
+} from '@shared/mcp'
 import { api } from '../lib/api'
-import { Button, Input, Switch, Badge } from './ui'
+import { Button, Input, Switch, Badge, Textarea } from './ui'
 import { ConfigBackup } from './ConfigBackup'
 
 function configSummary(config: McpServerConfig): string {
@@ -16,6 +21,17 @@ const MCP_STATUS_STYLES: Record<McpServerView['status'], string> = {
   disabled: 'text-text-muted'
 }
 
+/** Sizes the JSON editor to its content so a long config isn't read through a slot. */
+function jsonRows(text: string): number {
+  return Math.min(24, Math.max(6, text.split('\n').length + 1))
+}
+
+const JSON_PLACEHOLDER = `{
+  "type": "local",
+  "command": ["npx", "-y", "@modelcontextprotocol/server-filesystem", "/path"],
+  "environment": { "API_KEY": "…" }
+}`
+
 /** List/add/toggle/reconnect/remove external MCP tool servers. Shared by Settings + the MCP page. */
 export function McpServers({ showBackup = false }: { showBackup?: boolean } = {}): JSX.Element {
   const [servers, setServers] = useState<McpServerView[]>([])
@@ -23,9 +39,12 @@ export function McpServers({ showBackup = false }: { showBackup?: boolean } = {}
   const [busy, setBusy] = useState<string | null>(null)
   const [showAdd, setShowAdd] = useState(false)
   const [name, setName] = useState('')
-  const [kind, setKind] = useState<'local' | 'remote'>('local')
+  const [kind, setKind] = useState<'local' | 'remote' | 'json'>('local')
   const [value, setValue] = useState('')
+  const [json, setJson] = useState('')
   const [formErr, setFormErr] = useState('')
+  /** id of the server whose raw JSON is open in the editor (only one at a time). */
+  const [editing, setEditing] = useState<string | null>(null)
 
   const reload = async (): Promise<void> => {
     setServers(await api.mcp.list())
@@ -58,47 +77,103 @@ export function McpServers({ showBackup = false }: { showBackup?: boolean } = {}
     setBusy(id)
     try {
       setServers(await api.mcp.remove(id))
+      if (editing === id) setEditing(null)
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  /**
+   * Persist an edited raw config. A pasted `{ "<name>": … }` map whose name
+   * differs from the row's is treated as a rename (write the new entry, drop the
+   * old one) rather than silently ignored — but never one that lands on another
+   * server, since upsert-then-remove would clobber the one already there.
+   *
+   * Resolves to a message for the editor to show, or null when the save stuck.
+   */
+  const saveRaw = async (server: McpServerView, parsed: ParsedMcpJson): Promise<string | null> => {
+    const nextId = parsed.id?.trim() || server.id
+    const enabled = parsed.enabled ?? server.enabled
+    if (nextId !== server.id && servers.some((s) => s.id === nextId)) {
+      return `Renaming to "${nextId}" would overwrite another server. Pick a different name.`
+    }
+    setBusy(server.id)
+    try {
+      await api.mcp.upsert({ id: nextId, config: parsed.config, enabled })
+      if (nextId !== server.id) await api.mcp.remove(server.id)
+      // Reconnect so the edit is validated against the real server right away —
+      // debugging a config whose result you can't see is the problem being fixed.
+      setServers(enabled ? await api.mcp.reconnect(nextId) : await api.mcp.list())
+      setEditing(null)
+      return null
+    } catch (e) {
+      // A rejected upsert (the main process refusing the config) has to surface
+      // here rather than vanish; showing failures is this editor's whole job.
+      await reload()
+      return e instanceof Error ? e.message : 'Failed to save the config.'
     } finally {
       setBusy(null)
     }
   }
 
   const submit = async (): Promise<void> => {
-    const id = name.trim()
-    if (!id) {
-      setFormErr('Enter a name')
-      return
+    let id = name.trim()
+    let config: McpServerConfig
+    let enabled = true
+
+    if (kind === 'json') {
+      const parsed = parseMcpJson(json)
+      if (!parsed.ok) {
+        setFormErr(parsed.error)
+        return
+      }
+      // A named map carries its own name, so pasting a README snippet needs no typing.
+      id = id || (parsed.value.id ?? '')
+      config = parsed.value.config
+      enabled = parsed.value.enabled ?? true
+      if (!id) {
+        setFormErr('Enter a name — the pasted JSON is a bare config, so it has none.')
+        return
+      }
+    } else {
+      if (!id) {
+        setFormErr('Enter a name')
+        return
+      }
+      if (kind === 'remote') {
+        const url = value.trim()
+        if (!/^https?:\/\//i.test(url)) {
+          setFormErr('Enter a valid http(s) URL')
+          return
+        }
+        config = { type: 'remote', url }
+      } else {
+        const argv = value.trim().split(/\s+/).filter(Boolean)
+        if (!argv.length) {
+          setFormErr('Enter a command')
+          return
+        }
+        config = { type: 'local', command: argv }
+      }
     }
+
     if (servers.some((s) => s.id === id)) {
       setFormErr('A server with that name already exists')
       return
     }
-    let config: McpServerConfig
-    if (kind === 'remote') {
-      const url = value.trim()
-      if (!/^https?:\/\//i.test(url)) {
-        setFormErr('Enter a valid http(s) URL')
-        return
-      }
-      config = { type: 'remote', url }
-    } else {
-      const argv = value.trim().split(/\s+/).filter(Boolean)
-      if (!argv.length) {
-        setFormErr('Enter a command')
-        return
-      }
-      config = { type: 'local', command: argv }
-    }
     setBusy('__add__')
     setFormErr('')
     try {
-      await api.mcp.upsert({ id, config, enabled: true })
+      await api.mcp.upsert({ id, config, enabled })
       // Connect immediately so the user sees the live status / any error.
-      setServers(await api.mcp.reconnect(id))
+      setServers(enabled ? await api.mcp.reconnect(id) : await api.mcp.list())
       setShowAdd(false)
       setName('')
       setValue('')
+      setJson('')
       setKind('local')
+    } catch (e) {
+      setFormErr(e instanceof Error ? e.message : 'Failed to add the server.')
     } finally {
       setBusy(null)
     }
@@ -118,55 +193,79 @@ export function McpServers({ showBackup = false }: { showBackup?: boolean } = {}
         servers.map((s) => (
           <div
             key={s.id}
-            className="flex items-center gap-3 sq sq-xl sq-ring rounded-xl border border-border bg-surface p-3.5"
+            className="flex flex-col sq sq-xl sq-ring rounded-xl border border-border bg-surface p-3.5"
           >
-            <div className="flex h-8 w-8 items-center justify-center sq sq-lg sq-ring rounded-lg border border-border bg-surface-2">
-              <Plug className="h-4 w-4 text-text-muted" />
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-2">
-                <span className="truncate text-sm font-medium text-text">{s.id}</span>
-                <Badge className={MCP_STATUS_STYLES[s.status]}>
-                  {s.status === 'connected'
-                    ? `${s.tools.length} tool${s.tools.length === 1 ? '' : 's'}`
-                    : s.status}
-                </Badge>
+            <div className="flex items-center gap-3">
+              <div className="flex h-8 w-8 items-center justify-center sq sq-lg sq-ring rounded-lg border border-border bg-surface-2">
+                <Plug className="h-4 w-4 text-text-muted" />
               </div>
-              <p
-                className="mt-0.5 truncate text-xs text-text-subtle"
-                title={configSummary(s.config)}
-              >
-                {configSummary(s.config)}
-              </p>
-              {s.status === 'error' && s.error && (
-                <p className="mt-0.5 truncate text-xs text-danger" title={s.error}>
-                  {s.error}
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <span className="truncate text-sm font-medium text-text">{s.id}</span>
+                  <Badge className={MCP_STATUS_STYLES[s.status]}>
+                    {s.status === 'connected'
+                      ? `${s.tools.length} tool${s.tools.length === 1 ? '' : 's'}`
+                      : s.status}
+                  </Badge>
+                </div>
+                <p
+                  className="mt-0.5 truncate text-xs text-text-subtle"
+                  title={configSummary(s.config)}
+                >
+                  {configSummary(s.config)}
                 </p>
-              )}
+                {s.status === 'error' && s.error && (
+                  <p className="mt-0.5 truncate text-xs text-danger" title={s.error}>
+                    {s.error}
+                  </p>
+                )}
+              </div>
+              <Switch
+                checked={s.enabled}
+                disabled={busy === s.id}
+                onChange={(v) => void toggle(s.id, v)}
+              />
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={busy === s.id}
+                onClick={() => setEditing((cur) => (cur === s.id ? null : s.id))}
+                title="Edit raw JSON"
+                aria-expanded={editing === s.id}
+                className={editing === s.id ? 'text-text' : undefined}
+              >
+                <Braces className="h-3.5 w-3.5" />
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={busy === s.id || !s.enabled}
+                onClick={() => void reconnect(s.id)}
+                title="Reconnect"
+              >
+                <RefreshCw className="h-3.5 w-3.5" />
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={busy === s.id}
+                onClick={() => void remove(s.id)}
+                title="Remove"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </Button>
             </div>
-            <Switch
-              checked={s.enabled}
-              disabled={busy === s.id}
-              onChange={(v) => void toggle(s.id, v)}
-            />
-            <Button
-              size="sm"
-              variant="ghost"
-              disabled={busy === s.id || !s.enabled}
-              onClick={() => void reconnect(s.id)}
-              title="Reconnect"
-            >
-              <RefreshCw className="h-3.5 w-3.5" />
-            </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              disabled={busy === s.id}
-              onClick={() => void remove(s.id)}
-              title="Remove"
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-            </Button>
+            {editing === s.id && (
+              // Keyed by the stored config so an external change (import, the mcp
+              // tool) reseeds the draft instead of leaving stale text on screen.
+              <RawConfigEditor
+                key={configSummary(s.config)}
+                server={s}
+                busy={busy === s.id}
+                onCancel={() => setEditing(null)}
+                onSave={(parsed) => saveRaw(s, parsed)}
+              />
+            )}
           </div>
         ))
       )}
@@ -177,31 +276,52 @@ export function McpServers({ showBackup = false }: { showBackup?: boolean } = {}
             <Input
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="name (e.g. filesystem)"
+              placeholder={
+                kind === 'json' ? 'name (optional if in JSON)' : 'name (e.g. filesystem)'
+              }
               className="sm:w-48"
               spellCheck={false}
               autoComplete="off"
             />
             <select
               value={kind}
-              onChange={(e) => setKind(e.target.value as 'local' | 'remote')}
+              onChange={(e) => {
+                setKind(e.target.value as 'local' | 'remote' | 'json')
+                setFormErr('')
+              }}
               className="h-9 sq sq-lg sq-ring rounded-lg border border-border bg-surface-2 px-2 text-sm text-text outline-none"
             >
               <option value="local">local (stdio)</option>
               <option value="remote">remote (http)</option>
+              <option value="json">raw JSON</option>
             </select>
           </div>
-          <Input
-            value={value}
-            onChange={(e) => setValue(e.target.value)}
-            placeholder={
-              kind === 'remote'
-                ? 'https://example.com/mcp'
-                : 'npx -y @modelcontextprotocol/server-filesystem /path'
-            }
-            spellCheck={false}
-            autoComplete="off"
-          />
+          {kind === 'json' ? (
+            <Textarea
+              value={json}
+              onChange={(e) => {
+                setJson(e.target.value)
+                setFormErr('')
+              }}
+              rows={jsonRows(json || JSON_PLACEHOLDER)}
+              placeholder={JSON_PLACEHOLDER}
+              className="font-mono text-xs leading-relaxed"
+              spellCheck={false}
+              autoComplete="off"
+            />
+          ) : (
+            <Input
+              value={value}
+              onChange={(e) => setValue(e.target.value)}
+              placeholder={
+                kind === 'remote'
+                  ? 'https://example.com/mcp'
+                  : 'npx -y @modelcontextprotocol/server-filesystem /path'
+              }
+              spellCheck={false}
+              autoComplete="off"
+            />
+          )}
           {formErr && <p className="text-xs text-danger">{formErr}</p>}
           <div className="flex items-center gap-2">
             <Button variant="primary" disabled={busy === '__add__'} onClick={() => void submit()}>
@@ -217,7 +337,9 @@ export function McpServers({ showBackup = false }: { showBackup?: boolean } = {}
               Cancel
             </Button>
             <span className="ml-auto text-[11px] text-text-subtle">
-              Advanced (env, headers): use <code>.roxy/mcp.json</code>
+              {kind === 'json'
+                ? 'Takes a bare config or an mcpServers / servers wrapper.'
+                : 'Advanced (env, headers, cwd): pick raw JSON.'}
             </span>
           </div>
         </div>
@@ -234,6 +356,109 @@ export function McpServers({ showBackup = false }: { showBackup?: boolean } = {}
           <ConfigBackup onImported={() => void reload()} />
         </div>
       )}
+    </div>
+  )
+}
+
+/**
+ * The raw-config escape hatch: one server's stored JSON, editable in place, with
+ * its last connection error and live tool list underneath. What it shows is the
+ * *normalized* config actually in effect (unknown keys were dropped on the way
+ * in) — which is the point: when a server misbehaves you want to see what Roxy
+ * is really launching, not what you believe you typed.
+ */
+function RawConfigEditor({
+  server,
+  busy,
+  onCancel,
+  onSave
+}: {
+  server: McpServerView
+  busy: boolean
+  onCancel: () => void
+  onSave: (parsed: ParsedMcpJson) => Promise<string | null>
+}): JSX.Element {
+  const stored = serializeServerConfig(server.config)
+  const [text, setText] = useState(stored)
+  const [err, setErr] = useState('')
+
+  const dirty = text !== stored
+  const parsed = parseMcpJson(text)
+  const renameTo =
+    parsed.ok && parsed.value.id && parsed.value.id !== server.id ? parsed.value.id : null
+
+  const save = async (): Promise<void> => {
+    if (!parsed.ok) {
+      setErr(parsed.error)
+      return
+    }
+    setErr(await onSave(parsed.value).then((e) => e ?? ''))
+  }
+
+  return (
+    <div className="mt-3 flex flex-col gap-2 border-t border-border pt-3">
+      <Textarea
+        value={text}
+        onChange={(e) => {
+          setText(e.target.value)
+          setErr('')
+        }}
+        rows={jsonRows(text)}
+        className="font-mono text-xs leading-relaxed"
+        spellCheck={false}
+        autoComplete="off"
+        aria-label={`Raw JSON config for ${server.id}`}
+        onKeyDown={(e) => {
+          // Cmd/Ctrl+Enter saves; a bare Enter has to stay a newline inside JSON.
+          if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+            e.preventDefault()
+            void save()
+          }
+        }}
+      />
+      {/* One line, in priority order: a failed save, then a parse problem (only
+          once you've typed — the stored config always parses), then a rename. */}
+      {err ? (
+        <p className="text-xs text-danger">{err}</p>
+      ) : !parsed.ok && dirty ? (
+        <p className="text-xs text-warning">{parsed.error}</p>
+      ) : renameTo ? (
+        <p className="text-xs text-text-muted">
+          Saving renames this server to <span className="font-mono text-text">{renameTo}</span>.
+        </p>
+      ) : null}
+      {server.status === 'error' && server.error && (
+        <p className="text-xs text-danger">
+          Last error: <span className="font-mono">{server.error}</span>
+        </p>
+      )}
+      {server.status === 'connected' && (
+        <p className="text-xs text-text-subtle">
+          Tools:{' '}
+          <span className="font-mono text-text-muted">
+            {server.tools.length ? server.tools.join(', ') : '(none exposed)'}
+          </span>
+        </p>
+      )}
+      <div className="flex items-center gap-2">
+        <Button size="sm" variant="primary" disabled={busy || !dirty} onClick={() => void save()}>
+          {busy ? 'Saving…' : server.enabled ? 'Save & reconnect' : 'Save'}
+        </Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          disabled={busy || !dirty}
+          onClick={() => {
+            setText(stored)
+            setErr('')
+          }}
+        >
+          Reset
+        </Button>
+        <Button size="sm" variant="ghost" disabled={busy} onClick={onCancel}>
+          Close
+        </Button>
+      </div>
     </div>
   )
 }
