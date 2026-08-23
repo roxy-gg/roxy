@@ -1,0 +1,144 @@
+name: CI
+
+# Runs on every pull request (and pushes to main) so a PR's checks — the thing
+# this workflow provides — show up as pass/fail directly on the PR, the same
+# gate you'd get in a company repo. Nothing here publishes anything; it only
+# reports status. See `.github/workflows/release.yml` for the actual release.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# Cancel a still-running run for the same PR/branch when new commits land, so
+# only the latest push burns CI minutes.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Fast, OS-independent checks: formatting + both typecheck projects + the
+  # pure-Node smoke suite (no Electron, no native modules). Runs first so a
+  # trivial mistake fails in seconds instead of waiting on the Electron matrix.
+  lint-and-typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        # --ignore-scripts: this job never loads better-sqlite3 under Electron,
+        # so there's nothing to rebuild — see the electron-tests job for why
+        # that job needs the real install-app-deps step instead.
+        run: npm ci --ignore-scripts
+
+      - name: Format check
+        run: npm run format:check
+
+      - name: Typecheck (main, preload, renderer)
+        run: npm run typecheck
+
+      - name: Shared suite (pure Node — tools, agents, prompts, providers, …)
+        run: npm run smoke:shared
+
+      - name: Store guard (regression test over renderer source)
+        run: npm run smoke:store
+
+  # The Electron-runtime suites: real SQLite migrations, the harness tool loop,
+  # git/worktree operations, and (Linux only) the cookie jar + browser tools,
+  # which need a real Chromium and so a virtual display.
+  electron-tests:
+    strategy:
+      fail-fast: false
+      matrix:
+        # windows-2022, not windows-latest: same reason as release.yml — this
+        # job's install-app-deps rebuilds better-sqlite3 from source when no
+        # prebuild matches Electron's ABI, and node-gyp can't parse the VS on
+        # the newer windows-latest image.
+        os: [ubuntu-latest, windows-2022, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Configure git identity for the worktree/git suites
+        # smoke.ts sets user.name/email on the repos IT creates, but a couple
+        # of git plumbing calls (e.g. `git stash`) still consult the global
+        # config on some platforms; a fresh CI box has none.
+        run: |
+          git config --global user.email "ci@roxy.gg"
+          git config --global user.name "Roxy CI"
+
+      - name: Install dependencies (with native rebuild for Electron's ABI)
+        # better-sqlite3's postinstall fetches/builds a prebuilt binary for
+        # plain Node's ABI. The app loads it inside Electron, which has a
+        # DIFFERENT ABI, so it must be rebuilt against Electron's — the same
+        # step electron-builder runs when packaging (npmRebuild: true) and the
+        # same one contributors run via `npm run worktree:setup`.
+        #
+        # Not literally `npm run worktree:setup`: that script's plain `npm ci`
+        # has no `--ignore-scripts`, so on a fresh CI box (no local toolchain
+        # cache) it can hit the same node-gyp/Visual Studio detection failure
+        # release.yml already works around. Skip the native postinstall build
+        # entirely and let `install-app-deps` do the one rebuild that matters.
+        run: |
+          npm ci --ignore-scripts
+          npx electron-builder install-app-deps
+
+      - name: Electron smoke suite (Linux, via virtual display)
+        if: runner.os == 'Linux'
+        # Ubuntu 23.10+ restricts unprivileged user namespaces by default,
+        # which breaks Chromium's sandbox init for a plain (non-SUID-root)
+        # Electron binary — unrelated to the missing display xvfb-run solves.
+        # CI-only: never shipped to users, who get electron-builder's properly
+        # permissioned chrome-sandbox.
+        env:
+          ELECTRON_DISABLE_SANDBOX: '1'
+        run: xvfb-run --auto-servernum npm run smoke:app
+
+      - name: Electron smoke suite
+        if: runner.os != 'Linux'
+        run: npm run smoke:app
+
+      - name: Cookie editor suite (real Chromium cookie jar)
+        if: runner.os == 'Linux'
+        env:
+          ELECTRON_DISABLE_SANDBOX: '1'
+        run: xvfb-run --auto-servernum npm run smoke:cookies
+
+      - name: Cookie editor suite
+        if: runner.os != 'Linux'
+        run: npm run smoke:cookies
+
+  # `npm run build` (typecheck + electron-vite build) on all three OSes, as a
+  # cheap guard that packaging-adjacent config (asset imports, ?raw inlining,
+  # per-platform icon paths) hasn't silently broken on a platform the author
+  # didn't build on themselves. Does not run electron-builder — that's what
+  # release.yml's build job covers, only on an actual version bump.
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Build renderer + main
+        run: npm run build
