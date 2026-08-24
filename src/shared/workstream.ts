@@ -109,12 +109,25 @@ export function workstreamStripView(input: {
   // strip would be permanently hidden for exactly the workspaces multi-repo
   // support was built for.
   //
-  // Order matters. An ARRIVED `isRepo: false` still wins for a session that has
-  // a worktree - that means the checkout was deleted underneath us and the
-  // strip must go quiet - so this only rescues a session that has NO worktree
-  // yet, which is the only state a multi-repo project can be stuck in.
+  // Order matters, and the multi-repo case is why it is subtle.
+  //
+  // For a SINGLE-repo session an arrived `isRepo: false` is conclusive: the
+  // checkout was deleted underneath us, so the strip goes quiet.
+  //
+  // For a MULTI-repo session it proves nothing. A composite worktree is a plain
+  // directory holding one real worktree per repo, so `git status` on the
+  // composite root reports `isRepo: false` for a perfectly healthy workstream -
+  // it is not a repository and never was. Treating that as "the worktree
+  // vanished" hides the strip for every composite session the moment a plain
+  // status lands on its key, which is exactly what happened in practice.
+  //
+  // So `projectHasRepos` outranks a false status for a multi-repo project,
+  // whether or not the worktree exists. The vanished-composite case is still
+  // caught, just by the honest signal rather than this one: `repoStatus` from
+  // `statusMulti` reports every child as `isRepo: false`, which drives
+  // `repoCount === 0` and blanks the strip's contents.
   const proven = status
-    ? status.isRepo || (!owner.worktreePath && !!input.projectHasRepos)
+    ? status.isRepo || !!input.projectHasRepos
     : !!owner.worktreePath || !!input.projectHasRepos
   if (!proven) return null
 

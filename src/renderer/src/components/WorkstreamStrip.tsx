@@ -99,9 +99,15 @@ export function WorkstreamStrip(): JSX.Element | null {
     findChat: (id) => chats.find((c) => c.id === id) ?? null,
     gitAvailable,
     status: statusKey ? gitStatus[statusKey] : undefined,
-    // A folder OF repos reports `isRepo:false` forever - it isn't one. Without
-    // this the strip stays hidden for every multi-repo project.
-    projectHasRepos: workspace ? projectRepos[workspace] : undefined
+    // A folder OF repos reports `isRepo:false` forever - it isn't one, and
+    // neither is the composite worktree cut from it. Without this the strip
+    // stays hidden for every multi-repo project.
+    //
+    // The session's own links are the authoritative answer and need no probe,
+    // so they win when present; `projectRepos` is the fallback for a session
+    // that has not been given a workstream yet, which is the only state where
+    // there are no links to read.
+    projectHasRepos: owner?.repos?.length ? true : workspace ? projectRepos[workspace] : undefined
   })
 
   // Probe the project's shape once. Runs before the early return so a

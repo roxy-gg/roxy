@@ -3242,17 +3242,60 @@ async function main(): Promise<void> {
           projectHasRepos: undefined
         }) !== null
       )
-      // But a DELETED composite still goes quiet: the session has a worktree and
-      // git says it isn't a repo any more, which outranks the project's shape.
+      // THE case this exists for, and the one that shipped broken: a composite
+      // worktree that is working perfectly. It is a plain directory holding one
+      // real worktree per repo, so `git status` on its root says `isRepo:false`
+      // - truthfully, because it is not a repository. Reading that as "the
+      // worktree vanished" hid the strip for every healthy multi-repo session
+      // the moment a plain status landed on its key.
       check(
-        'strip: a vanished worktree still hides, even in a multi-repo project',
+        'strip: a LIVE composite survives its root reporting isRepo:false',
+        workstreamStripView({
+          chat: mk({ worktreePath: '/wt/mila', branch: 'roxy/x' }),
+          findChat: () => null,
+          gitAvailable: true,
+          status: NOT_A_REPO,
+          projectHasRepos: true
+        }) !== null
+      )
+      // A single-repo session keeps the old, conclusive reading: it has a
+      // worktree, git says that worktree is not a repo, so it is gone.
+      check(
+        'strip: a vanished SINGLE-repo worktree still hides',
         workstreamStripView({
           chat: mk({ worktreePath: '/wt/gone', branch: 'roxy/gone' }),
           findChat: () => null,
           gitAvailable: true,
           status: NOT_A_REPO,
-          projectHasRepos: true
+          projectHasRepos: false
         }) === null
+      )
+      // A vanished COMPOSITE is caught by the honest signal instead: every
+      // child reports isRepo:false, so the aggregate repoCount is 0.
+      check(
+        'strip: a vanished composite is detected by repoCount, not the root',
+        aggregateRepoStatus([
+          {
+            name: 'backend',
+            isRepo: false,
+            branch: null,
+            dirty: false,
+            changed: 0,
+            ahead: 0,
+            behind: 0,
+            hasUpstream: false
+          },
+          {
+            name: 'frontend',
+            isRepo: false,
+            branch: null,
+            dirty: false,
+            changed: 0,
+            ahead: 0,
+            behind: 0,
+            hasUpstream: false
+          }
+        ]).repoCount === 0
       )
       check(
         'strip: no git binary still hides everything',
