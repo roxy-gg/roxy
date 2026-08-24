@@ -115,6 +115,29 @@
   animation: modal-panel-in 200ms var(--ease-out-quart) both;
 }
 
+/* The sidebar's action rail.
+
+   Every row in the sidebar ends in a square icon button - "+" on a project
+   header, the trash / stop slot on a session, a loop, a subagent. Those rows
+   have DIFFERENT horizontal padding and DIFFERENT icon sizes, so padding them
+   all by the same amount does not line the icons up: what the eye tracks is
+   the icon's CENTRE, which sits at padding + width / 2.
+
+   So state the rail instead of the padding. This sets the row's right padding
+   to whatever puts the centre of ITS icon on the shared rail, given that
+   icon's size. Rows declare their slot width in --action-slot (default 1.5rem)
+   and the arithmetic keeps them aligned, including if a slot is ever resized.
+
+   --action-rail is measured from the inner edge of the sidebar's own px-3 padding. */
+.action-rail {
+  --action-rail: 1.375rem; /* 22px: centre of a 1.5rem slot sitting flush at px-2.5 */
+  --action-slot: 1.5rem;
+  padding-right: calc(var(--action-rail) - var(--action-slot) / 2);
+}
+.action-rail-sm {
+  --action-slot: 1.25rem;
+}
+
 /* Instant, tactile press feedback — the UI should feel like it heard the click.
    Self-contained: it owns the transition for both the color hover states and the
    press squish (one element resolves to one `transition-property`, so we declare

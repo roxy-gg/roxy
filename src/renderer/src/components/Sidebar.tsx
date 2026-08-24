@@ -8,7 +8,6 @@ import {
 } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  ChevronRight,
   FolderOpen,
   GitBranch,
   GitFork,
@@ -19,12 +18,12 @@ import {
   PanelLeftOpen,
   Plug,
   Plus,
-  Repeat,
   Settings as SettingsIcon,
   Square,
   SquarePen,
   Trash2
 } from 'lucide-react'
+import { MorphIcon } from 'morphicons/react'
 import type { Chat, Loop } from '@shared/types'
 import type { LifecycleView } from '@shared/forge'
 import { isPullRequestPhase } from '@shared/forge'
@@ -36,7 +35,7 @@ import { api } from '../lib/api'
 import { cn } from '../lib/cn'
 import { ContextMenuRow, ContextMenuSurface, CONTEXT_MENU_PAD, CONTEXT_ROW_H } from './ContextMenu'
 import { TONE_BG, TONE_TEXT_STATIC } from '../lib/lifecycle'
-import { HeartbeatDot, NewLoopDialog } from './LoopsSection'
+import { HeartbeatDot } from './LoopsSection'
 import { RemoteWorkspaceDialog } from './RemoteWorkspaceDialog'
 import { BrailleSpinner } from './ThinkingIndicator'
 import { UpdateCard } from './UpdateCard'
@@ -88,6 +87,56 @@ function sessionRowTitle(chat: Chat, dirty: boolean, pull: LifecycleView | undef
   return bits.join(' - ')
 }
 
+/** Lucide's `folder` and `folder-open`, as data rather than components.
+ *
+ * morphicons consumes icon GEOMETRY, so these are the raw `d` strings from
+ * lucide-react's own icon nodes - kept here verbatim so the morphing folder
+ * and every static lucide icon in the app stay visually identical. */
+const FOLDER_CLOSED =
+  'M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z'
+const FOLDER_OPEN =
+  'm6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2'
+
+/**
+ * The project row's folder, which opens and closes in place of a chevron.
+ *
+ * The shape genuinely morphs: morphicons resamples both icons, solves the
+ * optimal similarity between them and springs along it, so the closed folder
+ * unfolds into the open one rather than cross-fading. Two reasons it is worth
+ * a dependency over the hand-written CSS `d` transition this replaces:
+ *
+ * 1. CSS can only interpolate `d` when both paths share an identical command
+ *    sequence, which lucide's two folders do NOT - matching them by hand meant
+ *    redrawing one icon to fit the other, and the result barely moved.
+ * 2. A CSS transition is silently zeroed for anyone whose OS asks for reduced
+ *    motion - which on Windows includes everyone who turned off window
+ *    animations. That is why the morph first shipped looking like a plain
+ *    swap. See `reducedMotion` below.
+ */
+function FolderMorph({ open, className }: { open: boolean; className?: string }): JSX.Element {
+  return (
+    <MorphIcon
+      icon={open ? FOLDER_OPEN : FOLDER_CLOSED}
+      // Matches every static lucide icon around it.
+      strokeWidth={2}
+      // 2x the speed of the "smooth" preset (k 170), still critically damped so
+      // a 14px folder does not wobble. A spring's frequency goes as sqrt(k), so
+      // doubling speed is k*4, and c = 2*sqrt(k) keeps zeta = 1 (the same
+      // relation every built-in preset uses). Settles in ~225ms, against the
+      // preset's ~450ms - which was sluggish for an icon this small.
+      spring={{ stiffness: 680, damping: 52 }}
+      // Play even when the OS asks for reduced motion. That setting exists to
+      // stop large-area movement that can cause nausea; this is a 14px icon
+      // redrawing itself in place, with no travel across the screen. Honouring
+      // it here does not help anyone - it just silently deletes the animation
+      // for every Windows user who turned off window animations, which is a
+      // common setting and is exactly how this shipped broken the first time.
+      reducedMotion="never"
+      className={className}
+    />
+  )
+}
+
 export function Sidebar(): JSX.Element {
   const navigate = useNavigate()
   const chats = useRoxyStore((s) => s.chats)
@@ -117,7 +166,6 @@ export function Sidebar(): JSX.Element {
     return Number.isFinite(v) && v >= MIN_WIDTH && v <= MAX_WIDTH ? v : DEFAULT_WIDTH
   })
   const [railed, setRailed] = useState<boolean>(() => localStorage.getItem(COLLAPSED_KEY) === '1')
-  const [loopDialogFor, setLoopDialogFor] = useState<{ path: string; name: string } | null>(null)
   // The open right-click menu: which session, and where the cursor was.
   const [contextMenu, setContextMenu] = useState<{ chat: Chat; x: number; y: number } | null>(null)
   const [remoteOpen, setRemoteOpen] = useState(false)
@@ -207,17 +255,35 @@ export function Sidebar(): JSX.Element {
     setContextMenu({ chat, x: e.clientX, y: e.clientY })
   }
 
+  // A row is busy while its own turn streams (a session) or its delegate is
+  // still running (a subagent) - exactly when the row swaps its trash for a
+  // stop control. The menu has to agree: an action the row withholds but the
+  // right-click still offers is not a guarantee, it is a second way in.
+  const isBusy = (chat: Chat): boolean =>
+    chat.kind === 'sub' ? !!runningSubagents[chat.id] : !!sendingChats[chat.id]
+
   // The rows a right-click offers, in escalating order of consequence.
-  const contextMenuItems = (chat: Chat): MenuItem[] => [
-    { label: 'Fork session history', icon: GitFork, onSelect: () => void forkChat(chat.id) },
-    { label: 'Rename', icon: SquarePen, onSelect: () => beginRename(chat) },
-    {
-      label: 'Delete session',
-      icon: Trash2,
-      danger: true,
-      onSelect: () => void deleteChat(chat.id)
-    }
-  ]
+  const contextMenuItems = (chat: Chat): MenuItem[] => {
+    const busy = isBusy(chat)
+    return [
+      { label: 'Fork session history', icon: GitFork, onSelect: () => void forkChat(chat.id) },
+      { label: 'Rename', icon: SquarePen, onSelect: () => beginRename(chat) },
+      {
+        // The label carries the reason. A greyed row with no explanation reads
+        // as a bug; this one names the single step that re-enables it, and the
+        // control to do it is already on the row you right-clicked.
+        label: busy
+          ? chat.kind === 'sub'
+            ? 'Delete — cancel it first'
+            : 'Delete — stop the turn first'
+          : 'Delete session',
+        icon: Trash2,
+        danger: true,
+        disabled: busy,
+        onSelect: () => void deleteChat(chat.id)
+      }
+    ]
+  }
 
   const commitRename = (): void => {
     const id = editingId
@@ -568,7 +634,7 @@ export function Sidebar(): JSX.Element {
                   >
                     <div
                       className={cn(
-                        'group/project flex items-center gap-1 px-1',
+                        'group/project action-rail action-rail-sm flex items-center gap-1 pl-1',
                         projectDrag && 'cursor-grabbing'
                       )}
                       draggable={canDragProject}
@@ -586,33 +652,22 @@ export function Sidebar(): JSX.Element {
                     >
                       <button
                         onClick={() => toggleProject(project.path)}
+                        aria-expanded={!isCollapsed}
                         className="flex min-w-0 flex-1 items-center gap-1.5 text-left text-xs font-medium text-text-muted transition-colors hover:text-text"
                       >
-                        <ChevronRight
-                          className={cn(
-                            'h-3 w-3 shrink-0 transition-transform duration-200 ease-out-quart',
-                            !isCollapsed && 'rotate-90'
-                          )}
+                        {/* The chevron that used to sit here is gone. It and the
+                            folder were two glyphs reporting one fact, and a folder
+                            already HAS an open and a closed state - so the icon that
+                            names the thing can report it, and the row gets the
+                            chevron's width back. */}
+                        <FolderMorph
+                          open={!isCollapsed}
+                          className="h-3.5 w-3.5 shrink-0 opacity-70 transition-opacity group-hover/project:opacity-100"
                         />
-                        <FolderOpen className="h-3.5 w-3.5 shrink-0 opacity-70" />
                         <span className="truncate" title={project.path}>
                           {project.name}
                         </span>
                       </button>
-                      {/* Loops are the rarer action, so they hide until the
-                          row is hovered -- that leaves "+" to mean exactly one
-                          thing: new session. */}
-                      {project.path !== '(no folder)' && (
-                        <button
-                          onClick={() =>
-                            setLoopDialogFor({ path: project.path, name: project.name })
-                          }
-                          title="New loop in this project"
-                          className="press-scale flex h-5 w-5 shrink-0 items-center justify-center sq sq-base rounded text-text-subtle opacity-0 transition-[opacity,color,background-color] hover:bg-white/5 hover:text-text focus-visible:opacity-100 group-hover/project:opacity-100"
-                        >
-                          <Repeat className="h-3.5 w-3.5" />
-                        </button>
-                      )}
                       <button
                         onClick={() => void newSessionInProject(project.path)}
                         title="New session in this project"
@@ -629,22 +684,29 @@ export function Sidebar(): JSX.Element {
                               <li key={loop.id}>
                                 <div
                                   className={cn(
-                                    'group flex items-center gap-2 sq sq-lg rounded-lg px-2.5 py-1.5 text-sm transition-colors',
+                                    'group action-rail flex items-center gap-2 sq sq-lg rounded-lg py-1.5 pl-2.5 text-sm transition-colors',
                                     loop.chatId === activeChatId
                                       ? 'bg-elevated text-text'
                                       : 'text-text-muted hover:bg-white/5 hover:text-text'
                                   )}
                                 >
-                                  <HeartbeatDot enabled={loop.enabled} />
                                   <button
                                     onClick={() => selectChat(loop.chatId)}
                                     title={loop.name}
                                     className="min-w-0 flex-1 text-left"
                                   >
                                     <span className="block truncate">{loop.name}</span>
-                                    <span className="block text-[11px] text-text-subtle">
-                                      every {formatInterval(loop.intervalMinutes)}
-                                      {loop.enabled ? '' : ' · paused'}
+                                    {/* The heartbeat sits in the subtitle, not in a left
+                                        gutter: sessions no longer have that column, and a
+                                        loop title indented past every session title would
+                                        read as nesting that isn't there. It also lands
+                                        against the cadence it actually qualifies. */}
+                                    <span className="flex items-center gap-1.5 text-[11px] text-text-subtle">
+                                      <HeartbeatDot enabled={loop.enabled} />
+                                      <span className="truncate">
+                                        every {formatInterval(loop.intervalMinutes)}
+                                        {loop.enabled ? '' : ' · paused'}
+                                      </span>
                                     </span>
                                   </button>
                                   <button
@@ -718,7 +780,7 @@ export function Sidebar(): JSX.Element {
                                 <div
                                   onContextMenu={(e) => openContextMenu(e, chat)}
                                   className={cn(
-                                    'group flex items-center gap-2 sq sq-lg rounded-lg px-2.5 py-1.5 text-sm transition-colors',
+                                    'group action-rail flex items-center gap-2 sq sq-lg rounded-lg py-1.5 pl-2.5 text-sm transition-colors',
                                     dragId && 'cursor-grabbing',
                                     // Keep the right-clicked row visibly selected
                                     // for as long as its menu is open, so a menu
@@ -732,32 +794,6 @@ export function Sidebar(): JSX.Element {
                                       : 'text-text-muted hover:bg-white/5 hover:text-text'
                                   )}
                                 >
-                                  {sending ? (
-                                    // Click the spinner to stop THAT session.
-                                    // `store.stop()` only ever knew the active
-                                    // chat, so a session streaming in the
-                                    // background could not be stopped at all
-                                    // without switching to it first.
-                                    <button
-                                      onClick={() => stop(chat.id)}
-                                      title="Stop this session"
-                                      className="group/stop flex h-4 w-4 shrink-0 items-center justify-center sq sq-base rounded text-accent transition-colors hover:bg-white/10"
-                                    >
-                                      <BrailleSpinner className="text-sm group-hover/stop:hidden" />
-                                      <Square className="hidden h-2 w-2 fill-current group-hover/stop:block" />
-                                    </button>
-                                  ) : (
-                                    <span
-                                      className={cn(
-                                        'h-1.5 w-1.5 shrink-0 rounded-full transition-colors',
-                                        // A BACKGROUND delegate runs while its parent sits idle,
-                                        // so without this the row would look asleep now that the
-                                        // count pill is hover-only. Tinting the dot the row
-                                        // already has keeps that signal at zero layout cost.
-                                        liveSubs > 0 ? 'bg-accent' : 'bg-text-subtle/50'
-                                      )}
-                                    />
-                                  )}
                                   {editingId === chat.id ? (
                                     <input
                                       autoFocus
@@ -847,13 +883,15 @@ export function Sidebar(): JSX.Element {
                                         liveSubs > 0
                                           ? 'bg-accent/10 text-accent'
                                           : 'bg-surface-2 text-text-subtle hover:text-text',
-                                        // This pill is a disclosure control, not a status light,
-                                        // so it earns space only while the row is hovered or the
-                                        // list it toggles is actually open. Live subagents used to
-                                        // pin it too, which parked a badge on the row for the whole
-                                        // run - the dot above carries that signal instead.
-                                        // Fading opacity (not unmounting) keeps the row stable.
-                                        subsOpen
+                                        // Normally a disclosure control, so it earns space only
+                                        // on hover or while the list it toggles is open. Live
+                                        // delegates are the exception: a BACKGROUND subagent runs
+                                        // while its parent sits idle, and the slot on the right
+                                        // speaks for the parent's own turn, not theirs. A tinted
+                                        // status dot used to carry that - now that the dot is
+                                        // gone the pill pins itself instead, and it says how many
+                                        // rather than merely that something is up.
+                                        subsOpen || liveSubs > 0
                                           ? 'opacity-100'
                                           : 'opacity-0 focus-visible:opacity-100 group-hover:opacity-100'
                                       )}
@@ -861,13 +899,38 @@ export function Sidebar(): JSX.Element {
                                       {subs.length}
                                     </button>
                                   )}
-                                  <button
-                                    onClick={() => deleteChat(chat.id)}
-                                    title="Delete session"
-                                    className="flex h-6 w-6 shrink-0 items-center justify-center sq sq-md rounded-md text-text-subtle opacity-0 transition-[opacity,color,background-color] hover:bg-white/5 hover:text-danger group-hover:opacity-100"
-                                  >
-                                    <Trash2 className="h-3.5 w-3.5" />
-                                  </button>
+                                  {/* The row's one action slot - and WHICH action it holds is
+                                      the guard. While the turn streams the slot is Stop, so the
+                                      trash is not disabled, it is simply not there: "you can't
+                                      delete a session mid-run" needs no error message to say it,
+                                      and there is no dead grey button to poke at.
+
+                                      This is also where the spinner went. It used to sit on the
+                                      left as a status dot, which billed every row a permanent
+                                      column to report "idle" nearly all of the time. Both
+                                      controls are h-6 w-6 and both always occupy the slot (the
+                                      trash only fades), so the swap costs no reflow. */}
+                                  {sending ? (
+                                    // Stop THAT session. `store.stop()` only ever knew the
+                                    // active chat, so a session streaming in the background
+                                    // could not be stopped without switching to it first.
+                                    <button
+                                      onClick={() => stop(chat.id)}
+                                      title="Stop this session"
+                                      className="group/stop flex h-6 w-6 shrink-0 items-center justify-center sq sq-md rounded-md text-accent transition-colors hover:bg-white/10"
+                                    >
+                                      <BrailleSpinner className="text-sm group-hover/stop:hidden" />
+                                      <Square className="hidden h-2.5 w-2.5 fill-current group-hover/stop:block" />
+                                    </button>
+                                  ) : (
+                                    <button
+                                      onClick={() => deleteChat(chat.id)}
+                                      title="Delete session"
+                                      className="flex h-6 w-6 shrink-0 items-center justify-center sq sq-md rounded-md text-text-subtle opacity-0 transition-[opacity,color,background-color] hover:bg-white/5 hover:text-danger group-hover:opacity-100"
+                                    >
+                                      <Trash2 className="h-3.5 w-3.5" />
+                                    </button>
+                                  )}
                                 </div>
                                 {subsOpen && subs.length > 0 && (
                                   <ul className="mt-0.5 ml-3 flex flex-col gap-0.5 border-l border-border pl-2">
@@ -876,30 +939,17 @@ export function Sidebar(): JSX.Element {
                                         <div
                                           onContextMenu={(e) => openContextMenu(e, sub)}
                                           className={cn(
-                                            'group/sub flex items-center gap-2 sq sq-lg rounded-lg px-2 py-1 text-xs transition-colors',
+                                            'group/sub action-rail action-rail-sm flex items-center gap-2 sq sq-lg rounded-lg py-1 pl-2 text-xs transition-colors',
                                             sub.id === activeChatId ||
                                               contextMenu?.chat.id === sub.id
                                               ? 'bg-elevated text-text'
                                               : 'text-text-muted hover:bg-white/5 hover:text-text'
                                           )}
                                         >
-                                          {runningSubagents[sub.id] ? (
-                                            // Skip one delegate from the sidebar
-                                            // — the fastest path for the "a
-                                            // commit hook spawned a README
-                                            // subagent I don't want" case, with
-                                            // no need to open anything.
-                                            <button
-                                              onClick={() => void cancelSubagent(sub.id)}
-                                              title="Cancel this subagent"
-                                              className="group/cancel flex h-4 w-4 shrink-0 items-center justify-center sq sq-base rounded text-accent transition-colors hover:bg-white/10"
-                                            >
-                                              <BrailleSpinner className="text-xs group-hover/cancel:hidden" />
-                                              <Square className="hidden h-2 w-2 fill-current group-hover/cancel:block" />
-                                            </button>
-                                          ) : (
-                                            <Hammer className="h-3 w-3 shrink-0 opacity-70" />
-                                          )}
+                                          {/* Identity, not status: the row says what it IS at a
+                                              glance and keeps saying it while the delegate
+                                              works. Cancel moved to the action slot below. */}
+                                          <Hammer className="h-3 w-3 shrink-0 opacity-70" />
                                           {editingId === sub.id ? (
                                             <input
                                               autoFocus
@@ -921,13 +971,28 @@ export function Sidebar(): JSX.Element {
                                               {sub.title}
                                             </button>
                                           )}
-                                          <button
-                                            onClick={() => deleteChat(sub.id)}
-                                            title="Delete subagent session"
-                                            className="flex h-5 w-5 shrink-0 items-center justify-center sq sq-base rounded text-text-subtle opacity-0 transition-[opacity,color,background-color] hover:bg-white/5 hover:text-danger group-hover/sub:opacity-100"
-                                          >
-                                            <Trash2 className="h-3 w-3" />
-                                          </button>
+                                          {/* Same slot, same rule as the parent row above. */}
+                                          {runningSubagents[sub.id] ? (
+                                            // Skip one delegate from the sidebar — the fastest
+                                            // path for the "a commit hook spawned a README
+                                            // subagent I don't want" case, with nothing to open.
+                                            <button
+                                              onClick={() => void cancelSubagent(sub.id)}
+                                              title="Cancel this subagent"
+                                              className="group/cancel flex h-5 w-5 shrink-0 items-center justify-center sq sq-base rounded text-accent transition-colors hover:bg-white/10"
+                                            >
+                                              <BrailleSpinner className="text-xs group-hover/cancel:hidden" />
+                                              <Square className="hidden h-2 w-2 fill-current group-hover/cancel:block" />
+                                            </button>
+                                          ) : (
+                                            <button
+                                              onClick={() => deleteChat(sub.id)}
+                                              title="Delete subagent session"
+                                              className="flex h-5 w-5 shrink-0 items-center justify-center sq sq-base rounded text-text-subtle opacity-0 transition-[opacity,color,background-color] hover:bg-white/5 hover:text-danger group-hover/sub:opacity-100"
+                                            >
+                                              <Trash2 className="h-3 w-3" />
+                                            </button>
+                                          )}
                                         </div>
                                       </li>
                                     ))}
@@ -956,14 +1021,6 @@ export function Sidebar(): JSX.Element {
         />
       )}
 
-      {loopDialogFor && (
-        <NewLoopDialog
-          workspacePath={loopDialogFor.path}
-          projectName={loopDialogFor.name}
-          onClose={() => setLoopDialogFor(null)}
-        />
-      )}
-
       {remoteOpen && <RemoteWorkspaceDialog onClose={() => setRemoteOpen(false)} />}
 
       <CustomizeNav onOpenRemote={() => setRemoteOpen(true)} remoteDot={remoteDot} />
@@ -987,6 +1044,8 @@ interface MenuItem {
   icon: typeof Trash2
   onSelect: () => void
   danger?: boolean
+  /** Offered but not available right now. The label should say why. */
+  disabled?: boolean
 }
 
 /**
@@ -1023,6 +1082,7 @@ function SessionContextMenu({
           label={item.label}
           icon={item.icon}
           danger={item.danger}
+          disabled={item.disabled}
           onSelect={() => {
             onClose()
             item.onSelect()
