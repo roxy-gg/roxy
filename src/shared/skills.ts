@@ -320,13 +320,20 @@ function unsupported(input: string, reason: string): SkillSource {
  */
 export function resolveSkillSource(input: string): SkillSource {
   const raw = (input ?? '').trim()
-  if (!raw) return unsupported(input, 'Provide a GitHub repo (owner/repo or a URL) or a direct SKILL.md URL.')
+  if (!raw)
+    return unsupported(
+      input,
+      'Provide a GitHub repo (owner/repo or a URL) or a direct SKILL.md URL.'
+    )
 
   if (/^https?:\/\//i.test(raw)) return resolveUrlSource(raw)
 
   // Bare local paths are not fetched (no git shell-out); steer to a supported form.
   if (/^[./~]/.test(raw) || /^[A-Za-z]:[\\/]/.test(raw)) {
-    return unsupported(raw, 'Local paths are not supported here — point to a GitHub repo (owner/repo) or a SKILL.md URL.')
+    return unsupported(
+      raw,
+      'Local paths are not supported here — point to a GitHub repo (owner/repo) or a SKILL.md URL.'
+    )
   }
   // `git@github.com:owner/repo.git` and other SCP-like git URLs.
   if (/^[\w.-]+@[\w.-]+:/.test(raw)) {
@@ -334,7 +341,10 @@ export function resolveSkillSource(input: string): SkillSource {
     if (m && safeSegment(m[1]) && safeSegment(trimRepo(m[2]))) {
       return { kind: 'github-repo', owner: m[1], repo: trimRepo(m[2]) }
     }
-    return unsupported(raw, 'Only GitHub is supported for git URLs — use github.com/owner/repo or the owner/repo shorthand.')
+    return unsupported(
+      raw,
+      'Only GitHub is supported for git URLs — use github.com/owner/repo or the owner/repo shorthand.'
+    )
   }
 
   // Shorthand: owner/repo (+ optional path within the default branch).
@@ -351,7 +361,10 @@ export function resolveSkillSource(input: string): SkillSource {
       : { kind: 'github-dir', owner, repo, path }
   }
 
-  return unsupported(raw, 'Unrecognized source. Use owner/repo, a github.com URL, or a direct https URL to a SKILL.md.')
+  return unsupported(
+    raw,
+    'Unrecognized source. Use owner/repo, a github.com URL, or a direct https URL to a SKILL.md.'
+  )
 }
 
 function resolveUrlSource(raw: string): SkillSource {
@@ -375,7 +388,8 @@ function resolveUrlSource(raw: string): SkillSource {
     if (marker === 'tree' || marker === 'blob') {
       const ref = segs[3]
       const pathSegs = segs.slice(4)
-      if (!ref || !safeSegment(ref)) return unsupported(raw, 'Could not read the git ref from the GitHub URL.')
+      if (!ref || !safeSegment(ref))
+        return unsupported(raw, 'Could not read the git ref from the GitHub URL.')
       if (!pathSegs.every(safeSegment)) return unsupported(raw, 'Invalid path in the GitHub URL.')
       const path = pathSegs.join('/')
       if (!path) return { kind: 'github-repo', owner, repo, ref }
@@ -399,9 +413,15 @@ function resolveUrlSource(raw: string): SkillSource {
     return unsupported(raw, 'A raw GitHub URL must point directly at a SKILL.md file.')
   }
   if (host === 'gitlab.com' || host.endsWith('.gitlab.com')) {
-    return unsupported(raw, 'GitLab is not supported yet — use a GitHub repo or a direct SKILL.md URL.')
+    return unsupported(
+      raw,
+      'GitLab is not supported yet — use a GitHub repo or a direct SKILL.md URL.'
+    )
   }
-  return unsupported(raw, `Unsupported source host "${host}". Use GitHub or a direct https URL to a SKILL.md.`)
+  return unsupported(
+    raw,
+    `Unsupported source host "${host}". Use GitHub or a direct https URL to a SKILL.md.`
+  )
 }
 
 /**

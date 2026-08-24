@@ -490,7 +490,9 @@ export function repairSchema(db: Database): void {
   `)
   db.exec('UPDATE providers SET sort_order = -created_at WHERE sort_order = 0')
   // v20's pinned-models table.
-  db.exec('CREATE TABLE IF NOT EXISTS pinned_models (provider_id TEXT NOT NULL, model TEXT NOT NULL, pinned_at INTEGER NOT NULL, PRIMARY KEY (provider_id, model))')
+  db.exec(
+    'CREATE TABLE IF NOT EXISTS pinned_models (provider_id TEXT NOT NULL, model TEXT NOT NULL, pinned_at INTEGER NOT NULL, PRIMARY KEY (provider_id, model))'
+  )
   // `projects` is derived state — one row per workspace folder its sessions use
   // — so a restored table can be rebuilt from the chats themselves, exactly as
   // v13 did on first upgrade. Only when empty, so a hand-ordered project list is

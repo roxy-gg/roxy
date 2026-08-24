@@ -302,7 +302,8 @@ export function renderDiagnosticsBlock(
   })
   if (wanted.length === 0) return ''
   const sorted = [...wanted].sort(
-    (a, b) => a.range.start.line - b.range.start.line || a.range.start.character - b.range.start.character
+    (a, b) =>
+      a.range.start.line - b.range.start.line || a.range.start.character - b.range.start.character
   )
   const limited = sorted.slice(0, max)
   const more = sorted.length - limited.length

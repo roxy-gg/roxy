@@ -84,7 +84,10 @@ writeFileSync(join(root, 'resources', 'icon.png'), await resize(full, 512))
 writeFileSync(join(root, 'resources', 'icon-mac.png'), await resize(mac, 512))
 writeFileSync(join(root, 'src', 'renderer', 'src', 'assets', 'roxy.png'), await resize(full, 512))
 
-writeFileSync(join(root, 'build', 'icon.ico'), png2icons.createICO(full, png2icons.BICUBIC, 0, true))
+writeFileSync(
+  join(root, 'build', 'icon.ico'),
+  png2icons.createICO(full, png2icons.BICUBIC, 0, true)
+)
 writeFileSync(join(root, 'build', 'icon.icns'), png2icons.createICNS(mac, png2icons.BICUBIC, 0))
 
 for (const s of [16, 32, 48, 64, 128, 256, 512, 1024]) {

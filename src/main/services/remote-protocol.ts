@@ -125,7 +125,14 @@ export interface HostErrorFrame {
 }
 
 /** Frames we send toward the guests. */
-export type HostFrame = SnapshotFrame | DeltaFrame | TurnFrame | MetaFrame | QueueFrame | SessionsFrame | HostErrorFrame
+export type HostFrame =
+  | SnapshotFrame
+  | DeltaFrame
+  | TurnFrame
+  | MetaFrame
+  | QueueFrame
+  | SessionsFrame
+  | HostErrorFrame
 
 // --- Relay (roxy.gg) → host (control) -------------------------------------
 

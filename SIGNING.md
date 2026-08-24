@@ -96,13 +96,13 @@ Windows job).
 
 **Secrets used by the workflow:**
 
-| Secret | What it is |
-| --- | --- |
-| `MAC_CSC_LINK` | base64 of your `.p12` (Developer ID cert + private key) |
-| `MAC_CSC_KEY_PASSWORD` | the password you set when exporting the `.p12` |
-| `APPLE_ID` | your Apple Developer account email |
-| `APPLE_APP_SPECIFIC_PASSWORD` | app-specific password from appleid.apple.com |
-| `APPLE_TEAM_ID` | `MA46PKHWXH` |
+| Secret                        | What it is                                              |
+| ----------------------------- | ------------------------------------------------------- |
+| `MAC_CSC_LINK`                | base64 of your `.p12` (Developer ID cert + private key) |
+| `MAC_CSC_KEY_PASSWORD`        | the password you set when exporting the `.p12`          |
+| `APPLE_ID`                    | your Apple Developer account email                      |
+| `APPLE_APP_SPECIFIC_PASSWORD` | app-specific password from appleid.apple.com            |
+| `APPLE_TEAM_ID`               | `MA46PKHWXH`                                            |
 
 **Set them up (one time):**
 
@@ -114,7 +114,7 @@ Windows job).
    ```
 
    With no argument it **exports your Developer ID identity straight from the
-   login keychain** — a macOS *“security wants to export a key”* dialog pops up,
+   login keychain** — a macOS _“security wants to export a key”_ dialog pops up,
    click **Allow** (enter your Mac login password if asked) — generates a random
    `.p12` password, and sets `MAC_CSC_LINK`, `MAC_CSC_KEY_PASSWORD`, and the
    auto-detected `APPLE_TEAM_ID` for you. You are prompted only for your
@@ -132,7 +132,7 @@ Windows job).
    ```
 
    Or set them individually. **Use this empty‑proof pattern** — a bare
-   `gh secret set NAME` will happily store a *blank* value if the paste doesn't
+   `gh secret set NAME` will happily store a _blank_ value if the paste doesn't
    register, and because secrets are write‑only you won't notice until the mac
    build fails (see Troubleshooting):
 
@@ -170,7 +170,7 @@ blank secret. Re‑set it with the empty‑proof pattern above, e.g.:
 read -rsp 'app-specific password: ' v; echo; printf '%s' "$v" | gh secret set APPLE_APP_SPECIFIC_PASSWORD; unset v
 ```
 
-A secret showing up in `gh secret list` only means it *exists* — not that it's
+A secret showing up in `gh secret list` only means it _exists_ — not that it's
 non‑empty. When in doubt, re‑set it.
 
 **Finish a release whose mac job failed** — when Windows/Linux succeeded but mac

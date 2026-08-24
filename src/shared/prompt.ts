@@ -85,8 +85,10 @@ export function buildEnvironment(env: EnvironmentInfo): string {
 
   const inner: string[] = []
   if (env.cwd) inner.push(`  Working directory: ${env.cwd}`)
-  if (env.worktree && env.worktree !== env.cwd) inner.push(`  Workspace root folder: ${env.worktree}`)
-  if (env.isGitRepo !== undefined) inner.push(`  Is directory a git repo: ${env.isGitRepo ? 'yes' : 'no'}`)
+  if (env.worktree && env.worktree !== env.cwd)
+    inner.push(`  Workspace root folder: ${env.worktree}`)
+  if (env.isGitRepo !== undefined)
+    inner.push(`  Is directory a git repo: ${env.isGitRepo ? 'yes' : 'no'}`)
   if (env.devPort)
     inner.push(
       `  Dev server port: ${env.devPort} (use this port for dev servers; other sessions own other ports)`
