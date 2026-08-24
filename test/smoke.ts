@@ -2219,14 +2219,61 @@ async function main(): Promise<void> {
           check('check: ...bringing its file along', existsSync(path.join(mine, 'surprise.txt')))
         }
 
-        // No upstream at all: both actions must decline with a reason rather
-        // than guess at `origin/<something>`.
+        // No upstream, but the repo HAS an origin: both actions fall back to
+        // `origin/<base>`. This used to decline, on the grounds that guessing a
+        // ref was worse than doing nothing. It is the opposite: a workstream
+        // branch has no upstream until its first push, so declining took both
+        // buttons away for the whole period when "my branch is stale, give me
+        // main" is most likely to be true, leaving only "Push to origin".
         await runGit(['checkout', '-q', '-b', 'orphan-branch'], mine)
         const noUp = await git.pullFastForward(mine)
-        check('pull: declines a branch with no upstream', !noUp.ok)
-        check('pull: ...with a reason naming the branch', /orphan-branch/.test(noUp.error ?? ''))
+        check('pull: an unpushed branch falls back to origin/<base>', noUp.ok, noUp.error ?? '')
+        check('pull: ...naming the ref it actually used', noUp.upstream === 'origin/main')
+        // Already identical to main, so honestly nothing moved.
+        check('pull: ...and reports no-op rather than a fake update', noUp.updated === false)
+
         const noUpReset = await git.resetToUpstream(mine)
-        check('reset: declines a branch with no upstream', !noUpReset.ok)
+        check(
+          'reset: an unpushed branch resets to origin/<base>',
+          noUpReset.ok,
+          noUpReset.error ?? ''
+        )
+        check('reset: ...to that same ref', noUpReset.upstream === 'origin/main')
+
+        // A repo with NO REMOTE AT ALL still has a local base to fall back to,
+        // and it is not a stale mirror of anything - it is the only truth there
+        // is. Refusing would strand every local-only repo with no way to main.
+        {
+          const solo = path.join(tmp, 'sync-solo')
+          await runGit(['init', '-q', '--initial-branch=main', solo], tmp)
+          await runGit(['config', 'user.email', 'ci@roxy.gg'], solo)
+          await runGit(['config', 'user.name', 'Roxy CI'], solo)
+          await fs.writeFile(path.join(solo, 'a.txt'), 'one\n')
+          await runGit(['add', '-A'], solo)
+          await runGit(['commit', '-qm', 'first'], solo)
+          await runGit(['checkout', '-q', '-b', 'roxy/solo'], solo)
+          await runGit(['checkout', '-q', 'main'], solo)
+          await fs.writeFile(path.join(solo, 'b.txt'), 'two\n')
+          await runGit(['add', '-A'], solo)
+          await runGit(['commit', '-qm', 'main moved on'], solo)
+          await runGit(['checkout', '-q', 'roxy/solo'], solo)
+
+          const soloPull = await git.pullFastForward(solo)
+          check(
+            'pull: a remoteless repo updates from LOCAL main',
+            soloPull.ok,
+            soloPull.error ?? ''
+          )
+          check('pull: ...naming the bare branch, not origin/main', soloPull.upstream === 'main')
+          check('pull: ...and really moved', soloPull.updated === true)
+          check('pull: ...bringing the file', existsSync(path.join(solo, 'b.txt')))
+
+          // On the base branch itself there is nothing to sync to: syncing a
+          // branch to itself can only ever report "already up to date".
+          await runGit(['checkout', '-q', 'main'], solo)
+          const onBase = await git.pullFastForward(solo)
+          check('pull: declines while ON the base branch', !onBase.ok)
+        }
       }
     }
   }
@@ -4485,10 +4532,16 @@ async function main(): Promise<void> {
 app.whenReady().then(async () => {
   console.log('roxy runtime smoke test\n')
   // Watchdog so an overnight run can never hang.
+  //
+  // Overridable because 60s is a budget for the WHOLE suite, not any one check,
+  // and it is spent mostly on spawning `git`. On a slow or loaded machine the
+  // run gets guillotined mid-suite, which reads as a failing test but is really
+  // just a clock - so the number has to be raisable without editing this file.
+  const budgetMs = Number(process.env.SMOKE_TIMEOUT_MS) || 60_000
   const watchdog = setTimeout(() => {
-    console.error('\nSMOKE TIMEOUT (60s)')
+    console.error(`\nSMOKE TIMEOUT (${Math.round(budgetMs / 1000)}s)`)
     app.exit(2)
-  }, 60_000)
+  }, budgetMs)
   watchdog.unref?.()
 
   try {
