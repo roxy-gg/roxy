@@ -107,7 +107,8 @@ function findRoot(absFile: string, markers: string[]): string {
 // Windows, silently dropping every diagnostic -- so both sides go through here.
 function docKey(p: string): string {
   let out = p.replace(/\\/g, '/')
-  if (process.platform === 'win32') out = out.replace(/^([a-zA-Z]):/, (_m, d) => d.toLowerCase() + ':')
+  if (process.platform === 'win32')
+    out = out.replace(/^([a-zA-Z]):/, (_m, d) => d.toLowerCase() + ':')
   return out
 }
 
@@ -225,7 +226,9 @@ class LspClient {
   }
 
   private onPublishDiagnostics(params: unknown): void {
-    const p = params as { uri?: string; version?: number; diagnostics?: LspDiagnostic[] } | undefined
+    const p = params as
+      | { uri?: string; version?: number; diagnostics?: LspDiagnostic[] }
+      | undefined
     if (!p?.uri) return
     const filePath = docKey(fileUriToPath(p.uri))
     this.published.set(filePath, {
@@ -300,7 +303,9 @@ class LspClient {
    */
   async diagnostics(absPath: string, timeoutMs = DIAGNOSTICS_TIMEOUT_MS): Promise<LspDiagnostic[]> {
     const prior = this.locks.get(absPath) ?? Promise.resolve()
-    const run = prior.then(() => this.touchAndWait(absPath, timeoutMs)).catch(() => [] as LspDiagnostic[])
+    const run = prior
+      .then(() => this.touchAndWait(absPath, timeoutMs))
+      .catch(() => [] as LspDiagnostic[])
     this.locks.set(
       absPath,
       run.catch(() => undefined)
@@ -464,10 +469,7 @@ async function getClient(absPath: string): Promise<LspClient | undefined> {
 // ---------------------------------------------------------------------------
 
 /** Raw diagnostics for a file after touching it, or [] when no server applies. */
-export async function diagnostics(
-  absPath: string,
-  timeoutMs?: number
-): Promise<LspDiagnostic[]> {
+export async function diagnostics(absPath: string, timeoutMs?: number): Promise<LspDiagnostic[]> {
   if (!lspEnabled()) return []
   try {
     const client = await getClient(absPath)

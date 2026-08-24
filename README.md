@@ -18,17 +18,17 @@ skills.
 
 ## Tech stack
 
-| Layer        | Choice                                  |
-| ------------ | --------------------------------------- |
-| Desktop      | Electron 33                             |
-| Build tool   | electron-vite (Vite 5)                  |
-| UI           | React 18 + TypeScript                   |
-| Styling      | Tailwind CSS v4                         |
-| Tool-calling | Vercel AI SDK (Anthropic + Google)      |
-| Integrations | Model Context Protocol SDK              |
-| Storage      | better-sqlite3                          |
-| Packaging    | electron-builder                        |
-| Formatting   | Prettier                                |
+| Layer        | Choice                             |
+| ------------ | ---------------------------------- |
+| Desktop      | Electron 33                        |
+| Build tool   | electron-vite (Vite 5)             |
+| UI           | React 18 + TypeScript              |
+| Styling      | Tailwind CSS v4                    |
+| Tool-calling | Vercel AI SDK (Anthropic + Google) |
+| Integrations | Model Context Protocol SDK         |
+| Storage      | better-sqlite3                     |
+| Packaging    | electron-builder                   |
+| Formatting   | Prettier                           |
 
 ## Project structure
 
@@ -65,16 +65,16 @@ npm run dev
 
 ## Useful scripts
 
-| Script                  | Description                                    |
-| ----------------------- | ---------------------------------------------- |
-| `npm run dev`           | Start the app with hot reload                  |
-| `npm run build`         | Type-check and build for production            |
-| `npm run typecheck`     | Type-check main, preload, and renderer         |
-| `npm run smoke`         | Run the shared (Node) + app (Electron) suites  |
-| `npm run format`        | Format the codebase with Prettier              |
-| `npm run build:win`     | Build a Windows installer                      |
-| `npm run build:mac`     | Build a macOS app                              |
-| `npm run build:linux`   | Build Linux packages (AppImage, deb)           |
+| Script                | Description                                   |
+| --------------------- | --------------------------------------------- |
+| `npm run dev`         | Start the app with hot reload                 |
+| `npm run build`       | Type-check and build for production           |
+| `npm run typecheck`   | Type-check main, preload, and renderer        |
+| `npm run smoke`       | Run the shared (Node) + app (Electron) suites |
+| `npm run format`      | Format the codebase with Prettier             |
+| `npm run build:win`   | Build a Windows installer                     |
+| `npm run build:mac`   | Build a macOS app                             |
+| `npm run build:linux` | Build Linux packages (AppImage, deb)          |
 
 ## Architecture notes
 

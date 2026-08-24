@@ -210,7 +210,10 @@ export interface PruneOptions {
  * this before dropping whole turns, matching opencode's "prune tool output
  * first" compaction step.
  */
-export function pruneToolMessages<T extends PrunableMessage>(messages: T[], opts: PruneOptions = {}): T[] {
+export function pruneToolMessages<T extends PrunableMessage>(
+  messages: T[],
+  opts: PruneOptions = {}
+): T[] {
   const keepRecentTokens = opts.keepRecentTokens ?? KEEP_RECENT_TOKENS
   const previewLines = opts.previewLines ?? TOOL_PRUNE_LINES
   const previewChars = opts.previewChars ?? TOOL_PRUNE_CHARS
@@ -226,10 +229,17 @@ export function pruneToolMessages<T extends PrunableMessage>(messages: T[], opts
     const withinRecent = budget <= keepRecentTokens
     budget += tokens
     if (withinRecent) continue // protected recent window — leave intact
-    if (m.role === 'tool' && isText && needsTruncation(m.content as string, previewLines, previewChars)) {
+    if (
+      m.role === 'tool' &&
+      isText &&
+      needsTruncation(m.content as string, previewLines, previewChars)
+    ) {
       out[i] = {
         ...m,
-        content: previewText(m.content as string, { maxLines: previewLines, maxChars: previewChars })
+        content: previewText(m.content as string, {
+          maxLines: previewLines,
+          maxChars: previewChars
+        })
       }
     }
   }

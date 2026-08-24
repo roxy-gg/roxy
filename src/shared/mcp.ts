@@ -126,9 +126,7 @@ export interface ParsedMcpJson {
   enabled?: boolean
 }
 
-export type ParseMcpJsonResult =
-  | { ok: true; value: ParsedMcpJson }
-  | { ok: false; error: string }
+export type ParseMcpJsonResult = { ok: true; value: ParsedMcpJson } | { ok: false; error: string }
 
 /** The canonical, pretty-printed form of a config — what the raw editor shows. */
 export function serializeServerConfig(config: McpServerConfig): string {
@@ -369,7 +367,8 @@ export function renderMcpContent(content: unknown, isError: boolean | undefined)
   }
 
   const joined = parts.join('\n').trim()
-  const output = joined || (isError ? 'The MCP tool reported an error with no message.' : '(no output)')
+  const output =
+    joined || (isError ? 'The MCP tool reported an error with no message.' : '(no output)')
   const result: ToolResult = { ok: !isError, output }
   if (image) result.image = image
   return result

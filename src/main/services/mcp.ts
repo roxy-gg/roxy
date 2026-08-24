@@ -16,7 +16,10 @@
  *    smoke:app.
  */
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
-import { StdioClientTransport, getDefaultEnvironment } from '@modelcontextprotocol/sdk/client/stdio.js'
+import {
+  StdioClientTransport,
+  getDefaultEnvironment
+} from '@modelcontextprotocol/sdk/client/stdio.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js'
 import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js'
@@ -84,7 +87,9 @@ const toolIndex = new Map<string, McpToolInfo>()
 
 function makeStdioTransport(cfg: McpLocalConfig, workspaceCwd: string): Transport {
   const [command, ...args] = cfg.command
-  const cwd = cfg.cwd ? path.resolve(workspaceCwd || process.cwd(), cfg.cwd) : workspaceCwd || undefined
+  const cwd = cfg.cwd
+    ? path.resolve(workspaceCwd || process.cwd(), cfg.cwd)
+    : workspaceCwd || undefined
   return new StdioClientTransport({
     command,
     args,
@@ -301,7 +306,9 @@ export const isMcpTool = isMcpToolName
 export function mcpToolTitle(name: string): string {
   const info = toolIndex.get(name)
   if (info) return `${info.serverId} · ${info.toolName}`
-  return name.startsWith(`${MCP_TOOL_PREFIX}__`) ? name.slice(MCP_TOOL_PREFIX.length + 2).replace(/__/g, ' · ') : name
+  return name.startsWith(`${MCP_TOOL_PREFIX}__`)
+    ? name.slice(MCP_TOOL_PREFIX.length + 2).replace(/__/g, ' · ')
+    : name
 }
 
 /** Per-server status snapshot (for the settings UI + prompt blurb). Optionally scoped. */
@@ -334,7 +341,12 @@ export async function reconnectMcpServer(
     return { id: rec.id, status: 'disabled', tools: [] }
   }
   const conn = await getConnection(rec, workspaceCwd)
-  return { id: conn.id, status: conn.status, tools: conn.tools.map((t) => t.toolName), error: conn.error }
+  return {
+    id: conn.id,
+    status: conn.status,
+    tools: conn.tools.map((t) => t.toolName),
+    error: conn.error
+  }
 }
 
 /** Close + forget one server's connection (e.g. it was deleted or disabled). */

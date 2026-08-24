@@ -35,7 +35,11 @@ import {
   type SkillInfo,
   type SkillSource
 } from '../../shared/skills'
-import { isSafeSkillFilePath, type PortableSkill, type PortableSkillFile } from '../../shared/portable'
+import {
+  isSafeSkillFilePath,
+  type PortableSkill,
+  type PortableSkillFile
+} from '../../shared/portable'
 
 /** Relative skill-root directories searched under each workspace ancestor. */
 const WORKSPACE_SKILL_DIRS = ['.roxy/skills', '.claude/skills', '.agents/skills']
@@ -114,7 +118,11 @@ async function skillRoots(cwd: string): Promise<{ dir: string; source: SkillInfo
 }
 
 /** Resolve a skill's name from its frontmatter, falling back to its path. */
-function resolveName(frontmatterName: string | undefined, file: string, root: string): string | undefined {
+function resolveName(
+  frontmatterName: string | undefined,
+  file: string,
+  root: string
+): string | undefined {
   const fromMatter = frontmatterName?.trim()
   if (fromMatter) return fromMatter
   const base = path.basename(file)
@@ -276,7 +284,10 @@ export async function writeSkill(
   }
   const scope: SkillScope = input.scope === 'global' ? 'global' : 'workspace'
   if (scope === 'workspace' && !cwd) {
-    return { ok: false, error: 'No workspace folder available; use scope "global" to write to ~/.roxy/skills.' }
+    return {
+      ok: false,
+      error: 'No workspace folder available; use scope "global" to write to ~/.roxy/skills.'
+    }
   }
 
   const existing = (await discover(cwd)).find((s) => s.name.toLowerCase() === name.toLowerCase())
@@ -325,13 +336,15 @@ export interface DeleteSkillResult {
  * discovery cache. Never throws — a missing skill is a graceful no-op.
  */
 export async function deleteSkill(name: string, cwd: string): Promise<DeleteSkillResult> {
-  if (skillsDisabled()) return { ok: false, removed: false, error: 'Skills are disabled (ROXY_SKILLS=0).' }
+  if (skillsDisabled())
+    return { ok: false, removed: false, error: 'Skills are disabled (ROXY_SKILLS=0).' }
   const wanted = (name ?? '').trim()
   if (!wanted) return { ok: false, removed: false, error: 'Provide the skill name to remove.' }
 
   const skills = await discover(cwd)
   const skill =
-    skills.find((s) => s.name === wanted) ?? skills.find((s) => s.name.toLowerCase() === wanted.toLowerCase())
+    skills.find((s) => s.name === wanted) ??
+    skills.find((s) => s.name.toLowerCase() === wanted.toLowerCase())
   if (!skill) return { ok: true, removed: false, error: `No skill named "${wanted}".` }
 
   try {
@@ -344,7 +357,12 @@ export async function deleteSkill(name: string, cwd: string): Promise<DeleteSkil
       await fs.rm(skill.location, { force: true })
     }
   } catch (e) {
-    return { ok: false, removed: false, location: skill.location, error: `Failed to remove skill: ${(e as Error).message}` }
+    return {
+      ok: false,
+      removed: false,
+      location: skill.location,
+      error: `Failed to remove skill: ${(e as Error).message}`
+    }
   }
   refreshSkills()
   return { ok: true, removed: true, location: skill.location }
@@ -529,7 +547,8 @@ export async function readSkill(name: string, cwd: string): Promise<SkillInfo | 
   if (!wanted) return undefined
   const skills = await discover(cwd)
   return (
-    skills.find((s) => s.name === wanted) ?? skills.find((s) => s.name.toLowerCase() === wanted.toLowerCase())
+    skills.find((s) => s.name === wanted) ??
+    skills.find((s) => s.name.toLowerCase() === wanted.toLowerCase())
   )
 }
 
@@ -591,7 +610,10 @@ interface InstallCtx {
 }
 
 class HttpError extends Error {
-  constructor(readonly status: number, message: string) {
+  constructor(
+    readonly status: number,
+    message: string
+  ) {
     super(message)
   }
 }
@@ -631,11 +653,7 @@ async function fetchWithTimeout(
 
 /** Encode a repo-relative path for the GitHub contents API (keep the slashes). */
 function encodeGhPath(p: string): string {
-  return p
-    .split('/')
-    .filter(Boolean)
-    .map(encodeURIComponent)
-    .join('/')
+  return p.split('/').filter(Boolean).map(encodeURIComponent).join('/')
 }
 
 /** List a directory (or fetch a single file's metadata) via the contents API. */
@@ -644,17 +662,31 @@ async function ghList(ctx: InstallCtx, dirPath: string, ref?: string): Promise<G
   ctx.listCalls++
   const q = ref ? `?ref=${encodeURIComponent(ref)}` : ''
   const url = `${GITHUB_API}/repos/${ctx.owner}/${ctx.repo}/contents/${encodeGhPath(dirPath)}${q}`
-  const res = await fetchWithTimeout(ctx.fetchImpl, url, { headers: ghHeaders(ctx.token) }, ctx.signal)
+  const res = await fetchWithTimeout(
+    ctx.fetchImpl,
+    url,
+    { headers: ghHeaders(ctx.token) },
+    ctx.signal
+  )
   if (!res.ok) throw new HttpError(res.status, `GitHub ${res.status} for ${dirPath || '/'}`)
   const json = (await res.json()) as GhEntry | GhEntry[]
   return Array.isArray(json) ? json : [json]
 }
 
 /** Download raw file bytes (dir entries carry a `download_url`), enforcing caps. */
-async function ghBytes(ctx: InstallCtx, url: string, declaredSize?: number): Promise<Buffer | null> {
+async function ghBytes(
+  ctx: InstallCtx,
+  url: string,
+  declaredSize?: number
+): Promise<Buffer | null> {
   if (declaredSize != null && declaredSize > INSTALL_MAX_FILE_BYTES) return null
   if (ctx.bytes >= INSTALL_MAX_TOTAL_BYTES) return null
-  const res = await fetchWithTimeout(ctx.fetchImpl, url, { headers: { 'User-Agent': 'roxy-skills-installer' } }, ctx.signal)
+  const res = await fetchWithTimeout(
+    ctx.fetchImpl,
+    url,
+    { headers: { 'User-Agent': 'roxy-skills-installer' } },
+    ctx.signal
+  )
   if (!res.ok) throw new HttpError(res.status, `GitHub ${res.status} for a file`)
   const len = Number(res.headers?.get?.('content-length') ?? '')
   if (Number.isFinite(len) && len > INSTALL_MAX_FILE_BYTES) return null
@@ -755,7 +787,8 @@ async function installFolderSkill(
   if (!skillBytes) return { skipped: { name: fallbackName, reason: 'SKILL.md too large' } }
   const { data } = parseSkillFrontmatter(skillBytes.toString('utf8'))
   const name = sanitizeSkillName(data.name || fallbackName)
-  if (!name) return { skipped: { name: fallbackName, reason: 'could not derive a valid skill name' } }
+  if (!name)
+    return { skipped: { name: fallbackName, reason: 'could not derive a valid skill name' } }
 
   const targetDir = path.join(root, name)
   await fs.rm(targetDir, { recursive: true, force: true }) // fresh install / clean update
@@ -793,7 +826,8 @@ async function installBareFile(
   const text = bytes.toString('utf8')
   const { data } = parseSkillFrontmatter(text)
   const name = sanitizeSkillName(data.name || fallbackName.replace(/\.md$/i, ''))
-  if (!name) return { skipped: { name: fallbackName, reason: 'could not derive a valid skill name' } }
+  if (!name)
+    return { skipped: { name: fallbackName, reason: 'could not derive a valid skill name' } }
   const targetDir = path.join(root, name)
   await fs.rm(targetDir, { recursive: true, force: true })
   await writeUnder(targetDir, 'SKILL.md', Buffer.from(text, 'utf8'))
@@ -824,22 +858,25 @@ export async function installSkillFromSource(
   source: string,
   opts: InstallSkillOptions = {}
 ): Promise<InstallSkillResult> {
-  if (skillsDisabled()) return { ok: false, installed: [], error: 'Skills are disabled (ROXY_SKILLS=0).' }
+  if (skillsDisabled())
+    return { ok: false, installed: [], error: 'Skills are disabled (ROXY_SKILLS=0).' }
   const resolved = resolveSkillSource(source)
   if (resolved.kind === 'unsupported') return { ok: false, installed: [], error: resolved.reason }
 
   const scope: SkillScope = opts.scope ?? (opts.cwd ? 'workspace' : 'global')
   const cwd = opts.cwd ?? ''
   if (scope === 'workspace' && !cwd) {
-    return { ok: false, installed: [], error: 'No workspace folder available; install with scope "global".' }
+    return {
+      ok: false,
+      installed: [],
+      error: 'No workspace folder available; install with scope "global".'
+    }
   }
   const root = primarySkillRoot(scope, cwd)
 
   const installed: InstalledSkillRef[] = []
   const skipped: { name: string; reason: string }[] = []
-  const record = (
-    r: InstalledSkillRef | { skipped: { name: string; reason: string } }
-  ): void => {
+  const record = (r: InstalledSkillRef | { skipped: { name: string; reason: string } }): void => {
     if ('skipped' in r) skipped.push(r.skipped)
     else installed.push(r)
   }
@@ -863,7 +900,8 @@ export async function installSkillFromSource(
             ? 'GitHub rate limit or access denied (403). Set a GITHUB_TOKEN to lift the anonymous limit.'
             : `GitHub request failed (${e.status}).`
         : err.message || 'Install failed.'
-    if (!installed.length) return { ok: false, installed: [], skipped: skipped.length ? skipped : undefined, error: msg }
+    if (!installed.length)
+      return { ok: false, installed: [], skipped: skipped.length ? skipped : undefined, error: msg }
   }
 
   if (installed.length) refreshSkills() // clear all cache keys so the new skills are visible
@@ -871,7 +909,12 @@ export async function installSkillFromSource(
     const reason = skipped.length
       ? `No skills installed. ${skipped.map((s) => `${s.name}: ${s.reason}`).join('; ')}`
       : 'No SKILL.md found at that source (looked at the repo root and skills/).'
-    return { ok: false, installed: [], skipped: skipped.length ? skipped : undefined, error: reason }
+    return {
+      ok: false,
+      installed: [],
+      skipped: skipped.length ? skipped : undefined,
+      error: reason
+    }
   }
   return { ok: true, installed, skipped: skipped.length ? skipped : undefined }
 }
@@ -901,7 +944,16 @@ async function installFromGitHub(
     if (isSkillMd) {
       const dir = path.posix.dirname(src.path)
       const dirPath = dir === '.' ? '' : dir
-      record(await installFolderSkill(ctx, dirPath, dirPath ? path.basename(dirPath) : ctx.repo, src.ref, root, scope))
+      record(
+        await installFolderSkill(
+          ctx,
+          dirPath,
+          dirPath ? path.basename(dirPath) : ctx.repo,
+          src.ref,
+          root,
+          scope
+        )
+      )
       return
     }
     const url = src.ref
@@ -933,7 +985,11 @@ async function installFromGitHub(
     entries = []
   }
   const bareMd = entries.filter(
-    (e) => e.type === 'file' && /\.md$/i.test(e.name) && e.name.toLowerCase() !== 'readme.md' && e.download_url
+    (e) =>
+      e.type === 'file' &&
+      /\.md$/i.test(e.name) &&
+      e.name.toLowerCase() !== 'readme.md' &&
+      e.download_url
   )
   for (const f of bareMd.slice(0, INSTALL_MAX_SKILLS)) {
     record(await installBareFile(ctx, f.download_url as string, f.name, root, scope))

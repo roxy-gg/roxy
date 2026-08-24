@@ -46,7 +46,9 @@ export function normalizeFetchUrl(raw: string): string {
   }
   if (url.protocol === 'http:') url.protocol = 'https:'
   if (url.protocol !== 'https:') {
-    throw new Error(`Unsupported URL scheme "${url.protocol}" — only http:// and https:// are allowed.`)
+    throw new Error(
+      `Unsupported URL scheme "${url.protocol}" — only http:// and https:// are allowed.`
+    )
   }
   return url.toString()
 }
@@ -138,12 +140,17 @@ export function decodeEntities(input: string): string {
 
 /** Remove non-content regions (scripts, styles, head, comments) wholesale. */
 function stripNoise(html: string): string {
-  return html
-    .replace(/<!--[\s\S]*?-->/g, ' ')
-    .replace(/<!\[CDATA\[[\s\S]*?\]\]>/g, ' ')
-    .replace(/<(script|style|noscript|template|svg|head|iframe|object|embed)\b[\s\S]*?<\/\1>/gi, ' ')
-    // A lone <head>…</head> may not close cleanly; the above also handles the common case.
-    .replace(/<!doctype[^>]*>/gi, ' ')
+  return (
+    html
+      .replace(/<!--[\s\S]*?-->/g, ' ')
+      .replace(/<!\[CDATA\[[\s\S]*?\]\]>/g, ' ')
+      .replace(
+        /<(script|style|noscript|template|svg|head|iframe|object|embed)\b[\s\S]*?<\/\1>/gi,
+        ' '
+      )
+      // A lone <head>…</head> may not close cleanly; the above also handles the common case.
+      .replace(/<!doctype[^>]*>/gi, ' ')
+  )
 }
 
 /** Prefer the <body> when present — drops leftover head/meta noise. */
@@ -180,16 +187,28 @@ export function htmlToText(html: string): string {
 /** Convert inline-level markup (links, emphasis, inline code) inside a block. */
 function convertInline(html: string): string {
   return html
-    .replace(/<a\b[^>]*?\shref\s*=\s*["']([^"']*)["'][^>]*>([\s\S]*?)<\/a>/gi, (_m, href: string, text: string) => {
-      const label = stripTags(text).trim()
-      const target = href.trim()
-      if (!label) return target
-      if (!target || target.startsWith('#') || target.startsWith('javascript:')) return label
-      return `[${label}](${target})`
-    })
-    .replace(/<(strong|b)\b[^>]*>([\s\S]*?)<\/\1>/gi, (_m, _t, inner: string) => `**${stripTags(inner).trim()}**`)
-    .replace(/<(em|i)\b[^>]*>([\s\S]*?)<\/\1>/gi, (_m, _t, inner: string) => `*${stripTags(inner).trim()}*`)
-    .replace(/<code\b[^>]*>([\s\S]*?)<\/code>/gi, (_m, inner: string) => `\`${stripTags(inner).trim()}\``)
+    .replace(
+      /<a\b[^>]*?\shref\s*=\s*["']([^"']*)["'][^>]*>([\s\S]*?)<\/a>/gi,
+      (_m, href: string, text: string) => {
+        const label = stripTags(text).trim()
+        const target = href.trim()
+        if (!label) return target
+        if (!target || target.startsWith('#') || target.startsWith('javascript:')) return label
+        return `[${label}](${target})`
+      }
+    )
+    .replace(
+      /<(strong|b)\b[^>]*>([\s\S]*?)<\/\1>/gi,
+      (_m, _t, inner: string) => `**${stripTags(inner).trim()}**`
+    )
+    .replace(
+      /<(em|i)\b[^>]*>([\s\S]*?)<\/\1>/gi,
+      (_m, _t, inner: string) => `*${stripTags(inner).trim()}*`
+    )
+    .replace(
+      /<code\b[^>]*>([\s\S]*?)<\/code>/gi,
+      (_m, inner: string) => `\`${stripTags(inner).trim()}\``
+    )
 }
 
 function stripTags(html: string): string {
@@ -236,7 +255,10 @@ export function htmlToMarkdown(html: string): string {
 
   // Block boundaries → blank lines / newlines.
   s = s.replace(/<br\s*\/?>/gi, '\n')
-  s = s.replace(/<\/(p|div|section|article|header|footer|main|aside|nav|tr|table|thead|tbody|figure|figcaption|ul|ol)\s*>/gi, '\n\n')
+  s = s.replace(
+    /<\/(p|div|section|article|header|footer|main|aside|nav|tr|table|thead|tbody|figure|figcaption|ul|ol)\s*>/gi,
+    '\n\n'
+  )
 
   // Drop every remaining tag, decode entities, tidy.
   s = stripTags(s)
@@ -245,7 +267,11 @@ export function htmlToMarkdown(html: string): string {
 }
 
 /** Convert fetched content to the requested format (only HTML needs work). */
-export function convertWebContent(content: string, contentType: string, format: WebFetchFormat): string {
+export function convertWebContent(
+  content: string,
+  contentType: string,
+  format: WebFetchFormat
+): string {
   const isHtml = contentType.toLowerCase().includes('html')
   if (!isHtml || format === 'html') return content
   return format === 'markdown' ? htmlToMarkdown(content) : htmlToText(content)
@@ -289,7 +315,9 @@ export function parseExaResponse(body: string): string | undefined {
     const content = (parsed as { result?: { content?: unknown } })?.result?.content
     if (!Array.isArray(content)) return undefined
     const texts = content
-      .map((item) => (item && typeof item === 'object' ? (item as { text?: unknown }).text : undefined))
+      .map((item) =>
+        item && typeof item === 'object' ? (item as { text?: unknown }).text : undefined
+      )
       .filter((t): t is string => typeof t === 'string' && t.length > 0)
     return texts.length ? texts.join('\n\n') : undefined
   }
