@@ -132,6 +132,23 @@ import {
 } from '../src/shared/web'
 import { resolveWorktreeCwd } from '../src/shared/workspace'
 import {
+  aggregateRepoStatus,
+  aggregateSyncTarget,
+  describeSyncRef,
+  summarizeSync,
+  type RepoSyncLite,
+  describeRepoStatus,
+  isMultiRepo,
+  isScannableDir,
+  parseRepoLinks,
+  planRepoLinks,
+  repoCountBadge,
+  serializeRepoLinks,
+  sharedBranch,
+  worktreeAnchor,
+  type RepoStatusLite
+} from '../src/shared/repos'
+import {
   DEFAULT_BRANCH_PREFIX,
   branchNameError,
   branchPrefixError,
@@ -3195,7 +3212,481 @@ async function main(): Promise<void> {
       'poll key: worktree session -> worktree path',
       statusKeyForSession(mk({ worktreePath: '/wt/auth' })) === '/wt/auth'
     )
+    // ---- multi-repo: the strip must appear for a folder OF repos ----
+    // A folder of repos is NOT itself a repository, so its status reports
+    // `isRepo:false` forever. Before `projectHasRepos` existed this hid the
+    // strip permanently for exactly the projects multi-repo support is for.
+    {
+      const NOT_A_REPO = { isRepo: false, branch: null, dirty: false, changed: 0 }
+      const plain = mk({ worktreePath: null, branch: null })
+
+      check('strip: hidden in a plain folder (unchanged)', view(plain, NOT_A_REPO) === null)
+      check(
+        'strip: SHOWN in a folder of repos despite isRepo:false',
+        workstreamStripView({
+          chat: plain,
+          findChat: () => null,
+          gitAvailable: true,
+          status: NOT_A_REPO,
+          projectHasRepos: true
+        }) !== null
+      )
+      // Unprobed must not read as false, or the strip flickers off on first paint.
+      check(
+        'strip: an unprobed project is not treated as repo-less',
+        workstreamStripView({
+          chat: mk({ worktreePath: '/wt/x', branch: 'roxy/x' }),
+          findChat: () => null,
+          gitAvailable: true,
+          status: undefined,
+          projectHasRepos: undefined
+        }) !== null
+      )
+      // THE case this exists for, and the one that shipped broken: a composite
+      // worktree that is working perfectly. It is a plain directory holding one
+      // real worktree per repo, so `git status` on its root says `isRepo:false`
+      // - truthfully, because it is not a repository. Reading that as "the
+      // worktree vanished" hid the strip for every healthy multi-repo session
+      // the moment a plain status landed on its key.
+      check(
+        'strip: a LIVE composite survives its root reporting isRepo:false',
+        workstreamStripView({
+          chat: mk({ worktreePath: '/wt/mila', branch: 'roxy/x' }),
+          findChat: () => null,
+          gitAvailable: true,
+          status: NOT_A_REPO,
+          projectHasRepos: true
+        }) !== null
+      )
+      // A single-repo session keeps the old, conclusive reading: it has a
+      // worktree, git says that worktree is not a repo, so it is gone.
+      check(
+        'strip: a vanished SINGLE-repo worktree still hides',
+        workstreamStripView({
+          chat: mk({ worktreePath: '/wt/gone', branch: 'roxy/gone' }),
+          findChat: () => null,
+          gitAvailable: true,
+          status: NOT_A_REPO,
+          projectHasRepos: false
+        }) === null
+      )
+      // A vanished COMPOSITE is caught by the honest signal instead: every
+      // child reports isRepo:false, so the aggregate repoCount is 0.
+      check(
+        'strip: a vanished composite is detected by repoCount, not the root',
+        aggregateRepoStatus([
+          {
+            name: 'backend',
+            isRepo: false,
+            branch: null,
+            dirty: false,
+            changed: 0,
+            ahead: 0,
+            behind: 0,
+            hasUpstream: false
+          },
+          {
+            name: 'frontend',
+            isRepo: false,
+            branch: null,
+            dirty: false,
+            changed: 0,
+            ahead: 0,
+            behind: 0,
+            hasUpstream: false
+          }
+        ]).repoCount === 0
+      )
+      check(
+        'strip: no git binary still hides everything',
+        workstreamStripView({
+          chat: plain,
+          findChat: () => null,
+          gitAvailable: false,
+          status: NOT_A_REPO,
+          projectHasRepos: true
+        }) === null
+      )
+    }
+
     check('poll key: a sub-session never polls', statusKeyForSession(sub) === null)
+  }
+
+  // ---- multi-repo (composite) workstreams ----
+  // A project that is a FOLDER OF REPOS gets one worktree directory holding a
+  // real checkout per repo, all on one branch name. These are the pure rules;
+  // the git-level behaviour is exercised by test/multirepo.ts.
+  {
+    const P = {
+      join: (...parts: string[]) => parts.join('/'),
+      basename: (p: string) => p.split('/').filter(Boolean).pop() ?? ''
+    }
+
+    // Directory filtering: dependency/build dirs routinely contain checkouts
+    // that are emphatically not part of the project.
+    check('repos: adopts an ordinary folder', isScannableDir('backend'))
+    check('repos: skips node_modules', !isScannableDir('node_modules'))
+    check('repos: skips vendor', !isScannableDir('vendor'))
+    check('repos: skips dotfolders (covers .git for free)', !isScannableDir('.git'))
+    check('repos: skips an empty name', !isScannableDir(''))
+
+    const links = planRepoLinks('/wt/proj/slug', ['/proj/backend', '/proj/frontend'], 'roxy/x', P)
+    check('repos: one link per repo', links.length === 2)
+    check(
+      'repos: children mirror the project layout',
+      links[0].worktreePath === '/wt/proj/slug/backend' &&
+        links[1].worktreePath === '/wt/proj/slug/frontend'
+    )
+    check(
+      'repos: every link carries the shared branch',
+      links.every((l) => l.branch === 'roxy/x')
+    )
+    check('repos: links remember the owning repo', links[0].root === '/proj/backend')
+
+    // isMultiRepo is the single test for "is this composite", so null and []
+    // must agree - two spellings would mean two things to get wrong.
+    check('repos: null is not multi', !isMultiRepo(null))
+    check('repos: [] is not multi', !isMultiRepo([]))
+    check('repos: a populated list is multi', isMultiRepo(links))
+
+    // The anchor decides where worktree path math starts from. For a composite
+    // it MUST be the project folder: findGitRoot on a multi-repo project walks
+    // past it and can land on an unrelated ancestor repo.
+    check(
+      'repos: composite anchors on the project folder',
+      worktreeAnchor('/proj', links, '/some/ancestor') === '/proj'
+    )
+    check(
+      'repos: single-repo still anchors on the git root',
+      worktreeAnchor('/repo/apps/web', null, '/repo') === '/repo'
+    )
+    check(
+      'repos: no git root and no links -> no anchor',
+      worktreeAnchor('/proj', null, null) === null
+    )
+
+    // A composite session's cwd is the composite root itself, because the root
+    // mirrors the project folder rather than any one repo.
+    check(
+      'repos: composite cwd is the composite root',
+      resolveWorktreeCwd(
+        '/proj',
+        '/wt/proj/slug',
+        worktreeAnchor('/proj', links, null),
+        posixPath
+      ) === '/wt/proj/slug'
+    )
+
+    // Round-tripping through the DB column.
+    const json = serializeRepoLinks(links)
+    check('repos: round-trips through JSON', parseRepoLinks(json).length === 2)
+    check('repos: empty serializes to null (means single-repo)', serializeRepoLinks([]) === null)
+    check('repos: null serializes to null', serializeRepoLinks(null) === null)
+    check('repos: garbage parses to empty', parseRepoLinks('{not json').length === 0)
+    check('repos: a non-array parses to empty', parseRepoLinks('{"a":1}').length === 0)
+    check('repos: null parses to empty', parseRepoLinks(null).length === 0)
+
+    // A link missing a required field is DROPPED, never defaulted: an empty
+    // `root` would later be handed to `git worktree remove` with no repo to run
+    // it from, and an empty worktreePath would point removal at nothing.
+    check(
+      'repos: drops a link with no root',
+      parseRepoLinks('[{"name":"a","worktreePath":"/w/a"}]').length === 0
+    )
+    check(
+      'repos: drops a link with no worktreePath',
+      parseRepoLinks('[{"name":"a","root":"/r/a"}]').length === 0
+    )
+    check(
+      'repos: dedupes two links with one name',
+      parseRepoLinks(
+        '[{"name":"a","root":"/r/a","worktreePath":"/w/a"},{"name":"a","root":"/r/b","worktreePath":"/w/b"}]'
+      ).length === 1
+    )
+    check(
+      'repos: a missing branch decodes as null, not undefined',
+      parseRepoLinks('[{"name":"a","root":"/r/a","worktreePath":"/w/a"}]')[0].branch === null
+    )
+
+    // sharedBranch returns null when the repos have DIVERGED - a real state
+    // after a rename that half-succeeded. Printing one of two names would
+    // assert something false about the other.
+    check('repos: agreeing branches yield the shared name', sharedBranch(links) === 'roxy/x')
+    const diverged = [links[0], { ...links[1], branch: 'roxy/y' }]
+    check('repos: diverged branches yield null', sharedBranch(diverged) === null)
+    check('repos: no links yield null', sharedBranch([]) === null)
+
+    // ---- aggregation: N repo statuses -> the one line the UI shows ----
+    const mkStatus = (name: string, over: Partial<RepoStatusLite> = {}): RepoStatusLite => ({
+      name,
+      isRepo: true,
+      branch: 'roxy/x',
+      dirty: false,
+      changed: 0,
+      ahead: 0,
+      behind: 0,
+      hasUpstream: false,
+      ...over
+    })
+
+    const clean = aggregateRepoStatus([mkStatus('backend'), mkStatus('frontend')])
+    check('aggregate: agreeing repos report the shared branch', clean.branch === 'roxy/x')
+    check('aggregate: all clean is not dirty', !clean.dirty)
+    check('aggregate: counts the repos', clean.repoCount === 2)
+    check('aggregate: agreeing repos are not diverged', !clean.diverged)
+
+    // dirty is ANY: the warning dot exists to stop you throwing work away, and
+    // a clean majority does not make the dirty one safe to delete.
+    const mixed = aggregateRepoStatus([
+      mkStatus('backend', { dirty: true, changed: 2 }),
+      mkStatus('frontend'),
+      mkStatus('shared', { dirty: true, changed: 3 })
+    ])
+    check('aggregate: ANY dirty repo makes the whole thing dirty', mixed.dirty)
+    check('aggregate: changed counts are summed', mixed.changed === 5)
+    check('aggregate: names the dirty repos', mixed.dirtyRepos.join(',') === 'backend,shared')
+    check(
+      'aggregate: the tooltip names them too',
+      describeRepoStatus(mixed) === 'Uncommitted changes in backend, shared.'
+    )
+    check(
+      'aggregate: a clean composite says so',
+      describeRepoStatus(clean) === '2 repositories, all clean.'
+    )
+
+    const ab = aggregateRepoStatus([
+      mkStatus('backend', { ahead: 2, behind: 1 }),
+      mkStatus('frontend', { ahead: 3 })
+    ])
+    check('aggregate: ahead is summed', ab.ahead === 5)
+    check('aggregate: behind is summed', ab.behind === 1)
+
+    // A half-succeeded rename leaves the set on two names. Showing one of them
+    // would assert something false about the other.
+    const div = aggregateRepoStatus([
+      mkStatus('backend', { branch: 'roxy/x' }),
+      mkStatus('frontend', { branch: 'roxy/y' })
+    ])
+    check('aggregate: divergence is detected', div.diverged)
+    check('aggregate: divergence yields no branch name', div.branch === null)
+    check(
+      'aggregate: and the tooltip says why',
+      describeRepoStatus(div) === '2 repositories, on different branches.'
+    )
+
+    // A checkout that vanished knows nothing about its own dirtiness. Counting
+    // it as clean is the direction that loses work, so it is EXCLUDED.
+    const gone = aggregateRepoStatus([
+      mkStatus('backend', { dirty: true, changed: 1 }),
+      mkStatus('frontend', { isRepo: false, branch: null })
+    ])
+    check('aggregate: a missing checkout is not counted', gone.repoCount === 1)
+    check('aggregate: and does not mask a dirty sibling', gone.dirty)
+    check('aggregate: nor fake a divergence', !gone.diverged && gone.branch === 'roxy/x')
+    check('aggregate: an empty set is inert', aggregateRepoStatus([]).repoCount === 0)
+    check(
+      'aggregate: an empty set says so',
+      describeRepoStatus(aggregateRepoStatus([])) === 'No repositories checked out.'
+    )
+
+    // ---- sync targets: what "Update all" / "Reset all" act on ----
+    const mkSync = (
+      name: string,
+      sync: { ref: string; ahead?: number; behind?: number; changed?: number } | null,
+      isRepo = true
+    ): RepoSyncLite => ({
+      name,
+      isRepo,
+      sync: sync && {
+        ref: sync.ref,
+        ahead: sync.ahead ?? 0,
+        behind: sync.behind ?? 0,
+        changed: sync.changed ?? 0,
+        canFastForward: (sync.ahead ?? 0) === 0
+      }
+    })
+
+    const agreed = aggregateSyncTarget([
+      mkSync('backend', { ref: 'origin/main', behind: 2 }),
+      mkSync('frontend', { ref: 'origin/main', behind: 1 })
+    ])!
+    check('sync: a shared ref is named', agreed.ref === 'origin/main')
+    check('sync: behind is summed across repos', agreed.behind === 3)
+    check('sync: every repo can fast-forward', agreed.canFastForward === 2)
+    check('sync: none are blocked', agreed.blocked.length === 0)
+    check('sync: the label is the shared ref', describeSyncRef(agreed) === 'origin/main')
+
+    // Repos need not agree - one may default to `develop`. Naming one repo's
+    // answer for all of them would be a claim about trees it never looked at.
+    const differing = aggregateSyncTarget([
+      mkSync('backend', { ref: 'origin/main' }),
+      mkSync('frontend', { ref: 'origin/develop' })
+    ])!
+    check('sync: differing refs yield no single name', differing.ref === null)
+    check(
+      'sync: and the label says so rather than picking one',
+      describeSyncRef(differing) === 'their base branches'
+    )
+
+    // A repo with local commits cannot be fast-forwarded, but must not veto the
+    // ones that can - "update the other two" is still the useful action.
+    const blocked = aggregateSyncTarget([
+      mkSync('backend', { ref: 'origin/main', ahead: 2, changed: 3 }),
+      mkSync('frontend', { ref: 'origin/main', behind: 1 })
+    ])!
+    check('sync: blocked repos are named', blocked.blocked.join(',') === 'backend')
+    check('sync: the unblocked one is still counted', blocked.canFastForward === 1)
+    check('sync: ahead is summed', blocked.ahead === 2)
+    check('sync: changed is summed for the reset label', blocked.changed === 3)
+
+    // A repo with no remote at all is skipped, not counted as syncable: a
+    // workstream spanning three GitHub repos and one local scratch repo should
+    // still offer to update the three.
+    const partial = aggregateSyncTarget([
+      mkSync('backend', { ref: 'origin/main', behind: 1 }),
+      mkSync('scratch', null)
+    ])!
+    check('sync: a repo with no target is not syncable', partial.syncable === 1)
+    check('sync: but the rest still are', partial.behind === 1)
+
+    check(
+      'sync: a missing checkout is excluded',
+      aggregateSyncTarget([mkSync('gone', { ref: 'origin/main' }, false)]) === null
+    )
+    check('sync: nothing syncable at all yields null', aggregateSyncTarget([]) === null)
+
+    // ---- summarizing what a multi-repo sync DID ----
+    const allMoved = summarizeSync(
+      [
+        { name: 'backend', ok: true, updated: true },
+        { name: 'frontend', ok: true, updated: true }
+      ],
+      'pull'
+    )
+    check('summary: all updated says so', allMoved.text === 'Updated all 2 repos.')
+    check('summary: and is not a failure', !allMoved.failed)
+
+    // "Already up to date" is worth saying: it is the difference between
+    // nothing happening and nothing NEEDING to happen.
+    const noop = summarizeSync(
+      [
+        { name: 'backend', ok: true, updated: false },
+        { name: 'frontend', ok: true, updated: false }
+      ],
+      'pull'
+    )
+    check('summary: a no-op is reported, not silent', noop.text === 'All 2 already up to date.')
+
+    const some = summarizeSync(
+      [
+        { name: 'backend', ok: true, updated: true },
+        { name: 'frontend', ok: true, updated: false }
+      ],
+      'pull'
+    )
+    check('summary: a partial update counts only what moved', some.text === 'Updated 1 repo.')
+
+    // A failure NAMES the repo: a count leaves the user to find which one.
+    const oneFailed = summarizeSync(
+      [
+        { name: 'backend', ok: false, error: 'Could not reach origin' },
+        { name: 'frontend', ok: true, updated: true }
+      ],
+      'pull'
+    )
+    check(
+      'summary: a single failure carries git\u2019s own message',
+      /backend: Could not reach origin/.test(oneFailed.text)
+    )
+    check('summary: and still reports what DID work', /Updated 1 of 2/.test(oneFailed.text))
+    check('summary: a failure is flagged as one', oneFailed.failed)
+
+    const twoFailed = summarizeSync(
+      [
+        { name: 'backend', ok: false, error: 'a' },
+        { name: 'shared', ok: false, error: 'b' },
+        { name: 'frontend', ok: true, updated: true }
+      ],
+      'reset'
+    )
+    check(
+      'summary: several failures are named, not detailed',
+      /backend, shared/.test(twoFailed.text)
+    )
+
+    // The stash is the escape route for work the reset just took away. Silence
+    // there is indistinguishable from having lost it.
+    const stashed = summarizeSync(
+      [
+        { name: 'backend', ok: true, updated: true, stashed: true },
+        { name: 'frontend', ok: true, updated: true }
+      ],
+      'reset'
+    )
+    check('summary: reset says reset, not updated', stashed.text.startsWith('Reset all 2 repos.'))
+    check('summary: a stash is always mentioned', /Stashed work in backend/.test(stashed.text))
+    check('summary: and says how to undo it', /git stash pop/.test(stashed.text))
+    check('summary: an empty set is inert', summarizeSync([], 'pull').text === 'Nothing to sync.')
+
+    // The badge is null below 2 so single-repo sessions render EXACTLY as they
+    // did before multi-repo support existed.
+    check('badge: hidden at 0', repoCountBadge(0) === null)
+    check('badge: hidden at 1 (single-repo renders unchanged)', repoCountBadge(1) === null)
+    check('badge: shown at 2', repoCountBadge(2) === '2')
+
+    // Auto-workstream must fire for a folder OF repos, which reports
+    // isRepo:false because the folder itself is not a repository. Missing this
+    // is the original bug: the workspaces that need parallel agents most got
+    // no workstream at all.
+    check(
+      'auto-workstream: fires for an ordinary repo',
+      shouldAutoWorkstream({ autoWorkstream: true, gitAvailable: true, isRepo: true })
+    )
+    check(
+      'auto-workstream: fires for a folder OF repos',
+      shouldAutoWorkstream({
+        autoWorkstream: true,
+        gitAvailable: true,
+        isRepo: false,
+        hasRepos: true
+      })
+    )
+    check(
+      'auto-workstream: still declines a plain folder',
+      !shouldAutoWorkstream({
+        autoWorkstream: true,
+        gitAvailable: true,
+        isRepo: false,
+        hasRepos: false
+      })
+    )
+    check(
+      'auto-workstream: repos cannot override a missing git binary',
+      !shouldAutoWorkstream({
+        autoWorkstream: true,
+        gitAvailable: false,
+        isRepo: false,
+        hasRepos: true
+      })
+    )
+    check(
+      'auto-workstream: nor an unprobed one',
+      !shouldAutoWorkstream({
+        autoWorkstream: true,
+        gitAvailable: null,
+        isRepo: false,
+        hasRepos: true
+      })
+    )
+    check(
+      'auto-workstream: nor the setting being off',
+      !shouldAutoWorkstream({
+        autoWorkstream: false,
+        gitAvailable: true,
+        isRepo: false,
+        hasRepos: true
+      })
+    )
   }
 
   // ---- session slug -> branch segment ----

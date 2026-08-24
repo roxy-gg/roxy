@@ -104,9 +104,16 @@ export async function forgeStatus(
     dirty: st?.dirty ?? false
   }
 
-  // Computed from the status we already have - no extra git spawn, so it rides
-  // the 5s poll for free. Null when there is no upstream: with nothing to sync
-  // against, the panel must not offer to sync.
+  // With an upstream this is computed from the status we already have - no
+  // extra git spawn, so it rides the 5s poll for free.
+  //
+  // WITHOUT one we ask git for the base ref instead (`syncTargetFor`), which is
+  // the case that used to return null and take both sync buttons off screen.
+  // That was wrong in the most common state there is: a workstream branch has
+  // no upstream until its first push, so "my branch is stale, give me main" was
+  // unreachable during exactly the window it is most often true. The extra
+  // commands only run for unpushed branches.
+  const fallback = st?.branch && !st.upstream ? await git.syncTargetFor(cwd) : null
   const syncTarget: SyncTarget | null = st?.upstream
     ? {
         upstream: st.upstream,
@@ -126,7 +133,15 @@ export async function forgeStatus(
         // clickable, fetches, and answers "Already up to date" or updates.
         canFastForward: st.ahead === 0
       }
-    : null
+    : fallback
+      ? {
+          upstream: fallback.ref,
+          behind: fallback.behind,
+          ahead: fallback.ahead,
+          changed: fallback.changed,
+          canFastForward: fallback.canFastForward
+        }
+      : null
 
   const remote = await resolveForge(cwd)
   // Distinguish "no remote at all" from "a real host we can't classify". The

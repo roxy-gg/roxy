@@ -1,6 +1,6 @@
 {
   "name": "roxy",
-  "version": "0.0.89",
+  "version": "0.0.90",
   "description": "Roxy — an open-source AI coding agent for engineers.",
   "main": "./out/main/index.js",
   "author": "Roxy (https://github.com/roxy-gg/roxy)",
@@ -36,7 +36,9 @@
     "icons:providers": "node script/copy-provider-icons.mjs",
     "smoke:shared": "esbuild test/shared.ts --bundle --platform=node --format=cjs --packages=external --outfile=test/.out/shared.cjs && node test/.out/shared.cjs",
     "smoke:app": "esbuild test/smoke.ts --bundle --platform=node --format=cjs --packages=external --outfile=test/.out/smoke.cjs && electron test/.out/smoke.cjs",
-    "smoke": "npm run smoke:shared && npm run smoke:store && npm run smoke:cookies && npm run smoke:app",
+    "smoke": "npm run smoke:shared && npm run smoke:store && npm run smoke:multirepo && npm run smoke:live && npm run smoke:cookies && npm run smoke:app",
+    "smoke:multirepo": "esbuild test/multirepo.ts --bundle --platform=node --format=cjs --packages=external --outfile=test/.out/multirepo.cjs && node test/.out/multirepo.cjs",
+    "smoke:live": "esbuild test/live-multirepo.ts --bundle --platform=node --format=cjs --packages=external --outfile=test/.out/live.cjs && electron test/.out/live.cjs",
     "smoke:cliproxy": "esbuild test/cliproxy.ts --bundle --platform=node --format=cjs --packages=external --outfile=test/.out/cliproxy.cjs && electron test/.out/cliproxy.cjs",
     "worktree:setup": "npm ci --prefer-offline --no-audit --no-fund && electron-builder install-app-deps",
     "smoke:store": "node test/store-guard.mjs",

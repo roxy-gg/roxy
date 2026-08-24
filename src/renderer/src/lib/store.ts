@@ -40,7 +40,15 @@ import { uniqueSlug } from '@shared/slugs'
 import { shouldAutoWorkstream, statusKeyForSession } from '@shared/workstream'
 import { api } from './api'
 import type { ComposerImage } from './images'
-import type { GitStatusView, ServiceView, SyncOutcome, WorktreeView } from '@shared/api'
+import type {
+  GitStatusView,
+  MultiSyncOutcome,
+  RepoStatusView,
+  ServiceView,
+  SyncOutcome,
+  WorktreeView
+} from '@shared/api'
+import { aggregateRepoStatus } from '@shared/repos'
 import type { ForgeStatusView } from '@shared/forge'
 
 interface RoxyStore {
@@ -139,6 +147,25 @@ interface RoxyStore {
    * git spawns for a strictly worse result.
    */
   forgeStatus: Record<string, ForgeStatusView>
+  /**
+   * Per-repo git state for MULTI-REPO sessions, keyed by the same composite
+   * path as `gitStatus`.
+   *
+   * A separate map rather than a field on `gitStatus` because the two answer
+   * different questions and arrive from different calls: `gitStatus[composite]`
+   * is the aggregate the row displays, this is the breakdown behind it. Empty
+   * or absent means single-repo, which is every session that isn't composite.
+   */
+  repoStatus: Record<string, RepoStatusView[]>
+  /**
+   * Which project folders are folders OF repos, keyed by project path.
+   *
+   * Cached because it gates the workstream strip on EVERY render for a
+   * multi-repo project, and the answer is a filesystem scan. Undefined means
+   * "not probed yet", which must not be read as false: doing so is what hid the
+   * strip for multi-repo projects in the first place.
+   */
+  projectRepos: Record<string, boolean>
   /** Live worktrees per project folder, for the workstream menu. */
   worktrees: Record<string, WorktreeView[]>
   /** Branches per project folder, loaded lazily when the menu opens. */
@@ -250,6 +277,8 @@ interface RoxyStore {
    * worktrees watchers multiply, and fs.watch is unreliable on Windows.
    */
   refreshGitStatus: (chatId: string) => Promise<void>
+  /** Probe (once, cached) whether a project folder is a folder OF repos. */
+  ensureProjectRepos: (workspacePath: string) => Promise<void>
   /**
    * Refresh git + PR status for EVERY session, so the sidebar can show where
    * each workstream stands without the user opening it.
@@ -269,6 +298,14 @@ interface RoxyStore {
    * turn is running - see `syncBranch`.
    */
   pullBranch: (chatId: string) => Promise<SyncOutcome>
+  /**
+   * Update / reset EVERY repo of a multi-repo session.
+   *
+   * Separate from `pullBranch`/`resetBranch` because the outcome is per-repo -
+   * see `syncAllRepos`. Callers pick by whether the session has `repos`.
+   */
+  pullAllRepos: (chatId: string) => Promise<MultiSyncOutcome>
+  resetAllRepos: (chatId: string) => Promise<MultiSyncOutcome>
   /** Hard-reset onto the upstream, stashing uncommitted work first. */
   resetBranch: (chatId: string) => Promise<SyncOutcome>
   /** Load the worktrees + branches for a project (menu open). */
@@ -454,6 +491,71 @@ const subagentTurns = new Map<string, PartsFold>()
  * promise makes every extra trigger free.
  */
 let gitSweep: Promise<void> | null = null
+
+/**
+ * Fetch git (and forge) state for one status key and write it into the store.
+ *
+ * The single place that knows a MULTI-REPO session is polled differently, so
+ * the 5s poll and the all-sessions sweep can never drift apart on it.
+ *
+ * The composite root of a multi-repo session is not a repository, so asking
+ * `git.status` there returns `isRepo:false` and would blank the row. Instead
+ * every repo is queried and folded into one synthetic `GitStatusView` stored
+ * under the SAME key — which is what lets the sidebar, the strip and everything
+ * else keep reading `gitStatus[key]` with no idea any of this happened.
+ */
+async function pollStatusInto(
+  set: (fn: (s: RoxyStore) => Partial<RoxyStore>) => void,
+  key: string,
+  chatId: string,
+  chats: Chat[]
+): Promise<void> {
+  const chat = chats.find((c) => c.id === chatId)
+  const owner =
+    chat?.kind === 'sub' && chat.parentId ? chats.find((c) => c.id === chat.parentId) : chat
+
+  if (owner?.repos?.length) {
+    const repos = await api.git.statusMulti(owner.id)
+    // Empty means the session isn't composite after all (its links were
+    // cleared) - leave the last known state rather than blanking the row.
+    if (!repos.length) return
+    const agg = aggregateRepoStatus(repos)
+    // The PR chip has no single answer across N repos. Show the first repo that
+    // has one and let the panel enumerate the rest; a chip that silently picks
+    // a winner is better than no chip, but the panel is where the truth is.
+    const lead = repos.find((r) => r.isRepo && r.forge)?.forge ?? null
+    set((s) => ({
+      repoStatus: { ...s.repoStatus, [key]: repos },
+      gitStatus: {
+        ...s.gitStatus,
+        [key]: {
+          // The composite directory isn't a repo, but the WORKSTREAM is
+          // repo-backed, and that is what this flag gates in the UI.
+          isRepo: agg.repoCount > 0,
+          root: key,
+          branch: agg.branch,
+          dirty: agg.dirty,
+          changed: agg.changed,
+          ahead: agg.ahead,
+          behind: agg.behind,
+          hasUpstream: repos.some((r) => r.hasUpstream),
+          defaultBranch: repos.find((r) => r.defaultBranch)?.defaultBranch ?? null
+        }
+      },
+      forgeStatus: lead ? { ...s.forgeStatus, [key]: lead } : s.forgeStatus
+    }))
+    return
+  }
+
+  // One round trip for both. `forge.status` is cheap by construction: it
+  // returns local git state immediately and refreshes pull-request data in the
+  // background, so putting it on the 5s poll costs no network traffic.
+  const [status, forge] = await Promise.all([api.git.status(key), api.forge.status(key)])
+  set((s) => ({
+    gitStatus: { ...s.gitStatus, [key]: status },
+    forgeStatus: forge ? { ...s.forgeStatus, [key]: forge } : s.forgeStatus
+  }))
+}
 
 /**
  * Record a config change as the new GLOBAL default - the template every new
@@ -707,30 +809,65 @@ async function syncBranch(
   chatId: string,
   mode: 'pull' | 'reset'
 ): Promise<SyncOutcome> {
-  const state = get()
-  const chat = state.chats.find((c) => c.id === chatId)
-  const owner =
-    chat?.kind === 'sub' && chat.parentId
-      ? (state.chats.find((c) => c.id === chat.parentId) ?? chat)
-      : chat
-  const key = owner?.worktreePath ?? owner?.workspacePath
-  if (!owner || !key) return { ok: false, error: 'No workspace for this session.' }
+  const owner = syncOwner(get, chatId)
+  if ('error' in owner) return { ok: false, error: owner.error }
 
-  const busy =
-    !!state.sendingChats[owner.id] || remoteTurns.has(owner.id) || subagentTurns.has(owner.id)
-  if (busy) {
-    return {
-      ok: false,
-      error: 'This session is mid-turn - stop it or let it finish first.'
-    }
-  }
+  const key = owner.chat.worktreePath ?? owner.chat.workspacePath
+  if (!key) return { ok: false, error: 'No workspace for this session.' }
 
   const r = mode === 'pull' ? await api.forge.pull(key) : await api.forge.reset(key)
   // Refresh on FAILURE too: a fetch happened either way, so the behind count on
   // screen is now stale even when the merge was refused. Leaving "3 behind"
   // under an error message that says the update didn't happen is confusing in
   // exactly the moment the user needs to trust the number.
-  await get().refreshGitStatus(owner.id)
+  await get().refreshGitStatus(owner.chat.id)
+  return r
+}
+
+/**
+ * Resolve which session a sync acts on, and refuse if it can't run right now.
+ *
+ * Split out of `syncBranch` so the multi-repo path enforces the SAME two
+ * guards. They are the interesting part of both functions, and a second copy
+ * that forgot the mid-turn check would reset a tree an agent is editing.
+ */
+function syncOwner(get: () => RoxyStore, chatId: string): { chat: Chat } | { error: string } {
+  const state = get()
+  const chat = state.chats.find((c) => c.id === chatId)
+  const owner =
+    chat?.kind === 'sub' && chat.parentId
+      ? (state.chats.find((c) => c.id === chat.parentId) ?? chat)
+      : chat
+  if (!owner) return { error: 'No workspace for this session.' }
+
+  const busy =
+    !!state.sendingChats[owner.id] || remoteTurns.has(owner.id) || subagentTurns.has(owner.id)
+  if (busy) return { error: 'This session is mid-turn - stop it or let it finish first.' }
+  return { chat: owner }
+}
+
+/**
+ * The multi-repo counterpart of `syncBranch`.
+ *
+ * Kept separate rather than folded in behind a branch because the RESULT shapes
+ * differ in kind: one repo answers with a single ok/error, N repos answer with
+ * a mix that the UI has to enumerate. Collapsing them would mean inventing a
+ * single `ok` for "two updated, one failed", which is the exact lie this
+ * feature exists to avoid.
+ */
+async function syncAllRepos(
+  get: () => RoxyStore,
+  chatId: string,
+  mode: 'pull' | 'reset'
+): Promise<MultiSyncOutcome> {
+  const owner = syncOwner(get, chatId)
+  if ('error' in owner) return { repos: [], error: owner.error }
+
+  const r =
+    mode === 'pull'
+      ? await api.forge.pullMulti(owner.chat.id)
+      : await api.forge.resetMulti(owner.chat.id)
+  await get().refreshGitStatus(owner.chat.id)
   return r
 }
 
@@ -766,6 +903,8 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
   gitAvailable: null,
   gitStatus: {},
   forgeStatus: {},
+  repoStatus: {},
+  projectRepos: {},
   worktrees: {},
   gitBranches: {},
   usageStats: null,
@@ -1026,16 +1165,24 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
     }
     if (!get().gitAvailable) return
     try {
-      // One round trip for both. `forge.status` is cheap by construction: it
-      // returns local git state immediately and refreshes pull-request data in
-      // the background, so putting it on the 5s poll costs no network traffic.
-      const [status, forge] = await Promise.all([api.git.status(key), api.forge.status(key)])
-      set((s) => ({
-        gitStatus: { ...s.gitStatus, [key]: status },
-        forgeStatus: forge ? { ...s.forgeStatus, [key]: forge } : s.forgeStatus
-      }))
+      await pollStatusInto(set, key, chatId, get().chats)
     } catch {
       // Best-effort: a transient git failure leaves the last known state.
+    }
+  },
+
+  ensureProjectRepos: async (workspacePath) => {
+    // Probed once per project: the answer is a filesystem scan, and this is
+    // read on every strip render.
+    if (!workspacePath) return
+    if (workspacePath in get().projectRepos) return
+    if (!get().gitAvailable) return
+    try {
+      const r = await api.git.projectRepos(workspacePath)
+      set((s) => ({ projectRepos: { ...s.projectRepos, [workspacePath]: r.layout === 'multi' } }))
+    } catch {
+      // Leave it unprobed rather than caching a false: a transient failure must
+      // not permanently hide the strip for this project.
     }
   },
 
@@ -1055,13 +1202,13 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
       }
       if (!get().gitAvailable) return
 
-      // One entry per distinct cwd. `statusKeyForSession` returns null for
-      // sub-sessions (they inherit their parent's workstream) and for sessions
-      // with no folder at all, and Set collapses the rest.
-      const keys = new Set<string>()
+      // One entry per distinct cwd, remembering the session it came from:
+      // a composite key can only be resolved through its session's `repos`
+      // links, since the composite root is not itself a repository.
+      const keys = new Map<string, string>()
       for (const c of get().chats) {
         const key = statusKeyForSession(c)
-        if (key) keys.add(key)
+        if (key && !keys.has(key)) keys.set(key, c.id)
       }
       if (!keys.size) return
 
@@ -1069,13 +1216,9 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
       // anyway, and firing N spawns at once on a machine with a dozen sessions is
       // a visible stall on the very interaction (opening the app) this is meant
       // to be invisible during.
-      for (const key of keys) {
+      for (const [key, chatId] of keys) {
         try {
-          const [status, forge] = await Promise.all([api.git.status(key), api.forge.status(key)])
-          set((s) => ({
-            gitStatus: { ...s.gitStatus, [key]: status },
-            forgeStatus: forge ? { ...s.forgeStatus, [key]: forge } : s.forgeStatus
-          }))
+          await pollStatusInto(set, key, chatId, get().chats)
         } catch {
           // Best-effort per session: a deleted worktree must not stop the sweep
           // and leave every row below it blank.
@@ -1102,6 +1245,9 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
 
   pullBranch: (chatId) => syncBranch(get, chatId, 'pull'),
   resetBranch: (chatId) => syncBranch(get, chatId, 'reset'),
+
+  pullAllRepos: (chatId) => syncAllRepos(get, chatId, 'pull'),
+  resetAllRepos: (chatId) => syncAllRepos(get, chatId, 'reset'),
 
   refreshWorktrees: async (workspacePath) => {
     if (!workspacePath || !get().gitAvailable) return
@@ -1392,10 +1538,23 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
       }
     }
 
+    // A folder OF repos reports `isRepo:false` (it isn't one itself), so ask
+    // separately - otherwise exactly the multi-repo workspaces this feature
+    // exists for would silently never get a workstream.
+    let hasRepos = false
+    if (!status?.isRepo && get().gitAvailable) {
+      try {
+        hasRepos = (await api.git.projectRepos(workspacePath)).layout === 'multi'
+      } catch {
+        hasRepos = false
+      }
+    }
+
     return shouldAutoWorkstream({
       autoWorkstream: true,
       gitAvailable: get().gitAvailable,
-      isRepo: status?.isRepo
+      isRepo: status?.isRepo,
+      hasRepos
     })
   },
 

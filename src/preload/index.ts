@@ -242,6 +242,8 @@ const roxy: RoxyApi = {
   git: {
     available: () => ipcRenderer.invoke(CHANNELS.gitAvailable),
     status: (cwd) => ipcRenderer.invoke(CHANNELS.gitStatus, cwd),
+    statusMulti: (sessionId) => ipcRenderer.invoke(CHANNELS.gitStatusMulti, sessionId),
+    projectRepos: (workspacePath) => ipcRenderer.invoke(CHANNELS.gitProjectRepos, workspacePath),
     branches: (cwd) => ipcRenderer.invoke(CHANNELS.gitBranches, cwd),
     worktrees: (cwd) => ipcRenderer.invoke(CHANNELS.gitWorktrees, cwd),
     createWorktree: (input) => ipcRenderer.invoke(CHANNELS.gitCreateWorktree, input),
@@ -254,6 +256,8 @@ const roxy: RoxyApi = {
     push: (cwd) => ipcRenderer.invoke(CHANNELS.forgePush, cwd),
     pull: (cwd) => ipcRenderer.invoke(CHANNELS.forgePull, cwd),
     reset: (cwd) => ipcRenderer.invoke(CHANNELS.forgeReset, cwd),
+    pullMulti: (sessionId) => ipcRenderer.invoke(CHANNELS.forgePullMulti, sessionId),
+    resetMulti: (sessionId) => ipcRenderer.invoke(CHANNELS.forgeResetMulti, sessionId),
     createUrl: (cwd) => ipcRenderer.invoke(CHANNELS.forgeCreateUrl, cwd),
     listHosts: () => ipcRenderer.invoke(CHANNELS.forgeListHosts),
     setHostKind: (host, kind) => ipcRenderer.invoke(CHANNELS.forgeSetHostKind, host, kind)

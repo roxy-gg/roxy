@@ -25,6 +25,7 @@ import type {
   UsageRecord,
   WorktreeIntent
 } from '../../shared/types'
+import { parseRepoLinks, serializeRepoLinks, type RepoLink } from '../../shared/repos'
 import type { CreateChatInput, CreateLoopInput } from '../../shared/api'
 import {
   parseReasoningEffort,
@@ -62,6 +63,7 @@ interface ChatRow {
   workspace_path: string | null
   worktree_path: string | null
   worktree_pending: string | null
+  repos: string | null
   branch: string | null
   dev_port: number | null
   parent_id: string | null
@@ -541,6 +543,7 @@ function rowToChat(row: ChatRow): Chat {
     contextLimit: row.context_limit,
     workspacePath: row.workspace_path,
     worktreePath: row.worktree_path,
+    repos: repoLinksOrNull(row.repos),
     worktreePending: parseWorktreeIntent(row.worktree_pending),
     branch: row.branch,
     devPort: row.dev_port,
@@ -580,6 +583,18 @@ export function getChatWorkspace(chatId: string): string | null {
     | { workspace_path: string | null }
     | undefined
   return row?.workspace_path ?? null
+}
+
+/**
+ * Decode `chats.repos` to the shape `Chat` wants.
+ *
+ * Empty collapses to null rather than `[]`, so "single-repo" has exactly ONE
+ * spelling on the way out. Two spellings would mean every `isMultiRepo` check
+ * has a second thing to get wrong.
+ */
+function repoLinksOrNull(json: string | null): RepoLink[] | null {
+  const links = parseRepoLinks(json)
+  return links.length ? links : null
 }
 
 /** Decode the parked worktree intent, tolerating anything malformed. */
@@ -624,12 +639,28 @@ export function listDevPorts(): number[] {
   return rows.map((r) => r.dev_port)
 }
 
-/** Every session currently pointing at a worktree (for prune bookkeeping). */
+/**
+ * Every worktree path a session currently claims, for prune bookkeeping.
+ *
+ * CRITICAL: this returns composite CHILDREN as well as the paths stored in
+ * `worktree_path`. `git worktree list` reports the real per-repo checkouts
+ * (`<composite>/backend`), never the composite root — so a version of this that
+ * returned only the roots would make every live multi-repo worktree look
+ * unclaimed, and prune would delete a running session's code.
+ *
+ * The composite root is included too: it is what `chatsUsingWorktree` matches
+ * on, and a caller comparing against either spelling must find it.
+ */
 export function listWorktreePaths(): string[] {
   const rows = getDb()
-    .prepare('SELECT DISTINCT worktree_path FROM chats WHERE worktree_path IS NOT NULL')
-    .all() as { worktree_path: string }[]
-  return rows.map((r) => r.worktree_path)
+    .prepare('SELECT worktree_path, repos FROM chats WHERE worktree_path IS NOT NULL')
+    .all() as { worktree_path: string; repos: string | null }[]
+  const out = new Set<string>()
+  for (const r of rows) {
+    out.add(r.worktree_path)
+    for (const link of parseRepoLinks(r.repos)) out.add(link.worktreePath)
+  }
+  return [...out]
 }
 
 /** Sessions pointing at a given worktree path (used before removing one). */
@@ -649,13 +680,22 @@ export function chatsUsingWorktree(worktreePath: string): Chat[] {
  */
 export function setChatWorktree(
   chatId: string,
-  input: { worktreePath?: string | null; branch?: string | null; devPort?: number | null }
+  input: {
+    worktreePath?: string | null
+    branch?: string | null
+    devPort?: number | null
+    repos?: RepoLink[] | null
+  }
 ): void {
   const sets: string[] = []
   const values: (string | number | null)[] = []
   if ('worktreePath' in input) {
     sets.push('worktree_path = ?')
     values.push(input.worktreePath ?? null)
+  }
+  if ('repos' in input) {
+    sets.push('repos = ?')
+    values.push(serializeRepoLinks(input.repos))
   }
   if ('branch' in input) {
     sets.push('branch = ?')

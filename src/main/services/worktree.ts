@@ -16,10 +16,13 @@ import {
   normalizeBranchPrefix
 } from '../../shared/branch'
 import { slugToBranchSegment } from '../../shared/slugs'
+import { isMultiRepo, planRepoLinks, sharedBranch, type RepoLink } from '../../shared/repos'
 import { existsSync, readFileSync } from 'node:fs'
+import { promises as fsp } from 'node:fs'
 import path from 'node:path'
 import * as repo from '../db/repo'
 import * as git from './git'
+import { discoverRepos } from './workspace'
 import { ensureDevPort } from './ports'
 import { startBackground, killSessionBackground } from '../harness'
 import { activeBackgroundSubChatIds, hasActiveBackgroundJobs } from './background-tasks'
@@ -96,6 +99,11 @@ export interface MaterializeResult {
   ok: boolean
   worktreePath?: string
   branch?: string
+  /**
+   * The repos inside a composite worktree, or undefined for a single-repo
+   * session. Undefined and `[]` both mean "not composite"; see shared/repos.ts.
+   */
+  repos?: RepoLink[]
   /** Set when we fell back to the project folder; safe to show the user. */
   error?: string
 }
@@ -137,7 +145,8 @@ export async function materializePendingWorktree(chatId: string): Promise<Materi
 
   repo.setChatWorktree(chatId, {
     worktreePath: result.worktreePath,
-    branch: result.branch ?? null
+    branch: result.branch ?? null,
+    repos: result.repos ?? null
   })
 
   // Give the session its own dev port before the setup script runs, so an
@@ -168,7 +177,7 @@ export async function materializePendingWorktree(chatId: string): Promise<Materi
   return result
 }
 
-/** Resolve the repo, pick a branch, and create/attach the worktree. */
+/** Resolve the repo(s), pick a branch, and create/attach the worktree(s). */
 async function createForWorkspace(
   workspace: string,
   intent: WorktreeIntent,
@@ -177,7 +186,19 @@ async function createForWorkspace(
   if (!(await git.isGitAvailable())) {
     return { ok: false, error: 'Git isn’t installed, so this session runs in the project folder.' }
   }
-  const root = await git.repoRoot(workspace)
+
+  // How the project is shaped decides everything below. `single` covers a
+  // folder that IS a repo and a folder INSIDE one, which is every project that
+  // worked before this feature existed.
+  const { layout, roots } = discoverRepos(workspace)
+  if (layout === 'none') {
+    return { ok: false, error: 'This folder isn’t a git repository, so the session runs in place.' }
+  }
+  if (layout === 'multi') {
+    return createComposite(workspace, roots, intent, title)
+  }
+
+  const root = (await git.repoRoot(workspace)) ?? roots[0]
   if (!root) {
     return { ok: false, error: 'This folder isn’t a git repository, so the session runs in place.' }
   }
@@ -215,6 +236,105 @@ async function createForWorkspace(
   }
 }
 
+/**
+ * Build a COMPOSITE worktree: one directory, one checkout per repo, one branch
+ * name shared by all of them.
+ *
+ * Three rules, each of which is a bug if broken:
+ *
+ *   - the branch name is chosen ONCE, against every repo at once, so the whole
+ *     set can share it (`branchNameForTitle` takes the array for this reason);
+ *   - the composite root is reserved ONCE and children go in verbatim, so a
+ *     name collision can never split one session across two directories;
+ *   - PARTIAL SUCCESS IS SUCCESS. A repo with no commits, a locked index, a
+ *     branch someone already checked out — any of these skips that repo and
+ *     keeps the rest. This runs on the turn path, where the standing rule is
+ *     that git trouble degrades rather than failing the turn, and refusing to
+ *     start because one of four repos is empty would be exactly that failure.
+ *
+ * Only a total wipeout (no repo produced a worktree) falls back to running in
+ * the project folder.
+ */
+async function createComposite(
+  workspace: string,
+  roots: string[],
+  intent: WorktreeIntent,
+  title: string
+): Promise<MaterializeResult> {
+  try {
+    // `attach`/`fromBranch` name one branch; `new` derives one free everywhere.
+    const requested = intent.branch?.trim()
+    if (intent.mode !== 'new' && !requested) {
+      return { ok: false, error: 'No branch was given for the worktree.' }
+    }
+    const branch = requested || (await git.branchNameForTitle(roots, title))
+
+    // Named for the PROJECT, not for any one repo — the composite holds them all.
+    const compositeRoot = await git.reserveWorktreePath(git.worktreePathFor(workspace, branch))
+    const planned = planRepoLinks(compositeRoot, roots, branch, path)
+
+    const links: RepoLink[] = []
+    const skipped: string[] = []
+    // Serial, not parallel: N concurrent checkouts contend on the same disk and
+    // each one already serializes behind its own repo lock, so the wall-clock
+    // win is small and the failure modes (partial trees, interleaved errors)
+    // are much worse.
+    for (const link of planned) {
+      // `new` CREATES the branch (even when the name was given explicitly);
+      // fromBranch/attach check out one that already exists. Mixing these up
+      // would make a new workstream fail in every repo that has never seen the
+      // name — which is all of them.
+      const r =
+        intent.mode === 'new'
+          ? await git.createWorktree({
+              repoRoot: link.root,
+              branch,
+              // A fork's base commit exists only in the repo it came from, so
+              // it is resolved PER REPO and simply omitted where it is unknown;
+              // that repo then branches off its own default, which is the only
+              // sensible base available to it.
+              baseRef: intent.baseRef?.trim()
+                ? ((await git.resolveCommit(link.root, intent.baseRef.trim())) ?? undefined)
+                : undefined,
+              path: link.worktreePath,
+              exactPath: true
+            })
+          : await git.attachWorktree({
+              repoRoot: link.root,
+              branch,
+              path: link.worktreePath,
+              exactPath: true
+            })
+
+      if (r.ok && r.worktree) {
+        links.push({ ...link, branch: r.worktree.branch ?? branch })
+      } else {
+        // Recorded, not thrown: the other repos still get their checkout.
+        skipped.push(link.name)
+        console.warn(`[worktree] skipped ${link.name}: ${r.error ?? 'unknown error'}`)
+      }
+    }
+
+    if (!links.length) {
+      return {
+        ok: false,
+        error:
+          'None of the repos in this folder could be checked out, so the session runs in place.'
+      }
+    }
+
+    return {
+      ok: true,
+      worktreePath: compositeRoot,
+      branch: sharedBranch(links) ?? branch,
+      repos: links,
+      error: skipped.length ? `Left out of this workstream: ${skipped.join(', ')}.` : undefined
+    }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+}
+
 export interface PruneCandidate {
   path: string
   branch: string | null
@@ -246,27 +366,43 @@ export async function pruneWorktrees(
 ): Promise<PruneResult> {
   const empty: PruneResult = { ok: false, candidates: [], removed: [], failed: [] }
   if (!(await git.isGitAvailable())) return { ...empty, error: 'Git isn’t installed.' }
-  const root = await git.repoRoot(workspace)
-  if (!root) return { ...empty, error: 'This folder isn’t a git repository.' }
 
-  const worktrees = await git.listWorktrees(root)
+  const { layout, roots } = discoverRepos(workspace)
+  if (layout === 'none' || !roots.length) {
+    return { ...empty, error: 'This folder isn’t a git repository.' }
+  }
+
   // Normalized so a case/separator difference doesn't make a live worktree look
-  // orphaned and get deleted out from under a session.
+  // orphaned and get deleted out from under a session. `listWorktreePaths`
+  // returns composite CHILDREN as well as roots, which is essential here: git
+  // reports the children, so comparing against roots alone would mark every
+  // live multi-repo checkout as garbage.
   const claimed = new Set(repo.listWorktreePaths().map(normalizePath))
-  const candidates = worktrees
-    .filter((w) => !w.isMain && !claimed.has(normalizePath(w.path)))
-    .map((w) => ({ path: w.path, branch: w.branch }))
 
-  if (opts.dryRun !== false) return { ok: true, candidates, removed: [], failed: [] }
+  // Each candidate remembers the repo it belongs to, because that is the only
+  // cwd from which git will agree to remove it.
+  const candidates: (PruneCandidate & { root: string })[] = []
+  const seen = new Set<string>()
+  for (const root of roots) {
+    for (const w of await git.listWorktrees(root)) {
+      const key = normalizePath(w.path)
+      if (w.isMain || claimed.has(key) || seen.has(key)) continue
+      seen.add(key)
+      candidates.push({ path: w.path, branch: w.branch, root })
+    }
+  }
+
+  const reported = candidates.map((c) => ({ path: c.path, branch: c.branch }))
+  if (opts.dryRun !== false) return { ok: true, candidates: reported, removed: [], failed: [] }
 
   const removed: string[] = []
   const failed: { path: string; error: string }[] = []
   for (const c of candidates) {
-    const r = await git.removeWorktree(c.path, { force: opts.force })
+    const r = await git.removeWorktree(c.path, { force: opts.force, cwd: c.root })
     if (r.ok) removed.push(c.path)
     else failed.push({ path: c.path, error: r.error ?? 'Unknown error' })
   }
-  return { ok: true, candidates, removed, failed }
+  return { ok: true, candidates: reported, removed, failed }
 }
 
 /**
@@ -294,6 +430,13 @@ export async function renameWorkstreamBranch(
   const problem = branchNameError(next)
   if (problem) return { ok: false, error: problem }
 
+  // Multi-repo: every repo carries the same branch name, so the rename has to
+  // land in all of them or the set diverges and no single name describes the
+  // session any more.
+  if (isMultiRepo(owner.repos)) {
+    return renameComposite(owner.id, owner.repos ?? [], next)
+  }
+
   const from = owner.branch ?? (await git.currentBranch(owner.worktreePath))
   if (!from) return { ok: false, error: 'Could not determine the current branch.' }
   if (from === next) return { ok: true, branch: next }
@@ -314,6 +457,58 @@ export async function renameWorkstreamBranch(
   if (!r.ok) return { ok: false, error: r.error }
 
   repo.setChatWorktree(owner.id, { branch: next })
+  return { ok: true, branch: next }
+}
+
+/**
+ * Rename the shared branch across every repo of a composite workstream.
+ *
+ * Pre-flight then apply, and ROLL BACK on partial failure. The alternative —
+ * renaming what we can and reporting the rest — leaves the session with three
+ * repos on two different branch names, which breaks the invariant every
+ * multi-repo surface reads from (`sharedBranch` returns null, the strip has no
+ * name to show, and a later rename has no single `from` to work off).
+ *
+ * The pushed-branch check is a veto by ANY repo, for the same reason it is a
+ * veto at all: a local rename strands the remote branch under its old name, and
+ * one stranded remote is enough to desynchronize the set.
+ */
+async function renameComposite(
+  chatId: string,
+  links: RepoLink[],
+  next: string
+): Promise<{ ok: boolean; branch?: string; error?: string }> {
+  // Pre-flight everything before touching anything, so the common refusals cost
+  // no partial state at all.
+  for (const link of links) {
+    const from = link.branch
+    if (!from) {
+      return { ok: false, error: `Could not determine the current branch in ${link.name}.` }
+    }
+    if (from === next) continue
+    if (await git.hasUpstreamBranch(link.root, from)) {
+      return {
+        ok: false,
+        error: `"${from}" has already been pushed in ${link.name} - rename it on the remote instead.`
+      }
+    }
+  }
+
+  const renamed: { root: string; from: string }[] = []
+  for (const link of links) {
+    const from = link.branch as string
+    if (from === next) continue
+    const r = await git.renameBranch(link.root, from, next)
+    if (!r.ok) {
+      // Undo the ones that already moved, so the set stays consistent.
+      for (const back of renamed) await git.renameBranch(back.root, next, back.from)
+      return { ok: false, error: r.error ?? `Could not rename the branch in ${link.name}.` }
+    }
+    renamed.push({ root: link.root, from })
+  }
+
+  const updated = links.map((l) => ({ ...l, branch: next }))
+  repo.setChatWorktree(chatId, { branch: next, repos: updated })
   return { ok: true, branch: next }
 }
 
@@ -343,11 +538,27 @@ export async function syncBranchToTitle(
     // Only ever reclaim a name we generated. A branch the user (or the agent,
     // earlier) chose deliberately is not ours to rewrite.
     if (!isPlaceholderBranch(chat.branch, branchPrefixSetting())) return { renamed: false }
-    if (await git.hasUpstreamBranch(chat.worktreePath, chat.branch)) return { renamed: false }
 
     // An unusable title (emoji-only, say) makes branchNameForTitle fall back to
     // hex; swapping one generated name for another is churn, not information.
     if (!slugToBranchSegment(title)) return { renamed: false }
+
+    // Multi-repo: pick a name free in EVERY repo, then let renameComposite do
+    // the pushed-branch veto and the all-or-nothing rename.
+    if (isMultiRepo(chat.repos)) {
+      const links = chat.repos ?? []
+      const next = await git.branchNameForTitle(
+        links.map((l) => l.root),
+        title
+      )
+      if (!next || next === chat.branch) return { renamed: false }
+      const r = await renameComposite(chat.id, links, next)
+      if (!r.ok) return { renamed: false }
+      emitSessionsUpdated({ reason: 'branch', sessionIds: [chat.id], statusKey: chat.worktreePath })
+      return { renamed: true, branch: next }
+    }
+
+    if (await git.hasUpstreamBranch(chat.worktreePath, chat.branch)) return { renamed: false }
 
     const next = await git.branchNameForTitle(chat.worktreePath, title)
     if (!next || next === chat.branch) return { renamed: false }
@@ -426,6 +637,15 @@ export async function removeWorktreeForChat(
   // kill has to have actually happened, not merely been requested.
   await stopSessionProcesses(chatId)
 
+  // A composite worktree is N real worktrees in one directory, and the
+  // directory itself is not a repo — so there is nothing to remove AT `target`.
+  // Each child is removed by the repo that owns it (git refuses otherwise:
+  // "fatal: <path> is not a working tree"), and the empty parent is cleaned up
+  // by hand afterwards, because `git worktree remove` never touches it.
+  if (isMultiRepo(chat.repos)) {
+    return removeComposite(target, chat.repos ?? [], opts.force ?? false)
+  }
+
   const r = await git.removeWorktree(target, { force: opts.force ?? false })
   if (!r.ok) {
     return {
@@ -433,6 +653,48 @@ export async function removeWorktreeForChat(
       removed: false,
       error: r.error ?? 'The workstream has uncommitted changes, so its folder was left in place.'
     }
+  }
+  return { ok: true, removed: true }
+}
+
+/**
+ * Take down a composite worktree, one repo at a time.
+ *
+ * Partial removal is a normal outcome and is reported as such: `force` is false
+ * by default, so a repo with uncommitted work keeps its checkout while its
+ * clean siblings go. The composite root is only removed once EVERY child is
+ * gone — deleting it earlier would take the dirty tree with it, which is the
+ * one thing this whole path exists to prevent.
+ */
+async function removeComposite(
+  compositeRoot: string,
+  links: RepoLink[],
+  force: boolean
+): Promise<{ ok: boolean; removed: boolean; error?: string }> {
+  const kept: string[] = []
+  for (const link of links) {
+    // `cwd` is what makes this work: the owning repo, not the worktree and not
+    // the composite root.
+    const r = await git.removeWorktree(link.worktreePath, { force, cwd: link.root })
+    if (!r.ok) kept.push(link.name)
+  }
+
+  if (kept.length) {
+    return {
+      ok: false,
+      removed: false,
+      error: `Left in place (uncommitted changes): ${kept.join(', ')}.`
+    }
+  }
+
+  // Every checkout is gone; the parent is an empty directory git knows nothing
+  // about. `rmdir` (not a recursive delete) on purpose — if anything unexpected
+  // is still in there, it fails and leaves the contents alone for prune to
+  // report, rather than silently deleting whatever it found.
+  try {
+    await fsp.rmdir(compositeRoot)
+  } catch {
+    /* not empty, or already gone - prune reports it later */
   }
   return { ok: true, removed: true }
 }

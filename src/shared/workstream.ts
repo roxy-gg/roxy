@@ -74,6 +74,11 @@ export function workstreamStripView(input: {
   findChat: (id: string) => StripSession | null
   gitAvailable: boolean | null
   status: StripGitStatus | undefined
+  /**
+   * True when the PROJECT FOLDER is a folder OF repos (backend/, frontend/,
+   * ...) rather than a repository itself. Probed once per project.
+   */
+  projectHasRepos?: boolean
 }): StripView | null {
   const { chat, findChat, gitAvailable, status } = input
   if (!chat) return null
@@ -97,7 +102,34 @@ export function workstreamStripView(input: {
   // something true to say. It does NOT outrank a status that actually arrived
   // saying `isRepo: false`: that means the worktree went away underneath us, and
   // the strip should go quiet.
-  if (status ? !status.isRepo : !owner.worktreePath) return null
+  //
+  // `projectHasRepos` is the third source of proof, and a MULTI-REPO project
+  // depends on it entirely: a folder of repos is not itself a repository, so
+  // its status legitimately reports `isRepo: false` forever. Without this the
+  // strip would be permanently hidden for exactly the workspaces multi-repo
+  // support was built for.
+  //
+  // Order matters, and the multi-repo case is why it is subtle.
+  //
+  // For a SINGLE-repo session an arrived `isRepo: false` is conclusive: the
+  // checkout was deleted underneath us, so the strip goes quiet.
+  //
+  // For a MULTI-repo session it proves nothing. A composite worktree is a plain
+  // directory holding one real worktree per repo, so `git status` on the
+  // composite root reports `isRepo: false` for a perfectly healthy workstream -
+  // it is not a repository and never was. Treating that as "the worktree
+  // vanished" hides the strip for every composite session the moment a plain
+  // status lands on its key, which is exactly what happened in practice.
+  //
+  // So `projectHasRepos` outranks a false status for a multi-repo project,
+  // whether or not the worktree exists. The vanished-composite case is still
+  // caught, just by the honest signal rather than this one: `repoStatus` from
+  // `statusMulti` reports every child as `isRepo: false`, which drives
+  // `repoCount === 0` and blanks the strip's contents.
+  const proven = status
+    ? status.isRepo || !!input.projectHasRepos
+    : !!owner.worktreePath || !!input.projectHasRepos
+  if (!proven) return null
 
   // A session that has ASKED for a workstream is not in the default one. Saying
   // "default workstream" there is not merely vague, it is wrong in the direction
@@ -158,19 +190,26 @@ function pendingBranch(intent: WorktreeIntent | null | undefined): string | null
  * inconsistent with the dropdown right below it.
  *
  * Both guards are correctness, not caution:
- *   - a non-repo has nothing to branch from, and `git worktree add` would fail
- *     on the turn path;
+ *   - a folder with no repo in it has nothing to branch from, and
+ *     `git worktree add` would fail on the turn path;
  *   - without a git binary the same is true, and `gitAvailable === null` means
  *     "not probed yet", which must not be read as "no".
+ *
+ * `isRepo` is false for a MULTI-REPO project - the folder itself isn't a
+ * repository, its children are - so `hasRepos` carries that case. Without it
+ * exactly the people this feature is for (a workspace of sibling repos) would
+ * still get no workstream by default, which was the original bug.
  */
 export function shouldAutoWorkstream(input: {
   autoWorkstream: boolean
   gitAvailable: boolean | null
   isRepo: boolean | undefined
+  /** True when the project is a folder OF repos (see shared/repos.ts). */
+  hasRepos?: boolean
 }): boolean {
   if (!input.autoWorkstream) return false
   if (input.gitAvailable !== true) return false
-  return input.isRepo === true
+  return input.isRepo === true || input.hasRepos === true
 }
 
 /**

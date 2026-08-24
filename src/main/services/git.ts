@@ -32,6 +32,7 @@ import {
   placeholderBranchName
 } from '../../shared/branch'
 import * as repo from '../db/repo'
+import type { RepoSyncTarget } from '../../shared/api'
 
 /** How long any single git command may run before it's killed. */
 const GIT_TIMEOUT_MS = 30_000
@@ -516,6 +517,115 @@ export async function status(cwd: string): Promise<GitStatus | null> {
 // ---------------------------------------------------------------------------
 
 /**
+ * The ref a branch should sync against, even when it tracks nothing.
+ *
+ * The upstream is the right answer whenever there is one - it is what the user
+ * pushed to and what ahead/behind already measure against.
+ *
+ * The fallback is the whole point of this function. A workstream branch is
+ * created locally and has no upstream until its first push, so `st.upstream` is
+ * null for the entire period when "my branch is stale, give me what's on main"
+ * is MOST likely to be true. Reporting "no upstream" there is technically
+ * accurate and practically useless: the branch has an obvious base
+ * (`origin/main`), and that is what the user means by "update from main".
+ *
+ * Returns null only when there is genuinely nothing to sync to: no base branch,
+ * or a base that is the branch itself.
+ */
+export async function syncRefFor(
+  cwd: string,
+  opts: { branch?: string | null; upstream?: string | null } = {}
+): Promise<{ ref: string; viaUpstream: boolean; local: boolean } | null> {
+  if (!cwd) return null
+  if (opts.upstream) return { ref: opts.upstream, viaUpstream: true, local: false }
+
+  // The branch this workstream was cut from, as recorded at creation - the
+  // honest answer to "main" for a repo whose default is `develop` or `trunk`.
+  const branch = opts.branch ?? (await currentBranch(cwd))
+  const base = (branch ? await baseBranchFor(cwd, branch) : null) ?? (await defaultBranch(cwd))
+  if (!base) return null
+
+  // Prefer the REMOTE base. A local `main` can be months behind the origin it
+  // tracks, and resetting onto that would look like it worked while quietly
+  // restoring old code - the exact failure this button exists to prevent.
+  const remoteRef = `origin/${base}`
+  const onRemote = await git(
+    ['rev-parse', '--verify', '--quiet', `refs/remotes/${remoteRef}^{commit}`],
+    cwd
+  )
+  if (onRemote.ok && onRemote.stdout.trim()) {
+    return { ref: remoteRef, viaUpstream: false, local: false }
+  }
+
+  // No remote copy of the base. If the repo has NO REMOTE AT ALL, the local
+  // branch is not a stale mirror of anything - it is the only truth there is,
+  // and refusing to sync with it strands every local-only repo (scratch
+  // projects, anything not yet pushed) with no way back to main. The staleness
+  // argument above is about a local branch DIVERGING from its remote; with no
+  // remote there is nothing for it to diverge from.
+  //
+  // When a remote DOES exist but lacks this base, stay silent: that means the
+  // base was deleted or renamed upstream, and syncing to a local leftover is
+  // the stale-restore failure, not an escape from it.
+  if (await remoteUrl(cwd)) return null
+
+  const onLocal = await git(
+    ['rev-parse', '--verify', '--quiet', `refs/heads/${base}^{commit}`],
+    cwd
+  )
+  if (!onLocal.ok || !onLocal.stdout.trim()) return null
+  // Syncing a branch to itself is a guaranteed no-op, so offer nothing rather
+  // than a button that can only ever report "already up to date".
+  if (base === branch) return null
+  return { ref: base, viaUpstream: false, local: true }
+}
+
+/**
+ * How far `cwd`'s branch is from `ref`, as a pair of commit counts.
+ *
+ * `rev-list --left-right --count A...B` is one command for both numbers, and
+ * uses the merge base - so "behind" means commits actually missing rather than
+ * every commit since the branches diverged.
+ */
+async function distanceFrom(cwd: string, ref: string): Promise<{ ahead: number; behind: number }> {
+  const r = await git(['rev-list', '--left-right', '--count', `${ref}...HEAD`], cwd)
+  if (!r.ok) return { ahead: 0, behind: 0 }
+  const m = /(\d+)\s+(\d+)/.exec(r.stdout.trim())
+  // Left is the ref, right is HEAD: left-only commits are what we're BEHIND.
+  return m ? { behind: Number(m[1]), ahead: Number(m[2]) } : { ahead: 0, behind: 0 }
+}
+
+/**
+ * Everything the UI needs to offer a sync for one repo, or null when it can't.
+ *
+ * Costs one extra git command beyond `status` (the ahead/behind count) and only
+ * when the branch has no upstream, so the common single-repo case is unchanged.
+ */
+export async function syncTargetFor(cwd: string): Promise<RepoSyncTarget | null> {
+  const st = await status(cwd)
+  if (!st?.branch) return null
+
+  const target = await syncRefFor(cwd, { branch: st.branch, upstream: st.upstream })
+  if (!target) return null
+
+  // With an upstream, status already counted the distance - don't pay twice.
+  const { ahead, behind } = target.viaUpstream
+    ? { ahead: st.ahead, behind: st.behind }
+    : await distanceFrom(cwd, target.ref)
+
+  return {
+    ref: target.ref,
+    viaUpstream: target.viaUpstream,
+    ahead,
+    behind,
+    changed: st.changed,
+    // `ahead === 0` is the honest predicate for whether a fast-forward can
+    // succeed; see the note in forge/index.ts on why it is not `behind > 0`.
+    canFastForward: ahead === 0
+  }
+}
+
+/**
  * Fast-forward the checked-out branch onto its upstream.
  *
  * Explicitly NOT `git pull`. `pull` is two operations wearing one name, and
@@ -535,27 +645,43 @@ export async function pullFastForward(cwd: string): Promise<SyncResult> {
   if (!cwd) return { ok: false, error: 'pull: missing cwd' }
   const st = await status(cwd)
   if (!st?.branch) return { ok: false, error: 'Not on a branch (detached HEAD).' }
-  if (!st.upstream) return { ok: false, error: `"${st.branch}" has no upstream to pull from.` }
+
+  // Falls back to `origin/<base>` when the branch tracks nothing, so a
+  // never-pushed workstream can still catch up with main. See `syncRefFor`.
+  const target = await syncRefFor(cwd, { branch: st.branch, upstream: st.upstream })
+  if (!target) {
+    return { ok: false, error: `"${st.branch}" has nothing to update from.` }
+  }
 
   // Fetch first so "behind" is measured against what the server has NOW, not
-  // whatever the last poll happened to see.
-  const remote = (await upstreamRemote(cwd, st.branch)) ?? 'origin'
-  const fetched = await fetchOrigin(cwd, remote)
-  if (!fetched.ok) return { ok: false, error: cleanGitError(fetched, `Could not reach ${remote}`) }
+  // whatever the last poll happened to see. Skipped for a LOCAL base ref: there
+  // is no remote to reach, and treating an unreachable one as failure would
+  // block the merge in a repo where nothing could have gone stale.
+  if (!target.local) {
+    const remote = (await upstreamRemote(cwd, st.branch)) ?? 'origin'
+    const fetched = await fetchOrigin(cwd, remote)
+    if (!fetched.ok)
+      return { ok: false, error: cleanGitError(fetched, `Could not reach ${remote}`) }
+  }
 
-  const after = await status(cwd)
-  if ((after?.behind ?? 0) === 0) {
-    return { ok: true, upstream: st.upstream, updated: false }
+  // Re-measure AFTER the fetch, against the ref we're actually merging. For a
+  // tracked branch `status` already knows; for a base ref it has no opinion, so
+  // count explicitly rather than read a number about a different ref.
+  const behind = target.viaUpstream
+    ? ((await status(cwd))?.behind ?? 0)
+    : (await distanceFrom(cwd, target.ref)).behind
+  if (behind === 0) {
+    return { ok: true, upstream: target.ref, updated: false }
   }
 
   // A dirty tree is fine for a fast-forward as long as no incoming file
   // collides with a local edit — git checks that itself and refuses if so, and
   // its refusal names the files, which is better than any pre-flight we could
   // write here.
-  const r = await git(['merge', '--ff-only', st.upstream], cwd, FETCH_TIMEOUT_MS)
+  const r = await git(['merge', '--ff-only', target.ref], cwd, FETCH_TIMEOUT_MS)
   if (!r.ok)
-    return { ok: false, error: cleanGitError(r, 'Could not fast-forward'), upstream: st.upstream }
-  return { ok: true, upstream: st.upstream, updated: true }
+    return { ok: false, error: cleanGitError(r, 'Could not fast-forward'), upstream: target.ref }
+  return { ok: true, upstream: target.ref, updated: true }
 }
 
 /**
@@ -578,17 +704,27 @@ export async function resetToUpstream(cwd: string): Promise<SyncResult> {
   if (!cwd) return { ok: false, error: 'reset: missing cwd' }
   const st = await status(cwd)
   if (!st?.branch) return { ok: false, error: 'Not on a branch (detached HEAD).' }
-  if (!st.upstream) return { ok: false, error: `"${st.branch}" has no upstream to reset to.` }
 
-  const remote = (await upstreamRemote(cwd, st.branch)) ?? 'origin'
-  const fetched = await fetchOrigin(cwd, remote)
-  if (!fetched.ok) return { ok: false, error: cleanGitError(fetched, `Could not reach ${remote}`) }
+  // Falls back to `origin/<base>`, which is what makes "reset to main" reachable
+  // on a branch that was never pushed. See `syncRefFor`.
+  const ref = await syncRefFor(cwd, { branch: st.branch, upstream: st.upstream })
+  if (!ref) {
+    return { ok: false, error: `"${st.branch}" has nothing to reset to.` }
+  }
+
+  // See `pullFastForward`: a local base ref has no remote to fetch from.
+  if (!ref.local) {
+    const remote = (await upstreamRemote(cwd, st.branch)) ?? 'origin'
+    const fetched = await fetchOrigin(cwd, remote)
+    if (!fetched.ok)
+      return { ok: false, error: cleanGitError(fetched, `Could not reach ${remote}`) }
+  }
 
   // Resolve the target BEFORE touching anything, so a typo'd or vanished
   // upstream fails while the tree is still intact.
-  const target = await git(['rev-parse', '--verify', '--quiet', `${st.upstream}^{commit}`], cwd)
+  const target = await git(['rev-parse', '--verify', '--quiet', `${ref.ref}^{commit}`], cwd)
   if (!target.ok || !target.stdout.trim()) {
-    return { ok: false, error: `Could not resolve ${st.upstream}.`, upstream: st.upstream }
+    return { ok: false, error: `Could not resolve ${ref.ref}.`, upstream: ref.ref }
   }
 
   let stashed = false
@@ -601,7 +737,7 @@ export async function resetToUpstream(cwd: string): Promise<SyncResult> {
       return {
         ok: false,
         error: cleanGitError(stash, 'Could not stash your changes, so nothing was reset'),
-        upstream: st.upstream
+        upstream: ref.ref
       }
     }
     // `stash push` exits 0 with "No local changes to save" when everything that
@@ -612,9 +748,9 @@ export async function resetToUpstream(cwd: string): Promise<SyncResult> {
 
   const r = await git(['reset', '--hard', target.stdout.trim()], cwd)
   if (!r.ok) {
-    return { ok: false, error: cleanGitError(r, 'Reset failed'), upstream: st.upstream, stashed }
+    return { ok: false, error: cleanGitError(r, 'Reset failed'), upstream: ref.ref, stashed }
   }
-  return { ok: true, upstream: st.upstream, updated: true, stashed }
+  return { ok: true, upstream: ref.ref, updated: true, stashed }
 }
 
 // ---------------------------------------------------------------------------
@@ -633,6 +769,23 @@ export function temporaryBranchName(prefix?: string): string {
 }
 
 /**
+ * Whether a branch name is free in every one of `roots`.
+ *
+ * A composite workstream puts the SAME branch name in each of its repos, so a
+ * candidate is only usable if no repo already has it. Checking one repo and
+ * hoping is not enough: `worktree add -b` on an existing branch is a hard
+ * failure, and it would strike on the turn path, in the third repo, after two
+ * worktrees already existed.
+ */
+async function branchFreeInAll(roots: string[], candidate: string): Promise<boolean> {
+  for (const root of roots) {
+    const exists = await git(['rev-parse', '--verify', '--quiet', `refs/heads/${candidate}`], root)
+    if (exists.ok && exists.stdout.trim()) return false
+  }
+  return true
+}
+
+/**
  * The branch name for a session titled `title`, guaranteed not to collide.
  *
  * Sessions are already named "Legacy Ogre Apprentice", so the branch reads
@@ -644,8 +797,14 @@ export function temporaryBranchName(prefix?: string): string {
  * session and creating another that draws the same random title is not rare —
  * and `worktree add -b` on an existing branch is a hard failure on the turn
  * path.
+ *
+ * `root` may be one repo or several. With several (a composite workstream) the
+ * name has to be free in EVERY one of them, so they can all share it.
  */
-export async function branchNameForTitle(root: string, title: string): Promise<string> {
+export async function branchNameForTitle(root: string | string[], title: string): Promise<string> {
+  const roots = (Array.isArray(root) ? root : [root]).filter(Boolean)
+  if (!roots.length) return temporaryBranchName()
+
   const segment = slugToBranchSegment(title)
   // Nothing usable survived (an emoji- or CJK-only title): fall back to hex
   // rather than inventing a name.
@@ -655,8 +814,7 @@ export async function branchNameForTitle(root: string, title: string): Promise<s
   const base = prefix ? prefix + '/' + segment : segment
   for (let i = 0; i < 100; i++) {
     const candidate = i === 0 ? base : base + '-' + (i + 1)
-    const exists = await git(['rev-parse', '--verify', '--quiet', `refs/heads/${candidate}`], root)
-    if (!exists.ok || !exists.stdout.trim()) return candidate
+    if (await branchFreeInAll(roots, candidate)) return candidate
   }
   return temporaryBranchName()
 }
@@ -712,6 +870,11 @@ function branchToDirName(branch: string): string {
  * the repo. A worktree inside the repo would be walked by file watchers, picked
  * up by glob/grep (the IGNORE list in harness/tools.ts doesn't know about it),
  * and would show up as an untracked directory in git status.
+ *
+ * `root` is the thing the directory is NAMED after. For a single-repo session
+ * that is the repo; for a composite it is the PROJECT folder, so all N repos
+ * land in one directory named for the project rather than N directories named
+ * for each repo.
  */
 export function worktreePathFor(root: string, branch: string): string {
   const base = app.getPath('userData')
@@ -731,6 +894,19 @@ async function uniquePath(desired: string): Promise<string> {
   return `${desired}-${Date.now()}`
 }
 
+/**
+ * Reserve a free directory path, for a caller that needs the name BEFORE it
+ * creates anything.
+ *
+ * A composite workstream picks its root once and then places every repo inside
+ * it, so de-duplication has to happen at the ROOT. Doing it per child instead
+ * would let one repo land in `backend` and the next in `frontend-2`, splitting
+ * one session's checkouts across two directories.
+ */
+export function reserveWorktreePath(desired: string): Promise<string> {
+  return uniquePath(desired)
+}
+
 // ---------------------------------------------------------------------------
 // Worktree lifecycle
 // ---------------------------------------------------------------------------
@@ -743,6 +919,15 @@ export interface CreateWorktreeInput {
   baseRef?: string
   /** Explicit directory. Omitted -> the standard userData location. */
   path?: string
+  /**
+   * Use `path` verbatim instead of de-duplicating it with a `-2` suffix.
+   *
+   * For a composite workstream the root was already reserved as a unit, and the
+   * children must land exactly where the plan says — a child that quietly
+   * became `backend-2` would be a worktree no link points at, invisible to both
+   * teardown and prune.
+   */
+  exactPath?: boolean
   /** The branch this work will eventually merge into (recorded in git config). */
   baseBranch?: string
 }
@@ -791,7 +976,8 @@ export async function createWorktree(input: CreateWorktreeInput): Promise<Worktr
     if (!baseRef) baseRef = 'HEAD'
   }
 
-  const target = await uniquePath(input.path ?? worktreePathFor(root, branch))
+  const desired = input.path ?? worktreePathFor(root, branch)
+  const target = input.exactPath ? desired : await uniquePath(desired)
   const add = await git(['worktree', 'add', '-b', branch, target, baseRef], root)
   if (!add.ok) {
     return { ok: false, error: cleanGitError(add, `Could not create a worktree for "${branch}"`) }
@@ -818,6 +1004,8 @@ export async function attachWorktree(input: {
   repoRoot: string
   branch: string
   path?: string
+  /** Use `path` verbatim; see `CreateWorktreeInput.exactPath`. */
+  exactPath?: boolean
 }): Promise<WorktreeResult> {
   const { repoRoot: root, branch } = input
   if (!root || !branch) return { ok: false, error: 'attachWorktree: missing repoRoot or branch' }
@@ -825,7 +1013,8 @@ export async function attachWorktree(input: {
   const existing = (await listWorktrees(root)).find((w) => w.branch === branch)
   if (existing) return { ok: true, worktree: existing, attached: true }
 
-  const target = await uniquePath(input.path ?? worktreePathFor(root, branch))
+  const desired = input.path ?? worktreePathFor(root, branch)
+  const target = input.exactPath ? desired : await uniquePath(desired)
   const localRef = await git(['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`], root)
   const args =
     localRef.ok && localRef.stdout.trim()
@@ -857,10 +1046,15 @@ export async function attachWorktree(input: {
  */
 export async function removeWorktree(
   worktreePath: string,
-  opts: { force?: boolean } = {}
+  opts: { force?: boolean; cwd?: string } = {}
 ): Promise<{ ok: boolean; error?: string }> {
   if (!worktreePath) return { ok: false, error: 'removeWorktree: missing path' }
-  const root = (await mainWorktreeRoot(worktreePath)) ?? worktreePath
+  // `cwd` is the OWNING repo, and multi-repo callers must pass it. Deriving it
+  // from the worktree works for a normal checkout but not for a composite
+  // child: `git worktree remove` refuses ("not a working tree") unless it runs
+  // in a repo that actually owns the path, and the composite ROOT is not a repo
+  // at all, so there is nothing there to derive from.
+  const root = opts.cwd ?? (await mainWorktreeRoot(worktreePath)) ?? worktreePath
   const args = ['worktree', 'remove']
   if (opts.force) args.push('--force')
   args.push(worktreePath)

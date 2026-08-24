@@ -610,11 +610,19 @@ function WorkspacePath({ chat }: { chat: Chat }): JSX.Element | null {
     }
   }
 
+  // For a multi-repo session this path is a COMPOSITE root: not a checkout
+  // itself, but the folder holding one per repo. It is still the right thing to
+  // copy (it is what you open in an editor to see the whole workstream), but
+  // the tooltip has to say so - on its own it names a directory that contains
+  // none of the code directly and is not even a git repository.
+  const repos = chat.repos ?? []
+  const detail = repos.length > 1 ? `\nContains: ${repos.map((r) => r.name).join(', ')}` : ''
+
   return (
     <button
       onClick={() => void copy()}
       // The label is truncated, so the tooltip carries the full path.
-      title={`${path}\nClick to copy`}
+      title={`${path}${detail}\nClick to copy`}
       className="press-scale relative flex min-w-0 items-center sq sq-md rounded-md px-1 py-0.5 text-xs text-text-subtle hover:bg-white/5 hover:text-text-muted"
     >
       {/* The path fades rather than unmounting, so the button keeps its width

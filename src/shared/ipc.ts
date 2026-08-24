@@ -222,6 +222,8 @@ export const CHANNELS = {
 
   gitAvailable: 'git:available',
   gitStatus: 'git:status',
+  gitStatusMulti: 'git:status-multi',
+  gitProjectRepos: 'git:project-repos',
   gitBranches: 'git:branches',
   gitWorktrees: 'git:worktrees',
   gitCreateWorktree: 'git:create-worktree',
@@ -234,6 +236,9 @@ export const CHANNELS = {
   forgePush: 'forge:push',
   forgePull: 'forge:pull',
   forgeReset: 'forge:reset',
+  /** Multi-repo variants: these take a SESSION id, not a path. */
+  forgePullMulti: 'forge:pull-multi',
+  forgeResetMulti: 'forge:reset-multi',
   forgeCreateUrl: 'forge:create-url',
   forgeListHosts: 'forge:list-hosts',
   forgeSetHostKind: 'forge:set-host-kind',

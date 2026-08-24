@@ -15,8 +15,27 @@ import type { Chat } from '@shared/types'
 import { useRoxyStore } from '../lib/store'
 import { workstreamStripView, statusKeyForSession } from '@shared/workstream'
 import { branchNameError } from '@shared/branch'
+import type { RepoStatusView } from '@shared/api'
+import {
+  aggregateRepoStatus,
+  aggregateSyncTarget,
+  describeRepoStatus,
+  describeSyncRef,
+  repoCountBadge,
+  summarizeSync,
+  type CompositeSyncTarget
+} from '@shared/repos'
 import { worktreeSlug } from '@shared/format'
 import { ServicesSegment, useServices } from './ServicesSegment'
+
+/**
+ * Stable empty array for single-repo sessions.
+ *
+ * A fresh `[]` per render would be a new identity every time, retriggering the
+ * `useMemo` in BranchSegment on every poll tick for the overwhelmingly common
+ * case that has no repos to aggregate at all.
+ */
+const EMPTY_REPOS: RepoStatusView[] = []
 import { useMenuAnchor } from '../lib/useMenuAnchor'
 import { cn } from '../lib/cn'
 // The tone -> class mapping is shared with the sidebar's row badge. Two copies
@@ -58,6 +77,9 @@ export function WorkstreamStrip(): JSX.Element | null {
   const activeChatId = useRoxyStore((s) => s.activeChatId)
   const gitAvailable = useRoxyStore((s) => s.gitAvailable)
   const gitStatus = useRoxyStore((s) => s.gitStatus)
+  const repoStatus = useRoxyStore((s) => s.repoStatus)
+  const projectRepos = useRoxyStore((s) => s.projectRepos)
+  const ensureProjectRepos = useRoxyStore((s) => s.ensureProjectRepos)
   const refreshGitStatus = useRoxyStore((s) => s.refreshGitStatus)
   // Hooked unconditionally: services exist outside git repos too, and this
   // keeps the list warm for the segment below.
@@ -71,12 +93,28 @@ export function WorkstreamStrip(): JSX.Element | null {
       ? (chats.find((c) => c.id === chat.parentId) ?? null)
       : chat
   const statusKey = owner ? statusKeyForSession(owner) : null
+  const workspace = owner?.workspacePath ?? null
   const view = workstreamStripView({
     chat,
     findChat: (id) => chats.find((c) => c.id === id) ?? null,
     gitAvailable,
-    status: statusKey ? gitStatus[statusKey] : undefined
+    status: statusKey ? gitStatus[statusKey] : undefined,
+    // A folder OF repos reports `isRepo:false` forever - it isn't one, and
+    // neither is the composite worktree cut from it. Without this the strip
+    // stays hidden for every multi-repo project.
+    //
+    // The session's own links are the authoritative answer and need no probe,
+    // so they win when present; `projectRepos` is the fallback for a session
+    // that has not been given a workstream yet, which is the only state where
+    // there are no links to read.
+    projectHasRepos: owner?.repos?.length ? true : workspace ? projectRepos[workspace] : undefined
   })
+
+  // Probe the project's shape once. Runs before the early return so a
+  // multi-repo project can flip the strip ON, which it otherwise never would.
+  useEffect(() => {
+    if (workspace) void ensureProjectRepos(workspace)
+  }, [workspace, ensureProjectRepos])
 
   // Poll rather than watch: N worktrees would mean N watchers, and fs.watch is
   // unreliable on Windows. Also refresh when the window regains focus, which is
@@ -110,6 +148,7 @@ export function WorkstreamStrip(): JSX.Element | null {
 
   const { branch, dirty, readOnly, pending } = view
   const changed = (statusKey ? gitStatus[statusKey]?.changed : 0) ?? 0
+  const repos = (statusKey ? repoStatus[statusKey] : undefined) ?? EMPTY_REPOS
 
   return (
     <StripRow>
@@ -131,6 +170,7 @@ export function WorkstreamStrip(): JSX.Element | null {
         dirty={dirty}
         changed={changed}
         readOnly={readOnly}
+        repos={repos}
       />
 
       <Divider />
@@ -347,9 +387,12 @@ function ForgePanel({
 }): JSX.Element {
   const forgeStatus = useRoxyStore((s) => s.forgeStatus)
   const gitStatus = useRoxyStore((s) => s.gitStatus)
+  const repoStatus = useRoxyStore((s) => s.repoStatus)
   const pushBranch = useRoxyStore((s) => s.pushBranch)
   const pullBranch = useRoxyStore((s) => s.pullBranch)
   const resetBranch = useRoxyStore((s) => s.resetBranch)
+  const pullAllRepos = useRoxyStore((s) => s.pullAllRepos)
+  const resetAllRepos = useRoxyStore((s) => s.resetAllRepos)
   const [busy, setBusy] = useState<null | 'action' | 'pull' | 'reset'>(null)
   const [error, setError] = useState<string | null>(null)
   const [note, setNote] = useState<string | null>(null)
@@ -358,15 +401,43 @@ function ForgePanel({
 
   const view = statusKey ? forgeStatus[statusKey] : undefined
   const git = statusKey ? gitStatus[statusKey] : undefined
+  const repos = (statusKey ? repoStatus[statusKey] : undefined) ?? EMPTY_REPOS
+  const agg = useMemo(() => aggregateRepoStatus(repos), [repos])
   const pull = view?.pull ?? null
   const action = view?.lifecycle.action ?? null
-  const sync = view?.syncTarget ?? null
+  const multi = repos.length > 1
+
+  // A composite workstream has no single upstream, so its sync target is folded
+  // from the per-repo ones. Null for single-repo sessions, which keep using
+  // `view.syncTarget` exactly as before.
+  const composite = useMemo(() => (multi ? aggregateSyncTarget(repos) : null), [multi, repos])
+  const sync = multi ? null : (view?.syncTarget ?? null)
+
+  // One shape for the label/disabled logic regardless of how many repos there
+  // are, so the two buttons below are written once rather than forked.
+  const target: SyncView | null = multi
+    ? composite && {
+        label: describeSyncRef(composite),
+        behind: composite.behind,
+        ahead: composite.ahead,
+        changed: composite.changed,
+        canFastForward: composite.canFastForward > 0,
+        hint: compositeHint(composite)
+      }
+    : sync && {
+        label: sync.upstream,
+        behind: sync.behind,
+        ahead: sync.ahead,
+        changed: sync.changed,
+        canFastForward: sync.canFastForward,
+        hint: fastForwardHint(sync)
+      }
 
   // Disarm as soon as the panel's numbers move: an armed "Reset" that was aimed
   // at "3 behind" must not silently fire at a different tree after a poll.
   useEffect(() => {
     setConfirmReset(false)
-  }, [sync?.upstream, sync?.behind, sync?.ahead, sync?.changed])
+  }, [target?.label, target?.behind, target?.ahead, target?.changed])
 
   const openUrl = (url: string): void => {
     void api.system.openExternal(url)
@@ -409,6 +480,12 @@ function ForgePanel({
 
   const runPull = (): Promise<void> =>
     perform('pull', async () => {
+      if (multi) {
+        const r = await pullAllRepos(ownerId)
+        if (r.error) return setError(r.error)
+        const s = summarizeSync(r.repos, 'pull')
+        return s.failed ? setError(s.text) : setNote(s.text)
+      }
       const r = await pullBranch(ownerId)
       if (!r.ok) return setError(r.error ?? 'Could not update from origin.')
       setNote(r.updated ? `Updated from ${r.upstream}.` : 'Already up to date.')
@@ -416,6 +493,13 @@ function ForgePanel({
 
   const runReset = (): Promise<void> =>
     perform('reset', async () => {
+      if (multi) {
+        const r = await resetAllRepos(ownerId)
+        setConfirmReset(false)
+        if (r.error) return setError(r.error)
+        const s = summarizeSync(r.repos, 'reset')
+        return s.failed ? setError(s.text) : setNote(s.text)
+      }
       const r = await resetBranch(ownerId)
       setConfirmReset(false)
       if (!r.ok) return setError(r.error ?? 'Reset failed.')
@@ -430,7 +514,7 @@ function ForgePanel({
 
   return (
     <div className="absolute bottom-full z-50 flex flex-col pb-1.5" style={style}>
-      <div className="flex min-h-0 flex-col overflow-hidden sq-frame sq-xl sq-fill-elevated sq-ring rounded-xl border border-border bg-elevated shadow-2xl">
+      <div className="flex max-h-full min-h-0 flex-col overflow-hidden sq-frame sq-xl sq-fill-elevated sq-ring rounded-xl border border-border bg-elevated shadow-2xl">
         <div className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-2">
           <span className="min-w-0 flex-1 truncate text-xs text-text-muted">
             {view?.remote ? view.remote.slug : 'No remote'}
@@ -473,13 +557,68 @@ function ForgePanel({
           </div>
         )}
 
+        {/* Multi-repo: push and PRs are inherently PER REPO - three repos can
+            mean three pull requests - so the panel enumerates them rather than
+            letting one chip speak for all of them. Empty for a single-repo
+            session, which renders exactly the panel that shipped before. */}
+        {repos.length > 1 && (
+          // The ONLY scrolling region in the panel, and deliberately so: the panel
+          // is height-capped, so without this a ten-repo workstream pushes the
+          // Update/Reset buttons past the cap where `overflow-hidden` clips them
+          // outright - unreachable, with nothing on screen to say they exist.
+          // Bounded in rem rather than by flex share so the list is the thing
+          // that gives way, never the actions.
+          <div className="flex min-h-0 flex-col overflow-y-auto border-t border-border">
+            <div className="sticky top-0 bg-elevated px-3 pt-1.5 pb-0.5 text-[10px] uppercase tracking-wide text-text-subtle">
+              {describeRepoStatus(agg)}
+            </div>
+            {repos.map((r) => (
+              <div
+                key={r.name}
+                className="flex items-center gap-2 px-3 py-1 text-[11px]"
+                title={describeRepoRow(r)}
+              >
+                <span className="min-w-0 flex-1 truncate text-text-muted">{r.name}</span>
+                {/* Per-repo ahead/behind: the number that tells you which of
+                    the N repos still needs pushing. */}
+                {r.isRepo && (r.sync?.ahead ?? r.ahead) > 0 && (
+                  <span className="shrink-0 tabular-nums text-text-subtle">
+                    {r.sync?.ahead ?? r.ahead} ahead
+                  </span>
+                )}
+                {r.isRepo && (r.sync?.behind ?? r.behind) > 0 && (
+                  <span className="shrink-0 tabular-nums text-text-subtle">
+                    {r.sync?.behind ?? r.behind} behind
+                  </span>
+                )}
+                {r.forge?.pull && (
+                  <button
+                    type="button"
+                    onClick={() => openUrl(r.forge!.pull!.url)}
+                    className="shrink-0 rounded px-1 text-info transition hover:bg-white/5"
+                  >
+                    #{r.forge.pull.number}
+                  </button>
+                )}
+                {r.isRepo ? (
+                  r.dirty && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-warning" />
+                ) : (
+                  <span className="shrink-0 text-warning">missing</span>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* `shrink-0` on both: these report what a sync just DID (including where
+            a reset parked your work), so they must survive a long repo list. */}
         {(error || view?.error) && (
-          <div className="border-t border-border px-3 py-1.5 text-[11px] text-warning">
+          <div className="shrink-0 border-t border-border px-3 py-1.5 text-[11px] text-warning">
             {error ?? view?.error?.message}
           </div>
         )}
         {note && !error && (
-          <div className="border-t border-border px-3 py-1.5 text-[11px] text-text-muted">
+          <div className="shrink-0 border-t border-border px-3 py-1.5 text-[11px] text-text-muted">
             {note}
           </div>
         )}
@@ -499,15 +638,17 @@ function ForgePanel({
           </div>
         )}
 
-        {sync && (
-          <div className="flex flex-col gap-1 border-t border-border p-1.5">
+        {target && (
+          // `shrink-0`: the actions are the point of the panel and must never be
+          // the thing that collapses when the repo list is long.
+          <div className="flex shrink-0 flex-col gap-1 border-t border-border p-1.5">
             <button
               type="button"
               onClick={() => void runPull()}
               // Nothing to fast-forward, or a fast-forward that git would
               // refuse. Disabled with a reason beats a button that fails.
-              disabled={!!busy || !sync.canFastForward}
-              title={fastForwardHint(sync)}
+              disabled={!!busy || !target.canFastForward}
+              title={target.hint}
               className="press-scale flex w-full items-center justify-center gap-1.5 sq sq-lg rounded-lg bg-surface-2 px-3 py-1.5 text-xs text-text hover:bg-white/5 disabled:opacity-40"
             >
               <ArrowDownToLine className="h-3.5 w-3.5 opacity-70" />
@@ -517,11 +658,11 @@ function ForgePanel({
                   fresh as the last fetch and clicking is how you refresh it. */}
               {busy === 'pull'
                 ? 'Updating...'
-                : sync.behind > 0
-                  ? `Update from ${sync.upstream}`
-                  : `Check ${sync.upstream}`}
-              {sync.behind > 0 && (
-                <span className="text-text-subtle tabular-nums">({sync.behind})</span>
+                : target.behind > 0
+                  ? `Update ${multi ? 'all ' : ''}from ${target.label}`
+                  : `Check ${target.label}`}
+              {target.behind > 0 && (
+                <span className="text-text-subtle tabular-nums">({target.behind})</span>
               )}
             </button>
 
@@ -534,7 +675,11 @@ function ForgePanel({
               onClick={() => (confirmReset ? void runReset() : setConfirmReset(true))}
               onBlur={() => setConfirmReset(false)}
               disabled={!!busy}
-              title={`Discard local state and make this branch identical to ${sync.upstream}`}
+              title={
+                multi
+                  ? `Discard local state in every repo and make each identical to ${target.label}`
+                  : `Discard local state and make this branch identical to ${target.label}`
+              }
               className={cn(
                 'press-scale flex w-full items-center justify-center gap-1.5 sq sq-lg rounded-lg px-3 py-1.5 text-xs disabled:opacity-40',
                 confirmReset
@@ -546,8 +691,8 @@ function ForgePanel({
               {busy === 'reset'
                 ? 'Resetting...'
                 : confirmReset
-                  ? resetConfirmLabel(sync)
-                  : `Reset to ${sync.upstream}`}
+                  ? resetConfirmLabel(target, multi ? composite?.syncable : undefined)
+                  : `Reset ${multi ? 'all ' : ''}to ${target.label}`}
             </button>
           </div>
         )}
@@ -578,12 +723,73 @@ function fastForwardHint(sync: SyncTarget): string {
  * are gone for good (well, reflog), edits are merely stashed. "Are you sure?"
  * says nothing; "Discard 2 commits + stash 5 changes" is a decision.
  */
-function resetConfirmLabel(sync: SyncTarget): string {
+function resetConfirmLabel(sync: SyncCounts, repoCount?: number): string {
   const bits: string[] = []
   if (sync.ahead > 0) bits.push(`discard ${sync.ahead} commit${sync.ahead === 1 ? '' : 's'}`)
   if (sync.changed > 0) bits.push(`stash ${sync.changed} change${sync.changed === 1 ? '' : 's'}`)
-  if (!bits.length) return 'Click again to reset'
-  return `Click again to ${bits.join(' + ')}`
+  // Across repos the counts are SUMS, so say what they are sums of - "discard 3
+  // commits" reads like one repo until it names the scope.
+  const scope = repoCount ? ` in ${repoCount} repos` : ''
+  if (!bits.length) return `Click again to reset${scope}`
+  return `Click again to ${bits.join(' + ')}${scope}`
+}
+
+/**
+ * The hover line for one repo row.
+ *
+ * Names the repo's own sync target, because in a composite they need not agree:
+ * one repo tracking `origin/feature` while the rest sit on `origin/main` is
+ * exactly the case the summary line above cannot express, and the row is where
+ * that detail belongs.
+ */
+function describeRepoRow(r: RepoStatusView): string {
+  if (!r.isRepo) return `${r.name} - checkout is missing`
+  const where = `${r.name} on ${r.branch ?? 'detached'}`
+  if (!r.sync) return `${where} - nothing to sync with`
+  const rel = r.sync.behind > 0 ? `, ${r.sync.behind} behind ${r.sync.ref}` : ` vs ${r.sync.ref}`
+  return where + rel
+}
+
+/** The counts `resetConfirmLabel` spells out, from either kind of target. */
+interface SyncCounts {
+  ahead: number
+  changed: number
+}
+
+/**
+ * One shape for the sync buttons, whether the workstream spans one repo or ten.
+ *
+ * Both cases answer the same four questions (what is the target called, how far
+ * behind, can it fast-forward, what would a reset cost), so the buttons are
+ * written once against this rather than forked on repo count at every label.
+ */
+interface SyncView extends SyncCounts {
+  /** What the target is CALLED on the button, e.g. `origin/main`. */
+  label: string
+  behind: number
+  canFastForward: boolean
+  hint: string
+}
+
+/**
+ * What "Update all" will do across N repos, or why it can't.
+ *
+ * Names the blocked repos rather than counting them: with the button disabled,
+ * "2 repos have local commits" leaves the user to work out WHICH two before
+ * they can do anything about it.
+ */
+function compositeHint(c: CompositeSyncTarget): string {
+  if (c.blocked.length) {
+    const names = c.blocked.join(', ')
+    const one = c.blocked.length === 1
+    return c.canFastForward > 0
+      ? `${names} ${one ? 'has' : 'have'} local commits - push or reset ${one ? 'it' : 'them'} first`
+      : `Local commits in ${names} - push them, or reset to discard them`
+  }
+  const scope = `${c.syncable} ${c.syncable === 1 ? 'repo' : 'repos'}`
+  return c.behind > 0
+    ? `Fast-forward ${scope} onto ${describeSyncRef(c)}`
+    : `Check ${scope} for new commits`
 }
 
 const ACTION_LABEL: Record<LifecycleAction, string> = {
@@ -615,7 +821,8 @@ function BranchSegment({
   pending,
   dirty,
   changed,
-  readOnly
+  readOnly,
+  repos
 }: {
   sessionId: string
   branch: string | null
@@ -623,6 +830,8 @@ function BranchSegment({
   dirty: boolean
   changed: number
   readOnly: boolean
+  /** Per-repo status for a composite workstream; [] for an ordinary session. */
+  repos: RepoStatusView[]
 }): JSX.Element {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState('')
@@ -630,6 +839,12 @@ function BranchSegment({
   const [saving, setSaving] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
   const refreshChats = useRoxyStore((s) => s.refreshChats)
+
+  // Multi-repo summary. Both are null/empty for a single-repo session, so every
+  // branch below collapses to exactly the markup that shipped before.
+  const agg = useMemo(() => aggregateRepoStatus(repos), [repos])
+  const repoBadge = repoCountBadge(agg.repoCount)
+  const repoSummary = describeRepoStatus(agg)
 
   // A pending workstream has no branch to rename yet, and a sub-session must
   // not move its parent's branch.
@@ -734,11 +949,26 @@ function BranchSegment({
       {/* A pending 'new' workstream has no branch yet — its name is generated
           at materialization. Showing the CURRENT branch here would name the one
           thing this workstream exists to stay off. */}
-      <span className="truncate">{branch ?? (pending ? 'branch pending' : 'detached')}</span>
+      <span className="truncate">
+        {branch ?? (pending ? 'branch pending' : repos.length ? 'mixed branches' : 'detached')}
+      </span>
+      {/* Multi-repo only: how many repos this one branch name spans. A
+          single-repo session renders exactly as it always has - repoCountBadge
+          returns null for 0 and 1, so there is no badge to lay out at all. */}
+      {repoBadge && (
+        <span
+          className="shrink-0 rounded bg-white/8 px-1 text-[10px] leading-4 text-text-subtle"
+          title={repoSummary}
+        >
+          {repoBadge}
+        </span>
+      )}
       {dirty && (
         <span
           className="h-1.5 w-1.5 shrink-0 rounded-full bg-warning"
-          title={`${changed} uncommitted change${changed === 1 ? '' : 's'}`}
+          title={
+            repos.length ? repoSummary : `${changed} uncommitted change${changed === 1 ? '' : 's'}`
+          }
         />
       )}
     </button>

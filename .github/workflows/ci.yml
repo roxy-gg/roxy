@@ -101,11 +101,31 @@ jobs:
         # permissioned chrome-sandbox.
         env:
           ELECTRON_DISABLE_SANDBOX: '1'
+          # The suite's own watchdog is a budget for the WHOLE run and defaults
+          # to 60s, which is generous locally and tight on a cold shared runner
+          # spawning hundreds of `git` processes. Raised here so a slow box
+          # reports real failures instead of a guillotined run.
+          SMOKE_TIMEOUT_MS: '300000'
         run: xvfb-run --auto-servernum npm run smoke:app
 
       - name: Electron smoke suite
         if: runner.os != 'Linux'
+        env:
+          SMOKE_TIMEOUT_MS: '300000'
         run: npm run smoke:app
+
+      - name: Multi-repo suite (composite worktrees, real git)
+        run: npm run smoke:multirepo
+
+      - name: Multi-repo live suite (real worktrees under Electron)
+        if: runner.os == 'Linux'
+        env:
+          ELECTRON_DISABLE_SANDBOX: '1'
+        run: xvfb-run --auto-servernum npm run smoke:live
+
+      - name: Multi-repo live suite
+        if: runner.os != 'Linux'
+        run: npm run smoke:live
 
       - name: Cookie editor suite (real Chromium cookie jar)
         if: runner.os == 'Linux'
