@@ -27,6 +27,7 @@ import type {
 import type { McpServerConfig } from './mcp'
 import type { CliProxyLoginResult, CliProxyState } from './cliproxy'
 import type { ForgeStatusView, ForgeHostView, ForgeKind } from './forge'
+import type { RepoLayout } from './repos'
 import type { SessionConfigPatch } from './session-config'
 import type { ClipboardAction } from './context-menu'
 
@@ -164,6 +165,24 @@ export interface WorktreeView {
   head: string | null
   /** The repo's own working tree; never removable. */
   isMain: boolean
+}
+
+/** One repo inside a multi-repo session's composite worktree, with its status. */
+export interface RepoStatusView {
+  /** Folder name under the composite root, e.g. `backend`. */
+  name: string
+  /** The repo's own worktree for this session (`<composite>/<name>`). */
+  worktreePath: string
+  isRepo: boolean
+  branch: string | null
+  dirty: boolean
+  changed: number
+  ahead: number
+  behind: number
+  hasUpstream: boolean
+  defaultBranch: string | null
+  /** PR/remote state for this repo's branch, when the forge knows any. */
+  forge: ForgeStatusView | null
 }
 
 export interface CreateWorktreeInput {
@@ -949,6 +968,26 @@ export interface RoxyApi {
     available(): Promise<boolean>
     /** Repo/branch/dirty/ahead-behind for a folder. `isRepo:false` when it isn't one. */
     status(cwd: string): Promise<GitStatusView>
+    /**
+     * Per-repo status for a MULTI-REPO session, one entry per live repo.
+     *
+     * Separate from `status` rather than folded into it because a composite
+     * root is not a repository: `status` correctly reports `isRepo:false`
+     * there, and answering properly needs the session's `repos` links to know
+     * where to look — which is why this takes a session id, not a path.
+     * Returns [] for a single-repo session, so every caller's "is this
+     * composite" check is a length test.
+     */
+    statusMulti(sessionId: string): Promise<RepoStatusView[]>
+    /**
+     * How a PROJECT FOLDER relates to git, for decisions made before a session
+     * exists (auto-workstream at create time).
+     *
+     * `layout: 'multi'` is the case `status()` cannot express: the folder is
+     * not a repository, so `isRepo` is false there, yet it holds several and a
+     * workstream is both possible and wanted.
+     */
+    projectRepos(workspacePath: string): Promise<{ layout: RepoLayout; names: string[] }>
     /** Local + origin branches, deduped and sorted. */
     branches(cwd: string): Promise<string[]>
     /** Live worktrees for the repo containing `cwd` (stale records dropped). */

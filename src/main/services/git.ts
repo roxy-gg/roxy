@@ -633,6 +633,23 @@ export function temporaryBranchName(prefix?: string): string {
 }
 
 /**
+ * Whether a branch name is free in every one of `roots`.
+ *
+ * A composite workstream puts the SAME branch name in each of its repos, so a
+ * candidate is only usable if no repo already has it. Checking one repo and
+ * hoping is not enough: `worktree add -b` on an existing branch is a hard
+ * failure, and it would strike on the turn path, in the third repo, after two
+ * worktrees already existed.
+ */
+async function branchFreeInAll(roots: string[], candidate: string): Promise<boolean> {
+  for (const root of roots) {
+    const exists = await git(['rev-parse', '--verify', '--quiet', `refs/heads/${candidate}`], root)
+    if (exists.ok && exists.stdout.trim()) return false
+  }
+  return true
+}
+
+/**
  * The branch name for a session titled `title`, guaranteed not to collide.
  *
  * Sessions are already named "Legacy Ogre Apprentice", so the branch reads
@@ -644,8 +661,14 @@ export function temporaryBranchName(prefix?: string): string {
  * session and creating another that draws the same random title is not rare —
  * and `worktree add -b` on an existing branch is a hard failure on the turn
  * path.
+ *
+ * `root` may be one repo or several. With several (a composite workstream) the
+ * name has to be free in EVERY one of them, so they can all share it.
  */
-export async function branchNameForTitle(root: string, title: string): Promise<string> {
+export async function branchNameForTitle(root: string | string[], title: string): Promise<string> {
+  const roots = (Array.isArray(root) ? root : [root]).filter(Boolean)
+  if (!roots.length) return temporaryBranchName()
+
   const segment = slugToBranchSegment(title)
   // Nothing usable survived (an emoji- or CJK-only title): fall back to hex
   // rather than inventing a name.
@@ -655,8 +678,7 @@ export async function branchNameForTitle(root: string, title: string): Promise<s
   const base = prefix ? prefix + '/' + segment : segment
   for (let i = 0; i < 100; i++) {
     const candidate = i === 0 ? base : base + '-' + (i + 1)
-    const exists = await git(['rev-parse', '--verify', '--quiet', `refs/heads/${candidate}`], root)
-    if (!exists.ok || !exists.stdout.trim()) return candidate
+    if (await branchFreeInAll(roots, candidate)) return candidate
   }
   return temporaryBranchName()
 }
@@ -712,6 +734,11 @@ function branchToDirName(branch: string): string {
  * the repo. A worktree inside the repo would be walked by file watchers, picked
  * up by glob/grep (the IGNORE list in harness/tools.ts doesn't know about it),
  * and would show up as an untracked directory in git status.
+ *
+ * `root` is the thing the directory is NAMED after. For a single-repo session
+ * that is the repo; for a composite it is the PROJECT folder, so all N repos
+ * land in one directory named for the project rather than N directories named
+ * for each repo.
  */
 export function worktreePathFor(root: string, branch: string): string {
   const base = app.getPath('userData')
@@ -731,6 +758,19 @@ async function uniquePath(desired: string): Promise<string> {
   return `${desired}-${Date.now()}`
 }
 
+/**
+ * Reserve a free directory path, for a caller that needs the name BEFORE it
+ * creates anything.
+ *
+ * A composite workstream picks its root once and then places every repo inside
+ * it, so de-duplication has to happen at the ROOT. Doing it per child instead
+ * would let one repo land in `backend` and the next in `frontend-2`, splitting
+ * one session's checkouts across two directories.
+ */
+export function reserveWorktreePath(desired: string): Promise<string> {
+  return uniquePath(desired)
+}
+
 // ---------------------------------------------------------------------------
 // Worktree lifecycle
 // ---------------------------------------------------------------------------
@@ -743,6 +783,15 @@ export interface CreateWorktreeInput {
   baseRef?: string
   /** Explicit directory. Omitted -> the standard userData location. */
   path?: string
+  /**
+   * Use `path` verbatim instead of de-duplicating it with a `-2` suffix.
+   *
+   * For a composite workstream the root was already reserved as a unit, and the
+   * children must land exactly where the plan says — a child that quietly
+   * became `backend-2` would be a worktree no link points at, invisible to both
+   * teardown and prune.
+   */
+  exactPath?: boolean
   /** The branch this work will eventually merge into (recorded in git config). */
   baseBranch?: string
 }
@@ -791,7 +840,8 @@ export async function createWorktree(input: CreateWorktreeInput): Promise<Worktr
     if (!baseRef) baseRef = 'HEAD'
   }
 
-  const target = await uniquePath(input.path ?? worktreePathFor(root, branch))
+  const desired = input.path ?? worktreePathFor(root, branch)
+  const target = input.exactPath ? desired : await uniquePath(desired)
   const add = await git(['worktree', 'add', '-b', branch, target, baseRef], root)
   if (!add.ok) {
     return { ok: false, error: cleanGitError(add, `Could not create a worktree for "${branch}"`) }
@@ -818,6 +868,8 @@ export async function attachWorktree(input: {
   repoRoot: string
   branch: string
   path?: string
+  /** Use `path` verbatim; see `CreateWorktreeInput.exactPath`. */
+  exactPath?: boolean
 }): Promise<WorktreeResult> {
   const { repoRoot: root, branch } = input
   if (!root || !branch) return { ok: false, error: 'attachWorktree: missing repoRoot or branch' }
@@ -825,7 +877,8 @@ export async function attachWorktree(input: {
   const existing = (await listWorktrees(root)).find((w) => w.branch === branch)
   if (existing) return { ok: true, worktree: existing, attached: true }
 
-  const target = await uniquePath(input.path ?? worktreePathFor(root, branch))
+  const desired = input.path ?? worktreePathFor(root, branch)
+  const target = input.exactPath ? desired : await uniquePath(desired)
   const localRef = await git(['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`], root)
   const args =
     localRef.ok && localRef.stdout.trim()
@@ -857,10 +910,15 @@ export async function attachWorktree(input: {
  */
 export async function removeWorktree(
   worktreePath: string,
-  opts: { force?: boolean } = {}
+  opts: { force?: boolean; cwd?: string } = {}
 ): Promise<{ ok: boolean; error?: string }> {
   if (!worktreePath) return { ok: false, error: 'removeWorktree: missing path' }
-  const root = (await mainWorktreeRoot(worktreePath)) ?? worktreePath
+  // `cwd` is the OWNING repo, and multi-repo callers must pass it. Deriving it
+  // from the worktree works for a normal checkout but not for a composite
+  // child: `git worktree remove` refuses ("not a working tree") unless it runs
+  // in a repo that actually owns the path, and the composite ROOT is not a repo
+  // at all, so there is nothing there to derive from.
+  const root = opts.cwd ?? (await mainWorktreeRoot(worktreePath)) ?? worktreePath
   const args = ['worktree', 'remove']
   if (opts.force) args.push('--force')
   args.push(worktreePath)

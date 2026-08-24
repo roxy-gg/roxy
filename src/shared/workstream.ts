@@ -74,6 +74,11 @@ export function workstreamStripView(input: {
   findChat: (id: string) => StripSession | null
   gitAvailable: boolean | null
   status: StripGitStatus | undefined
+  /**
+   * True when the PROJECT FOLDER is a folder OF repos (backend/, frontend/,
+   * ...) rather than a repository itself. Probed once per project.
+   */
+  projectHasRepos?: boolean
 }): StripView | null {
   const { chat, findChat, gitAvailable, status } = input
   if (!chat) return null
@@ -97,7 +102,14 @@ export function workstreamStripView(input: {
   // something true to say. It does NOT outrank a status that actually arrived
   // saying `isRepo: false`: that means the worktree went away underneath us, and
   // the strip should go quiet.
-  if (status ? !status.isRepo : !owner.worktreePath) return null
+  //
+  // `projectHasRepos` is the third source of proof, and it is the one a
+  // MULTI-REPO project depends on entirely: a folder of repos is not itself a
+  // repository, so its status legitimately says `isRepo: false` forever. Without
+  // this the strip would be permanently hidden for exactly the workspaces
+  // multi-repo support was built for - which is the bug this clause fixes.
+  const repoBacked = status?.isRepo || !!owner.worktreePath || !!input.projectHasRepos
+  if (!repoBacked) return null
 
   // A session that has ASKED for a workstream is not in the default one. Saying
   // "default workstream" there is not merely vague, it is wrong in the direction
@@ -158,19 +170,26 @@ function pendingBranch(intent: WorktreeIntent | null | undefined): string | null
  * inconsistent with the dropdown right below it.
  *
  * Both guards are correctness, not caution:
- *   - a non-repo has nothing to branch from, and `git worktree add` would fail
- *     on the turn path;
+ *   - a folder with no repo in it has nothing to branch from, and
+ *     `git worktree add` would fail on the turn path;
  *   - without a git binary the same is true, and `gitAvailable === null` means
  *     "not probed yet", which must not be read as "no".
+ *
+ * `isRepo` is false for a MULTI-REPO project - the folder itself isn't a
+ * repository, its children are - so `hasRepos` carries that case. Without it
+ * exactly the people this feature is for (a workspace of sibling repos) would
+ * still get no workstream by default, which was the original bug.
  */
 export function shouldAutoWorkstream(input: {
   autoWorkstream: boolean
   gitAvailable: boolean | null
   isRepo: boolean | undefined
+  /** True when the project is a folder OF repos (see shared/repos.ts). */
+  hasRepos?: boolean
 }): boolean {
   if (!input.autoWorkstream) return false
   if (input.gitAvailable !== true) return false
-  return input.isRepo === true
+  return input.isRepo === true || input.hasRepos === true
 }
 
 /**

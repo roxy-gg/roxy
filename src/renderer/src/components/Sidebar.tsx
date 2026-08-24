@@ -29,6 +29,7 @@ import type { Chat, Loop } from '@shared/types'
 import type { LifecycleView } from '@shared/forge'
 import { isPullRequestPhase } from '@shared/forge'
 import { statusKeyForSession } from '@shared/workstream'
+import { repoCountBadge } from '@shared/repos'
 import { formatInterval } from '@shared/format'
 import { useRoxyStore } from '../lib/store'
 import { api } from '../lib/api'
@@ -78,6 +79,10 @@ interface Project {
 function sessionRowTitle(chat: Chat, dirty: boolean, pull: LifecycleView | undefined): string {
   const bits = [chat.title]
   if (chat.branch) bits.push(chat.branch)
+  // Multi-repo: name the repos. "uncommitted changes" is not actionable when a
+  // session spans four of them, and the row itself has no space to say which.
+  const repos = chat.repos ?? []
+  if (repos.length > 1) bits.push(`${repos.length} repos: ${repos.map((r) => r.name).join(', ')}`)
   if (pull) bits.push(pull.title)
   if (dirty) bits.push('uncommitted changes')
   return bits.join(' - ')
@@ -320,6 +325,18 @@ export function Sidebar(): JSX.Element {
     }
     return ids
   }, [chats, gitStatus])
+
+  // How many repos each multi-repo session spans, for the row badge. Absent for
+  // a single-repo session (`repoCountBadge` returns null at 1), so the map is
+  // empty in the common case and the badge never renders.
+  const repoCountById = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const c of chats) {
+      const badge = repoCountBadge(c.repos?.length ?? 0)
+      if (badge) map.set(c.id, badge)
+    }
+    return map
+  }, [chats])
 
   // The PR badge on a row, when that row's branch HAS a pull request. Anything
   // earlier in the lifecycle (`local`, `up-3`, `pushed`) is filtered out by
@@ -766,6 +783,14 @@ export function Sidebar(): JSX.Element {
                                         <span className="flex items-center gap-1 text-[10px] text-text-subtle">
                                           <GitBranch className="h-2.5 w-2.5 shrink-0 opacity-70" />
                                           <span className="truncate">{chat.branch}</span>
+                                          {/* Multi-repo: the branch name spans
+                                              N repos. Null for single-repo, so
+                                              ordinary rows are untouched. */}
+                                          {repoCountById.get(chat.id) && (
+                                            <span className="shrink-0 rounded bg-white/8 px-0.5 text-[9px] leading-3 text-text-subtle">
+                                              {repoCountById.get(chat.id)}
+                                            </span>
+                                          )}
                                           {/* Uncommitted work. The label lives on the row
                                               tooltip above, not here: a 4px dot is too small
                                               to hover deliberately, so its own `title` would

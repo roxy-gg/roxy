@@ -242,6 +242,8 @@ const roxy: RoxyApi = {
   git: {
     available: () => ipcRenderer.invoke(CHANNELS.gitAvailable),
     status: (cwd) => ipcRenderer.invoke(CHANNELS.gitStatus, cwd),
+    statusMulti: (sessionId) => ipcRenderer.invoke(CHANNELS.gitStatusMulti, sessionId),
+    projectRepos: (workspacePath) => ipcRenderer.invoke(CHANNELS.gitProjectRepos, workspacePath),
     branches: (cwd) => ipcRenderer.invoke(CHANNELS.gitBranches, cwd),
     worktrees: (cwd) => ipcRenderer.invoke(CHANNELS.gitWorktrees, cwd),
     createWorktree: (input) => ipcRenderer.invoke(CHANNELS.gitCreateWorktree, input),

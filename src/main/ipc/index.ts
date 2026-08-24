@@ -11,6 +11,7 @@ import type {
   CreateWorktreeResult,
   ForkChatInput,
   GitStatusView,
+  RepoStatusView,
   LlmStartInput,
   McpServerView,
   RemoteStartInput,
@@ -45,7 +46,8 @@ import {
   stopService,
   restartService
 } from '../harness'
-import { sessionCwd } from '../services/workspace'
+import { sessionCwd, discoverRepos } from '../services/workspace'
+import nodePath from 'node:path'
 import * as git from '../services/git'
 import * as forge from '../services/forge'
 import type { ForgeKind } from '../../shared/forge'
@@ -855,6 +857,78 @@ export function registerIpc(): void {
       hasUpstream: st?.hasUpstream ?? false,
       defaultBranch: def
     }
+  })
+
+  /**
+   * Per-repo status for a multi-repo session.
+   *
+   * Takes a SESSION id, not a path: the composite root is not a repository, so
+   * there is nothing at that path to interrogate — the session's `repos` links
+   * are the only record of which repos it spans and where their checkouts are.
+   *
+   * Every repo is queried independently and a failure degrades to
+   * `isRepo:false` for that entry alone, so one deleted checkout reports itself
+   * as gone instead of blanking the whole workstream.
+   */
+  ipcMain.handle(
+    CHANNELS.gitStatusMulti,
+    async (_e, sessionId: string): Promise<RepoStatusView[]> => {
+      if (!sessionId || !(await git.isGitAvailable())) return []
+      const chat = repo.getChat(sessionId)
+      // A sub-session shows its parent's workstream, exactly as the strip does.
+      const owner = chat?.kind === 'sub' && chat.parentId ? repo.getChat(chat.parentId) : chat
+      const links = owner?.repos
+      if (!links?.length) return []
+
+      return Promise.all(
+        links.map(async (link): Promise<RepoStatusView> => {
+          const base = {
+            name: link.name,
+            worktreePath: link.worktreePath,
+            branch: link.branch,
+            dirty: false,
+            changed: 0,
+            ahead: 0,
+            behind: 0,
+            hasUpstream: false,
+            defaultBranch: null,
+            forge: null
+          }
+          try {
+            const root = await git.repoRoot(link.worktreePath)
+            if (!root) return { ...base, isRepo: false }
+            const [st, def, fg] = await Promise.all([
+              git.status(link.worktreePath),
+              git.defaultBranch(link.worktreePath),
+              forge.forgeStatus(link.worktreePath, { force: false })
+            ])
+            return {
+              ...base,
+              isRepo: true,
+              branch: st?.branch ?? link.branch,
+              dirty: st?.dirty ?? false,
+              changed: st?.changed ?? 0,
+              ahead: st?.ahead ?? 0,
+              behind: st?.behind ?? 0,
+              hasUpstream: st?.hasUpstream ?? false,
+              defaultBranch: def,
+              forge: fg
+            }
+          } catch {
+            // This repo alone is unreadable; the rest of the workstream stands.
+            return { ...base, isRepo: false }
+          }
+        })
+      )
+    }
+  )
+
+  ipcMain.handle(CHANNELS.gitProjectRepos, async (_e, workspacePath: string) => {
+    if (!workspacePath || !(await git.isGitAvailable())) {
+      return { layout: 'none' as const, names: [] }
+    }
+    const { layout, roots } = discoverRepos(workspacePath)
+    return { layout, names: roots.map((r) => nodePath.basename(r)) }
   })
 
   ipcMain.handle(CHANNELS.gitBranches, async (_e, cwd: string) =>

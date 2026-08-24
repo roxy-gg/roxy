@@ -222,6 +222,8 @@ export const CHANNELS = {
 
   gitAvailable: 'git:available',
   gitStatus: 'git:status',
+  gitStatusMulti: 'git:status-multi',
+  gitProjectRepos: 'git:project-repos',
   gitBranches: 'git:branches',
   gitWorktrees: 'git:worktrees',
   gitCreateWorktree: 'git:create-worktree',

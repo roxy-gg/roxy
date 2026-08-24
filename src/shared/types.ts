@@ -3,6 +3,7 @@
  * renderer. This module must stay isomorphic — types and plain data only, no
  * Node, Electron, or browser-specific imports.
  */
+import type { RepoLink } from './repos'
 
 // ---- Providers ---------------------------------------------------------------
 
@@ -152,6 +153,16 @@ export interface Chat {
    * Sub-sessions never set this; they run in their parent's tree.
    */
   worktreePath: string | null
+  /**
+   * The repos inside a composite worktree, for a project that is a folder OF
+   * repos rather than a repo itself.
+   *
+   * Null/empty means single-repo - every session in an ordinary repo, and every
+   * session that predates multi-repo support. Test it with `isMultiRepo()` from
+   * shared/repos.ts, and never run a git command in `worktreePath` when it is
+   * set: a composite root is not itself a repository.
+   */
+  repos: RepoLink[] | null
   /**
    * A worktree this session asked for but hasn't got yet. Materialized on the
    * first turn (so an abandoned composer leaves nothing on disk) and cleared

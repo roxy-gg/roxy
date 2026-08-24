@@ -15,8 +15,19 @@ import type { Chat } from '@shared/types'
 import { useRoxyStore } from '../lib/store'
 import { workstreamStripView, statusKeyForSession } from '@shared/workstream'
 import { branchNameError } from '@shared/branch'
+import type { RepoStatusView } from '@shared/api'
+import { aggregateRepoStatus, describeRepoStatus, repoCountBadge } from '@shared/repos'
 import { worktreeSlug } from '@shared/format'
 import { ServicesSegment, useServices } from './ServicesSegment'
+
+/**
+ * Stable empty array for single-repo sessions.
+ *
+ * A fresh `[]` per render would be a new identity every time, retriggering the
+ * `useMemo` in BranchSegment on every poll tick for the overwhelmingly common
+ * case that has no repos to aggregate at all.
+ */
+const EMPTY_REPOS: RepoStatusView[] = []
 import { useMenuAnchor } from '../lib/useMenuAnchor'
 import { cn } from '../lib/cn'
 // The tone -> class mapping is shared with the sidebar's row badge. Two copies
@@ -58,6 +69,9 @@ export function WorkstreamStrip(): JSX.Element | null {
   const activeChatId = useRoxyStore((s) => s.activeChatId)
   const gitAvailable = useRoxyStore((s) => s.gitAvailable)
   const gitStatus = useRoxyStore((s) => s.gitStatus)
+  const repoStatus = useRoxyStore((s) => s.repoStatus)
+  const projectRepos = useRoxyStore((s) => s.projectRepos)
+  const ensureProjectRepos = useRoxyStore((s) => s.ensureProjectRepos)
   const refreshGitStatus = useRoxyStore((s) => s.refreshGitStatus)
   // Hooked unconditionally: services exist outside git repos too, and this
   // keeps the list warm for the segment below.
@@ -110,6 +124,7 @@ export function WorkstreamStrip(): JSX.Element | null {
 
   const { branch, dirty, readOnly, pending } = view
   const changed = (statusKey ? gitStatus[statusKey]?.changed : 0) ?? 0
+  const repos = (statusKey ? repoStatus[statusKey] : undefined) ?? EMPTY_REPOS
 
   return (
     <StripRow>
@@ -131,6 +146,7 @@ export function WorkstreamStrip(): JSX.Element | null {
         dirty={dirty}
         changed={changed}
         readOnly={readOnly}
+        repos={repos}
       />
 
       <Divider />
@@ -347,6 +363,7 @@ function ForgePanel({
 }): JSX.Element {
   const forgeStatus = useRoxyStore((s) => s.forgeStatus)
   const gitStatus = useRoxyStore((s) => s.gitStatus)
+  const repoStatus = useRoxyStore((s) => s.repoStatus)
   const pushBranch = useRoxyStore((s) => s.pushBranch)
   const pullBranch = useRoxyStore((s) => s.pullBranch)
   const resetBranch = useRoxyStore((s) => s.resetBranch)
@@ -358,6 +375,8 @@ function ForgePanel({
 
   const view = statusKey ? forgeStatus[statusKey] : undefined
   const git = statusKey ? gitStatus[statusKey] : undefined
+  const repos = (statusKey ? repoStatus[statusKey] : undefined) ?? EMPTY_REPOS
+  const agg = useMemo(() => aggregateRepoStatus(repos), [repos])
   const pull = view?.pull ?? null
   const action = view?.lifecycle.action ?? null
   const sync = view?.syncTarget ?? null
@@ -470,6 +489,53 @@ function ForgePanel({
           <div className="flex gap-3 border-t border-border px-3 py-1.5 text-[11px] text-text-subtle tabular-nums">
             {git.ahead > 0 && <span>{git.ahead} ahead</span>}
             {git.behind > 0 && <span>{git.behind} behind</span>}
+          </div>
+        )}
+
+        {/* Multi-repo: push and PRs are inherently PER REPO - three repos can
+            mean three pull requests - so the panel enumerates them rather than
+            letting one chip speak for all of them. Empty for a single-repo
+            session, which renders exactly the panel that shipped before. */}
+        {repos.length > 1 && (
+          <div className="flex flex-col border-t border-border">
+            <div className="px-3 pt-1.5 text-[10px] uppercase tracking-wide text-text-subtle">
+              {describeRepoStatus(agg)}
+            </div>
+            {repos.map((r) => (
+              <div
+                key={r.name}
+                className="flex items-center gap-2 px-3 py-1 text-[11px]"
+                title={
+                  r.isRepo
+                    ? `${r.name} on ${r.branch ?? 'detached'}`
+                    : `${r.name} - checkout is missing`
+                }
+              >
+                <span className="min-w-0 flex-1 truncate text-text-muted">{r.name}</span>
+                {/* Per-repo ahead/behind: the number that tells you which of
+                    the N repos still needs pushing. */}
+                {r.isRepo && r.ahead > 0 && (
+                  <span className="shrink-0 tabular-nums text-text-subtle">{r.ahead} ahead</span>
+                )}
+                {r.isRepo && r.behind > 0 && (
+                  <span className="shrink-0 tabular-nums text-text-subtle">{r.behind} behind</span>
+                )}
+                {r.forge?.pull && (
+                  <button
+                    type="button"
+                    onClick={() => openUrl(r.forge!.pull!.url)}
+                    className="shrink-0 rounded px-1 text-info transition hover:bg-white/5"
+                  >
+                    #{r.forge.pull.number}
+                  </button>
+                )}
+                {r.isRepo ? (
+                  r.dirty && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-warning" />
+                ) : (
+                  <span className="shrink-0 text-warning">missing</span>
+                )}
+              </div>
+            ))}
           </div>
         )}
 
@@ -615,7 +681,8 @@ function BranchSegment({
   pending,
   dirty,
   changed,
-  readOnly
+  readOnly,
+  repos
 }: {
   sessionId: string
   branch: string | null
@@ -623,6 +690,8 @@ function BranchSegment({
   dirty: boolean
   changed: number
   readOnly: boolean
+  /** Per-repo status for a composite workstream; [] for an ordinary session. */
+  repos: RepoStatusView[]
 }): JSX.Element {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState('')
@@ -630,6 +699,12 @@ function BranchSegment({
   const [saving, setSaving] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
   const refreshChats = useRoxyStore((s) => s.refreshChats)
+
+  // Multi-repo summary. Both are null/empty for a single-repo session, so every
+  // branch below collapses to exactly the markup that shipped before.
+  const agg = useMemo(() => aggregateRepoStatus(repos), [repos])
+  const repoBadge = repoCountBadge(agg.repoCount)
+  const repoSummary = describeRepoStatus(agg)
 
   // A pending workstream has no branch to rename yet, and a sub-session must
   // not move its parent's branch.
@@ -734,11 +809,26 @@ function BranchSegment({
       {/* A pending 'new' workstream has no branch yet — its name is generated
           at materialization. Showing the CURRENT branch here would name the one
           thing this workstream exists to stay off. */}
-      <span className="truncate">{branch ?? (pending ? 'branch pending' : 'detached')}</span>
+      <span className="truncate">
+        {branch ?? (pending ? 'branch pending' : repos.length ? 'mixed branches' : 'detached')}
+      </span>
+      {/* Multi-repo only: how many repos this one branch name spans. A
+          single-repo session renders exactly as it always has - repoCountBadge
+          returns null for 0 and 1, so there is no badge to lay out at all. */}
+      {repoBadge && (
+        <span
+          className="shrink-0 rounded bg-white/8 px-1 text-[10px] leading-4 text-text-subtle"
+          title={repoSummary}
+        >
+          {repoBadge}
+        </span>
+      )}
       {dirty && (
         <span
           className="h-1.5 w-1.5 shrink-0 rounded-full bg-warning"
-          title={`${changed} uncommitted change${changed === 1 ? '' : 's'}`}
+          title={
+            repos.length ? repoSummary : `${changed} uncommitted change${changed === 1 ? '' : 's'}`
+          }
         />
       )}
     </button>

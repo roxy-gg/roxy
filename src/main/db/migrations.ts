@@ -441,7 +441,26 @@ export const MIGRATIONS: Migration[] = [
       pinned_at   INTEGER NOT NULL,
       PRIMARY KEY (provider_id, model)
     );
-  `
+  `,
+
+  // ---- v21: multi-repo (composite) workstreams ----
+  // A project folder that is NOT a repo but CONTAINS several (backend/,
+  // frontend/, shared/) used to get no workstream at all - "this folder isn't a
+  // git repository" - so the people with the most to gain from parallel agents
+  // got none of it.
+  //
+  // Such a session now gets a COMPOSITE worktree: one directory holding one real
+  // git worktree per repo, all on the same branch name (branch names are
+  // per-repo, so the same name in three repos never collides). `worktree_path`
+  // points at that composite root, and THIS column records what is inside it -
+  // a JSON RepoLink[] of {name, root, worktreePath, branch}.
+  //
+  // NULL means single-repo: every session that predates this, and every session
+  // in an ordinary repo. Every multi-repo code path short-circuits on NULL, so
+  // their behaviour is bit-for-bit unchanged. See shared/repos.ts.
+  (db) => {
+    addColumnIfMissing(db, 'chats', 'repos', 'TEXT')
+  }
 ]
 
 /**
@@ -473,6 +492,8 @@ export function repairSchema(db: Database): void {
   addColumnIfMissing(db, 'chats', 'branch', 'TEXT')
   addColumnIfMissing(db, 'chats', 'dev_port', 'INTEGER')
   addColumnIfMissing(db, 'chats', 'worktree_pending', 'TEXT')
+  // v21's composite (multi-repo) workstream membership.
+  addColumnIfMissing(db, 'chats', 'repos', 'TEXT')
   // v17's per-session inference config.
   addColumnIfMissing(db, 'chats', 'agent_id', 'TEXT')
   addColumnIfMissing(db, 'chats', 'reasoning_effort', 'TEXT')
