@@ -3208,6 +3208,60 @@ async function main(): Promise<void> {
       'poll key: worktree session -> worktree path',
       statusKeyForSession(mk({ worktreePath: '/wt/auth' })) === '/wt/auth'
     )
+    // ---- multi-repo: the strip must appear for a folder OF repos ----
+    // A folder of repos is NOT itself a repository, so its status reports
+    // `isRepo:false` forever. Before `projectHasRepos` existed this hid the
+    // strip permanently for exactly the projects multi-repo support is for.
+    {
+      const NOT_A_REPO = { isRepo: false, branch: null, dirty: false, changed: 0 }
+      const plain = mk({ worktreePath: null, branch: null })
+
+      check('strip: hidden in a plain folder (unchanged)', view(plain, NOT_A_REPO) === null)
+      check(
+        'strip: SHOWN in a folder of repos despite isRepo:false',
+        workstreamStripView({
+          chat: plain,
+          findChat: () => null,
+          gitAvailable: true,
+          status: NOT_A_REPO,
+          projectHasRepos: true
+        }) !== null
+      )
+      // Unprobed must not read as false, or the strip flickers off on first paint.
+      check(
+        'strip: an unprobed project is not treated as repo-less',
+        workstreamStripView({
+          chat: mk({ worktreePath: '/wt/x', branch: 'roxy/x' }),
+          findChat: () => null,
+          gitAvailable: true,
+          status: undefined,
+          projectHasRepos: undefined
+        }) !== null
+      )
+      // But a DELETED composite still goes quiet: the session has a worktree and
+      // git says it isn't a repo any more, which outranks the project's shape.
+      check(
+        'strip: a vanished worktree still hides, even in a multi-repo project',
+        workstreamStripView({
+          chat: mk({ worktreePath: '/wt/gone', branch: 'roxy/gone' }),
+          findChat: () => null,
+          gitAvailable: true,
+          status: NOT_A_REPO,
+          projectHasRepos: true
+        }) === null
+      )
+      check(
+        'strip: no git binary still hides everything',
+        workstreamStripView({
+          chat: plain,
+          findChat: () => null,
+          gitAvailable: false,
+          status: NOT_A_REPO,
+          projectHasRepos: true
+        }) === null
+      )
+    }
+
     check('poll key: a sub-session never polls', statusKeyForSession(sub) === null)
   }
 

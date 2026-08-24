@@ -1104,7 +1104,8 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
     }
   },
 
-  refreshGitStatus: async (chatId) => {    const chat = get().chats.find((c) => c.id === chatId)
+  refreshGitStatus: async (chatId) => {
+    const chat = get().chats.find((c) => c.id === chatId)
     if (!chat) return
     // Sub-sessions inherit their parent's workstream — never poll them separately.
     if (chat.kind === 'sub') return

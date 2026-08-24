@@ -85,12 +85,22 @@ export function WorkstreamStrip(): JSX.Element | null {
       ? (chats.find((c) => c.id === chat.parentId) ?? null)
       : chat
   const statusKey = owner ? statusKeyForSession(owner) : null
+  const workspace = owner?.workspacePath ?? null
   const view = workstreamStripView({
     chat,
     findChat: (id) => chats.find((c) => c.id === id) ?? null,
     gitAvailable,
-    status: statusKey ? gitStatus[statusKey] : undefined
+    status: statusKey ? gitStatus[statusKey] : undefined,
+    // A folder OF repos reports `isRepo:false` forever - it isn't one. Without
+    // this the strip stays hidden for every multi-repo project.
+    projectHasRepos: workspace ? projectRepos[workspace] : undefined
   })
+
+  // Probe the project's shape once. Runs before the early return so a
+  // multi-repo project can flip the strip ON, which it otherwise never would.
+  useEffect(() => {
+    if (workspace) void ensureProjectRepos(workspace)
+  }, [workspace, ensureProjectRepos])
 
   // Poll rather than watch: N worktrees would mean N watchers, and fs.watch is
   // unreliable on Windows. Also refresh when the window regains focus, which is

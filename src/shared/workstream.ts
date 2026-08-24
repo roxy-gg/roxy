@@ -103,13 +103,20 @@ export function workstreamStripView(input: {
   // saying `isRepo: false`: that means the worktree went away underneath us, and
   // the strip should go quiet.
   //
-  // `projectHasRepos` is the third source of proof, and it is the one a
-  // MULTI-REPO project depends on entirely: a folder of repos is not itself a
-  // repository, so its status legitimately says `isRepo: false` forever. Without
-  // this the strip would be permanently hidden for exactly the workspaces
-  // multi-repo support was built for - which is the bug this clause fixes.
-  const repoBacked = status?.isRepo || !!owner.worktreePath || !!input.projectHasRepos
-  if (!repoBacked) return null
+  // `projectHasRepos` is the third source of proof, and a MULTI-REPO project
+  // depends on it entirely: a folder of repos is not itself a repository, so
+  // its status legitimately reports `isRepo: false` forever. Without this the
+  // strip would be permanently hidden for exactly the workspaces multi-repo
+  // support was built for.
+  //
+  // Order matters. An ARRIVED `isRepo: false` still wins for a session that has
+  // a worktree - that means the checkout was deleted underneath us and the
+  // strip must go quiet - so this only rescues a session that has NO worktree
+  // yet, which is the only state a multi-repo project can be stuck in.
+  const proven = status
+    ? status.isRepo || (!owner.worktreePath && !!input.projectHasRepos)
+    : !!owner.worktreePath || !!input.projectHasRepos
+  if (!proven) return null
 
   // A session that has ASKED for a workstream is not in the default one. Saying
   // "default workstream" there is not merely vague, it is wrong in the direction
