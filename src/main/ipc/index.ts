@@ -11,7 +11,9 @@ import type {
   CreateWorktreeResult,
   ForkChatInput,
   GitStatusView,
+  MultiSyncOutcome,
   RepoStatusView,
+  RepoSyncResult,
   LlmStartInput,
   McpServerView,
   RemoteStartInput,
@@ -892,15 +894,21 @@ export function registerIpc(): void {
             behind: 0,
             hasUpstream: false,
             defaultBranch: null,
-            forge: null
+            forge: null,
+            sync: null
           }
           try {
             const root = await git.repoRoot(link.worktreePath)
             if (!root) return { ...base, isRepo: false }
-            const [st, def, fg] = await Promise.all([
+            const [st, def, fg, sync] = await Promise.all([
               git.status(link.worktreePath),
               git.defaultBranch(link.worktreePath),
-              forge.forgeStatus(link.worktreePath, { force: false })
+              forge.forgeStatus(link.worktreePath, { force: false }),
+              // What this repo would sync against - `origin/<base>` when the
+              // branch was never pushed, which is the normal state of a fresh
+              // composite workstream and the whole reason Update/Reset can be
+              // offered for one at all.
+              git.syncTargetFor(link.worktreePath)
             ])
             return {
               ...base,
@@ -912,7 +920,8 @@ export function registerIpc(): void {
               behind: st?.behind ?? 0,
               hasUpstream: st?.hasUpstream ?? false,
               defaultBranch: def,
-              forge: fg
+              forge: fg,
+              sync
             }
           } catch {
             // This repo alone is unreadable; the rest of the workstream stands.
@@ -1011,6 +1020,69 @@ export function registerIpc(): void {
     if (r.ok) forge.invalidate()
     return r
   })
+
+  /**
+   * Update or reset EVERY repo of a composite workstream.
+   *
+   * Takes a session id because the composite root is not a repository - see
+   * `gitStatusMulti`. One shared implementation for both modes, because the
+   * only thing that differs is which per-repo primitive runs; everything around
+   * it (resolve the links, run them independently, collect outcomes) is
+   * identical, and duplicating it is how the two drift.
+   *
+   * Repos run SEQUENTIALLY. They are separate repositories so they could run in
+   * parallel, but each one fetches, and N parallel fetches against the same
+   * host is how you get rate-limited or throttled by a corporate proxy. In
+   * practice N is under a dozen and the fetches dominate either way.
+   *
+   * A failure in one repo never stops the others: they are independent
+   * checkouts, and stopping at the first error would leave the workstream in a
+   * state that is neither "before" nor "after", with no record of which repos
+   * moved.
+   */
+  const syncEveryRepo = async (
+    sessionId: string,
+    mode: 'pull' | 'reset'
+  ): Promise<MultiSyncOutcome> => {
+    if (!sessionId) return { repos: [], error: 'No session.' }
+    if (!(await git.isGitAvailable())) return { repos: [], error: 'Git isn\u2019t installed.' }
+
+    const chat = repo.getChat(sessionId)
+    const owner = chat?.kind === 'sub' && chat.parentId ? repo.getChat(chat.parentId) : chat
+    const links = owner?.repos
+    if (!links?.length) return { repos: [], error: 'This session is not multi-repo.' }
+
+    const results: RepoSyncResult[] = []
+    for (const link of links) {
+      const r =
+        mode === 'pull'
+          ? await git.pullFastForward(link.worktreePath)
+          : await git.resetToUpstream(link.worktreePath)
+      results.push({
+        name: link.name,
+        ok: r.ok,
+        error: r.error,
+        ref: r.upstream,
+        updated: r.updated,
+        stashed: r.stashed
+      })
+    }
+
+    // Every branch that moved may now disagree with what we cached about its
+    // PR, so drop the lot rather than show pre-sync state until the TTL expires.
+    if (results.some((r) => r.ok && r.updated)) forge.invalidate()
+    return { repos: results }
+  }
+
+  ipcMain.handle(
+    CHANNELS.forgePullMulti,
+    (_e, sessionId: string): Promise<MultiSyncOutcome> => syncEveryRepo(sessionId, 'pull')
+  )
+
+  ipcMain.handle(
+    CHANNELS.forgeResetMulti,
+    (_e, sessionId: string): Promise<MultiSyncOutcome> => syncEveryRepo(sessionId, 'reset')
+  )
 
   ipcMain.handle(CHANNELS.forgeCreateUrl, async (_e, cwd: string) => {
     if (!cwd || !(await git.isGitAvailable())) return null

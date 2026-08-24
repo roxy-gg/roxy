@@ -183,6 +183,56 @@ export interface RepoStatusView {
   defaultBranch: string | null
   /** PR/remote state for this repo's branch, when the forge knows any. */
   forge: ForgeStatusView | null
+  /**
+   * The ref this repo would sync against, and how far it is from it.
+   *
+   * Deliberately NOT the same measurement as `ahead`/`behind` above, which are
+   * relative to the UPSTREAM and are therefore both zero on a freshly-created
+   * workstream branch that tracks nothing. This is relative to whatever the
+   * repo would actually sync to: its upstream when it has one, otherwise
+   * `origin/<base>` - which is the only thing a brand-new branch can
+   * meaningfully update from or reset to.
+   */
+  sync: RepoSyncTarget | null
+}
+
+/**
+ * Where one repo would sync to, and what that would cost.
+ *
+ * `viaUpstream` is the distinction the UI has to draw: syncing to a tracked
+ * upstream is "catch my branch up with itself on the server", while syncing to
+ * a base branch is "rebase my life onto main" - same buttons, very different
+ * promise, so the label has to name which one it is.
+ */
+export interface RepoSyncTarget {
+  /** The ref, e.g. `origin/main`. */
+  ref: string
+  /** False when `ref` is the base branch rather than a tracked upstream. */
+  viaUpstream: boolean
+  ahead: number
+  behind: number
+  /** Uncommitted entries a reset would stash first. */
+  changed: number
+  /**
+   * Whether a fast-forward can succeed. False once the branch has commits the
+   * target doesn't: git would have to merge or rebase, and nothing here picks
+   * one on the user's behalf.
+   */
+  canFastForward: boolean
+}
+
+/** What a sync did to ONE repo of a composite workstream. */
+export interface RepoSyncResult {
+  /** Folder name under the composite root, e.g. `backend`. */
+  name: string
+  ok: boolean
+  error?: string
+  /** The ref this repo synced to. */
+  ref?: string
+  /** False when it was already in sync and nothing moved. */
+  updated?: boolean
+  /** True when a reset parked this repo's uncommitted work in the stash. */
+  stashed?: boolean
 }
 
 export interface CreateWorktreeInput {
@@ -216,6 +266,23 @@ export interface SyncOutcome {
    * indistinguishable from one that lost the work.
    */
   stashed?: boolean
+}
+
+/**
+ * The result of a sync across every repo of a composite workstream.
+ *
+ * There is no single `ok` worth reporting when four repos are involved and one
+ * of them failed, so this keeps the per-repo detail and lets the UI say "3 of
+ * 4" rather than a boolean that is a lie in one direction or the other.
+ */
+export interface MultiSyncOutcome {
+  /** One entry per repo, in display order. */
+  repos: RepoSyncResult[]
+  /**
+   * Set only when the call could not run AT ALL (no session, mid-turn, git
+   * missing). A per-repo failure is not this - it lives in `repos`.
+   */
+  error?: string
 }
 
 export interface PruneWorktreesResult {
@@ -952,6 +1019,20 @@ export interface RoxyApi {
      * (including untracked files) so nothing is unrecoverable.
      */
     reset(cwd: string): Promise<SyncOutcome>
+    /**
+     * Update EVERY repo of a multi-repo session, in one call.
+     *
+     * Takes a SESSION id rather than a path for the same reason
+     * `git.statusMulti` does: the composite root is not a repository, so there
+     * is nothing at that path to act on - the session's `repos` links are the
+     * only record of where its checkouts are.
+     *
+     * Repos are independent, so one failure never stops the rest: the result
+     * carries a per-repo outcome and the caller reports the mix.
+     */
+    pullMulti(sessionId: string): Promise<MultiSyncOutcome>
+    /** Reset EVERY repo of a multi-repo session. See `pullMulti`. */
+    resetMulti(sessionId: string): Promise<MultiSyncOutcome>
     /** The host's "create a pull request" URL, pre-filled for this branch. */
     createUrl(cwd: string): Promise<string | null>
     /**

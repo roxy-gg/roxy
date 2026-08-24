@@ -221,6 +221,85 @@ function main(): void {
   )
   check('claiming expanded paths protects it', claimedExpanded.has(live.links[0].worktreePath))
 
+  // ---- syncing a composite against origin -------------------------------
+  // The claim under test is the one the whole feature rests on: a workstream
+  // branch that was NEVER PUSHED still has somewhere to update from and reset
+  // to. Its upstream is null, so anything keying off `@{upstream}` reports
+  // "nothing to sync" - which is why `syncRefFor` falls back to origin/<base>.
+  const SYNC = path.join(ROOT, 'sync')
+  const origin = path.join(SYNC, 'origin.git')
+  const clone = path.join(SYNC, 'clone')
+  mkdirSync(SYNC, { recursive: true })
+  git(['init', '-q', '--bare', '-b', 'main', origin], SYNC)
+  git(['clone', '-q', origin, clone], SYNC)
+  writeFileSync(path.join(clone, 'a.txt'), 'one\n')
+  git(['add', '-A'], clone)
+  git(['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-qm', 'first'], clone)
+  git(['push', '-q', 'origin', 'main'], clone)
+
+  // A workstream branch, exactly as createWorktree makes one: cut from main,
+  // never pushed, tracking nothing.
+  const wt = path.join(SYNC, 'wt')
+  git(['worktree', 'add', '-q', '-b', 'roxy/feature', wt, 'HEAD'], clone)
+  const upstream = git(['rev-parse', '--abbrev-ref', 'roxy/feature@{upstream}'], wt)
+  check('sync: a fresh workstream branch has NO upstream', !upstream.ok)
+
+  // ...and yet it has an obvious base, which is what makes the buttons legal.
+  const baseRef = git(['rev-parse', '--verify', '--quiet', 'refs/remotes/origin/main^{commit}'], wt)
+  check('sync: but origin/main resolves from inside the worktree', baseRef.ok && !!baseRef.out)
+
+  // Someone else pushes to main while the workstream sits there.
+  writeFileSync(path.join(clone, 'b.txt'), 'two\n')
+  git(['add', '-A'], clone)
+  git(['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-qm', 'second'], clone)
+  git(['push', '-q', 'origin', 'main'], clone)
+  git(['fetch', '-q', 'origin'], wt)
+
+  // This is the exact measurement `distanceFrom` makes: left-only commits are
+  // what we are BEHIND, right-only what we are ahead.
+  const dist = git(['rev-list', '--left-right', '--count', 'origin/main...HEAD'], wt)
+  const [behind, ahead] = dist.out.split(/\s+/).map(Number)
+  check('sync: the unpushed branch measures 1 behind origin/main', behind === 1, dist.out)
+  check('sync: and 0 ahead, so it can fast-forward', ahead === 0, dist.out)
+
+  // Update: a plain fast-forward onto the base ref.
+  const ff = git(['merge', '--ff-only', 'origin/main'], wt)
+  check('sync: update fast-forwards onto origin/main', ff.ok, ff.err)
+  check('sync: and the new file arrived', existsSync(path.join(wt, 'b.txt')))
+
+  // Reset: local commits are discarded, and uncommitted work is STASHED first -
+  // the promise that makes a destructive one-click button acceptable.
+  writeFileSync(path.join(wt, 'c.txt'), 'local\n')
+  git(['add', '-A'], wt)
+  git(['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-qm', 'local work'], wt)
+  writeFileSync(path.join(wt, 'd.txt'), 'uncommitted\n')
+  const aheadNow = git(['rev-list', '--left-right', '--count', 'origin/main...HEAD'], wt)
+  check('sync: a local commit shows as ahead', aheadNow.out.split(/\s+/).map(Number)[1] === 1)
+
+  const stash = git(['stash', 'push', '--include-untracked', '-m', 'roxy: before reset'], wt)
+  check('sync: uncommitted work stashes before the reset', stash.ok, stash.err)
+  const hardReset = git(['reset', '--hard', 'origin/main'], wt)
+  check('sync: reset lands on origin/main', hardReset.ok, hardReset.err)
+  check('sync: the local commit is gone', !existsSync(path.join(wt, 'c.txt')))
+  const stashList = git(['stash', 'list'], wt)
+  check('sync: and the uncommitted work is recoverable', /roxy: before reset/.test(stashList.out))
+  const popped = git(['stash', 'pop'], wt)
+  check(
+    'sync: `git stash pop` really brings it back',
+    popped.ok && existsSync(path.join(wt, 'd.txt'))
+  )
+
+  // A repo with no remote has nowhere to sync to, and must be SKIPPED rather
+  // than failing the workstream around it.
+  const lonely = path.join(SYNC, 'lonely')
+  mkdirSync(lonely, { recursive: true })
+  git(['init', '-q', '-b', 'main'], lonely)
+  writeFileSync(path.join(lonely, 'x.txt'), 'x\n')
+  git(['add', '-A'], lonely)
+  git(['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-qm', 'only'], lonely)
+  const noRemote = git(['rev-parse', '--verify', '--quiet', 'refs/remotes/origin/main'], lonely)
+  check('sync: a repo with no origin resolves no base ref', !noRemote.ok || !noRemote.out)
+
   rmSync(ROOT, { recursive: true, force: true })
 
   if (fails.length) {

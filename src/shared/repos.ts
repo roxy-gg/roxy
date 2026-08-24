@@ -311,6 +311,131 @@ export function describeRepoStatus(agg: AggregateStatus): string {
 }
 
 /**
+ * The aggregate sync target for a composite workstream.
+ *
+ * Composite sessions put every repo on the SAME branch, cut from each repo's
+ * own base, so in the normal case all N repos report the same ref name
+ * (`origin/main`) and this reads exactly like the single-repo panel. When they
+ * genuinely differ - one repo's default is `develop` - `ref` is null and the UI
+ * says "their base branches" rather than naming one repo's answer for all.
+ *
+ * Repos with nothing to sync to (no origin) are ignored rather than blocking
+ * the others: a workstream spanning three GitHub repos and one local-only
+ * scratch repo should still offer to update the three.
+ */
+export interface CompositeSyncTarget {
+  /** The ref every syncable repo shares, or null when they differ. */
+  ref: string | null
+  /** How many repos have somewhere to sync to. */
+  syncable: number
+  /** Total commits behind, across syncable repos. */
+  behind: number
+  /** Total local commits, across syncable repos. */
+  ahead: number
+  /** Total uncommitted entries a reset would stash. */
+  changed: number
+  /** Repos that could be fast-forwarded right now. */
+  canFastForward: number
+  /** Repos blocked from fast-forwarding by local commits, in display order. */
+  blocked: string[]
+}
+
+/** Just enough of a repo's status to plan a sync across the set. */
+export interface RepoSyncLite {
+  name: string
+  isRepo: boolean
+  sync: {
+    ref: string
+    ahead: number
+    behind: number
+    changed: number
+    canFastForward: boolean
+  } | null
+}
+
+/**
+ * Fold N per-repo sync targets into the one the panel acts on.
+ *
+ * Returns null when NO repo has anywhere to sync to - the caller uses that to
+ * hide the buttons entirely, which is the honest answer for a workstream with
+ * no remotes at all.
+ */
+export function aggregateSyncTarget(repos: RepoSyncLite[]): CompositeSyncTarget | null {
+  const live = repos.filter((r) => r.isRepo && r.sync)
+  if (!live.length) return null
+
+  const refs = new Set(live.map((r) => r.sync!.ref))
+  return {
+    ref: refs.size === 1 ? [...refs][0] : null,
+    syncable: live.length,
+    behind: live.reduce((n, r) => n + r.sync!.behind, 0),
+    ahead: live.reduce((n, r) => n + r.sync!.ahead, 0),
+    changed: live.reduce((n, r) => n + r.sync!.changed, 0),
+    canFastForward: live.filter((r) => r.sync!.canFastForward).length,
+    blocked: live.filter((r) => !r.sync!.canFastForward).map((r) => r.name)
+  }
+}
+
+/** How a composite sync target is named in a button label. */
+export function describeSyncRef(target: CompositeSyncTarget): string {
+  return target.ref ?? 'their base branches'
+}
+
+/** One repo's outcome, as much as `summarizeSync` needs. */
+export interface SyncResultLite {
+  name: string
+  ok: boolean
+  updated?: boolean
+  stashed?: boolean
+  error?: string
+}
+
+/**
+ * One sentence describing what a multi-repo sync actually did.
+ *
+ * The rules are about which detail earns the space:
+ *   - failures always come first and NAME the repos, because that is the only
+ *     part the user has to act on;
+ *   - "already up to date" is worth saying out loud - it is the difference
+ *     between "nothing happened" and "nothing needed to happen";
+ *   - a stash is always mentioned, because it is the escape route for work the
+ *     reset just took away, and silence there is indistinguishable from loss.
+ */
+export function summarizeSync(
+  results: SyncResultLite[],
+  mode: 'pull' | 'reset'
+): { text: string; failed: boolean } {
+  if (!results.length) return { text: 'Nothing to sync.', failed: false }
+
+  const failed = results.filter((r) => !r.ok)
+  const moved = results.filter((r) => r.ok && r.updated)
+  const stashed = results.filter((r) => r.ok && r.stashed)
+  const verb = mode === 'pull' ? 'Updated' : 'Reset'
+
+  if (failed.length) {
+    const names = failed.map((r) => r.name).join(', ')
+    // One repo, one failure: git's own message is more useful than a count.
+    const detail =
+      failed.length === 1 && failed[0].error ? `${failed[0].name}: ${failed[0].error}` : names
+    const ok = moved.length ? ` ${verb} ${moved.length} of ${results.length}.` : ''
+    return { text: `Failed in ${detail}.${ok}`, failed: true }
+  }
+
+  if (!moved.length) {
+    return { text: `All ${results.length} already up to date.`, failed: false }
+  }
+
+  const scope = moved.length === results.length ? `all ${results.length}` : `${moved.length}`
+  const stash = stashed.length
+    ? ` Stashed work in ${stashed.map((r) => r.name).join(', ')} - \`git stash pop\` to get it back.`
+    : ''
+  return {
+    text: `${verb} ${scope} ${moved.length === 1 ? 'repo' : 'repos'}.${stash}`,
+    failed: false
+  }
+}
+
+/**
  * The one branch name to show for a session, given its links.
  *
  * Normally every link carries the same name, so this is just "the branch". It

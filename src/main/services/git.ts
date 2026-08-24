@@ -32,6 +32,7 @@ import {
   placeholderBranchName
 } from '../../shared/branch'
 import * as repo from '../db/repo'
+import type { RepoSyncTarget } from '../../shared/api'
 
 /** How long any single git command may run before it's killed. */
 const GIT_TIMEOUT_MS = 30_000
@@ -516,6 +517,92 @@ export async function status(cwd: string): Promise<GitStatus | null> {
 // ---------------------------------------------------------------------------
 
 /**
+ * The ref a branch should sync against, even when it tracks nothing.
+ *
+ * The upstream is the right answer whenever there is one - it is what the user
+ * pushed to and what ahead/behind already measure against.
+ *
+ * The fallback is the whole point of this function. A workstream branch is
+ * created locally and has no upstream until its first push, so `st.upstream` is
+ * null for the entire period when "my branch is stale, give me what's on main"
+ * is MOST likely to be true. Reporting "no upstream" there is technically
+ * accurate and practically useless: the branch has an obvious base
+ * (`origin/main`), and that is what the user means by "update from main".
+ *
+ * Returns null only when there is genuinely nothing to sync to: no upstream, no
+ * origin, or a base branch the remote doesn't have.
+ */
+export async function syncRefFor(
+  cwd: string,
+  opts: { branch?: string | null; upstream?: string | null } = {}
+): Promise<{ ref: string; viaUpstream: boolean } | null> {
+  if (!cwd) return null
+  if (opts.upstream) return { ref: opts.upstream, viaUpstream: true }
+
+  // The branch this workstream was cut from, as recorded at creation - the
+  // honest answer to "main" for a repo whose default is `develop` or `trunk`.
+  const branch = opts.branch ?? (await currentBranch(cwd))
+  const base = (branch ? await baseBranchFor(cwd, branch) : null) ?? (await defaultBranch(cwd))
+  if (!base) return null
+
+  // Only offer a REMOTE base. Resetting onto a local `main` that is itself
+  // months stale would look like it worked and quietly restore old code, which
+  // is precisely the failure this button exists to prevent.
+  const ref = `origin/${base}`
+  const exists = await git(
+    ['rev-parse', '--verify', '--quiet', `refs/remotes/${ref}^{commit}`],
+    cwd
+  )
+  if (!exists.ok || !exists.stdout.trim()) return null
+  return { ref, viaUpstream: false }
+}
+
+/**
+ * How far `cwd`'s branch is from `ref`, as a pair of commit counts.
+ *
+ * `rev-list --left-right --count A...B` is one command for both numbers, and
+ * uses the merge base - so "behind" means commits actually missing rather than
+ * every commit since the branches diverged.
+ */
+async function distanceFrom(cwd: string, ref: string): Promise<{ ahead: number; behind: number }> {
+  const r = await git(['rev-list', '--left-right', '--count', `${ref}...HEAD`], cwd)
+  if (!r.ok) return { ahead: 0, behind: 0 }
+  const m = /(\d+)\s+(\d+)/.exec(r.stdout.trim())
+  // Left is the ref, right is HEAD: left-only commits are what we're BEHIND.
+  return m ? { behind: Number(m[1]), ahead: Number(m[2]) } : { ahead: 0, behind: 0 }
+}
+
+/**
+ * Everything the UI needs to offer a sync for one repo, or null when it can't.
+ *
+ * Costs one extra git command beyond `status` (the ahead/behind count) and only
+ * when the branch has no upstream, so the common single-repo case is unchanged.
+ */
+export async function syncTargetFor(cwd: string): Promise<RepoSyncTarget | null> {
+  const st = await status(cwd)
+  if (!st?.branch) return null
+
+  const target = await syncRefFor(cwd, { branch: st.branch, upstream: st.upstream })
+  if (!target) return null
+
+  // With an upstream, status already counted the distance - don't pay twice.
+  const { ahead, behind } = target.viaUpstream
+    ? { ahead: st.ahead, behind: st.behind }
+    : await distanceFrom(cwd, target.ref)
+
+  return {
+    ref: target.ref,
+    viaUpstream: target.viaUpstream,
+    ahead,
+    behind,
+    changed: st.changed,
+    // `ahead === 0` is the honest predicate for whether a fast-forward can
+    // succeed; see the note in forge/index.ts on why it is not `behind > 0`.
+    canFastForward: ahead === 0
+  }
+}
+
+/**
  * Fast-forward the checked-out branch onto its upstream.
  *
  * Explicitly NOT `git pull`. `pull` is two operations wearing one name, and
@@ -535,7 +622,13 @@ export async function pullFastForward(cwd: string): Promise<SyncResult> {
   if (!cwd) return { ok: false, error: 'pull: missing cwd' }
   const st = await status(cwd)
   if (!st?.branch) return { ok: false, error: 'Not on a branch (detached HEAD).' }
-  if (!st.upstream) return { ok: false, error: `"${st.branch}" has no upstream to pull from.` }
+
+  // Falls back to `origin/<base>` when the branch tracks nothing, so a
+  // never-pushed workstream can still catch up with main. See `syncRefFor`.
+  const target = await syncRefFor(cwd, { branch: st.branch, upstream: st.upstream })
+  if (!target) {
+    return { ok: false, error: `"${st.branch}" has nothing to update from.` }
+  }
 
   // Fetch first so "behind" is measured against what the server has NOW, not
   // whatever the last poll happened to see.
@@ -543,19 +636,24 @@ export async function pullFastForward(cwd: string): Promise<SyncResult> {
   const fetched = await fetchOrigin(cwd, remote)
   if (!fetched.ok) return { ok: false, error: cleanGitError(fetched, `Could not reach ${remote}`) }
 
-  const after = await status(cwd)
-  if ((after?.behind ?? 0) === 0) {
-    return { ok: true, upstream: st.upstream, updated: false }
+  // Re-measure AFTER the fetch, against the ref we're actually merging. For a
+  // tracked branch `status` already knows; for a base ref it has no opinion, so
+  // count explicitly rather than read a number about a different ref.
+  const behind = target.viaUpstream
+    ? ((await status(cwd))?.behind ?? 0)
+    : (await distanceFrom(cwd, target.ref)).behind
+  if (behind === 0) {
+    return { ok: true, upstream: target.ref, updated: false }
   }
 
   // A dirty tree is fine for a fast-forward as long as no incoming file
   // collides with a local edit — git checks that itself and refuses if so, and
   // its refusal names the files, which is better than any pre-flight we could
   // write here.
-  const r = await git(['merge', '--ff-only', st.upstream], cwd, FETCH_TIMEOUT_MS)
+  const r = await git(['merge', '--ff-only', target.ref], cwd, FETCH_TIMEOUT_MS)
   if (!r.ok)
-    return { ok: false, error: cleanGitError(r, 'Could not fast-forward'), upstream: st.upstream }
-  return { ok: true, upstream: st.upstream, updated: true }
+    return { ok: false, error: cleanGitError(r, 'Could not fast-forward'), upstream: target.ref }
+  return { ok: true, upstream: target.ref, updated: true }
 }
 
 /**
@@ -578,7 +676,13 @@ export async function resetToUpstream(cwd: string): Promise<SyncResult> {
   if (!cwd) return { ok: false, error: 'reset: missing cwd' }
   const st = await status(cwd)
   if (!st?.branch) return { ok: false, error: 'Not on a branch (detached HEAD).' }
-  if (!st.upstream) return { ok: false, error: `"${st.branch}" has no upstream to reset to.` }
+
+  // Falls back to `origin/<base>`, which is what makes "reset to main" reachable
+  // on a branch that was never pushed. See `syncRefFor`.
+  const ref = await syncRefFor(cwd, { branch: st.branch, upstream: st.upstream })
+  if (!ref) {
+    return { ok: false, error: `"${st.branch}" has nothing to reset to.` }
+  }
 
   const remote = (await upstreamRemote(cwd, st.branch)) ?? 'origin'
   const fetched = await fetchOrigin(cwd, remote)
@@ -586,9 +690,9 @@ export async function resetToUpstream(cwd: string): Promise<SyncResult> {
 
   // Resolve the target BEFORE touching anything, so a typo'd or vanished
   // upstream fails while the tree is still intact.
-  const target = await git(['rev-parse', '--verify', '--quiet', `${st.upstream}^{commit}`], cwd)
+  const target = await git(['rev-parse', '--verify', '--quiet', `${ref.ref}^{commit}`], cwd)
   if (!target.ok || !target.stdout.trim()) {
-    return { ok: false, error: `Could not resolve ${st.upstream}.`, upstream: st.upstream }
+    return { ok: false, error: `Could not resolve ${ref.ref}.`, upstream: ref.ref }
   }
 
   let stashed = false
@@ -601,7 +705,7 @@ export async function resetToUpstream(cwd: string): Promise<SyncResult> {
       return {
         ok: false,
         error: cleanGitError(stash, 'Could not stash your changes, so nothing was reset'),
-        upstream: st.upstream
+        upstream: ref.ref
       }
     }
     // `stash push` exits 0 with "No local changes to save" when everything that
@@ -612,9 +716,9 @@ export async function resetToUpstream(cwd: string): Promise<SyncResult> {
 
   const r = await git(['reset', '--hard', target.stdout.trim()], cwd)
   if (!r.ok) {
-    return { ok: false, error: cleanGitError(r, 'Reset failed'), upstream: st.upstream, stashed }
+    return { ok: false, error: cleanGitError(r, 'Reset failed'), upstream: ref.ref, stashed }
   }
-  return { ok: true, upstream: st.upstream, updated: true, stashed }
+  return { ok: true, upstream: ref.ref, updated: true, stashed }
 }
 
 // ---------------------------------------------------------------------------

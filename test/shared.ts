@@ -133,6 +133,10 @@ import {
 import { resolveWorktreeCwd } from '../src/shared/workspace'
 import {
   aggregateRepoStatus,
+  aggregateSyncTarget,
+  describeSyncRef,
+  summarizeSync,
+  type RepoSyncLite,
   describeRepoStatus,
   isMultiRepo,
   isScannableDir,
@@ -3441,6 +3445,145 @@ async function main(): Promise<void> {
       'aggregate: an empty set says so',
       describeRepoStatus(aggregateRepoStatus([])) === 'No repositories checked out.'
     )
+
+    // ---- sync targets: what "Update all" / "Reset all" act on ----
+    const mkSync = (
+      name: string,
+      sync: { ref: string; ahead?: number; behind?: number; changed?: number } | null,
+      isRepo = true
+    ): RepoSyncLite => ({
+      name,
+      isRepo,
+      sync: sync && {
+        ref: sync.ref,
+        ahead: sync.ahead ?? 0,
+        behind: sync.behind ?? 0,
+        changed: sync.changed ?? 0,
+        canFastForward: (sync.ahead ?? 0) === 0
+      }
+    })
+
+    const agreed = aggregateSyncTarget([
+      mkSync('backend', { ref: 'origin/main', behind: 2 }),
+      mkSync('frontend', { ref: 'origin/main', behind: 1 })
+    ])!
+    check('sync: a shared ref is named', agreed.ref === 'origin/main')
+    check('sync: behind is summed across repos', agreed.behind === 3)
+    check('sync: every repo can fast-forward', agreed.canFastForward === 2)
+    check('sync: none are blocked', agreed.blocked.length === 0)
+    check('sync: the label is the shared ref', describeSyncRef(agreed) === 'origin/main')
+
+    // Repos need not agree - one may default to `develop`. Naming one repo's
+    // answer for all of them would be a claim about trees it never looked at.
+    const differing = aggregateSyncTarget([
+      mkSync('backend', { ref: 'origin/main' }),
+      mkSync('frontend', { ref: 'origin/develop' })
+    ])!
+    check('sync: differing refs yield no single name', differing.ref === null)
+    check(
+      'sync: and the label says so rather than picking one',
+      describeSyncRef(differing) === 'their base branches'
+    )
+
+    // A repo with local commits cannot be fast-forwarded, but must not veto the
+    // ones that can - "update the other two" is still the useful action.
+    const blocked = aggregateSyncTarget([
+      mkSync('backend', { ref: 'origin/main', ahead: 2, changed: 3 }),
+      mkSync('frontend', { ref: 'origin/main', behind: 1 })
+    ])!
+    check('sync: blocked repos are named', blocked.blocked.join(',') === 'backend')
+    check('sync: the unblocked one is still counted', blocked.canFastForward === 1)
+    check('sync: ahead is summed', blocked.ahead === 2)
+    check('sync: changed is summed for the reset label', blocked.changed === 3)
+
+    // A repo with no remote at all is skipped, not counted as syncable: a
+    // workstream spanning three GitHub repos and one local scratch repo should
+    // still offer to update the three.
+    const partial = aggregateSyncTarget([
+      mkSync('backend', { ref: 'origin/main', behind: 1 }),
+      mkSync('scratch', null)
+    ])!
+    check('sync: a repo with no target is not syncable', partial.syncable === 1)
+    check('sync: but the rest still are', partial.behind === 1)
+
+    check(
+      'sync: a missing checkout is excluded',
+      aggregateSyncTarget([mkSync('gone', { ref: 'origin/main' }, false)]) === null
+    )
+    check('sync: nothing syncable at all yields null', aggregateSyncTarget([]) === null)
+
+    // ---- summarizing what a multi-repo sync DID ----
+    const allMoved = summarizeSync(
+      [
+        { name: 'backend', ok: true, updated: true },
+        { name: 'frontend', ok: true, updated: true }
+      ],
+      'pull'
+    )
+    check('summary: all updated says so', allMoved.text === 'Updated all 2 repos.')
+    check('summary: and is not a failure', !allMoved.failed)
+
+    // "Already up to date" is worth saying: it is the difference between
+    // nothing happening and nothing NEEDING to happen.
+    const noop = summarizeSync(
+      [
+        { name: 'backend', ok: true, updated: false },
+        { name: 'frontend', ok: true, updated: false }
+      ],
+      'pull'
+    )
+    check('summary: a no-op is reported, not silent', noop.text === 'All 2 already up to date.')
+
+    const some = summarizeSync(
+      [
+        { name: 'backend', ok: true, updated: true },
+        { name: 'frontend', ok: true, updated: false }
+      ],
+      'pull'
+    )
+    check('summary: a partial update counts only what moved', some.text === 'Updated 1 repo.')
+
+    // A failure NAMES the repo: a count leaves the user to find which one.
+    const oneFailed = summarizeSync(
+      [
+        { name: 'backend', ok: false, error: 'Could not reach origin' },
+        { name: 'frontend', ok: true, updated: true }
+      ],
+      'pull'
+    )
+    check(
+      'summary: a single failure carries git\u2019s own message',
+      /backend: Could not reach origin/.test(oneFailed.text)
+    )
+    check('summary: and still reports what DID work', /Updated 1 of 2/.test(oneFailed.text))
+    check('summary: a failure is flagged as one', oneFailed.failed)
+
+    const twoFailed = summarizeSync(
+      [
+        { name: 'backend', ok: false, error: 'a' },
+        { name: 'shared', ok: false, error: 'b' },
+        { name: 'frontend', ok: true, updated: true }
+      ],
+      'reset'
+    )
+    check(
+      'summary: several failures are named, not detailed',
+      /backend, shared/.test(twoFailed.text)
+    )
+
+    // The stash is the escape route for work the reset just took away. Silence
+    // there is indistinguishable from having lost it.
+    const stashed = summarizeSync(
+      [
+        { name: 'backend', ok: true, updated: true, stashed: true },
+        { name: 'frontend', ok: true, updated: true }
+      ],
+      'reset'
+    )
+    check('summary: reset says reset, not updated', stashed.text.startsWith('Reset all 2 repos.'))
+    check('summary: a stash is always mentioned', /Stashed work in backend/.test(stashed.text))
+    check('summary: and says how to undo it', /git stash pop/.test(stashed.text))
+    check('summary: an empty set is inert', summarizeSync([], 'pull').text === 'Nothing to sync.')
 
     // The badge is null below 2 so single-repo sessions render EXACTLY as they
     // did before multi-repo support existed.

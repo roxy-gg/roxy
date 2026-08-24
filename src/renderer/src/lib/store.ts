@@ -42,6 +42,7 @@ import { api } from './api'
 import type { ComposerImage } from './images'
 import type {
   GitStatusView,
+  MultiSyncOutcome,
   RepoStatusView,
   ServiceView,
   SyncOutcome,
@@ -297,6 +298,14 @@ interface RoxyStore {
    * turn is running - see `syncBranch`.
    */
   pullBranch: (chatId: string) => Promise<SyncOutcome>
+  /**
+   * Update / reset EVERY repo of a multi-repo session.
+   *
+   * Separate from `pullBranch`/`resetBranch` because the outcome is per-repo -
+   * see `syncAllRepos`. Callers pick by whether the session has `repos`.
+   */
+  pullAllRepos: (chatId: string) => Promise<MultiSyncOutcome>
+  resetAllRepos: (chatId: string) => Promise<MultiSyncOutcome>
   /** Hard-reset onto the upstream, stashing uncommitted work first. */
   resetBranch: (chatId: string) => Promise<SyncOutcome>
   /** Load the worktrees + branches for a project (menu open). */
@@ -800,30 +809,65 @@ async function syncBranch(
   chatId: string,
   mode: 'pull' | 'reset'
 ): Promise<SyncOutcome> {
-  const state = get()
-  const chat = state.chats.find((c) => c.id === chatId)
-  const owner =
-    chat?.kind === 'sub' && chat.parentId
-      ? (state.chats.find((c) => c.id === chat.parentId) ?? chat)
-      : chat
-  const key = owner?.worktreePath ?? owner?.workspacePath
-  if (!owner || !key) return { ok: false, error: 'No workspace for this session.' }
+  const owner = syncOwner(get, chatId)
+  if ('error' in owner) return { ok: false, error: owner.error }
 
-  const busy =
-    !!state.sendingChats[owner.id] || remoteTurns.has(owner.id) || subagentTurns.has(owner.id)
-  if (busy) {
-    return {
-      ok: false,
-      error: 'This session is mid-turn - stop it or let it finish first.'
-    }
-  }
+  const key = owner.chat.worktreePath ?? owner.chat.workspacePath
+  if (!key) return { ok: false, error: 'No workspace for this session.' }
 
   const r = mode === 'pull' ? await api.forge.pull(key) : await api.forge.reset(key)
   // Refresh on FAILURE too: a fetch happened either way, so the behind count on
   // screen is now stale even when the merge was refused. Leaving "3 behind"
   // under an error message that says the update didn't happen is confusing in
   // exactly the moment the user needs to trust the number.
-  await get().refreshGitStatus(owner.id)
+  await get().refreshGitStatus(owner.chat.id)
+  return r
+}
+
+/**
+ * Resolve which session a sync acts on, and refuse if it can't run right now.
+ *
+ * Split out of `syncBranch` so the multi-repo path enforces the SAME two
+ * guards. They are the interesting part of both functions, and a second copy
+ * that forgot the mid-turn check would reset a tree an agent is editing.
+ */
+function syncOwner(get: () => RoxyStore, chatId: string): { chat: Chat } | { error: string } {
+  const state = get()
+  const chat = state.chats.find((c) => c.id === chatId)
+  const owner =
+    chat?.kind === 'sub' && chat.parentId
+      ? (state.chats.find((c) => c.id === chat.parentId) ?? chat)
+      : chat
+  if (!owner) return { error: 'No workspace for this session.' }
+
+  const busy =
+    !!state.sendingChats[owner.id] || remoteTurns.has(owner.id) || subagentTurns.has(owner.id)
+  if (busy) return { error: 'This session is mid-turn - stop it or let it finish first.' }
+  return { chat: owner }
+}
+
+/**
+ * The multi-repo counterpart of `syncBranch`.
+ *
+ * Kept separate rather than folded in behind a branch because the RESULT shapes
+ * differ in kind: one repo answers with a single ok/error, N repos answer with
+ * a mix that the UI has to enumerate. Collapsing them would mean inventing a
+ * single `ok` for "two updated, one failed", which is the exact lie this
+ * feature exists to avoid.
+ */
+async function syncAllRepos(
+  get: () => RoxyStore,
+  chatId: string,
+  mode: 'pull' | 'reset'
+): Promise<MultiSyncOutcome> {
+  const owner = syncOwner(get, chatId)
+  if ('error' in owner) return { repos: [], error: owner.error }
+
+  const r =
+    mode === 'pull'
+      ? await api.forge.pullMulti(owner.chat.id)
+      : await api.forge.resetMulti(owner.chat.id)
+  await get().refreshGitStatus(owner.chat.id)
   return r
 }
 
@@ -1201,6 +1245,9 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
 
   pullBranch: (chatId) => syncBranch(get, chatId, 'pull'),
   resetBranch: (chatId) => syncBranch(get, chatId, 'reset'),
+
+  pullAllRepos: (chatId) => syncAllRepos(get, chatId, 'pull'),
+  resetAllRepos: (chatId) => syncAllRepos(get, chatId, 'reset'),
 
   refreshWorktrees: async (workspacePath) => {
     if (!workspacePath || !get().gitAvailable) return
