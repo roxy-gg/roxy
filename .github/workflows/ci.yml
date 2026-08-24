@@ -78,19 +78,18 @@ jobs:
           git config --global user.name "Roxy CI"
 
       - name: Install dependencies (with native rebuild for Electron's ABI)
-        # better-sqlite3's postinstall fetches/builds a prebuilt binary for
-        # plain Node's ABI. The app loads it inside Electron, which has a
-        # DIFFERENT ABI, so it must be rebuilt against Electron's — the same
-        # step electron-builder runs when packaging (npmRebuild: true) and the
-        # same one contributors run via `npm run worktree:setup`.
+        # Unlike the other two jobs, this one actually spawns `electron`, so it
+        # CANNOT use --ignore-scripts: that also skips Electron's own
+        # postinstall (the step that downloads its binary), which fails with
+        # "Electron failed to install correctly" the moment anything runs it.
         #
-        # Not literally `npm run worktree:setup`: that script's plain `npm ci`
-        # has no `--ignore-scripts`, so on a fresh CI box (no local toolchain
-        # cache) it can hit the same node-gyp/Visual Studio detection failure
-        # release.yml already works around. Skip the native postinstall build
-        # entirely and let `install-app-deps` do the one rebuild that matters.
+        # better-sqlite3's postinstall then builds/fetches a prebuild for plain
+        # Node's ABI, which the app can't load inside Electron (different ABI)
+        # — so `install-app-deps` rebuilds it against Electron's, same as
+        # `npm run worktree:setup` and the same step electron-builder runs when
+        # packaging (npmRebuild: true).
         run: |
-          npm ci --ignore-scripts
+          npm ci
           npx electron-builder install-app-deps
 
       - name: Electron smoke suite (Linux, via virtual display)
