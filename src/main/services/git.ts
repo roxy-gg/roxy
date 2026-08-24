@@ -529,15 +529,15 @@ export async function status(cwd: string): Promise<GitStatus | null> {
  * accurate and practically useless: the branch has an obvious base
  * (`origin/main`), and that is what the user means by "update from main".
  *
- * Returns null only when there is genuinely nothing to sync to: no upstream, no
- * origin, or a base branch the remote doesn't have.
+ * Returns null only when there is genuinely nothing to sync to: no base branch,
+ * or a base that is the branch itself.
  */
 export async function syncRefFor(
   cwd: string,
   opts: { branch?: string | null; upstream?: string | null } = {}
-): Promise<{ ref: string; viaUpstream: boolean } | null> {
+): Promise<{ ref: string; viaUpstream: boolean; local: boolean } | null> {
   if (!cwd) return null
-  if (opts.upstream) return { ref: opts.upstream, viaUpstream: true }
+  if (opts.upstream) return { ref: opts.upstream, viaUpstream: true, local: false }
 
   // The branch this workstream was cut from, as recorded at creation - the
   // honest answer to "main" for a repo whose default is `develop` or `trunk`.
@@ -545,16 +545,39 @@ export async function syncRefFor(
   const base = (branch ? await baseBranchFor(cwd, branch) : null) ?? (await defaultBranch(cwd))
   if (!base) return null
 
-  // Only offer a REMOTE base. Resetting onto a local `main` that is itself
-  // months stale would look like it worked and quietly restore old code, which
-  // is precisely the failure this button exists to prevent.
-  const ref = `origin/${base}`
-  const exists = await git(
-    ['rev-parse', '--verify', '--quiet', `refs/remotes/${ref}^{commit}`],
+  // Prefer the REMOTE base. A local `main` can be months behind the origin it
+  // tracks, and resetting onto that would look like it worked while quietly
+  // restoring old code - the exact failure this button exists to prevent.
+  const remoteRef = `origin/${base}`
+  const onRemote = await git(
+    ['rev-parse', '--verify', '--quiet', `refs/remotes/${remoteRef}^{commit}`],
     cwd
   )
-  if (!exists.ok || !exists.stdout.trim()) return null
-  return { ref, viaUpstream: false }
+  if (onRemote.ok && onRemote.stdout.trim()) {
+    return { ref: remoteRef, viaUpstream: false, local: false }
+  }
+
+  // No remote copy of the base. If the repo has NO REMOTE AT ALL, the local
+  // branch is not a stale mirror of anything - it is the only truth there is,
+  // and refusing to sync with it strands every local-only repo (scratch
+  // projects, anything not yet pushed) with no way back to main. The staleness
+  // argument above is about a local branch DIVERGING from its remote; with no
+  // remote there is nothing for it to diverge from.
+  //
+  // When a remote DOES exist but lacks this base, stay silent: that means the
+  // base was deleted or renamed upstream, and syncing to a local leftover is
+  // the stale-restore failure, not an escape from it.
+  if (await remoteUrl(cwd)) return null
+
+  const onLocal = await git(
+    ['rev-parse', '--verify', '--quiet', `refs/heads/${base}^{commit}`],
+    cwd
+  )
+  if (!onLocal.ok || !onLocal.stdout.trim()) return null
+  // Syncing a branch to itself is a guaranteed no-op, so offer nothing rather
+  // than a button that can only ever report "already up to date".
+  if (base === branch) return null
+  return { ref: base, viaUpstream: false, local: true }
 }
 
 /**
@@ -631,10 +654,15 @@ export async function pullFastForward(cwd: string): Promise<SyncResult> {
   }
 
   // Fetch first so "behind" is measured against what the server has NOW, not
-  // whatever the last poll happened to see.
-  const remote = (await upstreamRemote(cwd, st.branch)) ?? 'origin'
-  const fetched = await fetchOrigin(cwd, remote)
-  if (!fetched.ok) return { ok: false, error: cleanGitError(fetched, `Could not reach ${remote}`) }
+  // whatever the last poll happened to see. Skipped for a LOCAL base ref: there
+  // is no remote to reach, and treating an unreachable one as failure would
+  // block the merge in a repo where nothing could have gone stale.
+  if (!target.local) {
+    const remote = (await upstreamRemote(cwd, st.branch)) ?? 'origin'
+    const fetched = await fetchOrigin(cwd, remote)
+    if (!fetched.ok)
+      return { ok: false, error: cleanGitError(fetched, `Could not reach ${remote}`) }
+  }
 
   // Re-measure AFTER the fetch, against the ref we're actually merging. For a
   // tracked branch `status` already knows; for a base ref it has no opinion, so
@@ -684,9 +712,13 @@ export async function resetToUpstream(cwd: string): Promise<SyncResult> {
     return { ok: false, error: `"${st.branch}" has nothing to reset to.` }
   }
 
-  const remote = (await upstreamRemote(cwd, st.branch)) ?? 'origin'
-  const fetched = await fetchOrigin(cwd, remote)
-  if (!fetched.ok) return { ok: false, error: cleanGitError(fetched, `Could not reach ${remote}`) }
+  // See `pullFastForward`: a local base ref has no remote to fetch from.
+  if (!ref.local) {
+    const remote = (await upstreamRemote(cwd, st.branch)) ?? 'origin'
+    const fetched = await fetchOrigin(cwd, remote)
+    if (!fetched.ok)
+      return { ok: false, error: cleanGitError(fetched, `Could not reach ${remote}`) }
+  }
 
   // Resolve the target BEFORE touching anything, so a typo'd or vanished
   // upstream fails while the tree is still intact.

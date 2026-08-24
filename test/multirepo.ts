@@ -289,16 +289,56 @@ function main(): void {
     popped.ok && existsSync(path.join(wt, 'd.txt'))
   )
 
-  // A repo with no remote has nowhere to sync to, and must be SKIPPED rather
-  // than failing the workstream around it.
+  // ---- a repo with NO REMOTE AT ALL -------------------------------------
+  // The local-only case: a scratch repo, or anything not pushed yet. There is
+  // no origin/main, but there IS a local main, and it is not a stale mirror of
+  // anything - it is the only truth in the repo. Refusing to sync would strand
+  // these with no way back to main at all.
   const lonely = path.join(SYNC, 'lonely')
   mkdirSync(lonely, { recursive: true })
   git(['init', '-q', '-b', 'main'], lonely)
   writeFileSync(path.join(lonely, 'x.txt'), 'x\n')
   git(['add', '-A'], lonely)
   git(['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-qm', 'only'], lonely)
+
   const noRemote = git(['rev-parse', '--verify', '--quiet', 'refs/remotes/origin/main'], lonely)
-  check('sync: a repo with no origin resolves no base ref', !noRemote.ok || !noRemote.out)
+  check('local: there is no origin/main to sync with', !noRemote.ok || !noRemote.out)
+  check('local: and no remote configured at all', !git(['remote', 'get-url', 'origin'], lonely).ok)
+  const localMain = git(['rev-parse', '--verify', '--quiet', 'refs/heads/main^{commit}'], lonely)
+  check('local: but local main exists, so there IS a base', localMain.ok && !!localMain.out)
+
+  // main moves on while a workstream branch sits behind it.
+  git(['checkout', '-q', '-b', 'roxy/local-feature'], lonely)
+  git(['checkout', '-q', 'main'], lonely)
+  writeFileSync(path.join(lonely, 'y.txt'), 'y\n')
+  git(['add', '-A'], lonely)
+  git(['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-qm', 'moved on'], lonely)
+  git(['checkout', '-q', 'roxy/local-feature'], lonely)
+
+  const localDist = git(['rev-list', '--left-right', '--count', 'main...HEAD'], lonely)
+  check('local: the branch measures 1 behind local main', localDist.out.split(/\s+/)[0] === '1')
+
+  // Update, with no fetch anywhere in sight.
+  const localFf = git(['merge', '--ff-only', 'main'], lonely)
+  check('local: update fast-forwards onto local main', localFf.ok, localFf.err)
+  check('local: and the file arrived', existsSync(path.join(lonely, 'y.txt')))
+
+  // Reset works the same way.
+  writeFileSync(path.join(lonely, 'z.txt'), 'z\n')
+  git(['add', '-A'], lonely)
+  git(['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-qm', 'local only work'], lonely)
+  const localReset = git(['reset', '--hard', 'main'], lonely)
+  check('local: reset lands on local main', localReset.ok, localReset.err)
+  check('local: discarding the local commit', !existsSync(path.join(lonely, 'z.txt')))
+
+  // Being ON main is the one case that must stay silent: syncing a branch to
+  // itself can only ever report "already up to date".
+  git(['checkout', '-q', 'main'], lonely)
+  const self = git(['rev-list', '--left-right', '--count', 'main...HEAD'], lonely)
+  check(
+    'local: main vs itself is 0/0, so the button would be a no-op',
+    self.out.replace(/\s+/g, '') === '00'
+  )
 
   rmSync(ROOT, { recursive: true, force: true })
 
