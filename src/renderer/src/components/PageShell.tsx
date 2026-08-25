@@ -1,17 +1,21 @@
 import { type ReactNode } from 'react'
 import { ArrowLeft } from 'lucide-react'
+import { cn } from '../lib/cn'
 
 export function PageShell({
   title,
   subtitle,
   onBack,
   actions,
+  wide = false,
   children
 }: {
   title: string
   subtitle?: string
   onBack: () => void
   actions?: ReactNode
+  /** Widen the column for grid/browse pages (Marketplace) instead of prose. */
+  wide?: boolean
   children: ReactNode
 }): JSX.Element {
   return (
@@ -28,7 +32,7 @@ export function PageShell({
         {actions && <div className="ml-auto">{actions}</div>}
       </header>
       <div className="min-h-0 flex-1 overflow-y-auto border-t border-border">
-        <div className="mx-auto max-w-3xl px-6 py-8">
+        <div className={cn('mx-auto px-6 py-8', wide ? 'max-w-5xl' : 'max-w-3xl')}>
           {subtitle && <p className="mb-6 text-sm text-text-muted">{subtitle}</p>}
           {children}
         </div>

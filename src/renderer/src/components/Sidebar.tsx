@@ -8,16 +8,15 @@ import {
 } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
+  Blocks,
   ChevronRight,
   FolderOpen,
   GitBranch,
   GitFork,
   Hammer,
-  Lightbulb,
   MonitorSmartphone,
   PanelLeftClose,
   PanelLeftOpen,
-  Plug,
   Plus,
   Repeat,
   Settings as SettingsIcon,
@@ -439,18 +438,11 @@ export function Sidebar(): JSX.Element {
             )}
           </button>
           <button
-            onClick={() => navigate('/skills')}
-            title="Skills"
+            onClick={() => navigate('/marketplace')}
+            title="Marketplace — skills, tool servers, channels"
             className="press-scale flex h-8 w-8 items-center justify-center sq sq-lg rounded-lg text-text-muted hover:bg-white/5 hover:text-text"
           >
-            <Lightbulb className="h-4 w-4" />
-          </button>
-          <button
-            onClick={() => navigate('/mcp')}
-            title="MCP Servers"
-            className="press-scale flex h-8 w-8 items-center justify-center sq sq-lg rounded-lg text-text-muted hover:bg-white/5 hover:text-text"
-          >
-            <Plug className="h-4 w-4" />
+            <Blocks className="h-4 w-4" />
           </button>
           <button
             onClick={() => navigate('/settings')}
@@ -1008,15 +1000,19 @@ function SessionContextMenu({
   )
 }
 
-/** Counts of discovered skills + configured MCP servers, refreshed when focused. */
-function useCustomizeCounts(): { skills: number; mcp: number } {
-  const [counts, setCounts] = useState<{ skills: number; mcp: number }>({ skills: 0, mcp: 0 })
+/**
+ * How many add-ons are installed — skills + MCP servers, counted together because
+ * the Marketplace presents them as one kind of thing. Refreshed on focus, since
+ * the agent can add either mid-session.
+ */
+function useAddonCount(): number {
+  const [count, setCount] = useState(0)
   useEffect(() => {
     let alive = true
     const load = (): void => {
       Promise.all([api.skills.list(), api.mcp.list()])
         .then(([skills, mcp]) => {
-          if (alive) setCounts({ skills: skills.length, mcp: mcp.length })
+          if (alive) setCount(skills.length + mcp.length)
         })
         .catch(() => {})
     }
@@ -1028,13 +1024,17 @@ function useCustomizeCounts(): { skills: number; mcp: number } {
       window.removeEventListener('focus', load)
     }
   }, [])
-  return counts
+  return count
 }
 
 /**
- * The utility section pinned to the bottom of the sidebar — quick access to
- * Remote Workspace (share to phone), plus the Skills and MCP Servers pages
- * (à la VS Code's Customizations panel), with a live count/indicator on each.
+ * The utility section pinned to the bottom of the sidebar.
+ *
+ * This used to be three entries — Skills, MCP Servers, and the Remote Workspace
+ * dialog — which asked the user to know which mechanism their wish belonged to
+ * before they could go looking for it. Now there is one **Marketplace** door for
+ * "what else can Roxy do?", and Remote Workspace keeps its button only because it
+ * is an *action* (start sharing now) rather than a thing to browse.
  */
 function CustomizeNav({
   onOpenRemote,
@@ -1044,17 +1044,21 @@ function CustomizeNav({
   remoteDot: 'green' | 'amber' | null
 }): JSX.Element {
   const navigate = useNavigate()
-  const counts = useCustomizeCounts()
+  const addons = useAddonCount()
   const items: {
     label: string
-    icon: typeof Lightbulb
+    icon: typeof Blocks
     onClick: () => void
     count?: number
     dot?: 'green' | 'amber' | null
   }[] = [
-    { label: 'Remote Workspace', icon: MonitorSmartphone, onClick: onOpenRemote, dot: remoteDot },
-    { label: 'Skills', icon: Lightbulb, onClick: () => navigate('/skills'), count: counts.skills },
-    { label: 'MCP Servers', icon: Plug, onClick: () => navigate('/mcp'), count: counts.mcp }
+    {
+      label: 'Marketplace',
+      icon: Blocks,
+      onClick: () => navigate('/marketplace'),
+      count: addons
+    },
+    { label: 'Remote Workspace', icon: MonitorSmartphone, onClick: onOpenRemote, dot: remoteDot }
   ]
   return (
     <div className="border-t border-border px-3 py-2">

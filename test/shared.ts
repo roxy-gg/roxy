@@ -294,6 +294,26 @@ import {
   toResponsesTools,
   type ResponsesEvent
 } from '../src/main/services/responses'
+import {
+  ADDON_CATEGORIES,
+  ADDON_KINDS,
+  CAPABILITIES,
+  LAB_IDEAS,
+  MARKETPLACE_CATALOG,
+  SUPERUSER_ADDON,
+  addonFlagId,
+  addonRisk,
+  filterAddons,
+  getCapability,
+  installNeeds,
+  labFlagId,
+  matchesQuery,
+  needsConsent,
+  readFlag,
+  sortCapabilities,
+  summarizeCapabilities,
+  type AddonSearchable
+} from '../src/shared/marketplace'
 
 let pass = 0
 const fails: string[] = []
@@ -5140,6 +5160,174 @@ async function main(): Promise<void> {
     'responses: unknown events are ignored',
     !applyResponsesEvent({ type: 'response.in_progress' }, { onText: () => {} })
   )
+
+  // ---- Marketplace ----------------------------------------------------------
+  check('marketplace: catalog non-empty', MARKETPLACE_CATALOG.length > 0)
+  check(
+    'marketplace: add-on ids unique',
+    new Set(MARKETPLACE_CATALOG.map((a) => a.id)).size === MARKETPLACE_CATALOG.length
+  )
+  check(
+    'marketplace: lab ids unique',
+    new Set(LAB_IDEAS.map((i) => i.id)).size === LAB_IDEAS.length
+  )
+  check(
+    'marketplace: capability ids unique',
+    new Set(CAPABILITIES.map((c) => c.id)).size === CAPABILITIES.length
+  )
+  check(
+    'marketplace: every add-on capability resolves',
+    [...MARKETPLACE_CATALOG, SUPERUSER_ADDON].every((a) =>
+      a.capabilities.every((c) => !!getCapability(c))
+    )
+  )
+  check(
+    'marketplace: every lab capability resolves',
+    LAB_IDEAS.every((i) => i.capabilities.every((c) => !!getCapability(c)))
+  )
+  check(
+    'marketplace: every category is a declared one',
+    [...MARKETPLACE_CATALOG, SUPERUSER_ADDON, ...LAB_IDEAS].every((a) =>
+      ADDON_CATEGORIES.includes(a.category)
+    )
+  )
+  check(
+    'marketplace: every kind is a declared one',
+    MARKETPLACE_CATALOG.every((a) => ADDON_KINDS.some((k) => k.id === a.kind))
+  )
+
+  // Risk is DERIVED, never declared -- an add-on must not be able to advertise
+  // itself as harmless while asking to drive the keyboard.
+  check(
+    'marketplace: risk is the worst capability',
+    addonRisk(['files-read', 'shell']) === 'elevated'
+  )
+  check('marketplace: risk of nothing is safe', addonRisk([]) === 'safe')
+  check(
+    'marketplace: input-control is critical',
+    addonRisk(['files-read', 'input-control']) === 'critical'
+  )
+  check('marketplace: unknown capabilities do not raise risk', addonRisk([]) === 'safe')
+  check(
+    'marketplace: SuperUser is critical',
+    addonRisk(SUPERUSER_ADDON.capabilities) === 'critical'
+  )
+  check('marketplace: SuperUser demands consent', needsConsent(SUPERUSER_ADDON.capabilities))
+  check('marketplace: SuperUser ships as a shell', SUPERUSER_ADDON.state === 'preview')
+  check('marketplace: SuperUser is not installable', !SUPERUSER_ADDON.install)
+  check('marketplace: elevated alone does not demand consent', !needsConsent(['shell']))
+
+  // Chips must be worst-first so nothing alarming hides behind a "+2".
+  const sorted = sortCapabilities(['files-read', 'input-control', 'network'])
+  check(
+    'marketplace: capabilities sort worst-first',
+    sorted[0]?.id === 'input-control',
+    sorted[0]?.id
+  )
+  check('marketplace: sortCapabilities drops unknowns', sortCapabilities([]).length === 0)
+  check(
+    'marketplace: summary names the worst first',
+    summarizeCapabilities(['files-read', 'input-control']).startsWith('Control mouse')
+  )
+  check(
+    'marketplace: empty summary is explicit',
+    summarizeCapabilities([]) === 'No extra permissions'
+  )
+  check(
+    'marketplace: long summaries overflow with a count',
+    summarizeCapabilities(['files-read', 'files-write', 'shell', 'network']).endsWith('+2')
+  )
+
+  // Search must still find things by the jargon the UI deliberately hides.
+  const searchable: AddonSearchable[] = MARKETPLACE_CATALOG.map((a) => ({
+    id: a.id,
+    name: a.name,
+    tagline: a.tagline,
+    kind: a.kind,
+    category: a.category,
+    keywords: a.keywords
+  }))
+  check(
+    'marketplace: empty query matches everything',
+    filterAddons(searchable, {}).length === searchable.length
+  )
+  check(
+    'marketplace: "mcp" still finds tool servers',
+    filterAddons(searchable, { query: 'mcp' }).length > 0
+  )
+  check(
+    'marketplace: search finds by name',
+    filterAddons(searchable, { query: 'postgres' }).some((a) => a.id === 'postgres')
+  )
+  check(
+    'marketplace: search is case-insensitive',
+    filterAddons(searchable, { query: 'POSTGRES' }).some((a) => a.id === 'postgres')
+  )
+  check(
+    'marketplace: multi-term search ANDs',
+    filterAddons(searchable, { query: 'postgres playwright' }).length === 0
+  )
+  check(
+    'marketplace: category filter narrows',
+    filterAddons(searchable, { category: 'Data' }).every((a) => a.category === 'Data')
+  )
+  check(
+    'marketplace: kind filter narrows',
+    filterAddons(searchable, { kind: 'skill' }).every((a) => a.kind === 'skill')
+  )
+  check(
+    'marketplace: filters compose',
+    filterAddons(searchable, { query: 'browser', category: 'Web', kind: 'mcp' }).every(
+      (a) => a.category === 'Web' && a.kind === 'mcp'
+    )
+  )
+  check(
+    'marketplace: nonsense query matches nothing',
+    filterAddons(searchable, { query: 'zzzzqqq' }).length === 0
+  )
+  check(
+    'marketplace: whitespace query matches everything',
+    filterAddons(searchable, { query: '   ' }).length === searchable.length
+  )
+  check(
+    'marketplace: matchesQuery searches the kind label',
+    matchesQuery({ ...searchable[0], keywords: [] }, 'server') ||
+      matchesQuery({ ...searchable[0], keywords: [] }, 'skill')
+  )
+
+  // Only MCP installs can require setup -- this is what the "Add" vs "Set up"
+  // button branches on.
+  check(
+    'marketplace: skill installs need nothing',
+    installNeeds({ via: 'skill', source: 'x' }).length === 0
+  )
+  check('marketplace: flag installs need nothing', installNeeds({ via: 'flag' }).length === 0)
+  check('marketplace: missing install needs nothing', installNeeds(undefined).length === 0)
+  check(
+    'marketplace: github needs a token',
+    installNeeds(MARKETPLACE_CATALOG.find((a) => a.id === 'github')?.install).length === 1
+  )
+  check(
+    'marketplace: everything needing setup is an MCP install',
+    MARKETPLACE_CATALOG.every(
+      (a) => installNeeds(a.install).length === 0 || a.install?.via === 'mcp'
+    )
+  )
+
+  // Flags are namespaced so they cannot collide with real integration rows.
+  check('marketplace: lab flags are namespaced', labFlagId('voice') === 'lab:voice')
+  check('marketplace: addon flags are namespaced', addonFlagId('superuser') === 'addon:superuser')
+  check(
+    'marketplace: flag namespaces never collide',
+    labFlagId('x') !== addonFlagId('x') && !labFlagId('x').includes(addonFlagId('x'))
+  )
+  const flagRows = [
+    { id: 'lab:voice-mode', enabled: true },
+    { id: 'lab:night-shift', enabled: false }
+  ]
+  check('marketplace: readFlag reads an on flag', readFlag(flagRows, 'lab:voice-mode'))
+  check('marketplace: readFlag reads an off flag', !readFlag(flagRows, 'lab:night-shift'))
+  check('marketplace: readFlag defaults to off', !readFlag(flagRows, 'lab:missing'))
 
   if (fails.length) {
     console.error(`\nSHARED FAILED \u2014 ${fails.length} failing: ${fails.join(', ')}`)

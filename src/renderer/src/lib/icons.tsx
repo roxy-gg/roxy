@@ -1,18 +1,33 @@
 import {
+  Brain,
   Code,
+  Cpu,
+  Database,
+  FilePen,
+  FileText,
+  FlaskConical,
   Folder,
   GitBranch,
   Globe,
   Hash,
+  History,
   Inbox,
+  LayoutGrid,
+  Library,
   Mail,
   MessageCircle,
   MessagesSquare,
+  Mic,
+  Monitor,
+  MonitorSmartphone,
+  MousePointer,
+  Plug,
   Search,
   Send,
   Shield,
   Smartphone,
   Terminal,
+  Timer,
   type LucideIcon
 } from 'lucide-react'
 
@@ -31,7 +46,23 @@ const ICONS: Record<string, LucideIcon> = {
   folder: Folder,
   terminal: Terminal,
   search: Search,
-  code: Code
+  code: Code,
+  // Marketplace: add-on kinds, capabilities and catalog entries.
+  brain: Brain,
+  cpu: Cpu,
+  database: Database,
+  'file-pen': FilePen,
+  'file-text': FileText,
+  'flask-conical': FlaskConical,
+  history: History,
+  'layout-grid': LayoutGrid,
+  library: Library,
+  mic: Mic,
+  monitor: Monitor,
+  'monitor-smartphone': MonitorSmartphone,
+  'mouse-pointer': MousePointer,
+  plug: Plug,
+  timer: Timer
 }
 
 export function CatalogIcon({

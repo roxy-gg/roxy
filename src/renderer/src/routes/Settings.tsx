@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { GripVertical, Globe, Plus, Trash2 } from 'lucide-react'
+import { Blocks, ChevronRight, GripVertical, Globe, Plus, Trash2 } from 'lucide-react'
 import type { AppVersions, ConnectedProvider } from '@shared/types'
 import type { UpdateInfo } from '@shared/api'
 import { AUTH_LABELS } from '@shared/providers'
@@ -16,7 +16,6 @@ import {
 } from '@shared/branch'
 import { randomSlug, slugToBranchSegment } from '@shared/slugs'
 import { PageShell } from '../components/PageShell'
-import { McpServers } from '../components/McpServers'
 import { CookiePanel } from '../components/CookiePanel'
 import { ConfigBackup } from '../components/ConfigBackup'
 import { ActivitySection } from '../components/ActivitySection'
@@ -353,11 +352,29 @@ export default function Settings(): JSX.Element {
         </h2>
         <CodeHosts />
       </section>
+      {/* Add-ons have their own front door now (the Marketplace). Settings keeps a
+          pointer rather than a second copy of the list: two places to manage the
+          same servers is how the two drift apart. */}
       <section className="mb-8">
         <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-text-subtle">
-          MCP servers
+          Add-ons
         </h2>
-        <McpServers />
+        <button
+          onClick={() => navigate('/marketplace')}
+          className="press-scale flex w-full items-center gap-3 sq sq-xl sq-ring rounded-xl border border-border bg-surface p-4 text-left hover:border-border-strong hover:[--sq-ring:var(--color-border-strong)]"
+        >
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center sq sq-lg rounded-lg bg-white/5 text-text-muted">
+            <Blocks className="h-4 w-4" />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-sm font-medium text-text">Marketplace</span>
+            <span className="mt-0.5 block text-xs text-text-muted">
+              Skills, tool servers (MCP), channels and devices — install, enable and disable them in
+              one place.
+            </span>
+          </span>
+          <ChevronRight className="h-4 w-4 shrink-0 text-text-subtle" />
+        </button>
       </section>
 
       <section className="mb-8">
