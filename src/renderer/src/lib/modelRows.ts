@@ -13,6 +13,7 @@
  * directly in test/shared.ts instead of being eyeballed in a running app.
  */
 import type { ModelInfo } from '../../../shared/api'
+import { modelLabel } from '../../../shared/models'
 
 /** The subset of a connected provider this list needs. */
 export interface RowProvider {
@@ -36,6 +37,7 @@ export interface ModelRow {
   providerId: string
   providerName: string
   modelId: string
+  /** What to render: the catalog name, with any vendor prefix already stripped. */
   label: string
   info: ModelInfo | undefined
   pinned: boolean
@@ -104,7 +106,7 @@ export function buildModelRows(input: {
       providerId,
       providerName,
       modelId,
-      label: label ?? hit?.info.name ?? modelId,
+      label: modelLabel(providerId, label ?? hit?.info.name ?? modelId, modelId),
       info: hit?.info,
       pinned: pinnedKeys.has(`${providerId}:${modelId}`)
     }

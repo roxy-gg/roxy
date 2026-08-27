@@ -41,7 +41,7 @@ import {
   sha256For,
   upstreamFor
 } from '../src/shared/cliproxy'
-import { pickDefaultModel } from '../src/shared/models'
+import { modelLabel, pickDefaultModel } from '../src/shared/models'
 import {
   ACTIVATION_MILESTONES,
   FEATURE_IDS,
@@ -888,6 +888,52 @@ check(
 check(
   'pickDefaultModel: first entry wins when it is already tool-capable',
   pickDefaultModel([mkModel('latest', true), mkModel('older', true)]) === 'latest'
+)
+
+// ---- model display names (the vendor prefix on gateway catalogs) ----
+//
+// Roxy's gateway proxies OpenRouter, so its names arrive as "Anthropic: Claude
+// Opus 4.5". Every row in the picker already wears the same Roxy mark, so that
+// prefix repeats on all 300+ rows and truncates away the half that differs.
+// Dropped for DISPLAY only: the search haystack and the catalog's name sort
+// still see the full name, so typing "anthropic" still finds every Claude and
+// the list stays grouped by vendor.
+check(
+  'modelLabel: roxy drops a vendor prefix its own id vouches for',
+  modelLabel('roxy', 'Anthropic: Claude Opus 4.5', 'anthropic/claude-opus-4.5') ===
+    'Claude Opus 4.5'
+)
+check(
+  'modelLabel: the vendor compare ignores punctuation and case (x-ai vs xAI)',
+  modelLabel('roxy', 'xAI: Grok 4', 'x-ai/grok-4') === 'Grok 4'
+)
+check(
+  'modelLabel: either side may be the longer form (meta-llama vs Meta)',
+  modelLabel('roxy', 'Meta: Llama 4 Maverick', 'meta-llama/llama-4-maverick') === 'Llama 4 Maverick'
+)
+// The whole point of checking the id: a colon that belongs to the MODEL's name
+// must survive, or the row is shortened to something that no longer identifies
+// it ("Uncensored" names no model).
+check(
+  'modelLabel: a colon the id does not vouch for is kept',
+  modelLabel('roxy', 'Venice: Uncensored', 'cognitivecomputations/dolphin-mistral-24b') ===
+    'Venice: Uncensored'
+)
+check(
+  'modelLabel: an unprefixed roxy name is untouched',
+  modelLabel('roxy', 'Claude Opus 4.5', 'anthropic/claude-opus-4.5') === 'Claude Opus 4.5'
+)
+check(
+  'modelLabel: a roxy id without a vendor segment keeps the full name',
+  modelLabel('roxy', 'Anthropic: Claude Opus 4.5', 'claude-opus-4.5') ===
+    'Anthropic: Claude Opus 4.5'
+)
+// Every OTHER provider is left alone: its logo already names the vendor, so a
+// colon there is the model's own and stripping it would lose information.
+check(
+  'modelLabel: a non-roxy provider is never stripped',
+  modelLabel('openrouter', 'Anthropic: Claude Opus 4.5', 'anthropic/claude-opus-4.5') ===
+    'Anthropic: Claude Opus 4.5'
 )
 
 // ---- structured tool history (Phase 5) ----
@@ -5262,6 +5308,38 @@ async function main(): Promise<void> {
     searched.filter((r) => r.kind === 'model').length === 2
   )
   check('picker rows: a non-matching query yields nothing', rowsFor('zzzz').length === 0)
+
+  // The vendor prefix is a DISPLAY concern, so it has to hold at the row level
+  // AND must not cost the search: the label loses "Anthropic: ", the haystack
+  // keeps it. Getting that backwards is silent - the menu looks right, and
+  // typing a vendor name quietly returns nothing.
+  const gatewayCatalog = {
+    roxy: [mkModel('anthropic/claude-opus-5', 'Anthropic: Claude Opus 5')]
+  }
+  const gatewayIndex = buildModelIndex(gatewayCatalog)
+  const gatewayRows = (query: string) =>
+    buildModelRows({
+      providers: [{ id: 'roxy', name: 'Roxy.gg Inference' }],
+      catalogs: gatewayCatalog,
+      // Pinned + Latest + catalog at once: the strip has to hold in all three,
+      // and only the catalog section passes the name in explicitly.
+      recent: { roxy: [{ model: 'anthropic/claude-opus-5' }] },
+      pinned: [{ providerId: 'roxy', model: 'anthropic/claude-opus-5' }],
+      index: gatewayIndex,
+      query
+    })
+  const gatewayLabels = gatewayRows('')
+    .filter((r) => r.kind === 'model')
+    .map((r) => (r.kind === 'model' ? r.label : ''))
+  check(
+    'picker rows: the roxy vendor prefix is stripped in every section',
+    gatewayLabels.length === 2 && gatewayLabels.every((l) => l === 'Claude Opus 5'),
+    gatewayLabels.join(' | ')
+  )
+  check(
+    'picker rows: the stripped vendor is still searchable',
+    gatewayRows('anthropic').some((r) => r.kind === 'model')
+  )
 
   // A pin whose provider was disconnected (or whose model left the catalog)
   // would otherwise render an unselectable row.
