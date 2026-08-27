@@ -239,6 +239,7 @@ export const CHANNELS = {
   /** Multi-repo variants: these take a SESSION id, not a path. */
   forgePullMulti: 'forge:pull-multi',
   forgeResetMulti: 'forge:reset-multi',
+  forgePushMulti: 'forge:push-multi',
   forgeCreateUrl: 'forge:create-url',
   forgeListHosts: 'forge:list-hosts',
   forgeSetHostKind: 'forge:set-host-kind',

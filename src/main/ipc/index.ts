@@ -862,6 +862,61 @@ export function registerIpc(): void {
   })
 
   /**
+   * The repos a session's git UI acts on, and where their checkouts live.
+   *
+   * Two sources, and the fallback is the whole point:
+   *
+   *   1. the session's own `repos` links - a materialized composite worktree,
+   *      one child checkout per repo. Authoritative when present.
+   *   2. the PROJECT's repos, discovered on disk.
+   *
+   * (2) covers the state a multi-repo session spends its entire life in before
+   * its first turn: worktrees are materialized lazily, so a session with a
+   * PENDING workstream has no links at all. Returning nothing for it was the
+   * bug - every per-repo status came back empty, which took the repo list, the
+   * count badge and both sync buttons off screen and left a bare "branch
+   * pending" with no way to update or reset anything. Meanwhile the session was
+   * genuinely running in the project folder, so those checkouts were exactly
+   * the ones the user was asking about.
+   *
+   * `pending: true` marks that second case so callers can say which tree they
+   * are about to touch: the project's own checkouts are shared with the user's
+   * editor and every other session, and a reset there is a much bigger claim
+   * than a reset inside a throwaway worktree.
+   */
+  const reposForSession = (
+    sessionId: string
+  ): { name: string; worktreePath: string; branch: string | null; pending: boolean }[] => {
+    const chat = repo.getChat(sessionId)
+    // A sub-session acts on its parent's workstream, exactly as the strip does.
+    const owner = chat?.kind === 'sub' && chat.parentId ? repo.getChat(chat.parentId) : chat
+    if (!owner) return []
+
+    const links = owner.repos
+    if (links?.length) {
+      return links.map((l) => ({
+        name: l.name,
+        worktreePath: l.worktreePath,
+        branch: l.branch,
+        pending: false
+      }))
+    }
+
+    if (!owner.workspacePath) return []
+    const { layout, roots } = discoverRepos(owner.workspacePath)
+    // Only the multi-repo layout: a `single` project is already served by the
+    // plain `git:status` path, and answering here too would give the UI two
+    // sources for one repo that could disagree mid-poll.
+    if (layout !== 'multi') return []
+    return roots.map((root) => ({
+      name: nodePath.basename(root),
+      worktreePath: root,
+      branch: null,
+      pending: true
+    }))
+  }
+
+  /**
    * Per-repo status for a multi-repo session.
    *
    * Takes a SESSION id, not a path: the composite root is not a repository, so
@@ -876,11 +931,8 @@ export function registerIpc(): void {
     CHANNELS.gitStatusMulti,
     async (_e, sessionId: string): Promise<RepoStatusView[]> => {
       if (!sessionId || !(await git.isGitAvailable())) return []
-      const chat = repo.getChat(sessionId)
-      // A sub-session shows its parent's workstream, exactly as the strip does.
-      const owner = chat?.kind === 'sub' && chat.parentId ? repo.getChat(chat.parentId) : chat
-      const links = owner?.repos
-      if (!links?.length) return []
+      const links = reposForSession(sessionId)
+      if (!links.length) return []
 
       return Promise.all(
         links.map(async (link): Promise<RepoStatusView> => {
@@ -888,6 +940,7 @@ export function registerIpc(): void {
             name: link.name,
             worktreePath: link.worktreePath,
             branch: link.branch,
+            pending: link.pending,
             dirty: false,
             changed: 0,
             ahead: 0,
@@ -1042,22 +1095,22 @@ export function registerIpc(): void {
    */
   const syncEveryRepo = async (
     sessionId: string,
-    mode: 'pull' | 'reset'
+    mode: 'pull' | 'reset' | 'push'
   ): Promise<MultiSyncOutcome> => {
     if (!sessionId) return { repos: [], error: 'No session.' }
     if (!(await git.isGitAvailable())) return { repos: [], error: 'Git isn\u2019t installed.' }
 
-    const chat = repo.getChat(sessionId)
-    const owner = chat?.kind === 'sub' && chat.parentId ? repo.getChat(chat.parentId) : chat
-    const links = owner?.repos
-    if (!links?.length) return { repos: [], error: 'This session is not multi-repo.' }
+    // Same resolver the status handler uses, so the buttons act on exactly the
+    // repos the panel just listed - including a PENDING workstream's, which are
+    // the project's own checkouts. Sharing this is the point: a second copy
+    // that only understood links is how "Reset all" silently did nothing on a
+    // session whose worktree had not been created yet.
+    const links = reposForSession(sessionId)
+    if (!links.length) return { repos: [], error: 'This session is not multi-repo.' }
 
     const results: RepoSyncResult[] = []
     for (const link of links) {
-      const r =
-        mode === 'pull'
-          ? await git.pullFastForward(link.worktreePath)
-          : await git.resetToUpstream(link.worktreePath)
+      const r = await syncOneRepo(link.worktreePath, mode)
       results.push({
         name: link.name,
         ok: r.ok,
@@ -1074,6 +1127,38 @@ export function registerIpc(): void {
     return { repos: results }
   }
 
+  /**
+   * One repo's half of a multi-repo sync.
+   *
+   * `push` is not simply `pushBranch`: it has to resolve the branch first and
+   * decide whether this is the repo's first push (`--set-upstream`), which the
+   * single-repo handler does inline. Pulling it out here keeps `syncEveryRepo`
+   * a loop over one uniform operation rather than a switch with three shapes.
+   *
+   * `updated` is reported as false for an already-pushed branch so the summary
+   * can say "already up to date" instead of claiming N repos moved.
+   */
+  const syncOneRepo = async (
+    cwd: string,
+    mode: 'pull' | 'reset' | 'push'
+  ): Promise<git.SyncResult> => {
+    if (mode === 'pull') return git.pullFastForward(cwd)
+    if (mode === 'reset') return git.resetToUpstream(cwd)
+
+    const st = await git.status(cwd)
+    if (!st?.branch) return { ok: false, error: 'Not on a branch (detached HEAD).' }
+    // Nothing local to publish. Reported as a success that changed nothing,
+    // because "push all" across four repos where two are already current is a
+    // normal outcome, not two failures.
+    if (st.hasUpstream && st.ahead === 0) {
+      return { ok: true, upstream: st.upstream ?? undefined, updated: false }
+    }
+    const r = await git.pushBranch(cwd, st.branch, { setUpstream: !st.hasUpstream })
+    return r.ok
+      ? { ok: true, upstream: st.upstream ?? `origin/${st.branch}`, updated: true }
+      : { ok: false, error: r.error }
+  }
+
   ipcMain.handle(
     CHANNELS.forgePullMulti,
     (_e, sessionId: string): Promise<MultiSyncOutcome> => syncEveryRepo(sessionId, 'pull')
@@ -1082,6 +1167,24 @@ export function registerIpc(): void {
   ipcMain.handle(
     CHANNELS.forgeResetMulti,
     (_e, sessionId: string): Promise<MultiSyncOutcome> => syncEveryRepo(sessionId, 'reset')
+  )
+
+  /**
+   * Push EVERY repo of a composite workstream.
+   *
+   * The missing third of the trio. Without it the panel's primary button ran
+   * `forge:push` against ONE repo's path - whichever happened to be first - so
+   * on a four-repo workstream "Push" published a quarter of the work and left
+   * the chip saying the same thing it did before the click.
+   */
+  ipcMain.handle(
+    CHANNELS.forgePushMulti,
+    async (_e, sessionId: string): Promise<MultiSyncOutcome> => {
+      const out = await syncEveryRepo(sessionId, 'push')
+      // The remote just changed, so every cached PR answer is suspect.
+      if (out.repos.some((r) => r.ok && r.updated)) forge.invalidate()
+      return out
+    }
   )
 
   ipcMain.handle(CHANNELS.forgeCreateUrl, async (_e, cwd: string) => {

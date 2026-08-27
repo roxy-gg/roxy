@@ -132,10 +132,13 @@ import {
 } from '../src/shared/web'
 import { resolveWorktreeCwd } from '../src/shared/workspace'
 import {
+  aggregateLifecycle,
   aggregateRepoStatus,
   aggregateSyncTarget,
+  describeCompositeLifecycle,
   describeSyncRef,
   summarizeSync,
+  type RepoLifecycleLite,
   type RepoSyncLite,
   describeRepoStatus,
   isMultiRepo,
@@ -278,6 +281,7 @@ import {
   branchLifecycle,
   isPullRequestPhase,
   type LifecyclePhase,
+  type LifecycleAction,
   relativeAge,
   FORGE_NAMES,
   type PullRequestView
@@ -3673,6 +3677,103 @@ async function main(): Promise<void> {
     check('summary: a stash is always mentioned', /Stashed work in backend/.test(stashed.text))
     check('summary: and says how to undo it', /git stash pop/.test(stashed.text))
     check('summary: an empty set is inert', summarizeSync([], 'pull').text === 'Nothing to sync.')
+
+    // ---- the chip: N repos, one honest label ----
+    // The rule under test is that the chip reports the LEAST-ADVANCED repo. The
+    // old behaviour took the first repo with a forge answer and let it speak
+    // for the rest, so a workstream with one unpushed repo rendered `pushed`
+    // and the repo that still needed work was invisible.
+    const mkLife = (
+      name: string,
+      phase: LifecyclePhase | null,
+      action: LifecycleAction | null = null,
+      isRepo = true
+    ): RepoLifecycleLite => ({
+      name,
+      isRepo,
+      lifecycle: phase ? { phase, action } : null
+    })
+
+    const lagging = aggregateLifecycle([
+      mkLife('backend', 'merged'),
+      mkLife('frontend', 'merged'),
+      mkLife('shared', 'unpublished', 'push')
+    ])!
+    check('chip: the least-advanced repo sets the phase', lagging.phase === 'unpublished')
+    check('chip: and is counted', lagging.count === 1 && lagging.total === 3)
+    check('chip: and named', lagging.repos.join(',') === 'shared')
+    check('chip: disagreement is flagged', lagging.mixed)
+    check('chip: the action comes from a repo AT that phase', lagging.action === 'push')
+
+    const agreedLife = aggregateLifecycle([
+      mkLife('backend', 'synced', 'open-pr'),
+      mkLife('frontend', 'synced', 'open-pr')
+    ])!
+    check('chip: agreement is not flagged as mixed', !agreedLife.mixed)
+    check('chip: and every repo is counted at that phase', agreedLife.count === 2)
+
+    // `diverged` sorts ahead of everything: it is the only phase no button in
+    // the panel can resolve, so it must not be buried under three merged repos.
+    const divergedChip = aggregateLifecycle([
+      mkLife('backend', 'merged'),
+      mkLife('frontend', 'diverged'),
+      mkLife('shared', 'unpublished', 'push')
+    ])!
+    check('chip: diverged outranks even unpublished', divergedChip.phase === 'diverged')
+
+    // A repo the forge has not answered for yet is `unpublished` - what git
+    // alone knows - rather than skipped, which would let a slow lookup briefly
+    // promote the chip and then demote it.
+    const pendingLookup = aggregateLifecycle([
+      mkLife('backend', 'merged'),
+      mkLife('frontend', null)
+    ])!
+    check('chip: an unanswered repo reads as unpublished', pendingLookup.phase === 'unpublished')
+
+    check(
+      'chip: a missing checkout is excluded',
+      aggregateLifecycle([mkLife('gone', 'merged', null, false)]) === null
+    )
+    check('chip: no live repos yields no chip', aggregateLifecycle([]) === null)
+
+    // The label only gains a count when the repos DISAGREE: an all-`local`
+    // workstream says `local`, exactly as a single repo does.
+    const baseView = {
+      phase: 'unpublished' as LifecyclePhase,
+      label: 'local',
+      tone: 'neutral' as const,
+      title: 'Not pushed yet',
+      pr: null,
+      action: 'push' as LifecycleAction
+    }
+    const mixedLabel = describeCompositeLifecycle(lagging, baseView)
+    check('chip label: disagreement shows a fraction', mixedLabel.label === '1/3 local')
+    check('chip label: and the tooltip names the repos', /shared/.test(mixedLabel.title))
+
+    const agreedLabel = describeCompositeLifecycle(
+      aggregateLifecycle([
+        mkLife('backend', 'unpublished', 'push'),
+        mkLife('frontend', 'unpublished', 'push')
+      ])!,
+      baseView
+    )
+    check('chip label: agreement reads exactly like one repo', agreedLabel.label === 'local')
+    check('chip label: but says how many it speaks for', /all 2 repos/.test(agreedLabel.title))
+
+    // Push joins pull/reset in the summary vocabulary.
+    const pushed = summarizeSync(
+      [
+        { name: 'backend', ok: true, updated: true },
+        { name: 'frontend', ok: true, updated: true }
+      ],
+      'push'
+    )
+    check('summary: push says pushed', pushed.text === 'Pushed all 2 repos.')
+    check(
+      'summary: nothing to push says so in push words',
+      summarizeSync([{ name: 'backend', ok: true, updated: false }], 'push').text ===
+        'All 1 already pushed.'
+    )
 
     // The badge is null below 2 so single-repo sessions render EXACTLY as they
     // did before multi-repo support existed.

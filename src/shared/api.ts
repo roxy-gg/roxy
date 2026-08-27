@@ -173,6 +173,18 @@ export interface RepoStatusView {
   name: string
   /** The repo's own worktree for this session (`<composite>/<name>`). */
   worktreePath: string
+  /**
+   * True when this is the PROJECT's own checkout rather than a worktree of it,
+   * because the session's workstream hasn't been materialized yet.
+   *
+   * Worktrees are created lazily on the first turn, so a multi-repo session
+   * spends the whole pre-turn window with no links of its own - and the repos
+   * it is really sitting in are the project's, shared with the user's editor
+   * and every other session there. The UI has to say so before offering to
+   * reset one: the same button means "throw away this session's scratch work"
+   * in a worktree and "throw away whatever is in my editor" here.
+   */
+  pending: boolean
   isRepo: boolean
   branch: string | null
   dirty: boolean
@@ -1033,6 +1045,14 @@ export interface RoxyApi {
     pullMulti(sessionId: string): Promise<MultiSyncOutcome>
     /** Reset EVERY repo of a multi-repo session. See `pullMulti`. */
     resetMulti(sessionId: string): Promise<MultiSyncOutcome>
+    /**
+     * Push EVERY repo of a multi-repo session.
+     *
+     * The counterpart of `push` for a composite workstream, and not optional:
+     * pushing one repo of four leaves the work unpublished and the chip
+     * unchanged, which reads as a button that did nothing.
+     */
+    pushMulti(sessionId: string): Promise<MultiSyncOutcome>
     /** The host's "create a pull request" URL, pre-filled for this branch. */
     createUrl(cwd: string): Promise<string | null>
     /**
