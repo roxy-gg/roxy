@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Brain, Check, ChevronsUpDown, Clock, Pin, Search, Wrench } from 'lucide-react'
 import { buildModelIndex, buildModelRows } from '../lib/modelRows'
+import { modelLabel } from '@shared/models'
 import { useRoxyStore } from '../lib/store'
 import { resolveSessionConfig } from '@shared/session-config'
 import { ProviderLogo } from '../lib/providerLogos'
@@ -219,10 +220,13 @@ export function ModelPicker(): JSX.Element {
   // behind whichever provider answered last.
   const loading = providers.length > 0 && providers.some((p) => !models[p.id] && !modelsTried[p.id])
 
+  // Stripped the same way as the rows below, so the trigger and the row the
+  // user just clicked read identically instead of the trigger re-adding a vendor.
   const triggerLabel = useMemo(() => {
     if (!activeModel) return 'Select a model'
     if (!activeProvider) return activeModel
-    return index.get(`${activeProvider.id}:${activeModel}`)?.info.name ?? activeModel
+    const name = index.get(`${activeProvider.id}:${activeModel}`)?.info.name
+    return name ? modelLabel(activeProvider.id, name, activeModel) : activeModel
   }, [activeModel, activeProvider, index])
 
   const pick = useCallback(
