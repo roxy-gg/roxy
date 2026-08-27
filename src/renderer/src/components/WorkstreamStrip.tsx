@@ -17,6 +17,7 @@ import { workstreamStripView, statusKeyForSession } from '@shared/workstream'
 import { branchNameError } from '@shared/branch'
 import type { RepoStatusView } from '@shared/api'
 import {
+  aggregateLifecycle,
   aggregateRepoStatus,
   aggregateSyncTarget,
   describeRepoStatus,
@@ -393,6 +394,7 @@ function ForgePanel({
   const resetBranch = useRoxyStore((s) => s.resetBranch)
   const pullAllRepos = useRoxyStore((s) => s.pullAllRepos)
   const resetAllRepos = useRoxyStore((s) => s.resetAllRepos)
+  const pushAllRepos = useRoxyStore((s) => s.pushAllRepos)
   const [busy, setBusy] = useState<null | 'action' | 'pull' | 'reset'>(null)
   const [error, setError] = useState<string | null>(null)
   const [note, setNote] = useState<string | null>(null)
@@ -406,12 +408,34 @@ function ForgePanel({
   const pull = view?.pull ?? null
   const action = view?.lifecycle.action ?? null
   const multi = repos.length > 1
+  // True while the workstream is still just an intent: these are the PROJECT's
+  // own checkouts, shared with the user's editor and every other session in the
+  // folder. Everything destructive below says so out loud rather than letting
+  // "Reset all" read like it only touches this session's scratch space.
+  const pendingTrees = multi && repos.some((r) => r.pending)
 
   // A composite workstream has no single upstream, so its sync target is folded
   // from the per-repo ones. Null for single-repo sessions, which keep using
   // `view.syncTarget` exactly as before.
   const composite = useMemo(() => (multi ? aggregateSyncTarget(repos) : null), [multi, repos])
   const sync = multi ? null : (view?.syncTarget ?? null)
+
+  // Whether the repos actually WANT different things. Drives the per-row action
+  // buttons: when every repo is at the same phase the summary buttons already
+  // say it once, and repeating it per row is noise.
+  const lifecycleAgg = useMemo(
+    () =>
+      multi
+        ? aggregateLifecycle(
+            repos.map((r) => ({
+              name: r.name,
+              isRepo: r.isRepo,
+              lifecycle: r.forge?.lifecycle ?? null
+            }))
+          )
+        : null,
+    [multi, repos]
+  )
 
   // One shape for the label/disabled logic regardless of how many repos there
   // are, so the two buttons below are written once rather than forked.
@@ -471,6 +495,15 @@ function ForgePanel({
         return openUrl(url)
       }
       if (action === 'push') {
+        // Multi-repo pushes EVERY repo. Pushing the one the chip happened to be
+        // derived from published a fraction of the work and left the chip
+        // saying exactly what it said before the click.
+        if (multi) {
+          const r = await pushAllRepos(ownerId)
+          if (r.error) return setError(r.error)
+          const s = summarizeSync(r.repos, 'push')
+          return s.failed ? setError(s.text) : setNote(s.text)
+        }
         const r = await pushBranch(ownerId)
         if (!r.ok) setError(r.error ?? 'Push failed.')
         return
@@ -525,6 +558,16 @@ function ForgePanel({
             </span>
           )}
         </div>
+
+        {/* Names the tree before any button acts on it. A composite workstream
+            that hasn't been created yet operates on the PROJECT's checkouts,
+            and "Reset all to origin/main" means something very different there
+            than it does inside a throwaway worktree. */}
+        {pendingTrees && (
+          <div className="border-b border-border px-3 py-1.5 text-[11px] text-warning">
+            Workstream not created yet - these are the project&rsquo;s own checkouts.
+          </div>
+        )}
 
         {pull ? (
           <button
@@ -591,7 +634,7 @@ function ForgePanel({
                     {r.sync?.behind ?? r.behind} behind
                   </span>
                 )}
-                {r.forge?.pull && (
+                {r.forge?.pull ? (
                   <button
                     type="button"
                     onClick={() => openUrl(r.forge!.pull!.url)}
@@ -599,6 +642,15 @@ function ForgePanel({
                   >
                     #{r.forge.pull.number}
                   </button>
+                ) : (
+                  /* The row's OWN next step, when it differs from the panel's.
+                     The summary buttons below act on all N at once, which is the
+                     right default and the wrong tool for the single repo that is
+                     behind while the others are merged - the case a composite
+                     workstream produces constantly. Suppressed when every repo
+                     wants the same thing, so the common case stays one button
+                     rather than a column of identical ones. */
+                  <RepoRowAction repo={r} suppress={!lifecycleAgg?.mixed} onDone={setNote} />
                 )}
                 {r.isRepo ? (
                   r.dirty && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-warning" />
@@ -676,9 +728,11 @@ function ForgePanel({
               onBlur={() => setConfirmReset(false)}
               disabled={!!busy}
               title={
-                multi
-                  ? `Discard local state in every repo and make each identical to ${target.label}`
-                  : `Discard local state and make this branch identical to ${target.label}`
+                pendingTrees
+                  ? `Discard local state in the PROJECT's own checkouts and make each identical to ${target.label} - this workstream has no worktree of its own yet`
+                  : multi
+                    ? `Discard local state in every repo and make each identical to ${target.label}`
+                    : `Discard local state and make this branch identical to ${target.label}`
               }
               className={cn(
                 'press-scale flex w-full items-center justify-center gap-1.5 sq sq-lg rounded-lg px-3 py-1.5 text-xs disabled:opacity-40',
@@ -691,13 +745,73 @@ function ForgePanel({
               {busy === 'reset'
                 ? 'Resetting...'
                 : confirmReset
-                  ? resetConfirmLabel(target, multi ? composite?.syncable : undefined)
+                  ? resetConfirmLabel(target, multi ? composite?.syncable : undefined, pendingTrees)
                   : `Reset ${multi ? 'all ' : ''}to ${target.label}`}
             </button>
           </div>
         )}
       </div>
     </div>
+  )
+}
+
+/**
+ * One repo's own next step, inside the panel's repo list.
+ *
+ * The panel's big buttons act on every repo at once, which is right when the
+ * repos agree and useless when they don't: a workstream with three merged repos
+ * and one that was never pushed offers "Push all", and the three that are done
+ * make that read like it would republish them. This is the escape hatch - the
+ * one repo that needs something, acted on alone.
+ *
+ * Deliberately only PUSH and VIEW-PR:
+ *   - push is the action a lone repo actually gets stuck needing, and it is
+ *     additive - the worst case is a no-op;
+ *   - update and reset stay on the panel's shared buttons, because reset can
+ *     destroy work and a small unlabelled control at the end of a dense row is
+ *     the last place that belongs.
+ */
+function RepoRowAction({
+  repo,
+  suppress,
+  onDone
+}: {
+  repo: RepoStatusView
+  /** True when every repo wants the same thing, so the panel says it once. */
+  suppress: boolean
+  onDone: (note: string | null) => void
+}): JSX.Element | null {
+  const [busy, setBusy] = useState(false)
+
+  if (suppress || !repo.isRepo) return null
+  const action = repo.forge?.lifecycle.action ?? null
+  if (action !== 'push') return null
+  // Nothing local to publish - the phase is stale or the repo is simply clean.
+  const ahead = repo.sync?.ahead ?? repo.ahead
+  if (repo.hasUpstream && ahead === 0) return null
+
+  const run = async (): Promise<void> => {
+    if (busy) return
+    setBusy(true)
+    onDone(null)
+    try {
+      const r = await api.forge.push(repo.worktreePath)
+      onDone(r.ok ? `Pushed ${repo.name}.` : `${repo.name}: ${r.error ?? 'push failed'}`)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={() => void run()}
+      disabled={busy}
+      title={`Push ${repo.name} to origin`}
+      className="shrink-0 rounded px-1 text-text-subtle transition hover:bg-white/5 hover:text-text disabled:opacity-40"
+    >
+      {busy ? '...' : 'push'}
+    </button>
   )
 }
 
@@ -723,13 +837,18 @@ function fastForwardHint(sync: SyncTarget): string {
  * are gone for good (well, reflog), edits are merely stashed. "Are you sure?"
  * says nothing; "Discard 2 commits + stash 5 changes" is a decision.
  */
-function resetConfirmLabel(sync: SyncCounts, repoCount?: number): string {
+function resetConfirmLabel(sync: SyncCounts, repoCount?: number, shared?: boolean): string {
   const bits: string[] = []
   if (sync.ahead > 0) bits.push(`discard ${sync.ahead} commit${sync.ahead === 1 ? '' : 's'}`)
   if (sync.changed > 0) bits.push(`stash ${sync.changed} change${sync.changed === 1 ? '' : 's'}`)
+  // The armed click is the last thing between the user and a destroyed tree, so
+  // it names WHOSE tree when the answer is "the one your editor is open in".
+  // Everywhere else the scope is implied by the panel; here it is the whole
+  // difference between discarding a scratch worktree and discarding the project.
+  const where = shared ? ' in the PROJECT' : ''
   // Across repos the counts are SUMS, so say what they are sums of - "discard 3
   // commits" reads like one repo until it names the scope.
-  const scope = repoCount ? ` in ${repoCount} repos` : ''
+  const scope = repoCount ? `${where} in ${repoCount} repos` : where
   if (!bits.length) return `Click again to reset${scope}`
   return `Click again to ${bits.join(' + ')}${scope}`
 }

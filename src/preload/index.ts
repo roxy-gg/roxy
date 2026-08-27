@@ -258,6 +258,7 @@ const roxy: RoxyApi = {
     reset: (cwd) => ipcRenderer.invoke(CHANNELS.forgeReset, cwd),
     pullMulti: (sessionId) => ipcRenderer.invoke(CHANNELS.forgePullMulti, sessionId),
     resetMulti: (sessionId) => ipcRenderer.invoke(CHANNELS.forgeResetMulti, sessionId),
+    pushMulti: (sessionId) => ipcRenderer.invoke(CHANNELS.forgePushMulti, sessionId),
     createUrl: (cwd) => ipcRenderer.invoke(CHANNELS.forgeCreateUrl, cwd),
     listHosts: () => ipcRenderer.invoke(CHANNELS.forgeListHosts),
     setHostKind: (host, kind) => ipcRenderer.invoke(CHANNELS.forgeSetHostKind, host, kind)
