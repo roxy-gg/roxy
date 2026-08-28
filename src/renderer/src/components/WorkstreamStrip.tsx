@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import type { LifecycleAction, LifecycleTone, ForgeKind, SyncTarget } from '@shared/forge'
 import { FORGE_NAMES, relativeAge } from '@shared/forge'
 import { api } from '../lib/api'
+import { GIT_POLL_MS } from '../lib/polling'
 import {
   ArrowDownToLine,
   Check,
@@ -57,9 +58,6 @@ import { TONE_BG, TONE_TEXT } from '../lib/lifecycle'
  * It renders NOTHING outside a git repo. Most folders aren't repos, and a
  * permanently greyed-out row would just be a nag.
  */
-
-/** How often to re-poll git status while a session is on screen. */
-const POLL_MS = 5_000
 
 /**
  * Menu widths in px, not Tailwind classes, because `useMenuAnchor` needs the
@@ -125,7 +123,7 @@ export function WorkstreamStrip(): JSX.Element | null {
   useEffect(() => {
     if (!ownerId) return
     void refreshGitStatus(ownerId)
-    const timer = setInterval(() => void refreshGitStatus(ownerId), POLL_MS)
+    const timer = setInterval(() => void refreshGitStatus(ownerId), GIT_POLL_MS)
     const onFocus = (): void => void refreshGitStatus(ownerId)
     window.addEventListener('focus', onFocus)
     return () => {

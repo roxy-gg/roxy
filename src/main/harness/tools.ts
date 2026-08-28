@@ -365,9 +365,18 @@ function cap(text: string): string {
 
 /** Build a before/after diff for the UI, skipping no-ops and oversized files. */
 function toolDiff(path: string, before: string, after: string): ToolDiff | undefined {
-  if (before === after) return undefined
-  if (before.length > MAX_DIFF_SIDE || after.length > MAX_DIFF_SIDE) return undefined
-  return { path, before, after }
+  // Same normalization as reviewDiff: otherwise Windows/autocrlf makes every
+  // write/edit card look like a whole-file rewrite because the old side came
+  // from a CRLF worktree while the model's replacement is LF.
+  const b = normalizeDiffEol(before)
+  const a = normalizeDiffEol(after)
+  if (b === a) return undefined
+  if (b.length > MAX_DIFF_SIDE || a.length > MAX_DIFF_SIDE) return undefined
+  return { path, before: b, after: a }
+}
+
+function normalizeDiffEol(text: string): string {
+  return text.includes('\r') ? text.replace(/\r\n?/g, '\n') : text
 }
 
 /** Image file extensions we render inline instead of dumping raw bytes as text. */

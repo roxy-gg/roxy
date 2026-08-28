@@ -187,6 +187,7 @@ export const CHANNELS = {
   browserReload: 'browser:reload',
   browserStop: 'browser:stop',
   browserNewTab: 'browser:new-tab',
+  browserNewReviewTab: 'browser:new-review-tab',
   browserCloseTab: 'browser:close-tab',
   browserActivateTab: 'browser:activate-tab',
   browserMoveTab: 'browser:move-tab',
@@ -230,6 +231,31 @@ export const CHANNELS = {
   gitRemoveWorktree: 'git:remove-worktree',
   gitPruneWorktrees: 'git:prune-worktrees',
   gitRenameBranch: 'git:rename-branch',
+
+  /**
+   * Reviewing changes - the diff pane behind the composer's Changes chip.
+   *
+   * Separate from the `git:*` block above because these answer a different
+   * question: that one is "where does this work land?", these are "what
+   * exactly changed?".
+   */
+  reviewFiles: 'review:files',
+  reviewDiff: 'review:diff',
+  reviewCommits: 'review:commits',
+  reviewStage: 'review:stage',
+  reviewUnstage: 'review:unstage',
+  reviewRevert: 'review:revert',
+  /**
+   * Which session the CALLING window belongs to.
+   *
+   * The browser window's chrome is a separate renderer with no store and no
+   * notion of the active chat, but every review call is keyed by session. Main
+   * already maps a chrome webContents back to its session key, and that key is
+   * the session id - so the chrome just asks.
+   */
+  reviewOwnSession: 'review:own-session',
+  /** Chat -> main: open this session's browser window on its review tab. */
+  reviewOpenWindow: 'review:open-window',
 
   /** Forge = the git host (GitHub/Azure DevOps/GitLab/Bitbucket) behind `origin`. */
   forgeStatus: 'forge:status',

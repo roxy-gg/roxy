@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { ChangesChip } from './ChangesChip'
 import {
   Check,
   ChevronRight,
@@ -547,6 +548,11 @@ export function ChatView(): JSX.Element {
           </div>
         </div>
       )}
+
+      {/* Directly above the composer, where it reads as "here is what has
+          changed" rather than as another status field. Clicking opens the
+          review WINDOW - unfolding a diff here buried the transcript. */}
+      <ChangesChip />
 
       {/* A subagent's session can now be stopped from its own composer: the Stop
           cancels the DELEGATE (there is no local request here to abort), which

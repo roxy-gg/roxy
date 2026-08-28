@@ -32,7 +32,13 @@ import {
   placeholderBranchName
 } from '../../shared/branch'
 import * as repo from '../db/repo'
-import type { RepoSyncTarget } from '../../shared/api'
+import type {
+  GitReviewScope,
+  RepoSyncTarget,
+  ReviewCommit,
+  ReviewDiff,
+  ReviewFile
+} from '../../shared/api'
 
 /** How long any single git command may run before it's killed. */
 const GIT_TIMEOUT_MS = 30_000
@@ -1107,4 +1113,460 @@ function cleanGitError(r: GitResult, fallback: string): string {
     .map((l) => l.replace(/^fatal:\s*/i, '').trim())
     .find((l) => l.length > 0)
   return first ? `${fallback}: ${first}` : fallback
+}
+
+// ---------------------------------------------------------------------------
+// Reviewing changes
+// ---------------------------------------------------------------------------
+
+/**
+ * Cap on a single file's contents before we refuse to diff it.
+ *
+ * The renderer highlights with Shiki, and a multi-megabyte minified bundle
+ * would lock its UI thread for seconds. A file that size is not something
+ * anyone reviews by eye, so it is reported as binary (counts only) instead.
+ */
+const MAX_DIFF_BYTES = 400_000
+
+/** How much of a file to sniff for NUL bytes, the way git detects binaries. */
+const BINARY_SNIFF_BYTES = 8_000
+
+/** Git's constant hash for the empty tree - the parent a root commit lacks. */
+const EMPTY_TREE_SHA = '4b825dc642cb6eb9a060e54bf8d69288fbee4904'
+
+/**
+ * The two revisions a scope compares, as git rev strings. A branch uses its
+ * merge base, not the base branch's current tip, so commits pushed there after
+ * this workstream branched never appear as part of the workstream's changes.
+ *
+ * `null` means "the working tree" - not a rev git can resolve, so callers read
+ * the file from disk instead. The index is `''`, which is git's own spelling
+ * for it in `git show :path`.
+ */
+async function revsForScope(
+  cwd: string,
+  scope: GitReviewScope,
+  commit?: string
+): Promise<{ from: string; to: string | null } | null> {
+  switch (scope) {
+    case 'unstaged':
+      // Against the index, so staging a file drops it out of this list.
+      return { from: '', to: null }
+    case 'staged':
+      // An unborn repository has an index but no HEAD yet. Comparing that
+      // index with Git's empty tree makes first-commit changes reviewable too.
+      return { from: (await resolveCommit(cwd)) ?? EMPTY_TREE_SHA, to: '' }
+    case 'branch': {
+      const base = await mergeBaseForWorkstream(cwd)
+      return base ? { from: base, to: null } : null
+    }
+    case 'commit': {
+      const sha = await validCommit(cwd, commit)
+      if (!sha) return null
+      // `<sha>^` fails on a root commit, which has no parent. Diffing against
+      // the empty tree is how git itself shows a root commit's contents.
+      const parent = await git(['rev-parse', '--verify', '--end-of-options', `${sha}^`], cwd)
+      const from =
+        parent.ok && /^[0-9a-f]{40}$/i.test(parent.stdout.trim())
+          ? parent.stdout.trim()
+          : EMPTY_TREE_SHA
+      return { from, to: sha }
+    }
+  }
+}
+
+/**
+ * The commit this workstream diverged from its base branch at.
+ *
+ * Tries the recorded base first (`branch.<name>.roxy-base`, written when the
+ * workstream was created), then the repo's default branch, and prefers the
+ * `origin/` copy of whichever it lands on: in a worktree the local base branch
+ * is routinely stale or absent, while the remote-tracking ref is always there.
+ */
+async function mergeBaseForWorkstream(cwd: string): Promise<string | null> {
+  const branch = await currentBranch(cwd)
+  const base = (branch ? await baseBranchFor(cwd, branch) : null) ?? (await defaultBranch(cwd))
+  if (!base) return null
+
+  for (const ref of [`origin/${base}`, base]) {
+    const r = await git(['merge-base', ref, 'HEAD'], cwd)
+    const sha = r.stdout.trim()
+    if (r.ok && sha) return sha
+  }
+  return null
+}
+
+/** The rev arguments for a scope, in `git diff` order. */
+function diffRange(revs: { from: string; to: string | null }): string[] {
+  // Working tree: name the source rev and let git compare against disk.
+  // `--cached` is the only way to say "the index is the RIGHT side".
+  if (revs.to === null) return revs.from === '' ? [] : [revs.from]
+  if (revs.to === '') return ['--cached', revs.from]
+  return [revs.from, revs.to]
+}
+
+/**
+ * The changed files for a scope, with per-file line counts.
+ *
+ * Two git calls, both NUL-delimited: `--name-status -z` for what happened to
+ * each file (and the rename pairs), `--numstat -z` for the counts. `-z` is not
+ * optional - the default output quotes and escapes any path with a space or a
+ * non-ASCII character in it, and parsing that back is a bug farm.
+ *
+ * Untracked files are appended for the `unstaged` scope only, since that is the
+ * one view where a brand-new file is honestly "not staged yet". Without them a
+ * file the agent just created would be invisible here, which is the single most
+ * common thing a user opens this pane to look at.
+ */
+export async function reviewFiles(
+  cwd: string,
+  scope: GitReviewScope,
+  commit?: string
+): Promise<ReviewFile[]> {
+  if (!cwd || !(await isGitAvailable())) return []
+  const revs = await revsForScope(cwd, scope, commit)
+  if (!revs) return []
+
+  const range = diffRange(revs)
+  const [names, nums] = await Promise.all([
+    git(['diff', '--name-status', '-z', '--find-renames', ...range], cwd),
+    git(['diff', '--numstat', '-z', '--find-renames', ...range], cwd)
+  ])
+  if (!names.ok) return []
+
+  const counts = parseNumstat(nums.ok ? nums.stdout : '')
+  const files: ReviewFile[] = parseNameStatus(names.stdout).map((f) => ({
+    ...f,
+    ...(counts.get(f.path) ?? { additions: 0, deletions: 0, binary: false })
+  }))
+
+  if (scope === 'unstaged') files.push(...(await untrackedEntries(cwd)))
+
+  // Git's own order for tracked files, then untracked. Sorting by path would
+  // scatter a rename's two halves away from each other.
+  return files
+}
+
+/** Keep user-supplied review paths inside the repo before touching the filesystem. */
+function reviewPath(cwd: string, file: string): string | null {
+  if (!file || file.includes('\0')) return null
+  const abs = path.resolve(cwd, file)
+  const rel = path.relative(cwd, abs)
+  return rel.startsWith('..') || path.isAbsolute(rel) ? null : abs
+}
+
+/**
+ * A worktree path whose real parent is still inside the repository.
+ *
+ * The lexical check above rejects `../`, while this one rejects a directory
+ * symlink that points outside the checkout. The leaf itself may be a symlink;
+ * callers use lstat or rm so they inspect/delete the link, never its target.
+ */
+async function safeWorktreePath(cwd: string, file: string): Promise<string | null> {
+  const abs = reviewPath(cwd, file)
+  if (!abs) return null
+  try {
+    const [root, parent] = await Promise.all([fs.realpath(cwd), fs.realpath(path.dirname(abs))])
+    const rel = path.relative(root, parent)
+    if (rel.startsWith('..') || path.isAbsolute(rel)) return null
+    return path.join(parent, path.basename(abs))
+  } catch {
+    return null
+  }
+}
+
+/** Only commit object names are valid input for the commit scope. */
+async function validCommit(cwd: string, commit: string | undefined): Promise<string | null> {
+  if (!commit) return null
+  const r = await git(['rev-parse', '--verify', '--end-of-options', `${commit}^{commit}`], cwd)
+  const sha = r.stdout.trim()
+  return r.ok && /^[0-9a-f]{40}$/i.test(sha) ? sha : null
+}
+
+/** Parse `git diff --name-status -z` into entries (handles rename pairs). */
+function parseNameStatus(out: string): ReviewFile[] {
+  // NUL-separated, and a rename is THREE fields: `R096`, old path, new path.
+  const parts = out.split('\0').filter((p) => p !== '')
+  const files: ReviewFile[] = []
+
+  for (let i = 0; i < parts.length; i++) {
+    const kind = parts[i][0]
+    if (kind === 'R' || kind === 'C') {
+      const oldPath = parts[++i]
+      const newPath = parts[++i]
+      if (!newPath) break
+      files.push({
+        path: newPath,
+        oldPath,
+        status: kind === 'R' ? 'renamed' : 'copied',
+        additions: 0,
+        deletions: 0,
+        binary: false
+      })
+      continue
+    }
+    const p = parts[++i]
+    if (!p) break
+    const status: ReviewFile['status'] =
+      kind === 'A' ? 'added' : kind === 'D' ? 'deleted' : 'modified'
+    files.push({ path: p, status, additions: 0, deletions: 0, binary: false })
+  }
+  return files
+}
+
+/**
+ * Parse `git diff --numstat -z` into per-path counts.
+ *
+ * Binary files report `-` for both numbers, which is git saying there is
+ * nothing to count and nothing worth rendering.
+ */
+function parseNumstat(
+  out: string
+): Map<string, { additions: number; deletions: number; binary: boolean }> {
+  const counts = new Map<string, { additions: number; deletions: number; binary: boolean }>()
+  // With -z a rename emits its two paths as their own NUL fields, following a
+  // record whose path column is empty.
+  const parts = out.split('\0').filter((p) => p !== '')
+
+  for (let i = 0; i < parts.length; i++) {
+    const m = /^(-|\d+)\t(-|\d+)\t(.*)$/.exec(parts[i])
+    if (!m) continue
+    const [, addRaw, delRaw, tail] = m
+    let p = tail
+    if (tail === '') {
+      // Rename/copy: skip the old path, take the new one.
+      i += 2
+      p = parts[i]
+    }
+    if (!p) break
+    counts.set(p, {
+      additions: addRaw === '-' ? 0 : Number(addRaw),
+      deletions: delRaw === '-' ? 0 : Number(delRaw),
+      binary: addRaw === '-' && delRaw === '-'
+    })
+  }
+  return counts
+}
+
+/** Untracked files as review entries, respecting .gitignore. */
+async function untrackedEntries(cwd: string): Promise<ReviewFile[]> {
+  const r = await git(['ls-files', '--others', '--exclude-standard', '-z'], cwd)
+  if (!r.ok) return []
+
+  return Promise.all(
+    r.stdout
+      .split('\0')
+      .filter((p) => p !== '')
+      .map(async (p): Promise<ReviewFile> => {
+        // A new file is all additions, and nothing in git knows its line count
+        // yet, so we count them ourselves.
+        const text = await readWorktreeFile(cwd, p)
+        return {
+          path: p,
+          status: 'untracked',
+          additions: text === null ? 0 : countLines(text),
+          deletions: 0,
+          binary: text === null
+        }
+      })
+  )
+}
+
+/** Line count for a file's contents, ignoring a single trailing newline. */
+function countLines(text: string): number {
+  if (text === '') return 0
+  const n = text.split('\n').length
+  return text.endsWith('\n') ? n - 1 : n
+}
+
+/**
+ * Both sides of one file, as full contents for a before/after diff view.
+ *
+ * Full text rather than a unified patch because that is what the renderer's
+ * diff component consumes: it computes and highlights the hunks itself, which
+ * also lets the user expand context beyond whatever a patch happened to carry.
+ *
+ * A missing side is `''`, which is exactly right - a file that was added has no
+ * "before", and one that was deleted has no "after".
+ */
+export async function reviewDiff(
+  cwd: string,
+  scope: GitReviewScope,
+  file: string,
+  commit?: string
+): Promise<ReviewDiff | null> {
+  if (!cwd || !file || !reviewPath(cwd, file) || !(await repoRoot(cwd))) return null
+  const revs = await revsForScope(cwd, scope, commit)
+  if (!revs) return null
+
+  // An untracked file exists in no rev at all; its "before" is simply empty.
+  const untracked = scope === 'unstaged' && (await isUntracked(cwd, file))
+  const before = untracked ? '' : await fileAt(cwd, revs.from, file)
+  const after =
+    revs.to === null ? await readWorktreeFile(cwd, file) : await fileAt(cwd, revs.to, file)
+
+  // `null` from either side means "exists, but we will not render it".
+  if (before === null || after === null) return { path: file, before: '', after: '', binary: true }
+  // Both sides are normalized so the ONLY differences left are real ones. Under
+  // `core.autocrlf` (the Windows default) git stores LF but checks out CRLF, so
+  // the committed side arrives LF and the worktree side CRLF - every line then
+  // differs by an invisible \r and a 6-line edit renders as a whole-file
+  // rewrite. Git's own diff normalizes here too, which is why numstat reported
+  // the honest +4/-2 all along. The tradeoff is intentional: an EOL-only change
+  // can render as no textual diff even though git still counts the rewritten
+  // lines. That is less harmful than making every normal Windows edit look like
+  // a whole-file rewrite.
+  return { path: file, before: normalizeEol(before), after: normalizeEol(after), binary: false }
+}
+
+/** Line endings as git stores them, so EOL-only noise is never a diff. */
+function normalizeEol(text: string): string {
+  return text.includes('\r') ? text.replace(/\r\n?/g, '\n') : text
+}
+
+/** Whether git considers this path untracked. */
+async function isUntracked(cwd: string, file: string): Promise<boolean> {
+  if (!reviewPath(cwd, file)) return false
+  const r = await git(['ls-files', '--error-unmatch', '--', file], cwd)
+  return !r.ok
+}
+
+/** Whether a path is tracked in either the index or HEAD. */
+async function isTracked(cwd: string, file: string): Promise<boolean> {
+  if (!reviewPath(cwd, file)) return false
+  const indexed = await git(['ls-files', '--error-unmatch', '--', file], cwd)
+  if (indexed.ok) return true
+
+  // A staged deletion is absent from the index but still belongs to HEAD. It
+  // must be restored, not mistaken for an untracked path and deleted again.
+  const committed = await git(['ls-tree', '-r', '--name-only', '-z', 'HEAD', '--', file], cwd)
+  return committed.ok && committed.stdout.split('\0').includes(file)
+}
+
+/**
+ * A file's contents at a rev (`''` = the index), or `''` when absent there.
+ *
+ * `null` is reserved for "exists, but must not reach the highlighter": binary
+ * content, or something past the size cap.
+ */
+async function fileAt(cwd: string, rev: string, file: string): Promise<string | null> {
+  const r = await git(['show', `${rev}:${file}`], cwd)
+  // Not present at that rev - an added file has no previous version. A
+  // legitimate empty side, not a failure.
+  if (!r.ok) return ''
+  return renderable(r.stdout)
+}
+
+/** A worktree file's contents; `''` when it does not exist. */
+async function readWorktreeFile(cwd: string, file: string): Promise<string | null> {
+  const abs = await safeWorktreePath(cwd, file)
+  if (!abs) return null
+  try {
+    const stat = await fs.lstat(abs)
+    if (stat.isSymbolicLink()) return null
+    const buf = await fs.readFile(abs)
+    if (buf.length > MAX_DIFF_BYTES) return null
+    if (buf.subarray(0, BINARY_SNIFF_BYTES).includes(0)) return null
+    return buf.toString('utf8')
+  } catch {
+    return ''
+  }
+}
+
+/** Reject content that must not reach the highlighter. */
+function renderable(text: string): string | null {
+  if (Buffer.byteLength(text) > MAX_DIFF_BYTES) return null
+  if (text.slice(0, BINARY_SNIFF_BYTES).includes('\0')) return null
+  return text
+}
+
+/** Recent commits on the current branch, newest first, for the commit scope. */
+export async function reviewCommits(cwd: string, limit = 30): Promise<ReviewCommit[]> {
+  if (!cwd || !(await isGitAvailable())) return []
+  const n = Math.min(Math.max(Math.trunc(Number(limit) || 30), 1), 100)
+  // %x00 is a literal NUL, so a subject containing anything at all stays
+  // parseable - including the tabs and pipes people do put in commit messages.
+  const r = await git(['log', `-${n}`, '--format=%H%x00%s%x00%an%x00%aI'], cwd)
+  if (!r.ok) return []
+
+  return r.stdout
+    .split('\n')
+    .filter((l) => l.trim() !== '')
+    .map((line) => {
+      const [sha, subject, author, date] = line.split('\0')
+      return { sha, subject: subject ?? '', author: author ?? '', date: date ?? '' }
+    })
+    .filter((c) => !!c.sha)
+}
+
+/** Stage paths, or everything when `files` is empty. */
+export async function stageFiles(
+  cwd: string,
+  files: string[]
+): Promise<{ ok: boolean; error?: string }> {
+  // `--` stops a path that looks like an option from being read as one.
+  const args = files.length ? ['add', '--', ...files] : ['add', '-A']
+  const r = await git(args, cwd)
+  return r.ok ? { ok: true } : { ok: false, error: cleanGitError(r, 'Could not stage') }
+}
+
+/** Unstage paths, leaving the working tree untouched. */
+export async function unstageFiles(
+  cwd: string,
+  files: string[]
+): Promise<{ ok: boolean; error?: string }> {
+  const hasHead = !!(await resolveCommit(cwd))
+  const args = hasHead
+    ? files.length
+      ? ['restore', '--staged', '--', ...files]
+      : ['restore', '--staged', ':/']
+    : files.length
+      ? ['rm', '--cached', '-f', '--', ...files]
+      : ['rm', '--cached', '-r', '-f', '--', '.']
+  const r = await git(args, cwd)
+  return r.ok ? { ok: true } : { ok: false, error: cleanGitError(r, 'Could not unstage') }
+}
+
+/**
+ * Throw away changes to paths - the one destructive operation in this file.
+ *
+ * Tracked files are restored from HEAD; untracked ones have to be deleted,
+ * since there is no version to restore them to. Callers MUST confirm first:
+ * nothing about this is recoverable through git.
+ */
+export async function revertFiles(
+  cwd: string,
+  files: string[]
+): Promise<{ ok: boolean; error?: string }> {
+  if (!files.length) return { ok: true }
+  if (files.some((f) => !reviewPath(cwd, f)))
+    return { ok: false, error: 'Path escapes repository.' }
+
+  const tracked: string[] = []
+  const untracked: string[] = []
+  for (const f of files) {
+    if (await isTracked(cwd, f)) tracked.push(f)
+    else untracked.push(f)
+  }
+
+  if (tracked.length) {
+    const hasHead = !!(await resolveCommit(cwd))
+    const r = hasHead
+      ? await git(['restore', '--staged', '--worktree', '--', ...tracked], cwd)
+      : await git(['rm', '--cached', '-r', '-f', '--', ...tracked], cwd)
+    if (!r.ok) return { ok: false, error: cleanGitError(r, 'Could not revert') }
+    // With no HEAD every indexed path is a new file. Removing it from the
+    // index is only half a revert; delete the worktree copy below as well.
+    if (!hasHead) untracked.push(...tracked)
+  }
+  for (const f of untracked) {
+    try {
+      const abs = await safeWorktreePath(cwd, f)
+      if (!abs) return { ok: false, error: 'Path escapes repository.' }
+      await fs.rm(abs, { force: true })
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : 'Could not delete file' }
+    }
+  }
+  return { ok: true }
 }
