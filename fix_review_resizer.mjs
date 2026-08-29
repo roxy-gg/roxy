@@ -1,13 +1,18 @@
-import { Sidebar } from '../components/Sidebar'
-import { ChatView } from '../components/ChatView'
-import { ReviewPane } from '../review/ReviewPane'
-import { useRoxyStore } from '../lib/store'
-import { useRef, useEffect } from 'react'
+import fs from 'node:fs'
+let text = fs.readFileSync('src/renderer/src/routes/Chat.tsx', 'utf8')
 
+// Import useEffect, useRef
+if (!text.includes('useRef')) {
+  text = text.replace(
+    /import \{ useRoxyStore \} from '\.\.\/lib\/store'\r?\n/,
+    "import { useRoxyStore } from '../lib/store'\nimport { useRef, useEffect } from 'react'\n"
+  )
+}
 
-import { X } from 'lucide-react'
-
-export default function Chat(): JSX.Element {
+// Add state and resizer
+text = text.replace(
+  /export default function Chat\(\): JSX\.Element \{\r?\n\s*const activeChatId = useRoxyStore\(\(s\) => s\.activeChatId\)\r?\n\s*const reviewPaneOpen = useRoxyStore\(\(s\) => s\.reviewPaneOpen\)\r?\n\s*const setReviewPaneOpen = useRoxyStore\(\(s\) => s\.setReviewPaneOpen\)\r?\n/,
+  `export default function Chat(): JSX.Element {
   const activeChatId = useRoxyStore((s) => s.activeChatId)
   const reviewPaneOpen = useRoxyStore((s) => s.reviewPaneOpen)
   const setReviewPaneOpen = useRoxyStore((s) => s.setReviewPaneOpen)
@@ -48,12 +53,12 @@ export default function Chat(): JSX.Element {
     resizer.addEventListener('pointerdown', onPointerDown)
     return () => resizer.removeEventListener('pointerdown', onPointerDown)
   }, [reviewPaneWidth, setReviewPaneWidth])
+`
+)
 
-  return (
-    <div className="flex h-full w-full">
-      <Sidebar />
-      <ChatView />
-      {reviewPaneOpen && activeChatId && (
+text = text.replace(
+  /\{reviewPaneOpen && activeChatId && \(\r?\n\s*<div className="w-\[480px\] shrink-0 border-l border-border bg-bg-app flex flex-col min-h-0">/,
+  `{reviewPaneOpen && activeChatId && (
         <div 
           className="shrink-0 border-l border-border bg-bg-app flex flex-col min-h-0 relative"
           style={{ width: reviewPaneWidth }}
@@ -61,22 +66,7 @@ export default function Chat(): JSX.Element {
           <div
             ref={resizerRef}
             className="absolute -left-1 top-0 bottom-0 w-2 cursor-col-resize z-10 transition-colors hover:bg-accent/30"
-          />
-          <ReviewPane
-            sessionId={activeChatId}
-            className="flex-1"
-            action={
-              <button
-                onClick={() => setReviewPaneOpen(false)}
-                title="Close review pane"
-                className="[-webkit-app-region:no-drag] press-scale sq sq-sm rounded-md text-text-muted hover:bg-white/5 hover:text-text transition-colors"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            }
-          />
-        </div>
-      )}
-    </div>
-  )
-}
+          />`
+)
+
+fs.writeFileSync('src/renderer/src/routes/Chat.tsx', text, 'utf8')

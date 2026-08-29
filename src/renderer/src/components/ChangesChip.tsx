@@ -79,7 +79,7 @@ export function ChangesChip(): JSX.Element | null {
   return (
     <button
       type="button"
-      onClick={() => setReviewPaneOpen(true)}
+      onClick={() => setReviewPaneOpen(!reviewPaneOpen)}
       title="Review these changes"
       className={cn(
         '[-webkit-app-region:no-drag] press-scale flex h-7 items-center gap-1.5 sq sq-lg sq-ring rounded-lg border px-2 text-xs tabular-nums transition-colors',
