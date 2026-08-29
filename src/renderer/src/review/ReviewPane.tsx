@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { FileDiff, Loader2, RefreshCw } from 'lucide-react'
+import { REVIEW_COMMITS } from '@shared/api'
 import type { GitReviewScope, ReviewCommit, ReviewFile, ReviewTarget } from '@shared/api'
 import { api } from '../lib/api'
 import { cn } from '../lib/cn'
@@ -84,7 +85,7 @@ export function ReviewPane({
     if (scope !== 'commit' || commits || !sessionId) return
     let alive = true
     void api.review
-      .commits(sessionId, undefined, 30)
+      .commits(sessionId, undefined, REVIEW_COMMITS)
       .then((next) => alive && setCommits(next))
       .catch(() => alive && setCommits([]))
     return () => {

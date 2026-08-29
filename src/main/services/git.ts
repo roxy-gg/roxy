@@ -32,6 +32,7 @@ import {
   placeholderBranchName
 } from '../../shared/branch'
 import * as repo from '../db/repo'
+import { REVIEW_COMMITS, REVIEW_COMMITS_MAX } from '../../shared/api'
 import type {
   GitReviewScope,
   RepoSyncTarget,
@@ -1480,10 +1481,15 @@ function renderable(text: string): string | null {
   return text
 }
 
+/** Clamp a caller-supplied commit limit into the range main is willing to serve. */
+export function clampCommitLimit(limit: number | undefined): number {
+  return Math.min(Math.max(Math.trunc(Number(limit) || REVIEW_COMMITS), 1), REVIEW_COMMITS_MAX)
+}
+
 /** Recent commits on the current branch, newest first, for the commit scope. */
-export async function reviewCommits(cwd: string, limit = 30): Promise<ReviewCommit[]> {
+export async function reviewCommits(cwd: string, limit = REVIEW_COMMITS): Promise<ReviewCommit[]> {
   if (!cwd || !(await isGitAvailable())) return []
-  const n = Math.min(Math.max(Math.trunc(Number(limit) || 30), 1), 100)
+  const n = clampCommitLimit(limit)
   // %x00 is a literal NUL, so a subject containing anything at all stays
   // parseable - including the tabs and pipes people do put in commit messages.
   const r = await git(['log', `-${n}`, '--format=%H%x00%s%x00%an%x00%aI'], cwd)

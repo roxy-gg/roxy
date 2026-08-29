@@ -293,6 +293,10 @@ export interface MultiSyncOutcome {
  */
 export type GitReviewScope = 'unstaged' | 'staged' | 'branch' | 'commit'
 
+/** How many commits the commit-scope picker lists, and the most main will return. */
+export const REVIEW_COMMITS = 30
+export const REVIEW_COMMITS_MAX = 100
+
 /** How a file came to be in the review. */
 export type ReviewFileStatus = 'added' | 'modified' | 'deleted' | 'renamed' | 'copied' | 'untracked'
 

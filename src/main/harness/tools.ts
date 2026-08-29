@@ -10,6 +10,7 @@ import path from 'node:path'
 import { glob } from 'tinyglobby'
 import type { ToolDiff, ToolResult, SessionTask } from '../../shared/types'
 import type { WebFetchFormat } from '../../shared/web'
+import type { GitReviewScope } from '../../shared/api'
 import {
   BROWSER_UA,
   EXA_MCP_URL,
@@ -137,6 +138,8 @@ const MAX_DIFF_SIDE = 100_000
 const MAX_IMAGE_BYTES = 3_000_000
 const MAX_BG_OUTPUT = 200_000
 const FG_TIMEOUT_MAX = 600_000
+/** A review patch is read by the model, so it is capped well below MAX_OUTPUT. */
+const MAX_REVIEW_PATCH = 50_000
 /**
  * How long to keep draining stdout after the command's own process has exited.
  *
@@ -1773,7 +1776,7 @@ async function runCodeReview(
     return { ok: false, output: 'Git is not available in this workspace.' }
   }
 
-  const resolvedScope = (scope || 'unstaged') as 'unstaged' | 'staged' | 'branch' | 'commit'
+  const resolvedScope = (scope || 'unstaged') as GitReviewScope
   const revs = await git.revsForScope(cwd, resolvedScope)
   if (!revs) return { ok: false, output: 'No valid commit range found for this scope.' }
 
@@ -1785,12 +1788,14 @@ async function runCodeReview(
 
     if (!r.stdout.trim()) return { ok: true, output: 'No changes found.' }
 
-    // Enforce output limits so we don't blow up the context window on a huge diff.
+    // Truncate rather than blow up the context window on a huge diff.
     const diff = r.stdout
-    if (diff.length > 50000) {
-      return { ok: true, output: diff.slice(0, 50000) + '\n... (diff truncated due to length)' }
+    return {
+      ok: true,
+      output:
+        diff.length > MAX_REVIEW_PATCH
+          ? diff.slice(0, MAX_REVIEW_PATCH) + '\n... (diff truncated due to length)'
+          : diff
     }
-
-    return { ok: true, output: diff }
   })
 }

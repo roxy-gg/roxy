@@ -1035,7 +1035,7 @@ export function registerIpc(): void {
     async (_e, sessionId: string, repoName?: string, limit?: number): Promise<ReviewCommit[]> => {
       requireMainWindow(_e)
       const selected = reviewRepos(sessionId, repoName)
-      const n = Math.min(Math.max(Math.trunc(Number(limit) || 30), 1), 100)
+      const n = git.clampCommitLimit(limit)
       const groups = await Promise.all(
         selected.map(async ({ name, cwd }) => {
           const commits = await git.reviewCommits(cwd, n)
