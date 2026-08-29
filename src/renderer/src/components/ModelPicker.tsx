@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Brain, Check, ChevronsUpDown, Clock, Pin, Search, Wrench } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
 import { buildModelIndex, buildModelRows } from '../lib/modelRows'
 import { modelLabel } from '@shared/models'
 import { useRoxyStore } from '../lib/store'
@@ -96,6 +97,7 @@ function useWindow(
 }
 
 export function ModelPicker(): JSX.Element {
+  const navigate = useNavigate()
   const providers = useRoxyStore((s) => s.providers)
   const settings = useRoxyStore((s) => s.settings)
   // Only the ACTIVE chat's config matters here, and it is the sole reason this
@@ -110,7 +112,9 @@ export function ModelPicker(): JSX.Element {
   const ensureModels = useRoxyStore((s) => s.ensureModels)
   const ensureRecentModels = useRoxyStore((s) => s.ensureRecentModels)
   const ensurePinnedModels = useRoxyStore((s) => s.ensurePinnedModels)
-  const togglePinnedModel = useRoxyStore((s) => s.togglePinnedModel)
+  const hiddenModels = useRoxyStore((s) => s.hiddenModels)
+  const ensureHiddenModels = useRoxyStore((s) => s.ensureHiddenModels)
+  const setModelPinned = useRoxyStore((s) => s.setModelPinned)
 
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
@@ -139,11 +143,12 @@ export function ModelPicker(): JSX.Element {
   // Lazy-load every connected provider's models and recents into shared caches.
   useEffect(() => {
     void ensurePinnedModels()
+    void ensureHiddenModels()
     providers.forEach((p) => {
       void ensureModels(p.id)
       void ensureRecentModels(p.id)
     })
-  }, [providers, ensureModels, ensureRecentModels, ensurePinnedModels])
+  }, [providers, ensureModels, ensureRecentModels, ensurePinnedModels, ensureHiddenModels])
 
   // Close on outside click / Escape.
   useEffect(() => {
@@ -191,9 +196,10 @@ export function ModelPicker(): JSX.Element {
         recent: recentModels,
         pinned: pinnedModels,
         index,
-        query
+        query,
+        hidden: hiddenModels
       }),
-    [providers, models, recentModels, pinnedModels, index, query]
+    [providers, models, recentModels, pinnedModels, index, query, hiddenModels]
   )
 
   /**
@@ -220,6 +226,13 @@ export function ModelPicker(): JSX.Element {
   // behind whichever provider answered last.
   const loading = providers.length > 0 && providers.some((p) => !models[p.id] && !modelsTried[p.id])
 
+  // An empty menu now has two causes; reporting a load failure for a list the
+  // user emptied themselves sends them debugging nothing.
+  const allHidden = useMemo(
+    () => rows.length === 0 && Object.values(models).some((list) => list.length > 0),
+    [rows.length, models]
+  )
+
   // Stripped the same way as the rows below, so the trigger and the row the
   // user just clicked read identically instead of the trigger re-adding a vendor.
   const triggerLabel = useMemo(() => {
@@ -244,9 +257,9 @@ export function ModelPicker(): JSX.Element {
   const togglePin = useCallback(
     (e: React.MouseEvent, providerId: string, modelId: string, pinned: boolean): void => {
       e.stopPropagation()
-      void togglePinnedModel(providerId, modelId, !pinned)
+      void setModelPinned(providerId, modelId, !pinned)
     },
-    [togglePinnedModel]
+    [setModelPinned]
   )
 
   if (providers.length === 0) {
@@ -353,7 +366,23 @@ export function ModelPicker(): JSX.Element {
             {rows.length === 0 && !loading && q && (
               <div className="px-3 py-3 text-xs text-text-subtle">No models match “{query}”.</div>
             )}
-            {rows.length === 0 && !loading && !q && (
+            {rows.length === 0 && !loading && !q && allHidden && (
+              <div className="px-3 py-3 text-xs text-text-subtle">
+                Every model is hidden. Bring some back in{' '}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setOpen(false)
+                    navigate('/settings')
+                  }}
+                  className="text-accent hover:underline"
+                >
+                  Settings → Models
+                </button>
+                .
+              </div>
+            )}
+            {rows.length === 0 && !loading && !q && !allHidden && (
               <div className="px-3 py-3 text-xs text-text-subtle">
                 Couldn&apos;t load models from models.dev — you can still send with the current
                 model.

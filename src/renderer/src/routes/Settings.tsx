@@ -22,6 +22,7 @@ import { ConfigBackup } from '../components/ConfigBackup'
 import { ActivitySection } from '../components/ActivitySection'
 import { ProviderLogo } from '../lib/providerLogos'
 import { SubscriptionAccounts } from '../components/SubscriptionSetup'
+import { ModelVisibility } from '../components/ModelVisibility'
 import { useRoxyStore } from '../lib/store'
 
 export default function Settings(): JSX.Element {
@@ -199,6 +200,14 @@ export default function Settings(): JSX.Element {
             <Plus className="h-4 w-4" /> Add provider
           </button>
         </div>
+      </section>
+
+      {/* Under Providers: same list, minus what you never use. */}
+      <section className="mb-8">
+        <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-text-subtle">
+          Models
+        </h2>
+        <ModelVisibility />
       </section>
 
       <section className="mb-8">

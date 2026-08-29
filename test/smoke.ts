@@ -205,6 +205,37 @@ async function main(): Promise<void> {
   repo.setWebSearchApiKey('   ')
   check('setWebSearchApiKey blanks to null', repo.getSettings().webSearchApiKey === null)
 
+  // ---- hidden models (v22: the picker deny-list) ----
+  // Against the real DB because the behaviour lives in SQL: hiding unpins.
+  repo.setModelPinned('openai', 'gpt-5', true)
+  repo.setModelHidden('openai', 'gpt-5', true)
+  check(
+    'setModelHidden records the model',
+    repo.listHiddenModels().some((h) => h.providerId === 'openai' && h.model === 'gpt-5')
+  )
+  check(
+    'hiding a model also unpins it',
+    !repo.listPinnedModels().some((p) => p.providerId === 'openai' && p.model === 'gpt-5')
+  )
+  repo.setModelHidden('openai', 'gpt-5', true)
+  check('hiding twice does not duplicate the row', repo.listHiddenModels().length === 1)
+  repo.setModelHidden('openai', 'gpt-5', false)
+  check('unhiding removes the model', repo.listHiddenModels().length === 0)
+  // Bulk replace is scoped per provider.
+  repo.setProviderHiddenModels('openai', ['a', 'b', 'c'])
+  repo.setProviderHiddenModels('anthropic', ['claude-x'])
+  repo.setProviderHiddenModels('openai', ['a'])
+  const bulkHidden = repo.listHiddenModels()
+  check(
+    'setProviderHiddenModels replaces only its own provider',
+    bulkHidden.length === 2 &&
+      bulkHidden.some((h) => h.providerId === 'openai' && h.model === 'a') &&
+      bulkHidden.some((h) => h.providerId === 'anthropic' && h.model === 'claude-x')
+  )
+  repo.setProviderHiddenModels('openai', [])
+  repo.setProviderHiddenModels('anthropic', [])
+  check('setProviderHiddenModels([]) clears a provider', repo.listHiddenModels().length === 0)
+
   // ---- per-session inference config ----
   //
   // The two behaviours users expect at once: a NEW session starts from what you

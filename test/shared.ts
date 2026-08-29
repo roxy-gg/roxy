@@ -5355,7 +5355,8 @@ async function main(): Promise<void> {
       recent: pickerRecent,
       pinned: pickerPinned,
       index: pickerIndex,
-      query
+      query,
+      hidden: new Set<string>()
     })
 
   let dupeKeys = ''
@@ -5427,7 +5428,8 @@ async function main(): Promise<void> {
       recent: { roxy: [{ model: 'anthropic/claude-opus-5' }] },
       pinned: [{ providerId: 'roxy', model: 'anthropic/claude-opus-5' }],
       index: gatewayIndex,
-      query
+      query,
+      hidden: new Set<string>()
     })
   const gatewayLabels = gatewayRows('')
     .filter((r) => r.kind === 'model')
@@ -5450,7 +5452,8 @@ async function main(): Promise<void> {
     recent: {},
     pinned: [{ providerId: 'deleted-provider', model: 'ghost' }],
     index: pickerIndex,
-    query: ''
+    query: '',
+    hidden: new Set<string>()
   })
   check(
     'picker rows: a pin for a disconnected provider is dropped',
@@ -5464,6 +5467,60 @@ async function main(): Promise<void> {
     baseRows
       .filter((r) => r.kind === 'model')
       .every((r) => r.kind === 'model' && r.info !== undefined)
+  )
+
+  // Every section, not just the catalog — recents keep listing a hidden model.
+  const hiddenRows = buildModelRows({
+    providers: pickerProviders,
+    catalogs: pickerCatalogs,
+    recent: pickerRecent,
+    pinned: pickerPinned,
+    index: pickerIndex,
+    query: '',
+    hidden: new Set(['github-copilot:claude-opus-5'])
+  })
+  check(
+    'picker rows: a hidden model appears in no section at all',
+    !hiddenRows.some((r) => r.kind === 'model' && r.key.endsWith('github-copilot:claude-opus-5'))
+  )
+  check(
+    "picker rows: hiding one model leaves the same provider's others alone",
+    hiddenRows.some((r) => r.kind === 'model' && r.modelId === 'gpt-5.6-sol')
+  )
+  // Keyed per provider:model — the same id from two providers is two routes.
+  check(
+    'picker rows: hiding is keyed by provider, not by model id',
+    hiddenRows.some((r) => r.kind === 'model' && r.modelId === 'anthropic/claude-opus-5')
+  )
+  // A provider with nothing left to show must not leave its header behind.
+  const allHiddenRows = buildModelRows({
+    providers: pickerProviders,
+    catalogs: pickerCatalogs,
+    recent: {},
+    pinned: [],
+    index: pickerIndex,
+    query: '',
+    hidden: new Set([
+      'github-copilot:claude-opus-5',
+      'github-copilot:gpt-5.6-sol',
+      'github-copilot:gemini-3.6-flash'
+    ])
+  })
+  check(
+    'picker rows: a fully hidden provider drops its header too',
+    !allHiddenRows.some((r) => r.kind === 'header' && r.providerId === 'github-copilot')
+  )
+  check(
+    'picker rows: an empty hidden set filters nothing',
+    buildModelRows({
+      providers: pickerProviders,
+      catalogs: pickerCatalogs,
+      recent: pickerRecent,
+      pinned: pickerPinned,
+      index: pickerIndex,
+      query: '',
+      hidden: new Set()
+    }).length === baseRows.length
   )
 
   // ---- context menus open AT THE CURSOR (sidebar right-click) --------------

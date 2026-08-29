@@ -76,9 +76,15 @@ interface RoxyStore {
   /**
    * A deliberate, user-curated shortlist of models - pinned models show above
    * everything else in the picker, across all providers. Unlike `recentModels`
-   * this never reshuffles on its own; only `togglePinnedModel` changes it.
+   * this never reshuffles on its own; only `setModelPinned` changes it.
    */
   pinnedModels: { providerId: string; model: string }[]
+  /**
+   * Models omitted from the picker, as `providerId:model` keys. A Set, not the
+   * array `pinnedModels` uses: membership is queried once per row over a long
+   * list, and there is no order to preserve.
+   */
+  hiddenModels: Set<string>
   chats: Chat[]
   activeChatId: string | null
   messages: Message[]
@@ -201,7 +207,13 @@ interface RoxyStore {
   /** Load the pinned-model shortlist once (cached until toggled). */
   ensurePinnedModels: () => Promise<void>
   /** Pin or unpin a model in the shortlist; updates the cache optimistically. */
-  togglePinnedModel: (providerId: string, model: string, pinned: boolean) => Promise<void>
+  setModelPinned: (providerId: string, model: string, pinned: boolean) => Promise<void>
+  /** Load the hidden-model deny-list once (cached until toggled). */
+  ensureHiddenModels: () => Promise<void>
+  /** Hide or show one model in the picker. Hiding also unpins it. */
+  setModelHidden: (providerId: string, model: string, hidden: boolean) => Promise<void>
+  /** Replace one provider's entire hidden set — Hide all / Show all, in one write. */
+  setProviderHiddenModels: (providerId: string, models: string[]) => Promise<void>
   setReasoningEffort: (level: ReasoningEffort) => Promise<void>
   setContextLimit: (limit: number | null) => Promise<void>
   setWebSearchApiKey: (key: string | null) => Promise<void>
@@ -376,6 +388,8 @@ const modelCatalogCache = new Map<string, ModelInfo[]>()
 const modelCatalogInflight = new Map<string, Promise<void>>()
 /** Loaded once per app session — `ensurePinnedModels` is called from every ModelPicker mount. */
 let pinnedModelsLoaded = false
+/** Same, for the hidden-model deny-list — every ModelPicker and Settings mount asks. */
+let hiddenModelsLoaded = false
 /** Set when a remote turn lands while a local send streams into the shared chat. */
 const remoteMirror = { deferred: false }
 
@@ -930,6 +944,7 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
   modelsTried: {},
   recentModels: {},
   pinnedModels: [],
+  hiddenModels: new Set<string>(),
   chats: [],
   activeChatId: null,
   messages: [],
@@ -966,7 +981,22 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
       api.projects.listOrder(),
       api.settings.getTelemetry()
     ])
-    set({ settings, providers, chats, loops, projectOrder, telemetryEnabled, ready: true })
+    // A factory reset truncates these tables and re-bootstraps, so the load
+    // guards have to fall with them or the picker keeps filtering on a
+    // deny-list the database no longer has.
+    pinnedModelsLoaded = false
+    hiddenModelsLoaded = false
+    set({
+      settings,
+      providers,
+      chats,
+      loops,
+      projectOrder,
+      telemetryEnabled,
+      pinnedModels: [],
+      hiddenModels: new Set(),
+      ready: true
+    })
     // Warm the usage/cost dashboard for the titlebar pill (best-effort, async).
     void get().refreshUsage()
 
@@ -1444,7 +1474,7 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
     set({ pinnedModels: pinned })
   },
 
-  togglePinnedModel: async (providerId, model, pinned) => {
+  setModelPinned: async (providerId, model, pinned) => {
     // Optimistic: the picker toggles instantly, no round trip flicker.
     set((s) => ({
       pinnedModels: pinned
@@ -1452,6 +1482,51 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
         : s.pinnedModels.filter((p) => !(p.providerId === providerId && p.model === model))
     }))
     await api.models.setPinned(providerId, model, pinned)
+  },
+
+  ensureHiddenModels: async () => {
+    if (hiddenModelsLoaded) return
+    hiddenModelsLoaded = true
+    const hidden = await api.models.hidden()
+    set({ hiddenModels: new Set(hidden.map((h) => `${h.providerId}:${h.model}`)) })
+  },
+
+  setModelHidden: async (providerId, model, hidden) => {
+    const key = `${providerId}:${model}`
+    set((s) => {
+      const next = new Set(s.hiddenModels)
+      if (hidden) next.add(key)
+      else next.delete(key)
+      // Mirrors the main process, which unpins on hide.
+      return {
+        hiddenModels: next,
+        ...(hidden
+          ? {
+              pinnedModels: s.pinnedModels.filter(
+                (p) => !(p.providerId === providerId && p.model === model)
+              )
+            }
+          : {})
+      }
+    })
+    await api.models.setHidden(providerId, model, hidden)
+  },
+
+  setProviderHiddenModels: async (providerId, models) => {
+    const hiding = new Set(models)
+    set((s) => {
+      // Replaces this provider's set only; other providers' keys survive.
+      const next = new Set<string>()
+      for (const key of s.hiddenModels) if (!key.startsWith(`${providerId}:`)) next.add(key)
+      for (const model of hiding) next.add(`${providerId}:${model}`)
+      return {
+        hiddenModels: next,
+        pinnedModels: s.pinnedModels.filter(
+          (p) => !(p.providerId === providerId && hiding.has(p.model))
+        )
+      }
+    })
+    await api.models.setProviderHidden(providerId, models)
   },
 
   setReasoningEffort: async (level) => {
