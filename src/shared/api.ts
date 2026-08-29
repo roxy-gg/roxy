@@ -30,6 +30,7 @@ import type { ForgeStatusView, ForgeHostView, ForgeKind } from './forge'
 import type { RepoLayout } from './repos'
 import type { SessionConfigPatch } from './session-config'
 import type { ClipboardAction } from './context-menu'
+import type { ResolvedTheme, ThemeView } from './theme'
 
 /** A configured MCP server merged with its live connection status (for Settings). */
 export interface McpServerView {
@@ -71,6 +72,30 @@ export interface SkillWriteInput {
   body?: string
   /** Where to write it â€” defaults to 'global' from the Skills page (no workspace context). */
   scope?: 'workspace' | 'global'
+}
+
+/** The themes the app knows about, plus any problems found while scanning. */
+export interface ThemeListResult {
+  themes: ThemeView[]
+  /** The id currently applied. */
+  activeId: string
+  /** Where the app writes themes it creates -- shown in the UI so files are findable. */
+  directory: string
+  /** Files that failed to parse, or tokens that were dropped, during the scan. */
+  warnings: { file: string; message: string }[]
+}
+
+/** Outcome of a theme write (save / create / delete). */
+export interface ThemeSaveResult {
+  ok: boolean
+  /** The id written -- create() may pick a different one to avoid a collision. */
+  id?: string
+  /** Why the write failed; a validation message fit to show the author. */
+  error?: string
+  /** Non-fatal problems (unknown token, unsafe value) -- the theme still saved. */
+  warnings?: string[]
+  /** The refreshed list, so the caller can update its view in one round trip. */
+  themes?: ThemeView[]
 }
 
 /** Outcome of installing skill(s) from a remote source (`skills.install`). */
@@ -774,6 +799,37 @@ export interface RoxyApi {
      * skills by default (or workspace when a cwd is given).
      */
     install(source: string, cwd?: string): Promise<SkillInstallResult>
+  }
+  themes: {
+    /** Built-in themes followed by user themes found on disk. */
+    list(): Promise<ThemeListResult>
+    /** Re-scan the theme directories (drops the cache) and return the fresh list. */
+    refresh(): Promise<ThemeListResult>
+    /** A theme's raw JSON source, for the editor. Null if it doesn't exist. */
+    read(id: string): Promise<string | null>
+    /**
+     * The CSS custom properties for a theme, ready to apply. Passing null
+     * resolves whichever theme is currently active.
+     */
+    resolve(id?: string | null): Promise<ResolvedTheme>
+    /** Validate and write a theme's JSON. Returns errors rather than throwing. */
+    save(id: string, source: string): Promise<ThemeSaveResult>
+    /** Create a new theme, or duplicate rom, under a fresh id. */
+    create(input: { name: string; from?: string }): Promise<ThemeSaveResult>
+    /** Delete a user theme; built-ins are protected. */
+    remove(id: string): Promise<ThemeSaveResult>
+    /**
+     * Show a theme's folder in the OS file manager. Pass an empty id to open
+     * the themes directory itself (a built-in has no file to reveal).
+     */
+    reveal(id: string): Promise<void>
+    /** Persist the active theme and broadcast it to every window. */
+    setActive(id: string): Promise<ResolvedTheme>
+    /**
+     * Subscribe to theme changes made elsewhere -- another window switching
+     * theme, or a save that re-resolves the active one. Returns an unsubscribe fn.
+     */
+    onChanged(callback: (theme: ResolvedTheme) => void): () => void
   }
   system: {
     getVersions(): Promise<AppVersions>

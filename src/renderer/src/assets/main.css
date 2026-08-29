@@ -174,7 +174,13 @@
 
 /* On macOS, prefer the native system font (San Francisco) over Geist so the app
    feels at home. Windows/Linux keep Geist. These override the @theme vars, which
-   both `body` and Tailwind's font-sans/font-mono utilities read from. */
+   both `body` and Tailwind's font-sans/font-mono utilities read from.
+
+   A theme that names a font wins over this, because `lib/theme.ts` applies its
+   fonts as INLINE styles on <html>, and those beat any selector. A theme that
+   stays quiet about fonts emits nothing at all, so this rule still decides --
+   which is exactly why resolveTheme() omits font properties rather than
+   defaulting them. */
 [data-platform='darwin'] {
   --font-sans:
     -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro Display', system-ui, sans-serif;
@@ -332,6 +338,10 @@
   --sq-fill: var(--color-elevated);
 }
 .sq-fill-white {
+  /* Deliberately LITERAL white, not the `white` polarity token: its only user
+     is the Remote Workspace QR panel, and a QR code has to stay dark-on-light
+     to be scannable. Inverting it under a light theme would silently break
+     pairing -- a physical scanning target is not themeable chrome. */
   --sq-fill: #fff;
 }
 
@@ -403,7 +413,7 @@ body {
 }
 
 ::selection {
-  background: color-mix(in srgb, var(--color-accent) 30%, transparent);
+  background: var(--theme-selection, color-mix(in srgb, var(--color-accent) 30%, transparent));
 }
 
 /* Scrollbars.
@@ -428,13 +438,18 @@ body {
   height: 10px;
 }
 ::-webkit-scrollbar-thumb {
-  background: var(--color-border-strong);
+  background: var(--theme-scrollbar-thumb, var(--color-border-strong));
   border-radius: 9999px;
   border: 2px solid transparent;
   background-clip: content-box;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #3d3d43;
+  /* Was a hardcoded #3d3d43, which stayed dark-grey under a light theme.
+     `color-mix` keeps it relative to the palette, so it tracks any theme. */
+  background: var(
+    --theme-scrollbar-thumb-hover,
+    color-mix(in srgb, var(--color-border-strong) 70%, var(--color-text-subtle))
+  );
   background-clip: content-box;
 }
 ::-webkit-scrollbar-track {

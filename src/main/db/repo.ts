@@ -118,7 +118,8 @@ export function getSettings(): AppSettings {
     autoWorkstream: map.get('auto_workstream') !== '0',
     // `?? DEFAULT` and not `|| DEFAULT`: an EMPTY string is a deliberate
     // "no prefix", and must survive a round trip through settings.
-    branchPrefix: map.get('branch_prefix') ?? DEFAULT_BRANCH_PREFIX
+    branchPrefix: map.get('branch_prefix') ?? DEFAULT_BRANCH_PREFIX,
+    activeThemeId: map.get('active_theme_id') ?? null
   }
 }
 
@@ -203,6 +204,11 @@ export function setContextLimit(limit: number | null): AppSettings {
 export function setBranchPrefix(prefix: string): AppSettings {
   // Store even the empty string, so "no prefix" is distinguishable from unset.
   setSetting('branch_prefix', normalizeBranchPrefix(prefix))
+  return getSettings()
+}
+
+export function setActiveThemeId(id: string | null): AppSettings {
+  setSetting('active_theme_id', id)
   return getSettings()
 }
 

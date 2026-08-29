@@ -20,6 +20,15 @@ import { initAutoUpdater } from './services/updater'
 import { initTracking, shutdownTracking } from './services/track'
 import { killAllBackground, setPromptText, setAgentPromptText } from './harness'
 import { PROMPT_TEXT, AGENT_PROMPT_TEXT } from '../shared/prompt-text'
+import {
+  OVERLAY_HEIGHT,
+  applyWindowChrome,
+  chromePlatform,
+  initialBackgroundColor,
+  initialOverlay
+} from './services/window-chrome'
+import { resolveThemeById } from './services/themes'
+import * as repo from './db/repo'
 
 function createWindow(): BrowserWindow {
   const isMac = process.platform === 'darwin'
@@ -30,13 +39,13 @@ function createWindow(): BrowserWindow {
     minHeight: 480,
     show: false,
     autoHideMenuBar: true,
-    backgroundColor: '#0a0a0a',
+    backgroundColor: initialBackgroundColor(),
     title: 'Roxy',
     // Native window controls, themed to match the app (no light OS title bar).
     titleBarStyle: 'hidden',
     ...(isMac
       ? { trafficLightPosition: { x: 16, y: 17 } }
-      : { titleBarOverlay: { color: '#0a0a0a', symbolColor: '#9a9aa3', height: 48 } }),
+      : { titleBarOverlay: initialOverlay(OVERLAY_HEIGHT.main) }),
     ...(isMac ? {} : { icon }),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
@@ -46,6 +55,12 @@ function createWindow(): BrowserWindow {
   })
 
   mainWindow.on('ready-to-show', () => {
+    // Repaint the native window controls from the active theme before the
+    // window is first shown. The constructor can only reach built-in themes
+    // synchronously; this covers a user theme, whose file has to be read.
+    void resolveThemeById(repo.getSettings().activeThemeId, chromePlatform())
+      .then((theme) => applyWindowChrome(mainWindow, theme))
+      .catch(() => undefined)
     mainWindow.show()
   })
 
