@@ -6,7 +6,7 @@
  * the same config the renderer uses.
  */
 import i18next from 'i18next'
-import en from '../src/renderer/src/locales/en.json'
+import en from '../src/renderer/src/locales/default.json'
 import es from '../src/renderer/src/locales/es.json'
 
 let pass = 0

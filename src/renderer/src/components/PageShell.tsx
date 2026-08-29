@@ -1,4 +1,5 @@
 import { type ReactNode } from 'react'
+import { useTranslation } from 'react-i18next'
 import { ArrowLeft } from 'lucide-react'
 
 export function PageShell({
@@ -14,12 +15,13 @@ export function PageShell({
   actions?: ReactNode
   children: ReactNode
 }): JSX.Element {
+  const { t } = useTranslation()
   return (
     <div className="flex h-full w-full flex-col bg-bg">
       <header className="titlebar reserve-controls-left reserve-controls-right flex h-12 shrink-0 items-center gap-3 px-4">
         <button
           onClick={onBack}
-          title="Back"
+          title={t('page.back')}
           className="press-scale flex h-7 w-7 items-center justify-center sq sq-lg rounded-lg text-text-muted hover:bg-white/5 hover:text-text"
         >
           <ArrowLeft className="h-4 w-4" />

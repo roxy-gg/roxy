@@ -46,7 +46,8 @@
     "worktree:setup": "npm ci --prefer-offline --no-audit --no-fund && electron-builder install-app-deps",
     "smoke:store": "node test/store-guard.mjs",
     "smoke:cookies": "esbuild test/cookies.ts --bundle --platform=node --format=cjs --packages=external --outfile=test/.out/cookies.cjs && electron test/.out/cookies.cjs",
-    "smoke:i18n": "esbuild test/i18n.ts --bundle --platform=node --format=cjs --outfile=test/.out/i18n.cjs && node test/.out/i18n.cjs"
+    "smoke:i18n": "esbuild test/i18n.ts --bundle --platform=node --format=cjs --outfile=test/.out/i18n.cjs && node test/.out/i18n.cjs",
+    "i18n:translate": "node script/i18n-translate.mjs"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^2.0.85",

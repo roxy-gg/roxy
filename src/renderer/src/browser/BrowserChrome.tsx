@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ArrowLeft, ArrowRight, Cookie, Globe, Plus, RotateCw, Search, X } from 'lucide-react'
 import type { BrowserState, BrowserTab } from '@shared/api'
+import { useTranslation } from 'react-i18next'
 import { api } from '../lib/api'
 import { cn } from '../lib/cn'
 import { CookiePanel } from '../components/CookiePanel'
@@ -20,6 +21,7 @@ const BLANK: BrowserState = {
  * the active tab from main, and this just reflects/controls it.
  */
 export function BrowserChrome(): JSX.Element {
+  const { t } = useTranslation()
   const [tabs, setTabs] = useState<BrowserTab[]>([])
   const [nav, setNav] = useState<BrowserState>(BLANK)
   const [draft, setDraft] = useState('')
@@ -83,15 +85,15 @@ export function BrowserChrome(): JSX.Element {
     <div className="flex h-screen w-screen select-none flex-col overflow-hidden bg-surface text-text">
       {/* Tab strip â€” doubles as the draggable title bar; native controls overlay it. */}
       <div className="titlebar reserve-controls-left reserve-controls-right flex items-end gap-0.5 overflow-x-auto px-2 pt-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-        {tabs.map((t) => (
+        {tabs.map((tab) => (
           <div
-            key={t.id}
+            key={tab.id}
             draggable
-            onClick={() => void api.browser.activateTab(t.id)}
+            onClick={() => void api.browser.activateTab(tab.id)}
             onDragStart={(e) => {
-              setDragId(t.id)
+              setDragId(tab.id)
               e.dataTransfer.effectAllowed = 'move'
-              e.dataTransfer.setData('text/plain', t.id)
+              e.dataTransfer.setData('text/plain', tab.id)
             }}
             onDragOver={(e) => {
               e.preventDefault()
@@ -99,36 +101,36 @@ export function BrowserChrome(): JSX.Element {
             }}
             onDrop={(e) => {
               e.preventDefault()
-              if (dragId && dragId !== t.id) {
+              if (dragId && dragId !== tab.id) {
                 void api.browser.moveTab(
                   dragId,
-                  tabs.findIndex((x) => x.id === t.id)
+                  tabs.findIndex((x) => x.id === tab.id)
                 )
               }
               setDragId(null)
             }}
             onDragEnd={() => setDragId(null)}
-            title={t.url}
+            title={tab.url}
             className={cn(
               'group relative flex h-7 min-w-[120px] max-w-[220px] shrink-0 cursor-default items-center gap-2 rounded-t-lg px-3 text-xs transition-colors [-webkit-app-region:no-drag]',
-              dragId === t.id && 'opacity-50',
-              t.active
+              dragId === tab.id && 'opacity-50',
+              tab.active
                 ? 'bg-elevated text-text'
                 : 'bg-surface-2/50 text-text-muted hover:bg-surface-2 hover:text-text'
             )}
           >
             <Globe className="h-3.5 w-3.5 shrink-0 text-text-subtle" />
-            <span className="min-w-0 flex-1 truncate">{t.title || 'New tab'}</span>
+            <span className="min-w-0 flex-1 truncate">{tab.title || 'New tab'}</span>
             <button
               type="button"
               onClick={(e) => {
                 e.stopPropagation()
-                void api.browser.closeTab(t.id)
+                void api.browser.closeTab(tab.id)
               }}
-              title="Close tab"
+              title={t('browserChrome.closeTab')}
               className={cn(
                 'flex h-5 w-5 shrink-0 items-center justify-center sq sq-md rounded-md text-text-subtle transition-colors hover:bg-border-strong hover:text-text',
-                t.active ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                tab.active ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
               )}
             >
               <X className="h-3 w-3" />
@@ -138,7 +140,7 @@ export function BrowserChrome(): JSX.Element {
         <button
           type="button"
           onClick={() => void api.browser.newTab()}
-          title="New tab"
+          title={t('browserChrome.newTab')}
           className="press-scale mb-0.5 ml-0.5 flex h-7 w-7 shrink-0 items-center justify-center sq sq-lg rounded-lg text-text-muted hover:bg-surface-2 hover:text-text"
         >
           <Plus className="h-4 w-4" />
@@ -147,13 +149,17 @@ export function BrowserChrome(): JSX.Element {
 
       {/* Nav + URL bar */}
       <div className="flex items-center gap-1 border-b border-border px-2.5 pb-2 pt-1">
-        <NavButton onClick={() => void api.browser.back()} disabled={!nav.canGoBack} title="Back">
+        <NavButton
+          onClick={() => void api.browser.back()}
+          disabled={!nav.canGoBack}
+          title={t('browserChrome.back')}
+        >
           <ArrowLeft className="h-4 w-4" />
         </NavButton>
         <NavButton
           onClick={() => void api.browser.forward()}
           disabled={!nav.canGoForward}
-          title="Forward"
+          title={t('browserChrome.forward')}
         >
           <ArrowRight className="h-4 w-4" />
         </NavButton>
@@ -176,13 +182,17 @@ export function BrowserChrome(): JSX.Element {
             onKeyDown={(e) => {
               if (e.key === 'Enter') go()
             }}
-            placeholder="Search or enter a URL"
+            placeholder={t('browserChrome.urlPlaceholder')}
             spellCheck={false}
             autoComplete="off"
             className="h-8 w-full rounded-full border border-border bg-surface-2 pl-9 pr-3.5 text-xs text-text outline-none transition-colors placeholder:text-text-subtle focus:border-accent focus:bg-surface focus:ring-1 focus:ring-accent/35"
           />
         </div>
-        <NavButton onClick={() => setCookiesOpen((v) => !v)} title="Cookies" active={cookiesOpen}>
+        <NavButton
+          onClick={() => setCookiesOpen((v) => !v)}
+          title={t('browserChrome.cookies')}
+          active={cookiesOpen}
+        >
           <Cookie className="h-4 w-4" />
         </NavButton>
       </div>
@@ -195,7 +205,10 @@ export function BrowserChrome(): JSX.Element {
           host={host}
           className="min-h-0 flex-1"
           action={
-            <NavButton onClick={() => setCookiesOpen(false)} title="Close cookies">
+            <NavButton
+              onClick={() => setCookiesOpen(false)}
+              title={t('browserChrome.closeCookies')}
+            >
               <X className="h-3.5 w-3.5" />
             </NavButton>
           }

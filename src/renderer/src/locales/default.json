@@ -1,4 +1,13 @@
 {
+  "browserChrome": {
+    "closeTab": "Close tab",
+    "newTab": "New tab",
+    "back": "Back",
+    "forward": "Forward",
+    "urlPlaceholder": "Search or enter a URL",
+    "cookies": "Cookies",
+    "closeCookies": "Close cookies"
+  },
   "chat": {
     "backTo": "Back to {{title}}",
     "cancel": "cancel",
@@ -58,6 +67,11 @@
     "unknown": "Unknown",
     "dash": "—"
   },
+  "composer": {
+    "removeImage": "Remove image",
+    "attachImages": "Attach images",
+    "stop": "Stop (Esc)"
+  },
   "configBackup": {
     "export": "Export",
     "exporting": "Exporting…",
@@ -112,6 +126,52 @@
     "toggleHttpOnly": "HttpOnly",
     "toggleHostOnly": "Host only"
   },
+  "inference": {
+    "agentMode": "Agent mode",
+    "compact": "Compact Conversation",
+    "compacting": "Compacting…",
+    "contextHeader": "Context Size",
+    "contextLonger": "Longer sessions without compaction",
+    "contextNote": "Larger context may increase cost.",
+    "contextTitle": "Context window",
+    "default": "Default",
+    "effort": {
+      "low": "Low",
+      "medium": "Medium",
+      "high": "High",
+      "xhigh": "Xhigh",
+      "max": "Max"
+    },
+    "groupSystem": "System",
+    "groupUncategorized": "Uncategorized",
+    "groupUserContext": "User Context",
+    "itemMessages": "Messages",
+    "itemOther": "Other",
+    "itemSystemInstructions": "System Instructions",
+    "itemToolDefinitions": "Tool Definitions",
+    "itemToolResults": "Tool Results",
+    "meterTitle": "Context Window",
+    "meterTokens": "{{used}} tokens",
+    "meterTokensOf": "{{used}} / {{total}} tokens",
+    "qualityWarning": "Quality may decline as limit nears.",
+    "reservedForResponse": "Reserved for response",
+    "thinkingHeader": "Thinking Effort",
+    "thinkingNote": "Higher levels of thinking may increase cost.",
+    "thinkingTitle": "Thinking effort"
+  },
+  "integrations": {
+    "title": "Integrations",
+    "subtitle": "Reach Roxy from your favorite messengers — OpenClaw-style.",
+    "soon": "Soon"
+  },
+  "loops": {
+    "close": "Close",
+    "namePlaceholder": "e.g. PR watcher",
+    "promptPlaceholder": "Check the open PR, resolve review comments, and report the status. When it merges, start the next feature.",
+    "running": "Running",
+    "paused": "Paused",
+    "everyInterval": "{{state}} · every {{interval}}"
+  },
   "mcp": {
     "emptyState": "No MCP servers configured. Connect external tool servers (filesystem, GitHub, databases, …) to expand what the agent can do. Servers are also read from a workspace <code>.roxy/mcp.json</code>.",
     "addServer": "Add MCP server",
@@ -150,6 +210,18 @@
   "mcpPage": {
     "title": "MCP Servers",
     "subtitle": "Connect external Model Context Protocol tool servers (filesystem, GitHub, databases, browsers, …) to expand what Roxy can do. Edit any server’s raw JSON with the { } button to debug it. Servers are also read from a workspace .roxy/mcp.json, and the agent can add them itself with the mcp tool."
+  },
+  "models": {
+    "selectModel": "Select a model",
+    "noProvider": "No provider connected",
+    "pin": "Pin model",
+    "unpin": "Unpin model",
+    "search": "Search models…",
+    "loading": "Loading models…",
+    "noMatch": "No models match “{{query}}”.",
+    "loadFailed": "Couldn't load models from models.dev — you can still send with the current model.",
+    "sectionPinned": "Pinned",
+    "sectionLatest": "Latest · {{provider}}"
   },
   "onboarding": {
     "welcomeTagline": "This might be a complete disaster. It might also be the best thing you use all year!",
@@ -191,6 +263,18 @@
     "openGitHub": "Open GitHub",
     "waitingForAuth": "Waiting for authorization…"
   },
+  "page": {
+    "back": "Back"
+  },
+  "queue": {
+    "removeImage": "Remove image",
+    "editPlaceholder": "Edit queued message…",
+    "attachImages": "Attach images",
+    "editMessage": "Edit message",
+    "moveUp": "Move up (run sooner)",
+    "moveDown": "Move down",
+    "removeFromQueue": "Remove from queue"
+  },
   "remote": {
     "title": "Remote Workspace",
     "subtitle": "Take your whole workspace to your phone — scan, enter the PIN, and switch between any session from anywhere.",
@@ -220,6 +304,18 @@
     "errorTitle": "Couldn’t start sharing",
     "errorFallback": "Something went wrong.",
     "tryAgain": "Try again"
+  },
+  "services": {
+    "segmentTitle": "Processes this session is running",
+    "menuHeader": "Processes",
+    "running": "{{count}} running",
+    "failed": "{{count}} failed",
+    "done": "{{count}} done",
+    "logs": "Logs",
+    "restart": "Restart",
+    "start": "Start",
+    "stop": "Stop",
+    "openPort": "Open localhost:{{port}} in this session's browser"
   },
   "settings": {
     "title": "Settings",
@@ -435,6 +531,22 @@
     "example": "Example",
     "hideReference": "Hide reference",
     "showReference": "Show reference"
+  },
+  "usage": {
+    "allProviders": "All providers, last 30 days",
+    "cost30d": "30d cost",
+    "empty": "No usage recorded yet. Run a turn and it’ll show up here.",
+    "last30Days": "Last 30 days",
+    "latestTokens": "Latest tokens",
+    "noteEstimates": "token counts marked ~ are estimated",
+    "noteNoParts": "Priced from the models.dev catalog at API rates.",
+    "noteUnpriced": "some models have no public price, so cost is a floor",
+    "noteWith": "Priced from models.dev; {{parts}}.",
+    "overview": "Overview",
+    "spend": "Spend",
+    "today": "Today",
+    "tokens30d": "30d tokens",
+    "topModel": "Top model: <1>{{model}}</1>"
   },
   "workstream": {
     "action": {

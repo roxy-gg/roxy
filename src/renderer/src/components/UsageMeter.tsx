@@ -11,6 +11,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { BarChart3, LayoutGrid } from 'lucide-react'
 import type { ProviderUsage, UsageDay, UsageStats } from '@shared/types'
+import { useTranslation, Trans } from 'react-i18next'
+import type { TFunction } from 'i18next'
 import { useRoxyStore } from '../lib/store'
 import { cn } from '../lib/cn'
 import { BarChart } from './dither-kit/bar-chart'
@@ -94,7 +96,13 @@ function SpendGraph({ daily }: { daily: UsageDay[] }): JSX.Element {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [daily, priced]
   )
-  const config = useMemo<ChartConfig>(() => ({ spend: { label: 'Spend', color: 'blue' } }), [])
+  const { t } = useTranslation()
+  // `t` in the deps: the identity change on a language switch is exactly when
+  // the series label needs to be rebuilt.
+  const config = useMemo<ChartConfig>(
+    () => ({ spend: { label: t('usage.spend'), color: 'blue' } }),
+    [t]
+  )
 
   return (
     <div>
@@ -145,6 +153,7 @@ function UsagePanel({
   daily: UsageDay[]
   note: string
 }): JSX.Element {
+  const { t } = useTranslation()
   const empty = tokens30 === 0
   return (
     <div className="p-3.5">
@@ -153,23 +162,25 @@ function UsagePanel({
         {subtitle && <div className="mt-0.5 text-xs text-text-subtle">{subtitle}</div>}
       </div>
       {empty ? (
-        <div className="py-6 text-center text-xs text-text-subtle">
-          No usage recorded yet. Run a turn and it’ll show up here.
-        </div>
+        <div className="py-6 text-center text-xs text-text-subtle">{t('usage.empty')}</div>
       ) : (
         <>
           <div className="grid grid-cols-2 gap-x-6 gap-y-3">
-            <Figure label="Today" value={formatUsd(today)} />
-            <Figure label="30d cost" value={formatUsd(cost30)} />
-            <Figure label="30d tokens" value={formatTokens(tokens30)} />
-            <Figure label="Latest tokens" value={formatTokens(latestTokens)} />
+            <Figure label={t('usage.today')} value={formatUsd(today)} />
+            <Figure label={t('usage.cost30d')} value={formatUsd(cost30)} />
+            <Figure label={t('usage.tokens30d')} value={formatTokens(tokens30)} />
+            <Figure label={t('usage.latestTokens')} value={formatTokens(latestTokens)} />
           </div>
           <div className="mt-4">
             <SpendGraph daily={daily} />
           </div>
           {topModel && (
             <div className="mt-3 text-xs text-text-muted">
-              Top model: <span className="text-text">{prettyModel(topModel)}</span>
+              <Trans
+                i18nKey="usage.topModel"
+                values={{ model: prettyModel(topModel) }}
+                components={{ 1: <span className="text-text" /> }}
+              />
             </div>
           )}
           <div className="mt-1 text-[11px] leading-snug text-text-subtle">{note}</div>
@@ -180,44 +191,44 @@ function UsagePanel({
 }
 
 /** Build the estimate/pricing caveat line for a panel. */
-function noteFor(hasEstimates: boolean, hasUnpriced: boolean): string {
+function noteFor(hasEstimates: boolean, hasUnpriced: boolean, t: TFunction): string {
   const parts: string[] = []
-  if (hasUnpriced) parts.push('some models have no public price, so cost is a floor')
-  if (hasEstimates) parts.push('token counts marked ~ are estimated')
-  if (parts.length === 0) return 'Priced from the models.dev catalog at API rates.'
-  return `Priced from models.dev; ${parts.join('; ')}.`
+  if (hasUnpriced) parts.push(t('usage.noteUnpriced'))
+  if (hasEstimates) parts.push(t('usage.noteEstimates'))
+  if (parts.length === 0) return t('usage.noteNoParts')
+  return t('usage.noteWith', { parts: parts.join('; ') })
 }
 
 /** Latest-call token volume for a provider panel = today's tokens (a proxy for "recent"). */
-function overviewPanel(stats: UsageStats): JSX.Element {
+function overviewPanel(stats: UsageStats, t: TFunction): JSX.Element {
   const o = stats.overview
   return (
     <UsagePanel
-      title="Overview"
-      subtitle="All providers, last 30 days"
+      title={t('usage.overview')}
+      subtitle={t('usage.allProviders')}
       today={o.today.cost}
       cost30={o.last30d.cost}
       tokens30={o.last30d.tokens}
       latestTokens={o.today.tokens}
       topModel={o.topModel}
       daily={o.daily}
-      note={noteFor(o.hasEstimates, o.hasUnpriced)}
+      note={noteFor(o.hasEstimates, o.hasUnpriced, t)}
     />
   )
 }
 
-function providerPanel(p: ProviderUsage): JSX.Element {
+function providerPanel(p: ProviderUsage, t: TFunction): JSX.Element {
   return (
     <UsagePanel
       title={p.name}
-      subtitle="Last 30 days"
+      subtitle={t('usage.last30Days')}
       today={p.today.cost}
       cost30={p.last30d.cost}
       tokens30={p.last30d.tokens}
       latestTokens={p.today.tokens}
       topModel={p.topModel}
       daily={p.daily}
-      note={noteFor(p.hasEstimates, p.hasUnpriced)}
+      note={noteFor(p.hasEstimates, p.hasUnpriced, t)}
     />
   )
 }
@@ -227,6 +238,7 @@ function providerPanel(p: ProviderUsage): JSX.Element {
  * opens the dashboard popover. Hidden until there's any usage to show.
  */
 export function UsageMeter(): JSX.Element | null {
+  const { t } = useTranslation()
   const usageStats = useRoxyStore((s) => s.usageStats)
   const refreshUsage = useRoxyStore((s) => s.refreshUsage)
   const { open, setOpen, ref } = usePopover()
@@ -292,10 +304,10 @@ export function UsageMeter(): JSX.Element | null {
             ))}
           </div>
           {tab === 'overview'
-            ? overviewPanel(usageStats)
+            ? overviewPanel(usageStats, t)
             : activeProvider
-              ? providerPanel(activeProvider)
-              : overviewPanel(usageStats)}
+              ? providerPanel(activeProvider, t)
+              : overviewPanel(usageStats, t)}
         </div>
       )}
     </div>

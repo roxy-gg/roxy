@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { useRoxyStore } from '../lib/store'
 import { Button, Input, Textarea } from './ui'
 import { formatInterval } from '@shared/format'
@@ -25,6 +26,7 @@ export function NewLoopDialog({
   projectName?: string
   onClose: () => void
 }): JSX.Element {
+  const { t } = useTranslation()
   const createLoop = useRoxyStore((s) => s.createLoop)
   const [name, setName] = useState('')
   const [prompt, setPrompt] = useState('')
@@ -66,7 +68,7 @@ export function NewLoopDialog({
             <Input
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. PR watcher"
+              placeholder={t('loops.namePlaceholder')}
               autoFocus
             />
           </label>
@@ -78,7 +80,7 @@ export function NewLoopDialog({
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
               rows={4}
-              placeholder="Check the open PR, resolve review comments, and report the status. When it merges, start the next feature."
+              placeholder={t('loops.promptPlaceholder')}
             />
           </label>
           <label className="flex flex-col gap-1.5">

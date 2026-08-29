@@ -149,6 +149,7 @@ import {
   LANGUAGE_CODES,
   SOURCE_LANGUAGE,
   isLanguage,
+  languageDir,
   languageOption,
   normalizeLanguage
 } from '../src/shared/i18n'
@@ -5799,12 +5800,22 @@ async function main(): Promise<void> {
   check('i18n: the source language ships a catalog', LANGUAGE_CODES.includes(SOURCE_LANGUAGE))
   check('i18n: Spanish is offered', LANGUAGE_CODES.includes('es'))
   check(
+    'i18n: the top-10 set is offered',
+    ['en', 'zh', 'hi', 'es', 'ar', 'fr', 'pt', 'ru', 'de', 'ja'].every((c) =>
+      (LANGUAGE_CODES as readonly string[]).includes(c)
+    )
+  )
+  // Arabic is the only RTL language today; the check is by data, not by code.
+  check('i18n: Arabic is marked rtl', LANGUAGES.find((l) => l.code === 'ar')?.rtl === true)
+  check('i18n: English is ltr', languageDir('en') === 'ltr')
+  check('i18n: Arabic is rtl', languageDir('ar') === 'rtl')
+  check(
     'i18n: every language has a name and a native name',
     LANGUAGES.every((l) => !!l.code && !!l.name && !!l.nativeName)
   )
   check('i18n: language codes are unique', new Set(LANGUAGE_CODES).size === LANGUAGE_CODES.length)
   check('i18n: a known code is a language', isLanguage('es'))
-  check('i18n: an unknown code is not', !isLanguage('fr') && !isLanguage('') && !isLanguage(null))
+  check('i18n: an unknown code is not', !isLanguage('kl') && !isLanguage('') && !isLanguage(null))
   check('i18n: normalize keeps a known code', normalizeLanguage('es') === 'es')
   // Regional tags must resolve, or a Mexican install silently renders English.
   check('i18n: normalize folds a region tag', normalizeLanguage('es-MX') === 'es')
@@ -5813,11 +5824,11 @@ async function main(): Promise<void> {
   check('i18n: normalize is case-insensitive', normalizeLanguage('ES') === 'es')
   check('i18n: normalize trims', normalizeLanguage('  es  ') === 'es')
   // A bad settings row must never be able to stop the UI from rendering.
-  check('i18n: an unknown language falls back', normalizeLanguage('fr') === DEFAULT_LANGUAGE)
+  check('i18n: an unknown language falls back', normalizeLanguage('kl') === DEFAULT_LANGUAGE)
   check('i18n: null falls back', normalizeLanguage(null) === DEFAULT_LANGUAGE)
   check('i18n: undefined falls back', normalizeLanguage(undefined) === DEFAULT_LANGUAGE)
   check('i18n: a non-string falls back', normalizeLanguage(42) === DEFAULT_LANGUAGE)
-  check('i18n: an explicit fallback is honoured', normalizeLanguage('fr', 'es') === 'es')
+  check('i18n: an explicit fallback is honoured', normalizeLanguage('kl', 'es') === 'es')
   check('i18n: languageOption resolves a code', languageOption('es').code === 'es')
   check(
     'i18n: languageOption never returns undefined',

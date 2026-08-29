@@ -3,22 +3,33 @@
  *
  * This lives in `shared/` and not in the renderer because BOTH sides need it:
  * the renderer to render, and main to validate what it writes to the settings
- * table. Adding a language is meant to be a three-line change here plus a new
- * `locales/<code>.json` - see script/i18n-sync.mjs, which reads this file as
- * the source of truth for which catalogs must exist.
+ * table. Adding a language is a one-line change here plus a `locales/<code>.json`
+ * — and `npm run i18n:translate` will write that file for you.
+ *
+ * The list past English is roughly "most spoken", which is also the order the
+ * translation script fills them in.
  */
 
-/** The language every string is authored in, and the fallback for any gap. */
+/**
+ * The language every string is authored in, and the fallback for any gap.
+ *
+ * Its catalog is `locales/default.json` rather than `locales/en.json`: the file
+ * contributors type new strings into is the DEFAULT copy, and it happens to be
+ * English. Naming it after the language invites treating it as one translation
+ * among many, which it is not — every other file is generated from it.
+ */
 export const SOURCE_LANGUAGE = 'en'
 
-export type Language = 'en' | 'es'
+export type Language = 'en' | 'zh' | 'hi' | 'es' | 'ar' | 'fr' | 'pt' | 'ru' | 'de' | 'ja'
 
 export type LanguageOption = {
   code: Language
   /** English name, for prose and for logs. */
   name: string
-  /** The name in the language itself - what the picker actually shows. */
+  /** The name in the language itself — what the picker actually shows. */
   nativeName: string
+  /** Right-to-left script. Drives `<html dir>`. */
+  rtl?: boolean
 }
 
 /**
@@ -26,7 +37,15 @@ export type LanguageOption = {
  */
 export const LANGUAGES: readonly LanguageOption[] = [
   { code: 'en', name: 'English', nativeName: 'English' },
-  { code: 'es', name: 'Spanish', nativeName: 'Español' }
+  { code: 'zh', name: 'Chinese (Simplified)', nativeName: '简体中文' },
+  { code: 'hi', name: 'Hindi', nativeName: 'हिन्दी' },
+  { code: 'es', name: 'Spanish', nativeName: 'Español' },
+  { code: 'ar', name: 'Arabic', nativeName: 'العربية', rtl: true },
+  { code: 'fr', name: 'French', nativeName: 'Français' },
+  { code: 'pt', name: 'Portuguese', nativeName: 'Português' },
+  { code: 'ru', name: 'Russian', nativeName: 'Русский' },
+  { code: 'de', name: 'German', nativeName: 'Deutsch' },
+  { code: 'ja', name: 'Japanese', nativeName: '日本語' }
 ] as const
 
 export const LANGUAGE_CODES: readonly Language[] = LANGUAGES.map((l) => l.code)
@@ -38,7 +57,7 @@ export function isLanguage(value: unknown): value is Language {
 }
 
 /**
- * Coerce anything - a settings row, a `navigator.language`, a CLI argument -
+ * Coerce anything — a settings row, a `navigator.language`, a CLI argument —
  * into a language we actually have a catalog for.
  *
  * Matches on the base subtag, so `es-419`, `es-MX` and `ES` all land on `es`.
@@ -53,4 +72,9 @@ export function normalizeLanguage(value: unknown, fallback: Language = DEFAULT_L
 
 export function languageOption(code: Language): LanguageOption {
   return LANGUAGES.find((l) => l.code === code) ?? LANGUAGES[0]
+}
+
+/** `dir` for `<html>`. Only Arabic is RTL today, but the check is by data. */
+export function languageDir(code: Language): 'ltr' | 'rtl' {
+  return languageOption(code).rtl ? 'rtl' : 'ltr'
 }

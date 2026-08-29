@@ -49,6 +49,12 @@ function languages() {
   return { codes, source }
 }
 
+/**
+ * Read once at module load so `catalogPath` (defined above the main flow) can
+ * see it. Kept separate from the `source` binding below purely for ordering.
+ */
+const SOURCE_LANGUAGE_CODE = languages().source
+
 /** Flatten nested JSON to `a.b.c` -> string, the shape i18next looks keys up by. */
 function flatten(obj, prefix = '', out = {}) {
   for (const [k, v] of Object.entries(obj)) {
@@ -97,7 +103,15 @@ function tags(value) {
   return [...String(value).matchAll(/<\/?(\w+)[^>]*>/g)].map((m) => m[1].toLowerCase()).sort()
 }
 
-const catalogPath = (code) => join(LOCALES, `${code}.json`)
+/**
+ * The source catalog is `default.json`, not `en.json`.
+ *
+ * It is the file contributors type new strings into, and every other catalog is
+ * generated from it. Naming it after a language invites treating it as one
+ * translation among many, which it is not.
+ */
+const catalogPath = (code) =>
+  join(LOCALES, code === SOURCE_LANGUAGE_CODE ? 'default.json' : `${code}.json`)
 
 function readCatalog(code) {
   const file = catalogPath(code)
@@ -224,7 +238,7 @@ for (const code of codes) {
 if (JSON_OUT) {
   console.log(JSON.stringify(report, null, 2))
 } else {
-  console.log(`i18n — ${report.total} keys in ${source}.json\n`)
+  console.log(`i18n — ${report.total} keys in default.json\n`)
   for (const [code, r] of Object.entries(report.locales)) {
     const bar = `${'█'.repeat(Math.round(r.coverage / 5)).padEnd(20, '░')}`
     console.log(

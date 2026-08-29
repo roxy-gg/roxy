@@ -1,4 +1,5 @@
 import { useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Check, ChevronDown, ChevronUp, ImagePlus, Pencil, X } from 'lucide-react'
 import type { QueueItem as QueueItemType } from '@shared/types'
 import { useRoxyStore } from '../lib/store'
@@ -39,6 +40,7 @@ export function QueuedMessage({
   index: number
   total: number
 }): JSX.Element {
+  const { t } = useTranslation()
   const editQueued = useRoxyStore((s) => s.editQueued)
   const removeQueued = useRoxyStore((s) => s.removeQueued)
   const moveQueued = useRoxyStore((s) => s.moveQueued)
@@ -166,7 +168,7 @@ export function QueuedMessage({
                   <button
                     type="button"
                     onClick={() => setDraftImages((prev) => prev.filter((i) => i.id !== img.id))}
-                    title="Remove image"
+                    title={t('queue.removeImage')}
                     className="press-scale absolute right-0.5 top-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-black/70 text-white opacity-0 transition-opacity group-hover/img:opacity-100"
                   >
                     <X className="h-2.5 w-2.5" />
@@ -179,7 +181,7 @@ export function QueuedMessage({
             ref={textRef}
             value={draft}
             rows={1}
-            placeholder="Edit queued message…"
+            placeholder={t('queue.editPlaceholder')}
             onChange={(e) => {
               setDraft(e.target.value)
               autoGrow()
@@ -192,7 +194,7 @@ export function QueuedMessage({
             <button
               type="button"
               onClick={() => fileRef.current?.click()}
-              title="Attach images"
+              title={t('queue.attachImages')}
               className="press-scale flex h-6 items-center gap-1 sq sq-md sq-ring rounded-md border border-border bg-surface-2 px-1.5 text-[11px] text-text-muted hover:border-border-strong hover:text-text"
             >
               <ImagePlus className="h-3.5 w-3.5" /> Image
@@ -203,7 +205,7 @@ export function QueuedMessage({
                 onClick={cancelEditing}
                 className="press-scale flex h-6 items-center sq sq-md rounded-md px-2 text-[11px] text-text-muted hover:bg-white/5 hover:text-text"
               >
-                Cancel
+                {t('common.cancel')}
               </button>
               <button
                 type="button"
@@ -211,7 +213,7 @@ export function QueuedMessage({
                 disabled={saving}
                 className="press-scale flex h-6 items-center gap-1 sq sq-md rounded-md bg-white px-2 text-[11px] font-medium text-black hover:bg-white/90 disabled:opacity-40"
               >
-                <Check className="h-3.5 w-3.5" /> Save
+                <Check className="h-3.5 w-3.5" /> {t('common.save')}
               </button>
             </div>
           </div>
@@ -249,13 +251,13 @@ export function QueuedMessage({
         )}
       </div>
       <QueueItemActions>
-        <QueueItemAction onClick={startEditing} title="Edit message">
+        <QueueItemAction onClick={startEditing} title={t('queue.editMessage')}>
           <Pencil className="h-3.5 w-3.5" />
         </QueueItemAction>
         <QueueItemAction
           onClick={() => moveQueued(item.id, 'up')}
           disabled={index === 0}
-          title="Move up (run sooner)"
+          title={t('queue.moveUp')}
           className="disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-text-subtle"
         >
           <ChevronUp className="h-3.5 w-3.5" />
@@ -263,12 +265,12 @@ export function QueuedMessage({
         <QueueItemAction
           onClick={() => moveQueued(item.id, 'down')}
           disabled={index === total - 1}
-          title="Move down"
+          title={t('queue.moveDown')}
           className="disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-text-subtle"
         >
           <ChevronDown className="h-3.5 w-3.5" />
         </QueueItemAction>
-        <QueueItemAction onClick={() => removeQueued(item.id)} title="Remove from queue">
+        <QueueItemAction onClick={() => removeQueued(item.id)} title={t('queue.removeFromQueue')}>
           <X className="h-3.5 w-3.5" />
         </QueueItemAction>
       </QueueItemActions>
