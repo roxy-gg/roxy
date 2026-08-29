@@ -81,6 +81,8 @@ interface RoxyStore {
   pinnedModels: { providerId: string; model: string }[]
   chats: Chat[]
   activeChatId: string | null
+  reviewPaneOpen: boolean
+  setReviewPaneOpen: (open: boolean) => void
   messages: Message[]
   /**
    * Which chat `messages` actually holds, or `null` while a load is in flight.
@@ -884,6 +886,8 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
   pinnedModels: [],
   chats: [],
   activeChatId: null,
+  reviewPaneOpen: false,
+  setReviewPaneOpen: (open) => set({ reviewPaneOpen: open }),
   messages: [],
   messagesChatId: null,
   messagesError: false,

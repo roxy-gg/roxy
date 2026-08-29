@@ -509,6 +509,15 @@ function gatherMcpRecords(cwd: string): McpServerRecord[] {
 
 /** OpenAI function schemas for the workspace/browser tools (the base toolset). */
 const BASE_SCHEMAS = [
+
+    fn(
+      'code_review',
+      'Show the active diff (unstaged, staged, or per-commit) for the workspace, along with any comments/review issues. Use this when the user asks you to review changes.',
+      {
+        scope: str('One of: "unstaged", "staged", "branch", or "commit". (default "unstaged")')
+      },
+      []
+    ),
   fn(
     'read',
     'Read a file from the workspace.',

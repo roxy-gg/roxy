@@ -232,7 +232,7 @@ function execGit(args: string[], cwd: string, timeoutMs = GIT_TIMEOUT_MS): Promi
 }
 
 /** Run a git command serialized against everything else touching this repo. */
-function git(args: string[], cwd: string, timeoutMs?: number): Promise<GitResult> {
+export function git(args: string[], cwd: string, timeoutMs?: number): Promise<GitResult> {
   return serialize(cwd, () => execGit(args, cwd, timeoutMs))
 }
 
@@ -1143,7 +1143,7 @@ const EMPTY_TREE_SHA = '4b825dc642cb6eb9a060e54bf8d69288fbee4904'
  * the file from disk instead. The index is `''`, which is git's own spelling
  * for it in `git show :path`.
  */
-async function revsForScope(
+export async function revsForScope(
   cwd: string,
   scope: GitReviewScope,
   commit?: string
@@ -1197,7 +1197,7 @@ async function mergeBaseForWorkstream(cwd: string): Promise<string | null> {
 }
 
 /** The rev arguments for a scope, in `git diff` order. */
-function diffRange(revs: { from: string; to: string | null }): string[] {
+export function diffRange(revs: { from: string; to: string | null }): string[] {
   // Working tree: name the source rev and let git compare against disk.
   // `--cached` is the only way to say "the index is the RIGHT side".
   if (revs.to === null) return revs.from === '' ? [] : [revs.from]

@@ -120,7 +120,7 @@ export function ReviewPane({
 
   return (
     <div className={cn('flex min-h-0 flex-col bg-surface text-text', className)}>
-      <div className="flex shrink-0 items-center gap-1 border-b border-border px-2.5 py-2">
+      <div className="titlebar reserve-controls-right flex shrink-0 items-center gap-1 border-b border-border px-2.5 py-2">
         {SCOPES.map((item) => (
           <button
             key={item.id}
@@ -134,7 +134,7 @@ export function ReviewPane({
             }}
             title={item.hint}
             className={cn(
-              'press-scale rounded-md px-2 py-1 text-xs transition',
+              '[-webkit-app-region:no-drag] press-scale rounded-md px-2 py-1 text-xs transition',
               scope === item.id
                 ? 'bg-surface-2 text-text'
                 : 'text-text-muted hover:bg-surface-2/60 hover:text-text'
@@ -154,13 +154,13 @@ export function ReviewPane({
           )}
         </span>
 
-        <div className="ml-auto flex items-center gap-1">
+        <div className="[-webkit-app-region:no-drag] ml-auto flex items-center gap-1">
           {(scope === 'unstaged' || scope === 'staged') && !!files?.length && (
             <button
               type="button"
               disabled={busy}
               onClick={() => void bulk(scope === 'staged' ? api.review.unstage : api.review.stage)}
-              className="press-scale rounded-md px-2 py-1 text-xs text-text-muted transition hover:bg-surface-2 hover:text-text disabled:opacity-40"
+              className="[-webkit-app-region:no-drag] press-scale rounded-md px-2 py-1 text-xs text-text-muted transition hover:bg-surface-2 hover:text-text disabled:opacity-40"
             >
               {scope === 'staged' ? 'Unstage all' : 'Stage all'}
             </button>
@@ -169,7 +169,7 @@ export function ReviewPane({
             type="button"
             onClick={() => void load()}
             title="Refresh"
-            className="press-scale flex h-7 w-7 items-center justify-center sq sq-lg rounded-lg text-text-muted transition hover:bg-surface-2 hover:text-text"
+            className="[-webkit-app-region:no-drag] press-scale flex h-7 w-7 items-center justify-center sq sq-lg rounded-lg text-text-muted transition hover:bg-surface-2 hover:text-text"
           >
             <RefreshCw className="h-3.5 w-3.5" />
           </button>

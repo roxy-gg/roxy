@@ -31,6 +31,7 @@ import {
   parseExaResponse
 } from '../../shared/web'
 import * as browser from '../services/browser'
+import * as git from '../services/git'
 import * as lsp from '../services/lsp'
 import * as repo from '../db/repo'
 import { isManagedToolOutputPath } from '../services/tool-output-store'
@@ -201,7 +202,9 @@ export async function runTool(
         return runBashOutput(str(input.id ?? input.process), owningSessionId(ctx))
       case 'bash_kill':
         return runBashKill(str(input.id ?? input.process), owningSessionId(ctx))
-      case 'read':
+      case 'code_review':
+          return await runCodeReview(str(input.scope), ctx.cwd, ctx.signal)
+        case 'read':
         return await runRead(str(input.path ?? input.file), ctx.cwd)
       case 'write':
         return await runWrite(str(input.path), str(input.content), ctx.cwd)
@@ -1759,4 +1762,32 @@ async function runSetSessionMetadata(
   }
 
   return { ok: true, output: `Updated session metadata (${bits.join(', ')}).` }
+}
+
+
+async function runCodeReview(scope: string, cwd: string, signal?: AbortSignal): Promise<ToolResult> {
+  if (!cwd || !(await git.isGitAvailable())) {
+    return { ok: false, output: 'Git is not available in this workspace.' }
+  }
+  
+  const resolvedScope = (scope || 'unstaged') as 'unstaged' | 'staged' | 'branch' | 'commit'
+  const revs = await git.revsForScope(cwd, resolvedScope)
+  if (!revs) return { ok: false, output: 'No valid commit range found for this scope.' }
+
+  const range = git.diffRange(revs)
+  
+  return untilAborted(signal, async () => {
+    const r = await git.git(['diff', '--patch', '--find-renames', ...range], cwd)
+    if (!r.ok) return { ok: false, output: 'Failed to generate diff.' }
+    
+    if (!r.stdout.trim()) return { ok: true, output: 'No changes found.' }
+    
+    // Enforce output limits so we don't blow up the context window on a huge diff.
+    const diff = r.stdout
+    if (diff.length > 50000) {
+      return { ok: true, output: diff.slice(0, 50000) + '\n... (diff truncated due to length)' }
+    }
+    
+    return { ok: true, output: diff }
+  })
 }
