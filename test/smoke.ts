@@ -199,11 +199,6 @@ async function main(): Promise<void> {
   check('setContextLimit persists', repo.getSettings().contextLimit === 1_000_000)
   repo.setContextLimit(null)
   check('setContextLimit clears', repo.getSettings().contextLimit === null)
-  check('web search key default null', repo.getSettings().webSearchApiKey === null)
-  repo.setWebSearchApiKey('exa_test_key')
-  check('setWebSearchApiKey persists', repo.getSettings().webSearchApiKey === 'exa_test_key')
-  repo.setWebSearchApiKey('   ')
-  check('setWebSearchApiKey blanks to null', repo.getSettings().webSearchApiKey === null)
 
   // ---- per-session inference config ----
   //
@@ -727,12 +722,6 @@ async function main(): Promise<void> {
     'webfetch rejects a malformed url',
     !badUrl.ok && badUrl.output.toLowerCase().includes('valid'),
     badUrl.output
-  )
-  const emptyQuery = await run('websearch', { query: '' })
-  check(
-    'websearch rejects an empty query',
-    !emptyQuery.ok && emptyQuery.output.includes('missing'),
-    emptyQuery.output
   )
 
   // ---- disk-backed tool-output store (Phase 9.3) ----
@@ -1317,6 +1306,56 @@ async function main(): Promise<void> {
         (db.prepare('PRAGMA table_info(chats)').all() as { name: string }[]).filter(
           (c) => c.name === 'worktree_path'
         ).length === 1
+      )
+      db.close()
+    }
+
+    // ---- v22: the dead Exa key is deleted on upgrade ----
+    // The real scenario, not a synthetic one: someone who actually typed a key
+    // into the old "Web search" settings box, then upgrades. The credential is
+    // for a feature that no longer exists and that they can no longer see, so
+    // leaving it in the settings table (and in every backup of it) is not
+    // acceptable. Drive the ladder exactly as database.ts does.
+    {
+      const db = new Database(path.join(healDir, 'v22.db'))
+      // Stop one rung short, at v21 — the last release that still had the box.
+      const priorSteps = MIGRATIONS.slice(0, MIGRATIONS.length - 1)
+      for (const step of priorSteps) {
+        if (typeof step === 'string') db.exec(step)
+        else step(db)
+      }
+      db.pragma(`user_version = ${priorSteps.length}`)
+      db.prepare('INSERT INTO settings(key, value) VALUES(?, ?)').run(
+        'web_search_api_key',
+        'exa_live_secret'
+      )
+      // A neighbouring row proves the DELETE is aimed, not a blanket wipe.
+      db.prepare('INSERT INTO settings(key, value) VALUES(?, ?)').run('active_model', 'gpt-5')
+      const keyOf = (k: string): string | undefined =>
+        (db.prepare('SELECT value AS v FROM settings WHERE key = ?').get(k) as { v: string })?.v
+      check(
+        'migration v22: the old key is present before upgrading',
+        keyOf('web_search_api_key') === 'exa_live_secret'
+      )
+
+      // The remaining rungs, applied the way database.ts applies them.
+      for (let v = priorSteps.length; v < MIGRATIONS.length; v++) {
+        const step = MIGRATIONS[v]
+        if (typeof step === 'string') db.exec(step)
+        else step(db)
+        db.pragma(`user_version = ${v + 1}`)
+      }
+
+      check(
+        'migration v22: upgrading deletes the stored Exa key',
+        keyOf('web_search_api_key') === undefined
+      )
+      check('migration v22: other settings are untouched', keyOf('active_model') === 'gpt-5')
+      // repairSchema runs on every open and must never resurrect it.
+      repairSchema(db)
+      check(
+        'migration v22: the repair step does not bring it back',
+        keyOf('web_search_api_key') === undefined
       )
       db.close()
     }

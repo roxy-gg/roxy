@@ -112,7 +112,6 @@ export function getSettings(): AppSettings {
         : 'high'
     })(),
     contextLimit: map.get('context_limit') ? Number(map.get('context_limit')) : null,
-    webSearchApiKey: map.get('web_search_api_key') ?? null,
     // Defaults ON, so the absence of a row means enabled. Written only when
     // someone turns it OFF ('0'), which keeps existing installs opted in
     // without a migration.
@@ -210,12 +209,6 @@ export function setBranchPrefix(prefix: string): AppSettings {
 export function setAutoWorkstream(enabled: boolean): AppSettings {
   // Store only the OFF state; see getSettings for why.
   setSetting('auto_workstream', enabled ? null : '0')
-  return getSettings()
-}
-
-export function setWebSearchApiKey(key: string | null): AppSettings {
-  const trimmed = key?.trim()
-  setSetting('web_search_api_key', trimmed ? trimmed : null)
   return getSettings()
 }
 

@@ -192,9 +192,6 @@ export function registerIpc(): void {
   ipcMain.handle(CHANNELS.settingsSetBranchPrefix, (_e, prefix: string) =>
     repo.setBranchPrefix(prefix)
   )
-  ipcMain.handle(CHANNELS.settingsSetWebSearchApiKey, (_e, key: string | null) =>
-    repo.setWebSearchApiKey(key)
-  )
   ipcMain.handle(CHANNELS.settingsCompleteOnboarding, () => repo.completeOnboarding())
   ipcMain.handle(CHANNELS.settingsReset, async () => {
     // "Wipes all providers" has to include the subscription tokens held by the

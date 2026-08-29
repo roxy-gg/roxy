@@ -30,7 +30,6 @@ export default function Settings(): JSX.Element {
   const settings = useRoxyStore((s) => s.settings)
   const refreshProviders = useRoxyStore((s) => s.refreshProviders)
   const reorderProviders = useRoxyStore((s) => s.reorderProviders)
-  const setWebSearchApiKey = useRoxyStore((s) => s.setWebSearchApiKey)
   const setAutoWorkstream = useRoxyStore((s) => s.setAutoWorkstream)
   const telemetryEnabled = useRoxyStore((s) => s.telemetryEnabled)
   const setTelemetryEnabled = useRoxyStore((s) => s.setTelemetryEnabled)
@@ -46,8 +45,6 @@ export default function Settings(): JSX.Element {
   const [update, setUpdate] = useState<UpdateInfo | null>(null)
   const [confirmingReset, setConfirmingReset] = useState(false)
   const [resetting, setResetting] = useState(false)
-  const [searchKey, setSearchKey] = useState('')
-  const [searchKeySaved, setSearchKeySaved] = useState(false)
   const [dragProviderId, setDragProviderId] = useState<string | null>(null)
   const [dragOverProviderId, setDragOverProviderId] = useState<string | null>(null)
   const [dropAfterProvider, setDropAfterProvider] = useState(false)
@@ -78,10 +75,6 @@ export default function Settings(): JSX.Element {
   }
 
   useEffect(() => {
-    setSearchKey(settings?.webSearchApiKey ?? '')
-  }, [settings?.webSearchApiKey])
-
-  useEffect(() => {
     setPrefix(settings?.branchPrefix ?? DEFAULT_BRANCH_PREFIX)
   }, [settings?.branchPrefix])
 
@@ -106,12 +99,6 @@ export default function Settings(): JSX.Element {
     clearActive()
     await bootstrap()
     navigate('/onboarding')
-  }
-
-  const saveSearchKey = async (): Promise<void> => {
-    await setWebSearchApiKey(searchKey.trim() || null)
-    setSearchKeySaved(true)
-    setTimeout(() => setSearchKeySaved(false), 2000)
   }
 
   const us = update?.state
@@ -299,48 +286,6 @@ export default function Settings(): JSX.Element {
             </p>
           </div>
           <CookiePanel className="max-h-[420px]" />
-        </div>
-      </section>
-
-      <section className="mb-8">
-        <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-text-subtle">
-          Web search
-        </h2>
-        <div className="flex flex-col gap-3 sq sq-xl sq-ring rounded-xl border border-border bg-surface p-4">
-          <div className="min-w-0">
-            <div className="text-sm font-medium text-text">Exa API key (optional)</div>
-            <p className="mt-0.5 text-xs text-text-muted">
-              The <code>websearch</code> tool works out of the box on Exa&apos;s free public
-              endpoint. Add a key to lift rate limits.{' '}
-              <a
-                href="https://dashboard.exa.ai/api-keys"
-                target="_blank"
-                rel="noreferrer"
-                className="text-accent hover:underline"
-              >
-                Get a key
-              </a>
-            </p>
-          </div>
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-            <input
-              type="password"
-              value={searchKey}
-              onChange={(e) => setSearchKey(e.target.value)}
-              placeholder="exa_…"
-              className="min-w-0 flex-1 sq sq-lg sq-ring rounded-lg border border-border bg-surface-strong px-3 py-2 text-sm text-text outline-none placeholder:text-text-subtle focus:border-border-strong"
-              spellCheck={false}
-              autoComplete="off"
-            />
-            <Button
-              variant="secondary"
-              className="shrink-0"
-              disabled={searchKey.trim() === (settings?.webSearchApiKey ?? '')}
-              onClick={() => void saveSearchKey()}
-            >
-              {searchKeySaved ? 'Saved' : 'Save'}
-            </Button>
-          </div>
         </div>
       </section>
 

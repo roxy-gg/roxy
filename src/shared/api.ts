@@ -689,7 +689,6 @@ export interface RoxyApi {
     setActiveAgent(agentId: string): Promise<AppSettings>
     setReasoningEffort(level: ReasoningEffort): Promise<AppSettings>
     setContextLimit(limit: number | null): Promise<AppSettings>
-    setWebSearchApiKey(key: string | null): Promise<AppSettings>
     setAutoWorkstream(enabled: boolean): Promise<AppSettings>
     setBranchPrefix(prefix: string): Promise<AppSettings>
     completeOnboarding(): Promise<AppSettings>
