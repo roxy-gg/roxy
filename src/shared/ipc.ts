@@ -63,6 +63,24 @@ export const CHANNELS = {
   skillsRemove: 'skills:remove',
   skillsInstall: 'skills:install',
 
+  /**
+   * Themes -- user-authored `theme.json` files that re-point the app's CSS
+   * custom properties. `themesResolve` returns the properties to set on the
+   * root element, which is what actually restyles the UI.
+   */
+  themesList: 'themes:list',
+  themesRefresh: 'themes:refresh',
+  themesRead: 'themes:read',
+  themesResolve: 'themes:resolve',
+  themesSave: 'themes:save',
+  themesCreate: 'themes:create',
+  themesRemove: 'themes:remove',
+  themesReveal: 'themes:reveal',
+  /** Persist the active theme; also broadcasts so every window follows. */
+  themesSetActive: 'themes:setActive',
+  /** main -> renderer: the active theme changed (or its file was edited). */
+  themesChanged: 'themes:changed',
+
   systemGetVersions: 'system:getVersions',
   systemOpenExternal: 'system:openExternal',
 

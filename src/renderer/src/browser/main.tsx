@@ -5,9 +5,16 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { BrowserChrome } from './BrowserChrome'
 import { AppContextMenu } from '../components/AppContextMenu'
+import { primeTheme, startTheme } from '../lib/theme'
 
 // Reserve space for the native window-control overlay (same as the main window).
 document.documentElement.dataset.platform = window.electron?.process?.platform ?? 'win32'
+
+// The browser toolbar is a second window of the same app, so it follows the
+// same theme -- and stays in step, because startTheme subscribes to changes
+// broadcast from main rather than reading a value once at launch.
+primeTheme()
+startTheme()
 
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
   <React.StrictMode>

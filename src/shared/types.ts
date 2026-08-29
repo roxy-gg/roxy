@@ -418,6 +418,15 @@ export interface AppSettings {
    * people prefer; it is a real choice, not a reason to reimpose the default.
    */
   branchPrefix: string
+  /**
+   * Which theme paints the UI. Null means the built-in default.
+   *
+   * Only the ID lives here -- the theme itself is a file on disk, so settings
+   * stay small and a theme can be edited, shared or version-controlled without
+   * the database knowing anything about it. An id naming a theme that has since
+   * been deleted resolves back to the default rather than failing.
+   */
+  activeThemeId: string | null
 }
 
 export interface AppVersions {
