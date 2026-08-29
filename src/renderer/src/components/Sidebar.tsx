@@ -18,6 +18,7 @@ import {
   MonitorSmartphone,
   PanelLeftClose,
   PanelLeftOpen,
+  Palette,
   Plug,
   Plus,
   Settings as SettingsIcon,
@@ -553,6 +554,13 @@ export function Sidebar(): JSX.Element {
             className="press-scale flex h-8 w-8 items-center justify-center sq sq-lg rounded-lg text-text-muted hover:bg-white/5 hover:text-text"
           >
             <Plug className="h-4 w-4" />
+          </button>
+          <button
+            onClick={() => navigate('/themes')}
+            title={t('sidebar.themes')}
+            className="press-scale flex h-8 w-8 items-center justify-center sq sq-lg rounded-lg text-text-muted hover:bg-white/5 hover:text-text"
+          >
+            <Palette className="h-4 w-4" />
           </button>
           <button
             onClick={() => navigate('/settings')}
@@ -1185,7 +1193,8 @@ function CustomizeNav({
       icon: Plug,
       onClick: () => navigate('/mcp'),
       count: counts.mcp
-    }
+    },
+    { label: t('sidebar.themes'), icon: Palette, onClick: () => navigate('/themes') }
   ]
   return (
     <div className="border-t border-border px-3 py-2">

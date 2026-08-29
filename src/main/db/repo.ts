@@ -114,7 +114,6 @@ export function getSettings(): AppSettings {
         : 'high'
     })(),
     contextLimit: map.get('context_limit') ? Number(map.get('context_limit')) : null,
-    webSearchApiKey: map.get('web_search_api_key') ?? null,
     // Defaults ON, so the absence of a row means enabled. Written only when
     // someone turns it OFF ('0'), which keeps existing installs opted in
     // without a migration.
@@ -125,7 +124,8 @@ export function getSettings(): AppSettings {
     // Normalised on the way OUT as well as in: a row written by an older build
     // (or a language later dropped from the app) must degrade to English rather
     // than leave the UI rendering raw keys.
-    language: normalizeLanguage(map.get('language'))
+    language: normalizeLanguage(map.get('language')),
+    activeThemeId: map.get('active_theme_id') ?? null
   }
 }
 
@@ -221,15 +221,14 @@ export function setLanguage(language: Language): AppSettings {
   return getSettings()
 }
 
-export function setAutoWorkstream(enabled: boolean): AppSettings {
-  // Store only the OFF state; see getSettings for why.
-  setSetting('auto_workstream', enabled ? null : '0')
+export function setActiveThemeId(id: string | null): AppSettings {
+  setSetting('active_theme_id', id)
   return getSettings()
 }
 
-export function setWebSearchApiKey(key: string | null): AppSettings {
-  const trimmed = key?.trim()
-  setSetting('web_search_api_key', trimmed ? trimmed : null)
+export function setAutoWorkstream(enabled: boolean): AppSettings {
+  // Store only the OFF state; see getSettings for why.
+  setSetting('auto_workstream', enabled ? null : '0')
   return getSettings()
 }
 

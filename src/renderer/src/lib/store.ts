@@ -206,7 +206,6 @@ interface RoxyStore {
   togglePinnedModel: (providerId: string, model: string, pinned: boolean) => Promise<void>
   setReasoningEffort: (level: ReasoningEffort) => Promise<void>
   setContextLimit: (limit: number | null) => Promise<void>
-  setWebSearchApiKey: (key: string | null) => Promise<void>
   setAutoWorkstream: (enabled: boolean) => Promise<void>
   setTelemetryEnabled: (enabled: boolean) => Promise<void>
   setBranchPrefix: (prefix: string) => Promise<void>
@@ -1493,11 +1492,6 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
 
   setBranchPrefix: async (prefix) => {
     const settings = await api.settings.setBranchPrefix(prefix)
-    set({ settings })
-  },
-
-  setWebSearchApiKey: async (key) => {
-    const settings = await api.settings.setWebSearchApiKey(key)
     set({ settings })
   },
 

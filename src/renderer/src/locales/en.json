@@ -223,13 +223,6 @@
       "cookiesTitle": "Cookies",
       "cookiesDescription": "Read, edit, import and delete the browser's cookies — the built-in equivalent of the Cookie-Editor extension. Import and export use its JSON format, so a blob copied out of Chrome pastes straight in. To work on just one site, use the cookie button in the browser's own toolbar."
     },
-    "webSearch": {
-      "heading": "Web search",
-      "title": "Exa API key (optional)",
-      "description": "The <code>websearch</code> tool works out of the box on Exa's free public endpoint. Add a key to lift rate limits.",
-      "getKey": "Get a key",
-      "placeholder": "exa_…"
-    },
     "codeHosts": {
       "heading": "Code hosts"
     },
@@ -312,7 +305,8 @@
     "subagentToggleView_one": "view",
     "subagentToggleView_other": "view",
     "subagentTooltip": "{{subagents}}{{working}} — tap to {{action}}",
-    "subagentWorking": " ({{count}} working)"
+    "subagentWorking": " ({{count}} working)",
+    "themes": "Themes"
   },
   "workstream": {
     "action": {

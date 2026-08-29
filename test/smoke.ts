@@ -10,7 +10,7 @@ import { existsSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { app } from 'electron'
+import { app, BrowserWindow } from 'electron'
 
 import * as repo from '../src/main/db/repo'
 import { getActivityStats } from '../src/main/services/activity'
@@ -25,6 +25,22 @@ import {
   restartService
 } from '../src/main/harness'
 import { sessionCwd } from '../src/main/services/workspace'
+import {
+  createTheme,
+  deleteTheme,
+  listThemes,
+  refreshThemes,
+  resolveThemeById,
+  themeWarnings,
+  writeTheme
+} from '../src/main/services/themes'
+import {
+  OVERLAY_HEIGHT,
+  applyWindowChrome,
+  backgroundColorFor,
+  initialOverlay,
+  symbolColorFor
+} from '../src/main/services/window-chrome'
 import Database from 'better-sqlite3'
 import { MIGRATIONS, repairSchema } from '../src/main/db/migrations'
 import * as git from '../src/main/services/git'
@@ -213,11 +229,6 @@ async function main(): Promise<void> {
   repo.setLanguage('es-MX' as never)
   check('a regional tag folds to its base language', repo.getSettings().language === 'es')
   repo.setLanguage('en')
-  check('web search key default null', repo.getSettings().webSearchApiKey === null)
-  repo.setWebSearchApiKey('exa_test_key')
-  check('setWebSearchApiKey persists', repo.getSettings().webSearchApiKey === 'exa_test_key')
-  repo.setWebSearchApiKey('   ')
-  check('setWebSearchApiKey blanks to null', repo.getSettings().webSearchApiKey === null)
 
   // ---- per-session inference config ----
   //
@@ -741,12 +752,6 @@ async function main(): Promise<void> {
     'webfetch rejects a malformed url',
     !badUrl.ok && badUrl.output.toLowerCase().includes('valid'),
     badUrl.output
-  )
-  const emptyQuery = await run('websearch', { query: '' })
-  check(
-    'websearch rejects an empty query',
-    !emptyQuery.ok && emptyQuery.output.includes('missing'),
-    emptyQuery.output
   )
 
   // ---- disk-backed tool-output store (Phase 9.3) ----
@@ -1331,6 +1336,56 @@ async function main(): Promise<void> {
         (db.prepare('PRAGMA table_info(chats)').all() as { name: string }[]).filter(
           (c) => c.name === 'worktree_path'
         ).length === 1
+      )
+      db.close()
+    }
+
+    // ---- v22: the dead Exa key is deleted on upgrade ----
+    // The real scenario, not a synthetic one: someone who actually typed a key
+    // into the old "Web search" settings box, then upgrades. The credential is
+    // for a feature that no longer exists and that they can no longer see, so
+    // leaving it in the settings table (and in every backup of it) is not
+    // acceptable. Drive the ladder exactly as database.ts does.
+    {
+      const db = new Database(path.join(healDir, 'v22.db'))
+      // Stop one rung short, at v21 — the last release that still had the box.
+      const priorSteps = MIGRATIONS.slice(0, MIGRATIONS.length - 1)
+      for (const step of priorSteps) {
+        if (typeof step === 'string') db.exec(step)
+        else step(db)
+      }
+      db.pragma(`user_version = ${priorSteps.length}`)
+      db.prepare('INSERT INTO settings(key, value) VALUES(?, ?)').run(
+        'web_search_api_key',
+        'exa_live_secret'
+      )
+      // A neighbouring row proves the DELETE is aimed, not a blanket wipe.
+      db.prepare('INSERT INTO settings(key, value) VALUES(?, ?)').run('active_model', 'gpt-5')
+      const keyOf = (k: string): string | undefined =>
+        (db.prepare('SELECT value AS v FROM settings WHERE key = ?').get(k) as { v: string })?.v
+      check(
+        'migration v22: the old key is present before upgrading',
+        keyOf('web_search_api_key') === 'exa_live_secret'
+      )
+
+      // The remaining rungs, applied the way database.ts applies them.
+      for (let v = priorSteps.length; v < MIGRATIONS.length; v++) {
+        const step = MIGRATIONS[v]
+        if (typeof step === 'string') db.exec(step)
+        else step(db)
+        db.pragma(`user_version = ${v + 1}`)
+      }
+
+      check(
+        'migration v22: upgrading deletes the stored Exa key',
+        keyOf('web_search_api_key') === undefined
+      )
+      check('migration v22: other settings are untouched', keyOf('active_model') === 'gpt-5')
+      // repairSchema runs on every open and must never resurrect it.
+      repairSchema(db)
+      check(
+        'migration v22: the repair step does not bring it back',
+        keyOf('web_search_api_key') === undefined
       )
       db.close()
     }
@@ -4537,6 +4592,242 @@ async function main(): Promise<void> {
     delete process.env.ROXY_TRACK_ENDPOINT
   } catch (e) {
     check('usage tracking', false, e instanceof Error ? e.message : String(e))
+  }
+
+  // ---- themes on disk (config-driven theming) ----
+  //
+  // shared.ts covers the pure logic (parsing, validation, resolution). What can
+  // only be verified against a real filesystem is the part that decides whether
+  // a hand-authored file actually reaches the UI: discovery, precedence between
+  // roots, and the write/delete paths.
+  try {
+    const themesRoot = path.join(tmp, 'themes')
+
+    // A theme authored by hand, in the folder layout the docs describe.
+    await fs.mkdir(path.join(themesRoot, 'ocean'), { recursive: true })
+    await fs.writeFile(
+      path.join(themesRoot, 'ocean', 'theme.json'),
+      JSON.stringify({
+        id: 'ocean',
+        name: 'Ocean',
+        appearance: 'dark',
+        colors: { bg: '#001018', accent: '#22d3ee' },
+        fonts: { mono: 'Fira Code' }
+      }),
+      'utf8'
+    )
+    // The other accepted shape: a bare <id>.json dropped straight into a root.
+    await fs.writeFile(
+      path.join(themesRoot, 'plain.json'),
+      JSON.stringify({ id: 'plain', name: 'Plain', colors: { bg: '#111' } }),
+      'utf8'
+    )
+    // Junk must not take the scan down with it.
+    await fs.writeFile(path.join(themesRoot, 'broken.json'), '{not json', 'utf8')
+
+    refreshThemes()
+    const listed = await listThemes()
+    check(
+      'themes: a hand-authored theme.json is discovered',
+      listed.some((t) => t.id === 'ocean' && t.source === 'user'),
+      listed.map((t) => t.id).join(',')
+    )
+    check(
+      'themes: a bare <id>.json is discovered too',
+      listed.some((t) => t.id === 'plain')
+    )
+    check(
+      'themes: built-ins are always present and marked as such',
+      listed.some((t) => t.id === 'roxy-dark' && t.source === 'builtin') &&
+        listed.some((t) => t.id === 'roxy-light')
+    )
+    check(
+      'themes: a malformed file is reported, not fatal',
+      themeWarnings().some((w) => w.file.includes('broken.json')),
+      JSON.stringify(themeWarnings())
+    )
+    check(
+      'themes: the picker gets swatches to render',
+      (listed.find((t) => t.id === 'ocean')?.swatches.bg ?? '') === '#001018'
+    )
+
+    // Resolution is what the renderer actually applies.
+    const resolved = await resolveThemeById('ocean', 'win32')
+    check(
+      'themes: a user theme resolves to CSS custom properties',
+      resolved.vars['--color-bg'] === '#001018' && resolved.vars['--color-accent'] === '#22d3ee',
+      JSON.stringify(resolved.vars['--color-bg'])
+    )
+    check(
+      'themes: tokens it never mentioned still come from the default',
+      resolved.vars['--color-text'] === '#ededed'
+    )
+    check(
+      'themes: a code font survives the round trip to disk',
+      resolved.vars['--font-mono']?.includes('Fira Code') === true,
+      String(resolved.vars['--font-mono'])
+    )
+    check(
+      'themes: an unknown id falls back to the default rather than failing',
+      (await resolveThemeById('does-not-exist', 'win32')).vars['--color-bg'] === '#0a0a0a'
+    )
+
+    // Writes.
+    const created = await createTheme({ name: 'My Theme' })
+    check('themes: create writes a new theme', created.ok && created.id === 'my-theme')
+    check(
+      'themes: the created file is on disk where the UI says it is',
+      existsSync(path.join(themesRoot, 'my-theme', 'theme.json'))
+    )
+    const dup = await createTheme({ name: 'My Theme' })
+    check(
+      'themes: creating the same name twice does not overwrite the first',
+      dup.ok && dup.id === 'my-theme-2',
+      JSON.stringify(dup)
+    )
+    const fromBuiltin = await createTheme({ name: 'Light Copy', from: 'roxy-light' })
+    const copied = fromBuiltin.ok ? await resolveThemeById(fromBuiltin.id, 'win32') : null
+    check(
+      'themes: duplicating a built-in copies its palette',
+      copied?.vars['--color-bg'] === '#ffffff',
+      JSON.stringify(copied?.vars['--color-bg'])
+    )
+    check(
+      'themes: a duplicate keeps the polarity of what it copied',
+      copied?.vars['--color-white'] === '#18181b',
+      JSON.stringify(copied?.vars['--color-white'])
+    )
+
+    // A theme found OUTSIDE the app's own folder must be rewritten in place,
+    // not forked into userData where the copy would shadow the original.
+    const savedPlain = await writeTheme(
+      JSON.stringify({ id: 'plain', name: 'Plain', colors: { bg: '#222' } }),
+      { id: 'plain' }
+    )
+    check('themes: saving an existing theme succeeds', savedPlain.ok)
+    check(
+      'themes: a theme is rewritten where it was found, not duplicated',
+      !existsSync(path.join(themesRoot, 'plain', 'theme.json')) &&
+        JSON.parse(await fs.readFile(path.join(themesRoot, 'plain.json'), 'utf8')).colors.bg ===
+          '#222'
+    )
+
+    check(
+      'themes: a built-in id cannot be overwritten',
+      !(await writeTheme(JSON.stringify({ id: 'roxy-dark', name: 'Hijack' }), { id: 'roxy-dark' }))
+        .ok
+    )
+    check('themes: a built-in cannot be deleted', !(await deleteTheme('roxy-dark')).ok)
+
+    const removed = await deleteTheme('my-theme')
+    check('themes: delete removes a user theme', removed.ok)
+    check('themes: its folder is gone from disk', !existsSync(path.join(themesRoot, 'my-theme')))
+    refreshThemes()
+    check(
+      'themes: a deleted theme leaves the list',
+      !(await listThemes()).some((t) => t.id === 'my-theme')
+    )
+
+    // A user file claiming a built-in id would make the default unreachable
+    // from the picker, so it is refused at discovery.
+    await fs.mkdir(path.join(themesRoot, 'roxy-dark'), { recursive: true })
+    await fs.writeFile(
+      path.join(themesRoot, 'roxy-dark', 'theme.json'),
+      JSON.stringify({ id: 'roxy-dark', name: 'Impostor', colors: { bg: '#f00' } }),
+      'utf8'
+    )
+    refreshThemes()
+    const shadowed = await listThemes()
+    check(
+      'themes: a user theme cannot shadow a built-in id',
+      shadowed.filter((t) => t.id === 'roxy-dark').length === 1 &&
+        shadowed.find((t) => t.id === 'roxy-dark')?.source === 'builtin',
+      JSON.stringify(shadowed.filter((t) => t.id === 'roxy-dark'))
+    )
+    check(
+      'themes: the default still resolves to its real palette',
+      (await resolveThemeById('roxy-dark', 'win32')).vars['--color-bg'] === '#0a0a0a'
+    )
+
+    // The active theme is persisted as an id only.
+    repo.setActiveThemeId('ocean')
+    check(
+      'themes: the active id persists in settings',
+      repo.getSettings().activeThemeId === 'ocean'
+    )
+    repo.setActiveThemeId(null)
+    check('themes: clearing it returns to the default', repo.getSettings().activeThemeId === null)
+  } catch (e) {
+    check('themes', false, e instanceof Error ? e.message : String(e))
+  }
+
+  // ---- native window chrome (the OS-drawn window controls) ----
+  //
+  // The minimise / maximise / close buttons are painted by the OS ABOVE the
+  // page, so no stylesheet reaches them. Getting this wrong is very visible --
+  // a dark block in the corner of a light theme -- and it cannot be caught by
+  // the CSS-level tests, so the colour derivation is pinned here.
+  try {
+    const dark = await resolveThemeById('roxy-dark', 'win32')
+    const light = await resolveThemeById('roxy-light', 'win32')
+
+    check(
+      'chrome: the overlay is transparent, never a flat colour',
+      initialOverlay(48).color === 'rgba(1, 0, 0, 0)',
+      String(initialOverlay(48).color)
+    )
+    // electron#51014: a FULLY transparent black silently falls back to the
+    // default opaque frame colour, which is the exact bug being fixed.
+    check(
+      'chrome: the overlay avoids the rgba(0,0,0,0) fallback bug',
+      initialOverlay(48).color !== 'rgba(0, 0, 0, 0)'
+    )
+    check(
+      'chrome: the overlay height matches the app header',
+      initialOverlay(OVERLAY_HEIGHT.main).height === 48 &&
+        initialOverlay(OVERLAY_HEIGHT.browser).height === 40
+    )
+    // The glyphs are the one part still painted by the OS, so they must track
+    // the theme or they go invisible on one polarity.
+    check(
+      'chrome: control glyphs follow the theme text colour',
+      symbolColorFor(dark) === '#9a9aa3' && symbolColorFor(light) === '#5c5c66',
+      symbolColorFor(dark) + ' / ' + symbolColorFor(light)
+    )
+    check(
+      'chrome: the pre-paint background follows the theme',
+      backgroundColorFor(dark) === '#0a0a0a' && backgroundColorFor(light) === '#ffffff',
+      backgroundColorFor(dark) + ' / ' + backgroundColorFor(light)
+    )
+    // The OS parses these itself and understands only literal colours.
+    check(
+      'chrome: never hands the OS a var() or color-mix() it cannot parse',
+      [symbolColorFor(dark), symbolColorFor(light), backgroundColorFor(dark)].every(
+        (c) => !c.includes('var(') && !c.includes('color-mix')
+      )
+    )
+    check(
+      'chrome: applying to a destroyed window is a no-op, not a crash',
+      (() => {
+        const w = new BrowserWindow({ show: false })
+        w.destroy()
+        applyWindowChrome(w, dark)
+        return true
+      })()
+    )
+    check(
+      'chrome: a window with no overlay is tolerated',
+      (() => {
+        // Constructed WITHOUT titleBarOverlay: setTitleBarOverlay throws here,
+        // and that must not take a theme change down with it.
+        const w = new BrowserWindow({ show: false })
+        applyWindowChrome(w, light)
+        w.destroy()
+        return true
+      })()
+    )
+  } catch (e) {
+    check('chrome', false, e instanceof Error ? e.message : String(e))
   }
 
   closeDb()

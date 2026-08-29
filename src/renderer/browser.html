@@ -5,7 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Roxy Browser</title>
   </head>
-  <body style="background: #0a0a0a">
+  <!-- Painted before the bundle runs, so the window never flashes white. The
+       theme's real background replaces it a moment later (lib/theme.ts), and
+       the window's own backgroundColor covers the gap before this parses. -->
+  <body style="background: var(--color-bg, #0a0a0a)">
     <div id="root"></div>
     <script type="module" src="/src/browser/main.tsx"></script>
   </body>

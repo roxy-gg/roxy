@@ -75,7 +75,7 @@ async function main(): Promise<void> {
   check(
     'es: a key absent from the catalog falls back to English',
     i18next.t('common.cancel', { lng: 'es' }) === 'Cancelar' &&
-      i18next.t('settings.webSearch.placeholder', { lng: 'es' }) === 'exa_\u2026'
+      i18next.t('settings.browser.cookiesTitle', { lng: 'es' }) === 'Cookies'
   )
 
   // Every English key must resolve in Spanish to SOMETHING that is not the key

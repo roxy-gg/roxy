@@ -258,13 +258,6 @@
       "signedInLocally": "sesión iniciada localmente"
     },
     "title": "Ajustes",
-    "webSearch": {
-      "description": "La herramienta <code>websearch</code> funciona sin configuración con el endpoint público gratuito de Exa. Añade una clave para ampliar los límites de uso.",
-      "getKey": "Consigue una clave",
-      "heading": "Búsqueda web",
-      "placeholder": "exa_…",
-      "title": "Clave de API de Exa (opcional)"
-    },
     "workstreams": {
       "autoDescription": "Cada sesión trabaja en su propio worktree de git, en su propia rama, para que las sesiones en paralelo no se pisen entre sí ni entren en conflicto con tu editor. La carpeta se crea con el primer mensaje de la sesión, y solo en repositorios git. Desactiva esto para que las sesiones nuevas se ejecuten directamente en la carpeta del proyecto.",
       "autoTitle": "Cada sesión nueva tiene su propio flujo de trabajo",
@@ -312,7 +305,8 @@
     "subagentToggleView_one": "verlo",
     "subagentToggleView_other": "verlos",
     "subagentTooltip": "{{subagents}}{{working}} — toca para {{action}}",
-    "subagentWorking": " ({{count}} trabajando)"
+    "subagentWorking": " ({{count}} trabajando)",
+    "themes": "Temas"
   },
   "workstream": {
     "action": {

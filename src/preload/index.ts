@@ -14,6 +14,7 @@ import type {
   UpdateState
 } from '../shared/api'
 import type { CliProxyState } from '../shared/cliproxy'
+import type { ResolvedTheme } from '../shared/theme'
 
 /**
  * The typed bridge exposed to the renderer as `window.roxy`. Every method maps
@@ -27,7 +28,6 @@ const roxy: RoxyApi = {
     setActiveAgent: (agentId) => ipcRenderer.invoke(CHANNELS.settingsSetActiveAgent, agentId),
     setReasoningEffort: (level) => ipcRenderer.invoke(CHANNELS.settingsSetReasoningEffort, level),
     setContextLimit: (limit) => ipcRenderer.invoke(CHANNELS.settingsSetContextLimit, limit),
-    setWebSearchApiKey: (key) => ipcRenderer.invoke(CHANNELS.settingsSetWebSearchApiKey, key),
     setAutoWorkstream: (enabled) => ipcRenderer.invoke(CHANNELS.settingsSetAutoWorkstream, enabled),
     setBranchPrefix: (prefix) => ipcRenderer.invoke(CHANNELS.settingsSetBranchPrefix, prefix),
     setLanguage: (language) => ipcRenderer.invoke(CHANNELS.settingsSetLanguage, language),
@@ -84,6 +84,23 @@ const roxy: RoxyApi = {
     update: (input, cwd) => ipcRenderer.invoke(CHANNELS.skillsUpdate, input, cwd),
     remove: (name, cwd) => ipcRenderer.invoke(CHANNELS.skillsRemove, name, cwd),
     install: (source, cwd) => ipcRenderer.invoke(CHANNELS.skillsInstall, source, cwd)
+  },
+  themes: {
+    list: () => ipcRenderer.invoke(CHANNELS.themesList),
+    refresh: () => ipcRenderer.invoke(CHANNELS.themesRefresh),
+    read: (id) => ipcRenderer.invoke(CHANNELS.themesRead, id),
+    resolve: (id) => ipcRenderer.invoke(CHANNELS.themesResolve, id),
+    save: (id, source) => ipcRenderer.invoke(CHANNELS.themesSave, id, source),
+    create: (input) => ipcRenderer.invoke(CHANNELS.themesCreate, input),
+    remove: (id) => ipcRenderer.invoke(CHANNELS.themesRemove, id),
+    reveal: (id) => ipcRenderer.invoke(CHANNELS.themesReveal, id),
+    setActive: (id) => ipcRenderer.invoke(CHANNELS.themesSetActive, id),
+    onChanged: (callback) => {
+      const handler = (_event: Electron.IpcRendererEvent, theme: ResolvedTheme): void =>
+        callback(theme)
+      ipcRenderer.on(CHANNELS.themesChanged, handler)
+      return () => ipcRenderer.removeListener(CHANNELS.themesChanged, handler)
+    }
   },
   system: {
     getVersions: () => ipcRenderer.invoke(CHANNELS.systemGetVersions),

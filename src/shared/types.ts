@@ -397,8 +397,6 @@ export interface AppSettings {
   reasoningEffort: ReasoningEffort
   /** Chosen context-window budget in tokens; null = use the model default. */
   contextLimit: number | null
-  /** Optional Exa API key for `websearch` (empty = use the keyless public endpoint). */
-  webSearchApiKey: string | null
   /**
    * Give every new session in a git repo its own workstream (an isolated
    * worktree on its own branch) instead of running it in the project folder.
@@ -428,6 +426,15 @@ export interface AppSettings {
    * would surprise anyone who works in English inside a Spanish desktop.
    */
   language: Language
+  /**
+   * Which theme paints the UI. Null means the built-in default.
+   *
+   * Only the ID lives here -- the theme itself is a file on disk, so settings
+   * stay small and a theme can be edited, shared or version-controlled without
+   * the database knowing anything about it. An id naming a theme that has since
+   * been deleted resolves back to the default rather than failing.
+   */
+  activeThemeId: string | null
 }
 
 export interface AppVersions {
