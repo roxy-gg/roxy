@@ -13,11 +13,14 @@ import {
   SquareStack
 } from 'lucide-react'
 import type { Chat } from '@shared/types'
+import { useTranslation } from 'react-i18next'
+import type { TFunction } from 'i18next'
 import { useRoxyStore } from '../lib/store'
 import { workstreamStripView, statusKeyForSession } from '@shared/workstream'
 import { branchNameError } from '@shared/branch'
 import type { RepoStatusView } from '@shared/api'
 import {
+  aggregateLifecycle,
   aggregateRepoStatus,
   aggregateSyncTarget,
   describeRepoStatus,
@@ -290,6 +293,7 @@ function LifecycleChip({
  * requests at an unrelated server, so we ask - once, then never again.
  */
 function UnknownHostChip({ host }: { host: string }): JSX.Element {
+  const { t } = useTranslation()
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
   const anchor = useMenuAnchor(ref, open, HOST_MENU_W, { align: 'end' })
@@ -326,7 +330,7 @@ function UnknownHostChip({ host }: { host: string }): JSX.Element {
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        title={`Roxy doesn't recognise ${host} - click to choose`}
+        title={t('workstream.unknownHost', { host })}
         className="flex items-center gap-1.5 sq sq-md rounded-md px-1.5 py-1 text-text-subtle transition hover:bg-white/5 hover:text-text-muted"
       >
         <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-warning" />
@@ -383,6 +387,7 @@ function ForgePanel({
   style: CSSProperties
   onClose: () => void
 }): JSX.Element {
+  const { t } = useTranslation()
   const forgeStatus = useRoxyStore((s) => s.forgeStatus)
   const gitStatus = useRoxyStore((s) => s.gitStatus)
   const repoStatus = useRoxyStore((s) => s.repoStatus)
@@ -391,6 +396,7 @@ function ForgePanel({
   const resetBranch = useRoxyStore((s) => s.resetBranch)
   const pullAllRepos = useRoxyStore((s) => s.pullAllRepos)
   const resetAllRepos = useRoxyStore((s) => s.resetAllRepos)
+  const pushAllRepos = useRoxyStore((s) => s.pushAllRepos)
   const [busy, setBusy] = useState<null | 'action' | 'pull' | 'reset'>(null)
   const [error, setError] = useState<string | null>(null)
   const [note, setNote] = useState<string | null>(null)
@@ -404,12 +410,34 @@ function ForgePanel({
   const pull = view?.pull ?? null
   const action = view?.lifecycle.action ?? null
   const multi = repos.length > 1
+  // True while the workstream is still just an intent: these are the PROJECT's
+  // own checkouts, shared with the user's editor and every other session in the
+  // folder. Everything destructive below says so out loud rather than letting
+  // "Reset all" read like it only touches this session's scratch space.
+  const pendingTrees = multi && repos.some((r) => r.pending)
 
   // A composite workstream has no single upstream, so its sync target is folded
   // from the per-repo ones. Null for single-repo sessions, which keep using
   // `view.syncTarget` exactly as before.
   const composite = useMemo(() => (multi ? aggregateSyncTarget(repos) : null), [multi, repos])
   const sync = multi ? null : (view?.syncTarget ?? null)
+
+  // Whether the repos actually WANT different things. Drives the per-row action
+  // buttons: when every repo is at the same phase the summary buttons already
+  // say it once, and repeating it per row is noise.
+  const lifecycleAgg = useMemo(
+    () =>
+      multi
+        ? aggregateLifecycle(
+            repos.map((r) => ({
+              name: r.name,
+              isRepo: r.isRepo,
+              lifecycle: r.forge?.lifecycle ?? null
+            }))
+          )
+        : null,
+    [multi, repos]
+  )
 
   // One shape for the label/disabled logic regardless of how many repos there
   // are, so the two buttons below are written once rather than forked.
@@ -420,7 +448,7 @@ function ForgePanel({
         ahead: composite.ahead,
         changed: composite.changed,
         canFastForward: composite.canFastForward > 0,
-        hint: compositeHint(composite)
+        hint: compositeHint(composite, t)
       }
     : sync && {
         label: sync.upstream,
@@ -428,7 +456,7 @@ function ForgePanel({
         ahead: sync.ahead,
         changed: sync.changed,
         canFastForward: sync.canFastForward,
-        hint: fastForwardHint(sync)
+        hint: fastForwardHint(sync, t)
       }
 
   // Disarm as soon as the panel's numbers move: an armed "Reset" that was aimed
@@ -465,12 +493,21 @@ function ForgePanel({
         const url = statusKey ? await api.forge.createUrl(statusKey) : null
         // A missing URL means we couldn't determine the base branch. Saying so
         // beats opening a compare page pointed at the wrong target.
-        if (!url) return setError('Could not work out the base branch for this PR.')
+        if (!url) return setError(t('workstream.prBaseUnknown'))
         return openUrl(url)
       }
       if (action === 'push') {
+        // Multi-repo pushes EVERY repo. Pushing the one the chip happened to be
+        // derived from published a fraction of the work and left the chip
+        // saying exactly what it said before the click.
+        if (multi) {
+          const r = await pushAllRepos(ownerId)
+          if (r.error) return setError(r.error)
+          const s = summarizeSync(r.repos, 'push')
+          return s.failed ? setError(s.text) : setNote(s.text)
+        }
         const r = await pushBranch(ownerId)
-        if (!r.ok) setError(r.error ?? 'Push failed.')
+        if (!r.ok) setError(r.error ?? t('workstream.pushFailed'))
         return
       }
       // 'pull' has its own dedicated button below; the primary slot skips it.
@@ -485,8 +522,12 @@ function ForgePanel({
         return s.failed ? setError(s.text) : setNote(s.text)
       }
       const r = await pullBranch(ownerId)
-      if (!r.ok) return setError(r.error ?? 'Could not update from origin.')
-      setNote(r.updated ? `Updated from ${r.upstream}.` : 'Already up to date.')
+      if (!r.ok) return setError(r.error ?? t('workstream.pullFailed'))
+      setNote(
+        r.updated
+          ? t('workstream.updatedFrom', { upstream: r.upstream })
+          : t('workstream.alreadyUpToDate')
+      )
     })
 
   const runReset = (): Promise<void> =>
@@ -500,13 +541,13 @@ function ForgePanel({
       }
       const r = await resetBranch(ownerId)
       setConfirmReset(false)
-      if (!r.ok) return setError(r.error ?? 'Reset failed.')
+      if (!r.ok) return setError(r.error ?? t('workstream.resetFailed'))
       // Naming the stash is the point. A destructive action that hides the way
       // back is indistinguishable from one that lost the work.
       setNote(
         r.stashed
-          ? `Reset to ${r.upstream}. Your changes are in the stash — \`git stash pop\` to get them back.`
-          : `Reset to ${r.upstream}.`
+          ? t('workstream.resetDoneStashed', { upstream: r.upstream })
+          : t('workstream.resetDone', { upstream: r.upstream })
       )
     })
 
@@ -515,7 +556,7 @@ function ForgePanel({
       <div className="flex max-h-full min-h-0 flex-col overflow-hidden sq-frame sq-xl sq-fill-elevated sq-ring rounded-xl border border-border bg-elevated shadow-2xl">
         <div className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-2">
           <span className="min-w-0 flex-1 truncate text-xs text-text-muted">
-            {view?.remote ? view.remote.slug : 'No remote'}
+            {view?.remote ? view.remote.slug : t('workstream.noRemote')}
           </span>
           {view?.remote && (
             <span className="shrink-0 text-[11px] text-text-subtle">
@@ -523,6 +564,16 @@ function ForgePanel({
             </span>
           )}
         </div>
+
+        {/* Names the tree before any button acts on it. A composite workstream
+            that hasn't been created yet operates on the PROJECT's checkouts,
+            and "Reset all to origin/main" means something very different there
+            than it does inside a throwaway worktree. */}
+        {pendingTrees && (
+          <div className="border-b border-border px-3 py-1.5 text-[11px] text-warning">
+            {t('workstream.pendingTrees')}
+          </div>
+        )}
 
         {pull ? (
           <button
@@ -537,12 +588,12 @@ function ForgePanel({
             <span className="text-[11px] text-text-subtle">
               {pull.author ? `${pull.author} - ` : ''}
               {relativeAge(pull.updatedAt || pull.createdAt, Date.now())}
-              {pull.targetBranch ? ` - into ${pull.targetBranch}` : ''}
+              {pull.targetBranch ? t('workstream.intoBranch', { branch: pull.targetBranch }) : ''}
             </span>
           </button>
         ) : (
           <div className="px-3 py-2 text-[11px] text-text-subtle">
-            {view?.lifecycle.title ?? 'No pull request'}
+            {view?.lifecycle.title ?? t('workstream.noPullRequest')}
           </div>
         )}
 
@@ -550,8 +601,8 @@ function ForgePanel({
             it's the one thing people cross-check against their terminal. */}
         {git && git.hasUpstream && (git.ahead > 0 || git.behind > 0) && (
           <div className="flex gap-3 border-t border-border px-3 py-1.5 text-[11px] text-text-subtle tabular-nums">
-            {git.ahead > 0 && <span>{git.ahead} ahead</span>}
-            {git.behind > 0 && <span>{git.behind} behind</span>}
+            {git.ahead > 0 && <span>{t('workstream.ahead', { count: git.ahead })}</span>}
+            {git.behind > 0 && <span>{t('workstream.behind', { count: git.behind })}</span>}
           </div>
         )}
 
@@ -574,22 +625,22 @@ function ForgePanel({
               <div
                 key={r.name}
                 className="flex items-center gap-2 px-3 py-1 text-[11px]"
-                title={describeRepoRow(r)}
+                title={describeRepoRow(r, t)}
               >
                 <span className="min-w-0 flex-1 truncate text-text-muted">{r.name}</span>
                 {/* Per-repo ahead/behind: the number that tells you which of
                     the N repos still needs pushing. */}
                 {r.isRepo && (r.sync?.ahead ?? r.ahead) > 0 && (
                   <span className="shrink-0 tabular-nums text-text-subtle">
-                    {r.sync?.ahead ?? r.ahead} ahead
+                    {t('workstream.ahead', { count: r.sync?.ahead ?? r.ahead })}
                   </span>
                 )}
                 {r.isRepo && (r.sync?.behind ?? r.behind) > 0 && (
                   <span className="shrink-0 tabular-nums text-text-subtle">
-                    {r.sync?.behind ?? r.behind} behind
+                    {t('workstream.behind', { count: r.sync?.behind ?? r.behind })}
                   </span>
                 )}
-                {r.forge?.pull && (
+                {r.forge?.pull ? (
                   <button
                     type="button"
                     onClick={() => openUrl(r.forge!.pull!.url)}
@@ -597,11 +648,20 @@ function ForgePanel({
                   >
                     #{r.forge.pull.number}
                   </button>
+                ) : (
+                  /* The row's OWN next step, when it differs from the panel's.
+                     The summary buttons below act on all N at once, which is the
+                     right default and the wrong tool for the single repo that is
+                     behind while the others are merged - the case a composite
+                     workstream produces constantly. Suppressed when every repo
+                     wants the same thing, so the common case stays one button
+                     rather than a column of identical ones. */
+                  <RepoRowAction repo={r} suppress={!lifecycleAgg?.mixed} onDone={setNote} />
                 )}
                 {r.isRepo ? (
                   r.dirty && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-warning" />
                 ) : (
-                  <span className="shrink-0 text-warning">missing</span>
+                  <span className="shrink-0 text-warning">{t('workstream.missing')}</span>
                 )}
               </div>
             ))}
@@ -631,7 +691,7 @@ function ForgePanel({
               disabled={!!busy}
               className="press-scale flex w-full items-center justify-center gap-1.5 sq sq-lg rounded-lg bg-surface-2 px-3 py-1.5 text-xs text-text hover:bg-white/5 disabled:opacity-50"
             >
-              {busy === 'action' ? 'Working...' : ACTION_LABEL[action]}
+              {busy === 'action' ? t('workstream.working') : t(ACTION_LABEL[action])}
             </button>
           </div>
         )}
@@ -655,10 +715,12 @@ function ForgePanel({
                   it says what it will LOOK FOR, since the count is only as
                   fresh as the last fetch and clicking is how you refresh it. */}
               {busy === 'pull'
-                ? 'Updating...'
+                ? t('workstream.updating')
                 : target.behind > 0
-                  ? `Update ${multi ? 'all ' : ''}from ${target.label}`
-                  : `Check ${target.label}`}
+                  ? multi
+                    ? t('workstream.updateAllFrom', { target: target.label })
+                    : t('workstream.updateFrom', { target: target.label })
+                  : t('workstream.check', { target: target.label })}
               {target.behind > 0 && (
                 <span className="text-text-subtle tabular-nums">({target.behind})</span>
               )}
@@ -674,9 +736,11 @@ function ForgePanel({
               onBlur={() => setConfirmReset(false)}
               disabled={!!busy}
               title={
-                multi
-                  ? `Discard local state in every repo and make each identical to ${target.label}`
-                  : `Discard local state and make this branch identical to ${target.label}`
+                pendingTrees
+                  ? t('workstream.resetHintPending', { target: target.label })
+                  : multi
+                    ? t('workstream.resetHintMulti', { target: target.label })
+                    : t('workstream.resetHintSingle', { target: target.label })
               }
               className={cn(
                 'press-scale flex w-full items-center justify-center gap-1.5 sq sq-lg rounded-lg px-3 py-1.5 text-xs disabled:opacity-40',
@@ -687,10 +751,17 @@ function ForgePanel({
             >
               <RotateCcw className="h-3.5 w-3.5 opacity-70" />
               {busy === 'reset'
-                ? 'Resetting...'
+                ? t('workstream.resetting')
                 : confirmReset
-                  ? resetConfirmLabel(target, multi ? composite?.syncable : undefined)
-                  : `Reset ${multi ? 'all ' : ''}to ${target.label}`}
+                  ? resetConfirmLabel(
+                      target,
+                      t,
+                      multi ? composite?.syncable : undefined,
+                      pendingTrees
+                    )
+                  : multi
+                    ? t('workstream.resetAllTo', { target: target.label })
+                    : t('workstream.resetTo', { target: target.label })}
             </button>
           </div>
         )}
@@ -700,20 +771,88 @@ function ForgePanel({
 }
 
 /**
+ * One repo's own next step, inside the panel's repo list.
+ *
+ * The panel's big buttons act on every repo at once, which is right when the
+ * repos agree and useless when they don't: a workstream with three merged repos
+ * and one that was never pushed offers "Push all", and the three that are done
+ * make that read like it would republish them. This is the escape hatch - the
+ * one repo that needs something, acted on alone.
+ *
+ * Deliberately only PUSH and VIEW-PR:
+ *   - push is the action a lone repo actually gets stuck needing, and it is
+ *     additive - the worst case is a no-op;
+ *   - update and reset stay on the panel's shared buttons, because reset can
+ *     destroy work and a small unlabelled control at the end of a dense row is
+ *     the last place that belongs.
+ */
+function RepoRowAction({
+  repo,
+  suppress,
+  onDone
+}: {
+  repo: RepoStatusView
+  /** True when every repo wants the same thing, so the panel says it once. */
+  suppress: boolean
+  onDone: (note: string | null) => void
+}): JSX.Element | null {
+  const { t } = useTranslation()
+  const [busy, setBusy] = useState(false)
+
+  if (suppress || !repo.isRepo) return null
+  const action = repo.forge?.lifecycle.action ?? null
+  if (action !== 'push') return null
+  // Nothing local to publish - the phase is stale or the repo is simply clean.
+  const ahead = repo.sync?.ahead ?? repo.ahead
+  if (repo.hasUpstream && ahead === 0) return null
+
+  const run = async (): Promise<void> => {
+    if (busy) return
+    setBusy(true)
+    onDone(null)
+    try {
+      const r = await api.forge.push(repo.worktreePath)
+      onDone(
+        r.ok
+          ? t('workstream.pushedRepo', { name: repo.name })
+          : t('workstream.repoPushFailed', {
+              name: repo.name,
+              error: r.error ?? t('workstream.pushFailedShort')
+            })
+      )
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={() => void run()}
+      disabled={busy}
+      title={t('workstream.rowPushTitle', { name: repo.name })}
+      className="shrink-0 rounded px-1 text-text-subtle transition hover:bg-white/5 hover:text-text disabled:opacity-40"
+    >
+      {busy ? t('workstream.rowPushing') : t('workstream.rowPush')}
+    </button>
+  )
+}
+
+/**
  * What "Update" will do, or why it can't — shown on the button, before the
  * click rather than as an error after it.
  */
-function fastForwardHint(sync: SyncTarget): string {
+function fastForwardHint(sync: SyncTarget, t: TFunction): string {
   if (!sync.canFastForward) {
     return sync.behind > 0
-      ? `Diverged from ${sync.upstream} — merge or rebase it yourself, or reset to discard the local commits`
-      : `${sync.ahead} unpushed commit${sync.ahead === 1 ? '' : 's'} — push them, or reset to discard them`
+      ? t('workstream.ffDiverged', { upstream: sync.upstream })
+      : t('workstream.ffUnpushed', { count: sync.ahead })
   }
   // No count means the last fetch found nothing; clicking fetches again, so
   // this doubles as "check for new commits".
   return sync.behind > 0
-    ? `Fast-forward this branch onto ${sync.upstream}`
-    : `Check ${sync.upstream} for new commits`
+    ? t('workstream.ffOnto', { upstream: sync.upstream })
+    : t('workstream.ffCheck', { upstream: sync.upstream })
 }
 
 /**
@@ -721,15 +860,25 @@ function fastForwardHint(sync: SyncTarget): string {
  * are gone for good (well, reflog), edits are merely stashed. "Are you sure?"
  * says nothing; "Discard 2 commits + stash 5 changes" is a decision.
  */
-function resetConfirmLabel(sync: SyncCounts, repoCount?: number): string {
+function resetConfirmLabel(
+  sync: SyncCounts,
+  t: TFunction,
+  repoCount?: number,
+  shared?: boolean
+): string {
   const bits: string[] = []
-  if (sync.ahead > 0) bits.push(`discard ${sync.ahead} commit${sync.ahead === 1 ? '' : 's'}`)
-  if (sync.changed > 0) bits.push(`stash ${sync.changed} change${sync.changed === 1 ? '' : 's'}`)
+  if (sync.ahead > 0) bits.push(t('workstream.resetConfirmDiscard', { count: sync.ahead }))
+  if (sync.changed > 0) bits.push(t('workstream.resetConfirmStash', { count: sync.changed }))
+  // The armed click is the last thing between the user and a destroyed tree, so
+  // it names WHOSE tree when the answer is "the one your editor is open in".
+  // Everywhere else the scope is implied by the panel; here it is the whole
+  // difference between discarding a scratch worktree and discarding the project.
+  const where = shared ? t('workstream.resetConfirmWhere') : ''
   // Across repos the counts are SUMS, so say what they are sums of - "discard 3
   // commits" reads like one repo until it names the scope.
-  const scope = repoCount ? ` in ${repoCount} repos` : ''
-  if (!bits.length) return `Click again to reset${scope}`
-  return `Click again to ${bits.join(' + ')}${scope}`
+  const scope = repoCount ? t('workstream.resetConfirmScope', { where, count: repoCount }) : where
+  if (!bits.length) return t('workstream.resetConfirmBare', { scope })
+  return t('workstream.resetConfirmDo', { what: bits.join(' + '), scope })
 }
 
 /**
@@ -740,12 +889,16 @@ function resetConfirmLabel(sync: SyncCounts, repoCount?: number): string {
  * exactly the case the summary line above cannot express, and the row is where
  * that detail belongs.
  */
-function describeRepoRow(r: RepoStatusView): string {
-  if (!r.isRepo) return `${r.name} - checkout is missing`
-  const where = `${r.name} on ${r.branch ?? 'detached'}`
-  if (!r.sync) return `${where} - nothing to sync with`
-  const rel = r.sync.behind > 0 ? `, ${r.sync.behind} behind ${r.sync.ref}` : ` vs ${r.sync.ref}`
-  return where + rel
+function describeRepoRow(r: RepoStatusView, t: TFunction): string {
+  if (!r.isRepo) return t('workstream.rowMissingCheckout', { name: r.name })
+  const where = t('workstream.rowWhere', {
+    name: r.name,
+    branch: r.branch ?? t('workstream.rowDetached')
+  })
+  if (!r.sync) return t('workstream.rowNothingToSync', { where })
+  return r.sync.behind > 0
+    ? t('workstream.rowBehind', { where, count: r.sync.behind, ref: r.sync.ref })
+    : t('workstream.rowVs', { where, ref: r.sync.ref })
 }
 
 /** The counts `resetConfirmLabel` spells out, from either kind of target. */
@@ -776,26 +929,27 @@ interface SyncView extends SyncCounts {
  * "2 repos have local commits" leaves the user to work out WHICH two before
  * they can do anything about it.
  */
-function compositeHint(c: CompositeSyncTarget): string {
+function compositeHint(c: CompositeSyncTarget, t: TFunction): string {
   if (c.blocked.length) {
     const names = c.blocked.join(', ')
-    const one = c.blocked.length === 1
+    // Subject-verb AND pronoun agreement both hang off this count, so the whole
+    // clause is one plural key rather than three glued fragments.
     return c.canFastForward > 0
-      ? `${names} ${one ? 'has' : 'have'} local commits - push or reset ${one ? 'it' : 'them'} first`
-      : `Local commits in ${names} - push them, or reset to discard them`
+      ? t('workstream.compositeBlocked', { count: c.blocked.length, names })
+      : t('workstream.compositeBlockedLocal', { names })
   }
-  const scope = `${c.syncable} ${c.syncable === 1 ? 'repo' : 'repos'}`
+  const scope = t('workstream.compositeScope', { count: c.syncable })
   return c.behind > 0
-    ? `Fast-forward ${scope} onto ${describeSyncRef(c)}`
-    : `Check ${scope} for new commits`
+    ? t('workstream.compositeOnto', { scope, ref: describeSyncRef(c) })
+    : t('workstream.compositeCheck', { scope })
 }
 
-const ACTION_LABEL: Record<LifecycleAction, string> = {
-  push: 'Push to origin',
-  pull: 'Update from origin',
-  'open-pr': 'Open a pull request',
-  'view-pr': 'View on the web'
-}
+const ACTION_LABEL = {
+  push: 'workstream.action.push',
+  pull: 'workstream.action.pull',
+  'open-pr': 'workstream.action.openPr',
+  'view-pr': 'workstream.action.viewPr'
+} as const satisfies Record<LifecycleAction, string>
 
 function Divider(): JSX.Element {
   return <span className="h-3.5 w-px shrink-0 bg-border" />
@@ -831,6 +985,7 @@ function BranchSegment({
   /** Per-repo status for a composite workstream; [] for an ordinary session. */
   repos: RepoStatusView[]
 }): JSX.Element {
+  const { t } = useTranslation()
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -873,7 +1028,7 @@ function BranchSegment({
     setSaving(true)
     const res = await window.roxy.git.renameBranch(sessionId, next)
     setSaving(false)
-    if (!res.ok) return setError(res.error ?? 'Could not rename the branch.')
+    if (!res.ok) return setError(res.error ?? t('workstream.renameFailed'))
     // The branch lives on the chat row, so the strip re-reads it from there.
     await refreshChats()
     setEditing(false)
@@ -929,12 +1084,12 @@ function BranchSegment({
       title={
         pending
           ? branch
-            ? `Will check out ${branch} when this session starts`
-            : 'Branch is chosen when this session starts'
+            ? t('workstream.branchWillCheckout', { branch })
+            : t('workstream.branchChosenAtStart')
           : canRename
-            ? `On branch ${branch} — click to rename`
+            ? t('workstream.branchOnRename', { branch })
             : branch
-              ? `On branch ${branch}`
+              ? t('workstream.branchOn', { branch })
               : undefined
       }
       className={cn(
@@ -948,7 +1103,12 @@ function BranchSegment({
           at materialization. Showing the CURRENT branch here would name the one
           thing this workstream exists to stay off. */}
       <span className="truncate">
-        {branch ?? (pending ? 'branch pending' : repos.length ? 'mixed branches' : 'detached')}
+        {branch ??
+          (pending
+            ? t('workstream.branchPending')
+            : repos.length
+              ? t('workstream.branchMixed')
+              : t('workstream.branchDetached'))}
       </span>
       {/* Multi-repo only: how many repos this one branch name spans. A
           single-repo session renders exactly as it always has - repoCountBadge
@@ -987,14 +1147,10 @@ function BranchSegment({
  * Only shown for real worktrees: a session in the default workstream has no
  * folder of its own, and a pending one has no folder yet.
  */
-function workstreamTitle(chat: Chat, pending: boolean, base?: string): string {
-  const fallback =
-    base ??
-    (pending
-      ? 'This workstream is created when the session starts'
-      : 'Workstreams — isolated checkouts you can run in parallel')
+function workstreamTitle(chat: Chat, pending: boolean, t: TFunction, base?: string): string {
+  const fallback = base ?? (pending ? t('workstream.titlePending') : t('workstream.titleDefault'))
   const slug = worktreeSlug(chat.worktreePath)
-  return slug ? `${fallback}\nFolder: ${slug}` : fallback
+  return slug ? t('workstream.titleFolder', { fallback, slug }) : fallback
 }
 
 /**
@@ -1014,6 +1170,7 @@ function WorkstreamSegment({
   label: string
   pending: boolean
 }): JSX.Element {
+  const { t } = useTranslation()
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
   const anchor = useMenuAnchor(ref, open, WORKSTREAM_MENU_W)
@@ -1041,7 +1198,7 @@ function WorkstreamSegment({
     return (
       <span
         className="flex min-w-0 items-center gap-1.5 px-1.5 py-1 text-text-subtle"
-        title={workstreamTitle(chat, false, 'Subagents run in the workstream that spawned them')}
+        title={workstreamTitle(chat, false, t, t('workstream.titleSubagent'))}
       >
         <SquareStack className="h-3.5 w-3.5 shrink-0 opacity-70" />
         <span className="truncate">{label}</span>
@@ -1055,7 +1212,7 @@ function WorkstreamSegment({
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        title={workstreamTitle(chat, pending)}
+        title={workstreamTitle(chat, pending, t)}
         className={cn(
           'flex min-w-0 items-center gap-1.5 sq sq-md rounded-md px-1.5 py-1 transition hover:bg-white/5',
           open ? 'text-text' : 'text-text-muted hover:text-text'
@@ -1067,7 +1224,9 @@ function WorkstreamSegment({
             here". Without it a pending workstream is indistinguishable from a
             live one, and the session silently looks like it edits the shared
             checkout. */}
-        {pending && <span className="shrink-0 text-text-subtle">(pending)</span>}
+        {pending && (
+          <span className="shrink-0 text-text-subtle">{t('workstream.pendingSuffix')}</span>
+        )}
         <ChevronDown
           className={cn('h-3 w-3 shrink-0 opacity-60 transition', open && 'rotate-180')}
         />
@@ -1087,6 +1246,7 @@ function WorkstreamMenu({
   style: CSSProperties
   onClose: () => void
 }): JSX.Element {
+  const { t } = useTranslation()
   const chats = useRoxyStore((s) => s.chats)
   const worktrees = useRoxyStore((s) => s.worktrees)
   const branches = useRoxyStore((s) => s.gitBranches)
@@ -1139,7 +1299,7 @@ function WorkstreamMenu({
           dozen sessions makes the workstream list itself taller than the window,
           and `maxHeight` without `overflow` would only clip it differently. */}
       <div className="flex min-h-0 flex-col overflow-y-auto sq-frame sq-xl sq-fill-elevated sq-ring rounded-xl border border-border bg-elevated py-1 shadow-2xl">
-        <MenuLabel>Workstreams</MenuLabel>
+        <MenuLabel>{t('workstream.menuWorkstreams')}</MenuLabel>
 
         {/* The default workstream is the project folder itself — always present,
             and shown for orientation rather than as something to click. The tick
@@ -1148,7 +1308,7 @@ function WorkstreamMenu({
             session will not run. */}
         <div className="flex items-center gap-2 px-3 py-1.5 text-xs text-text-subtle">
           <SquareStack className="h-3.5 w-3.5 opacity-70" />
-          <span className="min-w-0 flex-1 truncate">default workstream</span>
+          <span className="min-w-0 flex-1 truncate">{t('workstream.menuDefault')}</span>
           {!chat.worktreePath && !chat.worktreePending && (
             <Check className="h-3.5 w-3.5 text-accent" />
           )}
@@ -1160,8 +1320,10 @@ function WorkstreamMenu({
         {chat.worktreePending && !chat.worktreePath && (
           <div className="flex items-center gap-2 px-3 py-1.5 text-xs text-text-subtle">
             <SquareStack className="h-3.5 w-3.5 opacity-70" />
-            <span className="min-w-0 flex-1 truncate">{chat.title || 'new workstream'}</span>
-            <span className="shrink-0 text-[11px]">pending</span>
+            <span className="min-w-0 flex-1 truncate">
+              {chat.title || t('workstream.menuNewWorkstreamName')}
+            </span>
+            <span className="shrink-0 text-[11px]">{t('workstream.menuPending')}</span>
             <Check className="h-3.5 w-3.5 text-accent" />
           </div>
         )}
@@ -1176,7 +1338,7 @@ function WorkstreamMenu({
             // The row already shows title + branch; the folder is the third
             // identity a workstream has, and the only one you need when
             // matching a session against what is actually on disk.
-            title={workstreamTitle(s, false)}
+            title={workstreamTitle(s, false, t)}
           >
             {s.title}
           </MenuItem>
@@ -1186,22 +1348,22 @@ function WorkstreamMenu({
 
         {!showBranches ? (
           <>
-            <MenuLabel>New workstream</MenuLabel>
+            <MenuLabel>{t('workstream.menuNewWorkstream')}</MenuLabel>
             <MenuItem
               onClick={() =>
                 void run(() => newWorkstream({ workspacePath: workspace, mode: 'new' }))
               }
               icon={<Plus className="h-3.5 w-3.5 opacity-70" />}
-              hint={`off ${defaultBranch}`}
+              hint={t('workstream.menuOffBranch', { branch: defaultBranch })}
             >
-              from {defaultBranch}
+              {t('workstream.menuFromBranch', { branch: defaultBranch })}
             </MenuItem>
             <MenuItem
               onClick={() => setShowBranches(true)}
               icon={<GitBranch className="h-3.5 w-3.5 opacity-70" />}
               trailing={<ChevronDown className="h-3 w-3 -rotate-90 opacity-60" />}
             >
-              from an existing branch
+              {t('workstream.menuFromExisting')}
             </MenuItem>
           </>
         ) : (
@@ -1212,12 +1374,14 @@ function WorkstreamMenu({
                 onClick={() => setShowBranches(false)}
                 className="transition hover:text-text"
               >
-                ← branches
+                {t('workstream.menuBackToBranches')}
               </button>
             </MenuLabel>
             <div className="max-h-56 overflow-y-auto">
               {projectBranches.length === 0 && (
-                <div className="px-3 py-1.5 text-[11px] text-text-subtle">No branches found.</div>
+                <div className="px-3 py-1.5 text-[11px] text-text-subtle">
+                  {t('workstream.menuNoBranches')}
+                </div>
               )}
               {projectBranches.map((b) => {
                 // A branch already checked out somewhere can't be checked out
@@ -1238,7 +1402,13 @@ function WorkstreamMenu({
                       })
                     }
                     icon={<GitBranch className="h-3.5 w-3.5 opacity-70" />}
-                    hint={taken ? (owner ? `↗ open in ${owner.title}` : '↗ open') : undefined}
+                    hint={
+                      taken
+                        ? owner
+                          ? t('workstream.menuOpenIn', { title: owner.title })
+                          : t('workstream.menuOpen')
+                        : undefined
+                    }
                   >
                     {b}
                   </MenuItem>

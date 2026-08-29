@@ -1,4 +1,5 @@
 import { FileDiff } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import { useEffect, useState } from 'react'
 import { statusKeyForSession } from '@shared/workstream'
 import { api } from '../lib/api'
@@ -20,6 +21,7 @@ import { cn } from '../lib/cn'
  * tree is not nagged by a permanent `+0 -0`.
  */
 export function ChangesChip(): JSX.Element | null {
+  const { t } = useTranslation()
   const setReviewPaneOpen = useRoxyStore((s) => s.setReviewPaneOpen)
   const reviewPaneOpen = useRoxyStore((s) => s.reviewPaneOpen)
   const chats = useRoxyStore((s) => s.chats)
@@ -80,7 +82,7 @@ export function ChangesChip(): JSX.Element | null {
     <button
       type="button"
       onClick={() => setReviewPaneOpen(!reviewPaneOpen)}
-      title="Review these changes"
+      title={t('review.chipTitle')}
       className={cn(
         '[-webkit-app-region:no-drag] press-scale flex h-7 items-center gap-1.5 sq sq-lg sq-ring rounded-lg border px-2 text-xs tabular-nums transition-colors',
         reviewPaneOpen
@@ -95,9 +97,7 @@ export function ChangesChip(): JSX.Element | null {
           {counts.deletions > 0 && <span className="text-danger">-{counts.deletions}</span>}
         </span>
       ) : (
-        <span className="text-text-subtle">
-          {changed} file{changed === 1 ? '' : 's'}
-        </span>
+        <span className="text-text-subtle">{t('review.files', { count: changed })}</span>
       )}
     </button>
   )

@@ -18,6 +18,15 @@ import { BrowserView, BrowserWindow } from 'electron'
 import { is } from '@electron-toolkit/utils'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
+import {
+  OVERLAY_HEIGHT,
+  applyWindowChrome,
+  initialBackgroundColor,
+  chromePlatform,
+  initialOverlay
+} from './window-chrome'
+import { resolveThemeById } from './themes'
+import { getSettings } from '../db/repo'
 import { CHANNELS } from '../../shared/ipc'
 import { BROWSER_CHROME_H } from '../../shared/browser'
 import type { BrowserState, BrowserTab } from '../../shared/api'
@@ -138,7 +147,7 @@ function ensureWindow(s: Session): BrowserWindow {
     height: 860,
     show: true,
     title: windowTitle(s),
-    backgroundColor: '#0a0a0a',
+    backgroundColor: initialBackgroundColor(),
     autoHideMenuBar: true,
     ...(isMac || !appIconPath ? {} : { icon: appIconPath }),
     // Hide the native OS title bar â€” our React chrome (tab strip + URL bar) IS
@@ -147,7 +156,7 @@ function ensureWindow(s: Session): BrowserWindow {
     titleBarStyle: 'hidden',
     ...(isMac
       ? { trafficLightPosition: { x: 12, y: 14 } }
-      : { titleBarOverlay: { color: '#0f0f10', symbolColor: '#9a9aa3', height: 40 } }),
+      : { titleBarOverlay: initialOverlay(OVERLAY_HEIGHT.browser) }),
     webPreferences: {
       preload: path.join(__dirname, '../preload/index.js'),
       sandbox: false,
@@ -155,6 +164,13 @@ function ensureWindow(s: Session): BrowserWindow {
     }
   })
   s.win = win
+
+  // A window opened AFTER a theme change would otherwise wear the constructor's
+  // fallback colors, since the theme broadcast only reaches windows that already
+  // existed. Catch it up immediately.
+  void resolveThemeById(getSettings().activeThemeId, chromePlatform()).then((theme) =>
+    applyWindowChrome(win, theme)
+  )
 
   // The chrome (tab strip + URL bar) is a real React app rendered into the
   // WINDOW's OWN webContents â€” not a BrowserView â€” so its title-bar strip is

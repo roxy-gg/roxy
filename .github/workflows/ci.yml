@@ -42,6 +42,12 @@ jobs:
       - name: Typecheck (main, preload, renderer)
         run: npm run typecheck
 
+      - name: Translation catalogs match the English source
+        run: npm run i18n
+
+      - name: i18n runtime suite (lookup, fallback, interpolation)
+        run: npm run smoke:i18n
+
       - name: Shared suite (pure Node — tools, agents, prompts, providers, …)
         run: npm run smoke:shared
 

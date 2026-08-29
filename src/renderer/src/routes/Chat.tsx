@@ -1,5 +1,6 @@
 import type { MouseEvent as ReactMouseEvent } from 'react'
 import { X } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import { Sidebar } from '../components/Sidebar'
 import { ChatView } from '../components/ChatView'
 import { ReviewPane } from '../review/ReviewPane'
@@ -10,6 +11,7 @@ const MIN_REVIEW_WIDTH = 360
 const MAX_REVIEW_WIDTH = 1200
 
 export default function Chat(): JSX.Element {
+  const { t } = useTranslation()
   const activeChatId = useRoxyStore((s) => s.activeChatId)
   const reviewPaneOpen = useRoxyStore((s) => s.reviewPaneOpen)
   const setReviewPaneOpen = useRoxyStore((s) => s.setReviewPaneOpen)
@@ -59,7 +61,7 @@ export default function Chat(): JSX.Element {
             action={
               <button
                 onClick={() => setReviewPaneOpen(false)}
-                title="Close"
+                title={t('common.close')}
                 className="press-scale flex h-6 w-6 items-center justify-center sq sq-lg rounded-lg text-text-muted hover:bg-white/5 hover:text-text"
               >
                 <X className="h-4 w-4" />

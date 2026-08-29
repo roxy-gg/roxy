@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
 import { INTEGRATIONS } from '@shared/integrations'
 import type { IntegrationConnection } from '@shared/types'
@@ -8,6 +9,7 @@ import { Badge, Switch } from '../components/ui'
 import { PageShell } from '../components/PageShell'
 
 export default function Integrations(): JSX.Element {
+  const { t } = useTranslation()
   const navigate = useNavigate()
   const [state, setState] = useState<Record<string, boolean>>({})
 
@@ -24,8 +26,8 @@ export default function Integrations(): JSX.Element {
 
   return (
     <PageShell
-      title="Integrations"
-      subtitle="Reach Roxy from your favorite messengers — OpenClaw-style."
+      title={t('integrations.title')}
+      subtitle={t('integrations.subtitle')}
       onBack={() => navigate('/')}
     >
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -43,7 +45,7 @@ export default function Integrations(): JSX.Element {
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">
                 <span className="text-sm font-medium text-text">{it.name}</span>
-                {it.status === 'coming-soon' && <Badge>Soon</Badge>}
+                {it.status === 'coming-soon' && <Badge>{t('integrations.soon')}</Badge>}
               </div>
               <p className="mt-0.5 text-xs text-text-muted">{it.description}</p>
             </div>

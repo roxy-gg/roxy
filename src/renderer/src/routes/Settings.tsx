@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useTranslation, Trans } from 'react-i18next'
 import { GripVertical, Globe, Plus, Trash2 } from 'lucide-react'
 import type { AppVersions, ConnectedProvider } from '@shared/types'
 import type { UpdateInfo } from '@shared/api'
 import { AUTH_LABELS } from '@shared/providers'
+import { LANGUAGES, SOURCE_LANGUAGE, normalizeLanguage } from '@shared/i18n'
 import { api } from '../lib/api'
 import { CodeHosts } from '../components/CodeHosts'
 import { Button, Switch } from '../components/ui'
@@ -24,17 +26,21 @@ import { ProviderLogo } from '../lib/providerLogos'
 import { SubscriptionAccounts } from '../components/SubscriptionSetup'
 import { useRoxyStore } from '../lib/store'
 
+/** The section heading repeated down the page. */
+const SECTION_HEADING = 'mb-3 text-xs font-semibold uppercase tracking-wide text-text-subtle'
+
 export default function Settings(): JSX.Element {
+  const { t } = useTranslation()
   const navigate = useNavigate()
   const providers = useRoxyStore((s) => s.providers)
   const settings = useRoxyStore((s) => s.settings)
   const refreshProviders = useRoxyStore((s) => s.refreshProviders)
   const reorderProviders = useRoxyStore((s) => s.reorderProviders)
-  const setWebSearchApiKey = useRoxyStore((s) => s.setWebSearchApiKey)
   const setAutoWorkstream = useRoxyStore((s) => s.setAutoWorkstream)
   const telemetryEnabled = useRoxyStore((s) => s.telemetryEnabled)
   const setTelemetryEnabled = useRoxyStore((s) => s.setTelemetryEnabled)
   const setBranchPrefix = useRoxyStore((s) => s.setBranchPrefix)
+  const setLanguage = useRoxyStore((s) => s.setLanguage)
   const [prefix, setPrefix] = useState('')
   const prefixError = branchPrefixError(prefix)
   // Pinned once per mount: a preview that reshuffled on every keystroke
@@ -46,8 +52,6 @@ export default function Settings(): JSX.Element {
   const [update, setUpdate] = useState<UpdateInfo | null>(null)
   const [confirmingReset, setConfirmingReset] = useState(false)
   const [resetting, setResetting] = useState(false)
-  const [searchKey, setSearchKey] = useState('')
-  const [searchKeySaved, setSearchKeySaved] = useState(false)
   const [dragProviderId, setDragProviderId] = useState<string | null>(null)
   const [dragOverProviderId, setDragOverProviderId] = useState<string | null>(null)
   const [dropAfterProvider, setDropAfterProvider] = useState(false)
@@ -78,10 +82,6 @@ export default function Settings(): JSX.Element {
   }
 
   useEffect(() => {
-    setSearchKey(settings?.webSearchApiKey ?? '')
-  }, [settings?.webSearchApiKey])
-
-  useEffect(() => {
     setPrefix(settings?.branchPrefix ?? DEFAULT_BRANCH_PREFIX)
   }, [settings?.branchPrefix])
 
@@ -108,39 +108,33 @@ export default function Settings(): JSX.Element {
     navigate('/onboarding')
   }
 
-  const saveSearchKey = async (): Promise<void> => {
-    await setWebSearchApiKey(searchKey.trim() || null)
-    setSearchKeySaved(true)
-    setTimeout(() => setSearchKeySaved(false), 2000)
-  }
-
   const us = update?.state
   const updateBusy =
     us?.status === 'checking' || us?.status === 'downloading' || us?.status === 'available'
   const updateLabel = !update?.packaged
-    ? 'Auto-updates run in the installed app.'
+    ? t('settings.about.update.devMode')
     : us?.status === 'checking'
-      ? 'Checking for updates…'
+      ? t('settings.about.update.checking')
       : us?.status === 'available'
-        ? `Found v${us.version} — downloading…`
+        ? t('settings.about.update.available', { version: us.version })
         : us?.status === 'downloading'
-          ? `Downloading… ${us.percent}%`
+          ? t('settings.about.update.downloading', { percent: us.percent })
           : us?.status === 'downloaded'
-            ? `v${us.version} is ready to install.`
+            ? t('settings.about.update.downloaded', { version: us.version })
             : us?.status === 'error'
-              ? `Update check failed: ${us.message}`
+              ? t('settings.about.update.error', { message: us.message })
               : us?.status === 'not-available'
-                ? "You're on the latest version."
-                : 'Updates install automatically from GitHub.'
+                ? t('settings.about.update.notAvailable')
+                : t('settings.about.update.idle')
+
+  const language = normalizeLanguage(settings?.language)
 
   return (
-    <PageShell title="Settings" onBack={() => navigate('/')}>
+    <PageShell title={t('settings.title')} onBack={() => navigate('/')}>
       <ActivitySection />
 
       <section className="mb-8">
-        <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-text-subtle">
-          Providers
-        </h2>
+        <h2 className={SECTION_HEADING}>{t('settings.providers.heading')}</h2>
         <div className="flex flex-col gap-2">
           {providers.map((p) => (
             <div
@@ -196,25 +190,51 @@ export default function Settings(): JSX.Element {
             onClick={() => navigate('/onboarding')}
             className="press-scale flex items-center justify-center gap-2 sq sq-xl sq-ring sq-dashed rounded-xl border border-dashed border-border bg-surface/40 p-3.5 text-sm text-text-muted hover:border-border-strong hover:[--sq-ring:var(--color-border-strong)] hover:bg-surface hover:text-text"
           >
-            <Plus className="h-4 w-4" /> Add provider
+            <Plus className="h-4 w-4" /> {t('settings.providers.add')}
           </button>
         </div>
       </section>
 
+      {/* A native <select> on purpose. The picker is read once and then never
+          again, so it earns none of the cost of a custom popover -- and the
+          native control already gives us type-ahead, keyboard nav and the OS's
+          own font stack, which matters for scripts the app font may not cover. */}
       <section className="mb-8">
-        <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-text-subtle">
-          Workstreams
-        </h2>
+        <h2 className={SECTION_HEADING}>{t('settings.language.heading')}</h2>
+        <div className="flex flex-col gap-3 sq sq-xl sq-ring rounded-xl border border-border bg-surface p-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0">
+            <label htmlFor="language" className="text-sm font-medium text-text">
+              {t('settings.language.label')}
+            </label>
+            <p className="mt-0.5 text-xs text-text-muted">{t('settings.language.description')}</p>
+            {language !== SOURCE_LANGUAGE && (
+              <p className="mt-2 text-xs text-text-subtle">{t('settings.language.translatedBy')}</p>
+            )}
+          </div>
+          <select
+            id="language"
+            value={language}
+            onChange={(e) => void setLanguage(normalizeLanguage(e.target.value))}
+            className="h-9 shrink-0 sq sq-lg sq-ring rounded-lg border border-border bg-surface-2 px-3 text-sm text-text outline-none transition-colors focus:border-accent/70"
+          >
+            {LANGUAGES.map((l) => (
+              <option key={l.code} value={l.code}>
+                {l.nativeName}
+              </option>
+            ))}
+          </select>
+        </div>
+      </section>
+
+      <section className="mb-8">
+        <h2 className={SECTION_HEADING}>{t('settings.workstreams.heading')}</h2>
         <div className="flex flex-col gap-3 sq sq-xl sq-ring rounded-xl border border-border bg-surface p-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0">
             <div className="text-sm font-medium text-text">
-              New sessions get their own workstream
+              {t('settings.workstreams.autoTitle')}
             </div>
             <p className="mt-0.5 text-xs text-text-muted">
-              Each session works in its own git worktree on its own branch, so parallel sessions
-              can&apos;t overwrite each other or fight with your editor. The folder is created on
-              the session&apos;s first message, and only in git repositories. Turn this off to run
-              new sessions directly in the project folder.
+              {t('settings.workstreams.autoDescription')}
             </p>
           </div>
           <Switch
@@ -224,11 +244,11 @@ export default function Settings(): JSX.Element {
         </div>
 
         <div className="mt-3 sq sq-xl sq-ring rounded-xl border border-border bg-surface p-4">
-          <div className="text-sm font-medium text-text">Branch prefix</div>
+          <div className="text-sm font-medium text-text">
+            {t('settings.workstreams.prefixTitle')}
+          </div>
           <p className="mt-0.5 text-xs text-text-muted">
-            New workstreams get a branch named after the session. This is what goes in front of it —
-            use your initials, <code className="text-text-subtle">wip</code>, or clear it for no
-            prefix at all.
+            <Trans i18nKey="settings.workstreams.prefixDescription" />
           </p>
           <div className="mt-3 flex items-center gap-2">
             <input
@@ -238,8 +258,8 @@ export default function Settings(): JSX.Element {
                 if (e.key === 'Enter' && !prefixError) void setBranchPrefix(prefix)
               }}
               spellCheck={false}
-              placeholder="no prefix"
-              aria-label="Branch prefix"
+              placeholder={t('settings.workstreams.prefixPlaceholder')}
+              aria-label={t('settings.workstreams.prefixAriaLabel')}
               className={cn(
                 'w-48 sq sq-lg sq-ring rounded-lg border bg-surface-2 px-3 py-1.5 text-sm text-text outline-none placeholder:text-text-subtle',
                 prefixError
@@ -260,87 +280,38 @@ export default function Settings(): JSX.Element {
                 normalizeBranchPrefix(prefix) === (settings?.branchPrefix ?? DEFAULT_BRANCH_PREFIX)
               }
             >
-              Save
+              {t('common.save')}
             </Button>
           </div>
           {prefixError && <p className="mt-2 text-xs text-danger">{prefixError}</p>}
           <p className="mt-2 text-xs text-text-subtle">
-            Only affects new workstreams. Existing branches keep their names — rename one from the
-            bar under the composer.
+            {t('settings.workstreams.prefixFootnote')}
           </p>
         </div>
       </section>
 
       <section className="mb-8">
-        <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-text-subtle">
-          Browser
-        </h2>
+        <h2 className={SECTION_HEADING}>{t('settings.browser.heading')}</h2>
         <div className="flex flex-col gap-3 sq sq-xl sq-ring rounded-xl border border-border bg-surface p-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0">
-            <div className="text-sm font-medium text-text">Roxy browser</div>
-            <p className="mt-0.5 text-xs text-text-muted">
-              Opens a persistent browser the agent shares. Sign in to sites here once — your session
-              (cookies/logins) is saved, so the agent can act with your access.
-            </p>
+            <div className="text-sm font-medium text-text">{t('settings.browser.title')}</div>
+            <p className="mt-0.5 text-xs text-text-muted">{t('settings.browser.description')}</p>
           </div>
           <Button variant="secondary" className="shrink-0" onClick={() => api.browser.open()}>
-            <Globe className="h-3.5 w-3.5" /> Open browser
+            <Globe className="h-3.5 w-3.5" /> {t('settings.browser.open')}
           </Button>
         </div>
 
         <div className="mt-3 overflow-hidden sq sq-xl sq-ring rounded-xl border border-border bg-surface">
           <div className="border-b border-border p-4">
-            <div className="text-sm font-medium text-text">Cookies</div>
+            <div className="text-sm font-medium text-text">
+              {t('settings.browser.cookiesTitle')}
+            </div>
             <p className="mt-0.5 text-xs text-text-muted">
-              Read, edit, import and delete the browser&apos;s cookies — the built-in equivalent of
-              the Cookie-Editor extension. Import and export use its JSON format, so a blob copied
-              out of Chrome pastes straight in. To work on just one site, use the cookie button in
-              the browser&apos;s own toolbar.
+              {t('settings.browser.cookiesDescription')}
             </p>
           </div>
           <CookiePanel className="max-h-[420px]" />
-        </div>
-      </section>
-
-      <section className="mb-8">
-        <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-text-subtle">
-          Web search
-        </h2>
-        <div className="flex flex-col gap-3 sq sq-xl sq-ring rounded-xl border border-border bg-surface p-4">
-          <div className="min-w-0">
-            <div className="text-sm font-medium text-text">Exa API key (optional)</div>
-            <p className="mt-0.5 text-xs text-text-muted">
-              The <code>websearch</code> tool works out of the box on Exa&apos;s free public
-              endpoint. Add a key to lift rate limits.{' '}
-              <a
-                href="https://dashboard.exa.ai/api-keys"
-                target="_blank"
-                rel="noreferrer"
-                className="text-accent hover:underline"
-              >
-                Get a key
-              </a>
-            </p>
-          </div>
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-            <input
-              type="password"
-              value={searchKey}
-              onChange={(e) => setSearchKey(e.target.value)}
-              placeholder="exa_…"
-              className="min-w-0 flex-1 sq sq-lg sq-ring rounded-lg border border-border bg-surface-strong px-3 py-2 text-sm text-text outline-none placeholder:text-text-subtle focus:border-border-strong"
-              spellCheck={false}
-              autoComplete="off"
-            />
-            <Button
-              variant="secondary"
-              className="shrink-0"
-              disabled={searchKey.trim() === (settings?.webSearchApiKey ?? '')}
-              onClick={() => void saveSearchKey()}
-            >
-              {searchKeySaved ? 'Saved' : 'Save'}
-            </Button>
-          </div>
         </div>
       </section>
 
@@ -348,33 +319,22 @@ export default function Settings(): JSX.Element {
           MODEL, this one is where the CODE lives. GitHub appears in both, as
           two unrelated accounts. */}
       <section className="mb-8">
-        <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-text-subtle">
-          Code hosts
-        </h2>
+        <h2 className={SECTION_HEADING}>{t('settings.codeHosts.heading')}</h2>
         <CodeHosts />
       </section>
       <section className="mb-8">
-        <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-text-subtle">
-          MCP servers
-        </h2>
+        <h2 className={SECTION_HEADING}>{t('settings.mcp.heading')}</h2>
         <McpServers />
       </section>
 
       <section className="mb-8">
-        <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-text-subtle">
-          Backup &amp; restore
-        </h2>
+        <h2 className={SECTION_HEADING}>{t('settings.backup.heading')}</h2>
         <div className="flex flex-col gap-3 sq sq-xl sq-ring rounded-xl border border-border bg-surface p-4">
           <div className="min-w-0">
-            <div className="text-sm font-medium text-text">Skills &amp; MCP servers</div>
+            <div className="text-sm font-medium text-text">{t('settings.backup.title')}</div>
             <p className="mt-0.5 text-xs text-text-muted">
-              Export your global skills and MCP server configs to a single file, then import it on
-              another computer to set it up the same way. Importing overwrites skills/servers that
-              share a name.{' '}
-              <span className="text-text-subtle">
-                Heads up: the file includes any MCP secrets (headers/env) in plain text — keep it
-                private.
-              </span>
+              {t('settings.backup.description')}{' '}
+              <span className="text-text-subtle">{t('settings.backup.warning')}</span>
             </p>
           </div>
           <ConfigBackup onImported={() => void bootstrap()} />
@@ -382,43 +342,31 @@ export default function Settings(): JSX.Element {
       </section>
 
       <section className="mb-8">
-        <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-text-subtle">
-          Privacy
-        </h2>
+        <h2 className={SECTION_HEADING}>{t('settings.privacy.heading')}</h2>
         <div className="flex flex-col gap-3 sq sq-xl sq-ring rounded-xl border border-border bg-surface p-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0">
-            <div className="text-sm font-medium text-text">Send anonymous usage data</div>
-            <p className="mt-0.5 text-xs text-text-muted">
-              Counts and timings &mdash; app launches, finished turns, how many steps and tools a
-              turn took, how many tokens it used and roughly what it cost &mdash; tied to a random
-              id generated on this machine. Never your prompts, your code, file paths, repo names,
-              or any error text.
-            </p>
+            <div className="text-sm font-medium text-text">{t('settings.privacy.title')}</div>
+            <p className="mt-0.5 text-xs text-text-muted">{t('settings.privacy.description')}</p>
             <p className="mt-2 text-xs text-text-muted">
-              A few labels ride along, and each is matched against a fixed list built into the app:
-              which provider served a turn (a custom endpoint is only ever recorded as{' '}
-              &ldquo;other&rdquo;), which model <em>family</em> ran (&ldquo;claude-sonnet&rdquo;,
-              never the exact model id), which built-in tools ran (an MCP server&rsquo;s own name is
-              only ever recorded as &ldquo;mcp&rdquo;), and which <em>kind</em> of error ended a
-              failed turn. It is the only way we can tell whether a release helped or broke things.
+              <Trans i18nKey="settings.privacy.labels" />
             </p>
           </div>
           <Switch checked={telemetryEnabled} onChange={(v) => void setTelemetryEnabled(v)} />
         </div>
       </section>
       <section>
-        <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-text-subtle">
-          About
-        </h2>
+        <h2 className={SECTION_HEADING}>{t('settings.about.heading')}</h2>
         <div className="flex flex-col gap-3 sq sq-xl sq-ring rounded-xl border border-border bg-surface p-4">
           <div className="flex items-center justify-between gap-3">
             <div className="min-w-0">
-              <div className="text-sm font-medium text-text">Roxy v{versions?.app ?? '—'}</div>
+              <div className="text-sm font-medium text-text">
+                {t('settings.about.version', { version: versions?.app ?? t('common.dash') })}
+              </div>
               <p className="mt-0.5 text-xs text-text-muted">{updateLabel}</p>
             </div>
             {update?.state.status === 'downloaded' ? (
               <Button variant="primary" className="shrink-0" onClick={() => api.updates.install()}>
-                Restart to update
+                {t('settings.about.restartToUpdate')}
               </Button>
             ) : (
               <Button
@@ -426,15 +374,19 @@ export default function Settings(): JSX.Element {
                 className="shrink-0"
                 disabled={!update?.packaged || updateBusy}
                 onClick={() => void api.updates.check()}
-                title={update?.packaged ? undefined : 'Available in the installed app'}
+                title={update?.packaged ? undefined : t('settings.about.installedAppOnly')}
               >
-                {updateBusy ? 'Checking…' : 'Check for updates'}
+                {updateBusy ? t('settings.about.checking') : t('settings.about.checkForUpdates')}
               </Button>
             )}
           </div>
           {versions && (
             <p className="text-[11px] text-text-subtle">
-              Electron {versions.electron} · Chromium {versions.chrome} · Node {versions.node}
+              {t('settings.about.runtime', {
+                electron: versions.electron,
+                chrome: versions.chrome,
+                node: versions.node
+              })}
             </p>
           )}
         </div>
@@ -442,14 +394,13 @@ export default function Settings(): JSX.Element {
 
       <section className="mt-8">
         <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-danger">
-          Danger zone
+          {t('settings.danger.heading')}
         </h2>
         <div className="flex flex-col gap-3 sq sq-xl sq-ring sq-ring-danger rounded-xl border border-danger/30 bg-danger/5 p-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0">
-            <div className="text-sm font-medium text-text">Reset everything</div>
+            <div className="text-sm font-medium text-text">{t('settings.danger.resetTitle')}</div>
             <p className="mt-0.5 text-xs text-text-muted">
-              Wipes all providers, sessions, loops, and settings, then returns to onboarding. This
-              can&apos;t be undone.
+              {t('settings.danger.resetDescription')}
             </p>
           </div>
           {confirmingReset ? (
@@ -459,15 +410,15 @@ export default function Settings(): JSX.Element {
                 onClick={() => setConfirmingReset(false)}
                 disabled={resetting}
               >
-                Cancel
+                {t('common.cancel')}
               </Button>
               <Button variant="danger" onClick={resetEverything} disabled={resetting}>
-                {resetting ? 'Wiping…' : 'Yes, wipe everything'}
+                {resetting ? t('settings.danger.wiping') : t('settings.danger.confirm')}
               </Button>
             </div>
           ) : (
             <Button variant="danger" className="shrink-0" onClick={() => setConfirmingReset(true)}>
-              <Trash2 className="h-3.5 w-3.5" /> Reset everything
+              <Trash2 className="h-3.5 w-3.5" /> {t('settings.danger.reset')}
             </Button>
           )}
         </div>
@@ -489,6 +440,7 @@ function ProviderRow({
   dragging: boolean
   onDisconnect: () => void
 }): JSX.Element {
+  const { t } = useTranslation()
   return (
     <div
       className={cn(
@@ -512,17 +464,17 @@ function ProviderRow({
           <span className="text-sm font-medium text-text">{provider.name}</span>
           {active && (
             <span className="rounded-full bg-success/15 px-2 py-0.5 text-[11px] text-success">
-              Active
+              {t('settings.providers.active')}
             </span>
           )}
         </div>
         <p className="mt-0.5 text-xs text-text-subtle">
           {AUTH_LABELS[provider.auth]} ·{' '}
           {provider.auth === 'subscription'
-            ? 'signed in locally'
+            ? t('settings.providers.signedInLocally')
             : provider.hasCredential
-              ? 'key stored'
-              : 'no credential'}
+              ? t('settings.providers.keyStored')
+              : t('settings.providers.noCredential')}
         </p>
         {/* Subscription providers hold their credential in the sidecar, not in
             Roxy - so the row lists the signed-in accounts instead of a key. The
@@ -531,7 +483,7 @@ function ProviderRow({
         {provider.auth === 'subscription' && <SubscriptionAccounts providerId={provider.id} />}
       </div>
       <Button size="sm" variant="ghost" onClick={onDisconnect}>
-        Disconnect
+        {t('settings.providers.disconnect')}
       </Button>
     </div>
   )

@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Brain, Check, ChevronsUpDown, Clock, Pin, Search, Wrench } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import { buildModelIndex, buildModelRows } from '../lib/modelRows'
+import { modelLabel } from '@shared/models'
 import { useRoxyStore } from '../lib/store'
 import { resolveSessionConfig } from '@shared/session-config'
 import { ProviderLogo } from '../lib/providerLogos'
@@ -95,6 +97,7 @@ function useWindow(
 }
 
 export function ModelPicker(): JSX.Element {
+  const { t } = useTranslation()
   const providers = useRoxyStore((s) => s.providers)
   const settings = useRoxyStore((s) => s.settings)
   // Only the ACTIVE chat's config matters here, and it is the sole reason this
@@ -219,11 +222,15 @@ export function ModelPicker(): JSX.Element {
   // behind whichever provider answered last.
   const loading = providers.length > 0 && providers.some((p) => !models[p.id] && !modelsTried[p.id])
 
+  // Stripped the same way as the rows below, so the trigger and the row the
+  // user just clicked read identically instead of the trigger re-adding a vendor.
   const triggerLabel = useMemo(() => {
-    if (!activeModel) return 'Select a model'
+    if (!activeModel) return t('models.selectModel')
     if (!activeProvider) return activeModel
-    return index.get(`${activeProvider.id}:${activeModel}`)?.info.name ?? activeModel
-  }, [activeModel, activeProvider, index])
+    const name = index.get(`${activeProvider.id}:${activeModel}`)?.info.name
+    return name ? modelLabel(activeProvider.id, name, activeModel) : activeModel
+    // `t` is in the deps so the placeholder re-resolves on a language switch.
+  }, [activeModel, activeProvider, index, t])
 
   const pick = useCallback(
     async (providerId: string, modelId: string): Promise<void> => {
@@ -246,7 +253,7 @@ export function ModelPicker(): JSX.Element {
   )
 
   if (providers.length === 0) {
-    return <span className="px-1 text-xs text-text-subtle">No provider connected</span>
+    return <span className="px-1 text-xs text-text-subtle">{t('models.noProvider')}</span>
   }
 
   const visible: JSX.Element[] = []
@@ -291,7 +298,7 @@ export function ModelPicker(): JSX.Element {
         <span
           role="button"
           tabIndex={-1}
-          title={row.pinned ? 'Unpin model' : 'Pin model'}
+          title={row.pinned ? t('models.unpin') : t('models.pin')}
           onClick={(e) => togglePin(e, row.providerId, row.modelId, row.pinned)}
           className={cn(
             'shrink-0 rounded p-0.5 transition hover:bg-white/10',
@@ -325,7 +332,7 @@ export function ModelPicker(): JSX.Element {
               autoFocus
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search models…"
+              placeholder={t('models.search')}
               className="w-full bg-transparent text-xs text-text outline-none placeholder:text-text-subtle"
             />
           </div>
@@ -344,16 +351,15 @@ export function ModelPicker(): JSX.Element {
               </>
             )}
             {rows.length === 0 && loading && (
-              <div className="px-3 py-3 text-xs text-text-subtle">Loading models…</div>
+              <div className="px-3 py-3 text-xs text-text-subtle">{t('models.loading')}</div>
             )}
             {rows.length === 0 && !loading && q && (
-              <div className="px-3 py-3 text-xs text-text-subtle">No models match “{query}”.</div>
+              <div className="px-3 py-3 text-xs text-text-subtle">
+                {t('models.noMatch', { query })}
+              </div>
             )}
             {rows.length === 0 && !loading && !q && (
-              <div className="px-3 py-3 text-xs text-text-subtle">
-                Couldn&apos;t load models from models.dev — you can still send with the current
-                model.
-              </div>
+              <div className="px-3 py-3 text-xs text-text-subtle">{t('models.loadFailed')}</div>
             )}
           </div>
         </div>

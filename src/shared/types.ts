@@ -4,6 +4,7 @@
  * Node, Electron, or browser-specific imports.
  */
 import type { RepoLink } from './repos'
+import type { Language } from './i18n'
 
 // ---- Providers ---------------------------------------------------------------
 
@@ -396,8 +397,6 @@ export interface AppSettings {
   reasoningEffort: ReasoningEffort
   /** Chosen context-window budget in tokens; null = use the model default. */
   contextLimit: number | null
-  /** Optional Exa API key for `websearch` (empty = use the keyless public endpoint). */
-  webSearchApiKey: string | null
   /**
    * Give every new session in a git repo its own workstream (an isolated
    * worktree on its own branch) instead of running it in the project folder.
@@ -418,6 +417,24 @@ export interface AppSettings {
    * people prefer; it is a real choice, not a reason to reimpose the default.
    */
   branchPrefix: string
+  /**
+   * Language for Roxy's own interface. Defaults to English.
+   *
+   * This is the CHROME only -- buttons, labels, settings copy. It is
+   * deliberately not passed to the model: what language the agent answers in is
+   * decided by what the user writes to it, and pinning that to a UI preference
+   * would surprise anyone who works in English inside a Spanish desktop.
+   */
+  language: Language
+  /**
+   * Which theme paints the UI. Null means the built-in default.
+   *
+   * Only the ID lives here -- the theme itself is a file on disk, so settings
+   * stay small and a theme can be edited, shared or version-controlled without
+   * the database knowing anything about it. An id naming a theme that has since
+   * been deleted resolves back to the default rather than failing.
+   */
+  activeThemeId: string | null
 }
 
 export interface AppVersions {

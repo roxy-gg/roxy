@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { FileDiff, Loader2, RefreshCw } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import { REVIEW_COMMITS } from '@shared/api'
 import type { GitReviewScope, ReviewCommit, ReviewFile, ReviewTarget } from '@shared/api'
 import { api } from '../lib/api'
@@ -8,12 +9,7 @@ import { GIT_POLL_MS } from '../lib/polling'
 import { ReviewFileRow } from './ReviewFileRow'
 
 /** Scopes in the order the picker lists them. */
-const SCOPES: { id: GitReviewScope; label: string; hint: string }[] = [
-  { id: 'unstaged', label: 'Uncommitted', hint: 'Edited but not staged' },
-  { id: 'staged', label: 'Staged', hint: "What's in the index" },
-  { id: 'branch', label: 'Branch', hint: 'Everything on this branch' },
-  { id: 'commit', label: 'Commit', hint: 'A single commit' }
-]
+const SCOPES: GitReviewScope[] = ['unstaged', 'staged', 'branch', 'commit']
 
 /**
  * A store-free review surface for the browser window's separate renderer.
@@ -30,6 +26,7 @@ export function ReviewPane({
   /** A close button (or anything else) for the pane's header. */
   action?: ReactNode
 }): JSX.Element {
+  const { t } = useTranslation()
   const [scope, setScope] = useState<GitReviewScope>('unstaged')
   const [commitKey, setCommitKey] = useState('')
   const [files, setFiles] = useState<ReviewFile[] | null>(null)
@@ -67,7 +64,7 @@ export function ReviewPane({
     } catch {
       // Keep the last list through a transient failure; the poll retries.
       if (seq === loadSeq.current) {
-        setError('Could not read changes')
+        setError(t('review.loadFailed'))
         setFiles((current) => current ?? [])
       }
     }
@@ -107,10 +104,10 @@ export function ReviewPane({
     try {
       // An empty list means everything: one Git call per repository.
       const result = await fn(target, [])
-      if (!result.ok) setError(result.error ?? 'Failed')
+      if (!result.ok) setError(result.error ?? t('review.failed'))
       await load()
     } catch {
-      setError('Could not update changes')
+      setError(t('review.updateFailed'))
     } finally {
       setBusy(false)
     }
@@ -122,26 +119,26 @@ export function ReviewPane({
   return (
     <div className={cn('flex min-h-0 flex-col bg-surface text-text', className)}>
       <div className="flex shrink-0 items-center gap-1 border-b border-border px-2.5 py-2">
-        {SCOPES.map((item) => (
+        {SCOPES.map((id) => (
           <button
-            key={item.id}
+            key={id}
             type="button"
             onClick={() => {
-              if (item.id === scope) return
+              if (id === scope) return
               // Never show one scope's files under another scope's heading.
               setFiles(null)
-              setScope(item.id)
+              setScope(id)
               setError(null)
             }}
-            title={item.hint}
+            title={t(`review.scope.${id}Hint`)}
             className={cn(
               'press-scale rounded-md px-2 py-1 text-xs transition',
-              scope === item.id
+              scope === id
                 ? 'bg-surface-2 text-text'
                 : 'text-text-muted hover:bg-surface-2/60 hover:text-text'
             )}
           >
-            {item.label}
+            {t(`review.scope.${id}`)}
           </button>
         ))}
 
@@ -149,9 +146,7 @@ export function ReviewPane({
           {additions > 0 && <span className="text-success">+{additions}</span>}
           {deletions > 0 && <span className="text-danger">-{deletions}</span>}
           {!!files?.length && (
-            <span className="text-text-subtle">
-              {files.length} file{files.length === 1 ? '' : 's'}
-            </span>
+            <span className="text-text-subtle">{t('review.files', { count: files.length })}</span>
           )}
         </span>
 
@@ -163,13 +158,13 @@ export function ReviewPane({
               onClick={() => void bulk(scope === 'staged' ? api.review.unstage : api.review.stage)}
               className="press-scale rounded-md px-2 py-1 text-xs text-text-muted transition hover:bg-surface-2 hover:text-text disabled:opacity-40"
             >
-              {scope === 'staged' ? 'Unstage all' : 'Stage all'}
+              {t(scope === 'staged' ? 'review.unstageAll' : 'review.stageAll')}
             </button>
           )}
           <button
             type="button"
             onClick={() => void load()}
-            title="Refresh"
+            title={t('review.refresh')}
             className="press-scale flex h-7 w-7 items-center justify-center sq sq-lg rounded-lg text-text-muted transition hover:bg-surface-2 hover:text-text"
           >
             <RefreshCw className="h-3.5 w-3.5" />
@@ -189,7 +184,7 @@ export function ReviewPane({
             }}
             className="w-full rounded-md border border-border bg-surface-2 px-2 py-1 text-xs text-text outline-none"
           >
-            <option value="">Pick a commit…</option>
+            <option value="">{t('review.pickCommitPlaceholder')}</option>
             {commits?.map((commit) => (
               <option key={commitKeyOf(commit)} value={commitKeyOf(commit)}>
                 {commit.repo ? `${commit.repo} · ` : ''}
@@ -209,15 +204,15 @@ export function ReviewPane({
       <div className="min-h-0 flex-1 overflow-y-auto">
         {!sessionId ? (
           <Empty>
-            <FileDiff className="h-4 w-4" /> Open this from a session to review its changes
+            <FileDiff className="h-4 w-4" /> {t('review.noSession')}
           </Empty>
         ) : !files ? (
           <Empty>
-            <Loader2 className="h-4 w-4 animate-spin" /> Reading changes…
+            <Loader2 className="h-4 w-4 animate-spin" /> {t('review.reading')}
           </Empty>
         ) : !files.length ? (
           <Empty>
-            <FileDiff className="h-4 w-4" /> {emptyLabel(scope, selectedCommit?.sha)}
+            <FileDiff className="h-4 w-4" /> {t(emptyKey(scope, selectedCommit?.sha))}
           </Empty>
         ) : (
           files.map((file) => (
@@ -235,11 +230,13 @@ export function ReviewPane({
   )
 }
 
-function emptyLabel(scope: GitReviewScope, commit: string | undefined): string {
-  if (scope === 'commit') return commit ? 'That commit changed nothing' : 'Pick a commit'
-  if (scope === 'staged') return 'Nothing staged'
-  if (scope === 'branch') return 'This branch matches its base'
-  return 'No uncommitted changes'
+/** Why the list is empty depends on the scope, not just on the count. */
+function emptyKey(scope: GitReviewScope, commit: string | undefined) {
+  if (scope === 'commit')
+    return commit ? ('review.emptyCommit' as const) : ('review.pickCommit' as const)
+  if (scope === 'staged') return 'review.emptyStaged' as const
+  if (scope === 'branch') return 'review.emptyBranch' as const
+  return 'review.emptyUnstaged' as const
 }
 
 function commitKeyOf(commit: ReviewCommit): string {

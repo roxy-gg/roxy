@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Brain, Check, Loader2 } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import type { MessagePart, ReasoningEffort } from '@shared/types'
 import type { ModelInfo } from '@shared/api'
 import { PRIMARY_AGENTS, getAgent, DEFAULT_AGENT_ID } from '@shared/agents'
@@ -118,15 +119,16 @@ const AGENT_POPOVER_W = 160
 
 // ---- Thinking effort ---------------------------------------------------------
 
-const EFFORTS: { value: ReasoningEffort; label: string }[] = [
-  { value: 'low', label: 'Low' },
-  { value: 'medium', label: 'Medium' },
-  { value: 'high', label: 'High' },
-  { value: 'xhigh', label: 'Xhigh' },
-  { value: 'max', label: 'Max' }
-]
+const EFFORTS = [
+  { value: 'low', labelKey: 'inference.effort.low' },
+  { value: 'medium', labelKey: 'inference.effort.medium' },
+  { value: 'high', labelKey: 'inference.effort.high' },
+  { value: 'xhigh', labelKey: 'inference.effort.xhigh' },
+  { value: 'max', labelKey: 'inference.effort.max' }
+] as const satisfies readonly { value: ReasoningEffort; labelKey: string }[]
 
 export function ThinkingPicker(): JSX.Element | null {
+  const { t } = useTranslation()
   const info = useActiveModelInfo()
   const config = useSessionConfig()
   const setReasoningEffort = useRoxyStore((s) => s.setReasoningEffort)
@@ -143,7 +145,8 @@ export function ThinkingPicker(): JSX.Element | null {
   // left on Max that switches to a high-only model sends `high`. Show the level
   // that will actually be used, so the footer never states a comfortable lie.
   const current = clampReasoningEffort(config.reasoningEffort, info.reasoningEfforts)
-  const currentLabel = efforts.find((e) => e.value === current)?.label ?? 'High'
+  const currentKey = efforts.find((e) => e.value === current)?.labelKey
+  const currentLabel = currentKey ? t(currentKey) : t('inference.effort.high')
   // "Default" marks the level a session starts on — clamped too, so a model
   // without `high` still marks one row instead of none.
   const defaultEffort = clampReasoningEffort(DEFAULT_REASONING_EFFORT, info.reasoningEfforts)
@@ -154,7 +157,7 @@ export function ThinkingPicker(): JSX.Element | null {
         type="button"
         onClick={() => setOpen(!open)}
         className={triggerClass}
-        title="Thinking effort"
+        title={t('inference.thinkingTitle')}
       >
         <Brain className="h-3.5 w-3.5 shrink-0 text-accent" />
         <span>{currentLabel}</span>
@@ -162,7 +165,7 @@ export function ThinkingPicker(): JSX.Element | null {
       {open && (
         <div className={popoverClass} style={anchor}>
           <div className="shrink-0 border-b border-border px-3 py-2 text-[11px] font-medium text-text-subtle">
-            Thinking Effort
+            {t('inference.thinkingHeader')}
           </div>
           <div className="py-1">
             {efforts.map((e) => {
@@ -183,16 +186,16 @@ export function ThinkingPicker(): JSX.Element | null {
                   <Check
                     className={cn('h-3.5 w-3.5 shrink-0', selected ? 'text-accent' : 'opacity-0')}
                   />
-                  <span className="text-xs font-medium text-text">{e.label}</span>
+                  <span className="text-xs font-medium text-text">{t(e.labelKey)}</span>
                   <span className="ml-auto text-[11px] text-text-subtle">
-                    {e.value === defaultEffort ? 'Default' : ''}
+                    {e.value === defaultEffort ? t('inference.default') : ''}
                   </span>
                 </button>
               )
             })}
           </div>
           <div className="shrink-0 border-t border-border px-3 py-1.5 text-[11px] text-text-subtle">
-            Higher levels of thinking may increase cost.
+            {t('inference.thinkingNote')}
           </div>
         </div>
       )}
@@ -208,6 +211,7 @@ export function ThinkingPicker(): JSX.Element | null {
  * prompt, and narrows the tool allowlist (no write/edit). Build is the default.
  */
 export function AgentPicker(): JSX.Element {
+  const { t } = useTranslation()
   const activeAgentId = useRoxyStore((s) => s.activeAgentId)
   const setActiveAgent = useRoxyStore((s) => s.setActiveAgent)
   const { open, setOpen, ref, anchor } = usePopover(AGENT_POPOVER_W)
@@ -220,7 +224,7 @@ export function AgentPicker(): JSX.Element {
         type="button"
         onClick={() => setOpen(!open)}
         className={triggerClass}
-        title="Agent mode"
+        title={t('inference.agentMode')}
       >
         <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: active.color }} />
         <span>{active.name}</span>
@@ -279,6 +283,7 @@ function contextOptions(max: number): number[] {
 }
 
 export function ContextPicker(): JSX.Element | null {
+  const { t } = useTranslation()
   const info = useActiveModelInfo()
   const config = useSessionConfig()
   const setContextLimit = useRoxyStore((s) => s.setContextLimit)
@@ -296,14 +301,14 @@ export function ContextPicker(): JSX.Element | null {
         type="button"
         onClick={() => setOpen(!open)}
         className={triggerClass}
-        title="Context window"
+        title={t('inference.contextTitle')}
       >
         <span>{formatTokens(current)}</span>
       </button>
       {open && (
         <div className={popoverClass} style={anchor}>
           <div className="shrink-0 border-b border-border px-3 py-2 text-[11px] font-medium text-text-subtle">
-            Context Size
+            {t('inference.contextHeader')}
           </div>
           <div className="py-1">
             {options.map((value) => {
@@ -327,9 +332,9 @@ export function ContextPicker(): JSX.Element | null {
                   <span className="text-xs font-medium text-text">{formatTokens(value)}</span>
                   <span className="ml-auto text-[11px] text-text-subtle">
                     {value === defaultBudget
-                      ? 'Default'
+                      ? t('inference.default')
                       : value === max
-                        ? 'Longer sessions without compaction'
+                        ? t('inference.contextLonger')
                         : ''}
                   </span>
                 </button>
@@ -337,7 +342,7 @@ export function ContextPicker(): JSX.Element | null {
             })}
           </div>
           <div className="shrink-0 border-t border-border px-3 py-1.5 text-[11px] text-text-subtle">
-            Larger context may increase cost.
+            {t('inference.contextNote')}
           </div>
         </div>
       )}
@@ -358,6 +363,7 @@ interface Category {
  * results, other) with a reserved-for-response segment + a Compact button.
  */
 export function ContextMeter(): JSX.Element {
+  const { t } = useTranslation()
   const info = useActiveModelInfo()
   const config = useSessionConfig()
   const messages = useRoxyStore((s) => s.messages)
@@ -412,26 +418,43 @@ export function ContextMeter(): JSX.Element {
   const reserve = total ? Math.min(info?.outputLimit ?? 4096, Math.round(total * 0.25)) : 0
   const pct = total ? Math.min(100, Math.round((used / total) * 100)) : 0
   const reservePct = total ? Math.min(100 - pct, Math.round((reserve / total) * 100)) : 0
-  const fmtShare = (t: number): string =>
-    total ? `${((t / total) * 100).toFixed(1)}%` : formatTokens(t)
+  // Parameter renamed off `t`: this scope now has the translator.
+  const fmtShare = (n: number): string =>
+    total ? `${((n / total) * 100).toFixed(1)}%` : formatTokens(n)
 
-  const groups: { group: string; items: Category[] }[] = [
+  const groups: { id: string; group: string; items: (Category & { id: string })[] }[] = [
     {
-      group: 'System',
+      id: 'system',
+      group: t('inference.groupSystem'),
       items: [
-        { label: 'System Instructions', tokens: systemTokens },
-        ...(toolDefsTokens ? [{ label: 'Tool Definitions', tokens: toolDefsTokens }] : [])
+        {
+          id: 'systemInstructions',
+          label: t('inference.itemSystemInstructions'),
+          tokens: systemTokens
+        },
+        ...(toolDefsTokens
+          ? [{ id: 'toolDefs', label: t('inference.itemToolDefinitions'), tokens: toolDefsTokens }]
+          : [])
       ]
     },
     {
-      group: 'User Context',
+      id: 'userContext',
+      group: t('inference.groupUserContext'),
       items: [
-        { label: 'Messages', tokens: messagesTokens },
-        ...(toolTokens ? [{ label: 'Tool Results', tokens: toolTokens }] : [])
+        { id: 'messages', label: t('inference.itemMessages'), tokens: messagesTokens },
+        ...(toolTokens
+          ? [{ id: 'toolResults', label: t('inference.itemToolResults'), tokens: toolTokens }]
+          : [])
       ]
     },
     ...(otherTokens
-      ? [{ group: 'Uncategorized', items: [{ label: 'Other', tokens: otherTokens }] }]
+      ? [
+          {
+            id: 'uncategorized',
+            group: t('inference.groupUncategorized'),
+            items: [{ id: 'other', label: t('inference.itemOther'), tokens: otherTokens }]
+          }
+        ]
       : [])
   ]
 
@@ -448,10 +471,15 @@ export function ContextMeter(): JSX.Element {
       {open && (
         <div className="absolute bottom-full z-50 flex flex-col pb-1.5" style={anchor}>
           <div className="animate-pop-in min-h-0 origin-bottom-left overflow-y-auto sq-frame sq-xl sq-fill-elevated sq-ring rounded-xl border border-border bg-elevated p-3 shadow-2xl">
-            <div className="mb-1.5 text-xs font-medium text-text">Context Window</div>
+            <div className="mb-1.5 text-xs font-medium text-text">{t('inference.meterTitle')}</div>
             <div className="mb-1 flex items-baseline justify-between text-[11px] text-text-subtle">
               <span className="tabular-nums">
-                {formatTokens(used)} {total ? `/ ${formatTokens(total)}` : ''} tokens
+                {total
+                  ? t('inference.meterTokensOf', {
+                      used: formatTokens(used),
+                      total: formatTokens(total)
+                    })
+                  : t('inference.meterTokens', { used: formatTokens(used) })}
               </span>
               {total ? <span className="tabular-nums">{pct}%</span> : null}
             </div>
@@ -471,16 +499,16 @@ export function ContextMeter(): JSX.Element {
                   className="h-2.5 w-2.5 sq sq-sm rounded-sm bg-accent/30"
                   style={{ backgroundImage: hatch }}
                 />
-                Reserved for response
+                {t('inference.reservedForResponse')}
               </div>
             )}
 
             {groups.map((g) => (
-              <div key={g.group} className="mt-2.5">
+              <div key={g.id} className="mt-2.5">
                 <div className="mb-0.5 text-[11px] font-medium text-text-muted">{g.group}</div>
                 {g.items.map((it) => (
                   <div
-                    key={it.label}
+                    key={it.id}
                     className="flex items-center justify-between py-0.5 text-[11px] text-text-subtle"
                   >
                     <span>{it.label}</span>
@@ -491,9 +519,7 @@ export function ContextMeter(): JSX.Element {
             ))}
 
             {total && pct >= 75 && (
-              <div className="mt-2 text-[11px] text-danger/90">
-                Quality may decline as limit nears.
-              </div>
+              <div className="mt-2 text-[11px] text-danger/90">{t('inference.qualityWarning')}</div>
             )}
 
             <button
@@ -504,10 +530,10 @@ export function ContextMeter(): JSX.Element {
             >
               {compacting ? (
                 <>
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" /> Compacting…
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" /> {t('inference.compacting')}
                 </>
               ) : (
-                'Compact Conversation'
+                t('inference.compact')
               )}
             </button>
           </div>

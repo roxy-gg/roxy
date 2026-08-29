@@ -565,15 +565,6 @@ const BASE_SCHEMAS = [
     ['url']
   ),
   fn(
-    'websearch',
-    'Search the web for fresh, current information beyond the training cutoff, and get back the most relevant results with snippets. Use it to find docs, error messages, library versions, or recent events, then webfetch a result URL for the full page.',
-    {
-      query: str('The search query.'),
-      numResults: { type: 'number', description: 'How many results to return (default 8, max 20).' }
-    },
-    ['query']
-  ),
-  fn(
     'bash',
     'Run a shell command in the workspace (PowerShell on Windows). By default each call is a FRESH shell (cwd/env do NOT persist) that returns when the command finishes or after `timeout` seconds. For a LONG-RUNNING process (a dev server, watcher, `npm run dev`), pass background:true — it starts the process and returns immediately with an id; then use bash_output to read its logs and bash_kill to stop it.',
     {
@@ -2156,8 +2147,6 @@ function toolTitle(name: string, input: Record<string, unknown>): string {
       return s(input.url)
     case 'webfetch':
       return s(input.url)
-    case 'websearch':
-      return s(input.query)
     case 'glob':
     case 'grep':
       return s(input.pattern)

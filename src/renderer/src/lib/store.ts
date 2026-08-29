@@ -1,5 +1,7 @@
 import { create } from 'zustand'
 import { DEFAULT_AGENT_ID, getAgent } from '@shared/agents'
+import type { Language } from '@shared/i18n'
+import { applyLanguage } from '../i18n'
 import type {
   AppSettings,
   Chat,
@@ -48,7 +50,7 @@ import type {
   SyncOutcome,
   WorktreeView
 } from '@shared/api'
-import { aggregateRepoStatus } from '@shared/repos'
+import { aggregateLifecycle, aggregateRepoStatus, describeCompositeLifecycle } from '@shared/repos'
 import type { ForgeStatusView } from '@shared/forge'
 
 interface RoxyStore {
@@ -208,10 +210,10 @@ interface RoxyStore {
   togglePinnedModel: (providerId: string, model: string, pinned: boolean) => Promise<void>
   setReasoningEffort: (level: ReasoningEffort) => Promise<void>
   setContextLimit: (limit: number | null) => Promise<void>
-  setWebSearchApiKey: (key: string | null) => Promise<void>
   setAutoWorkstream: (enabled: boolean) => Promise<void>
   setTelemetryEnabled: (enabled: boolean) => Promise<void>
   setBranchPrefix: (prefix: string) => Promise<void>
+  setLanguage: (language: Language) => Promise<void>
   selectChat: (id: string) => Promise<void>
   clearActive: () => void
   newSession: () => Promise<void>
@@ -310,6 +312,14 @@ interface RoxyStore {
    */
   pullAllRepos: (chatId: string) => Promise<MultiSyncOutcome>
   resetAllRepos: (chatId: string) => Promise<MultiSyncOutcome>
+  /**
+   * Push EVERY repo of a multi-repo session.
+   *
+   * Separate from `pushBranch` for the same reason `pullAllRepos` is separate
+   * from `pullBranch`: four repos produce four outcomes, and there is no single
+   * `ok` that is true when three pushed and one was rejected.
+   */
+  pushAllRepos: (chatId: string) => Promise<MultiSyncOutcome>
   /** Hard-reset onto the upstream, stashing uncommitted work first. */
   resetBranch: (chatId: string) => Promise<SyncOutcome>
   /** Load the worktrees + branches for a project (menu open). */
@@ -512,43 +522,80 @@ async function pollStatusInto(
   set: (fn: (s: RoxyStore) => Partial<RoxyStore>) => void,
   key: string,
   chatId: string,
-  chats: Chat[]
+  chats: Chat[],
+  /** `projectRepos` from the store: which project folders are folders OF repos. */
+  projectRepos: Record<string, boolean>
 ): Promise<void> {
   const chat = chats.find((c) => c.id === chatId)
   const owner =
     chat?.kind === 'sub' && chat.parentId ? chats.find((c) => c.id === chat.parentId) : chat
 
-  if (owner?.repos?.length) {
+  // Asked for every session in a multi-repo PROJECT, not just one whose links
+  // already exist. A workstream is materialized lazily on the first turn, so a
+  // brand-new multi-repo session has no links for the whole pre-turn window -
+  // and answering "not composite" for it was what left the strip with a bare
+  // "branch pending" and no working sync buttons. The main process resolves
+  // that case to the project's own checkouts; an empty array still means "not
+  // multi-repo", so a single-repo session falls straight through.
+  if (owner?.repos?.length || (owner?.workspacePath && projectRepos[owner.workspacePath])) {
     const repos = await api.git.statusMulti(owner.id)
     // Empty means the session isn't composite after all (its links were
     // cleared) - leave the last known state rather than blanking the row.
-    if (!repos.length) return
-    const agg = aggregateRepoStatus(repos)
-    // The PR chip has no single answer across N repos. Show the first repo that
-    // has one and let the panel enumerate the rest; a chip that silently picks
-    // a winner is better than no chip, but the panel is where the truth is.
-    const lead = repos.find((r) => r.isRepo && r.forge)?.forge ?? null
-    set((s) => ({
-      repoStatus: { ...s.repoStatus, [key]: repos },
-      gitStatus: {
-        ...s.gitStatus,
-        [key]: {
-          // The composite directory isn't a repo, but the WORKSTREAM is
-          // repo-backed, and that is what this flag gates in the UI.
-          isRepo: agg.repoCount > 0,
-          root: key,
-          branch: agg.branch,
-          dirty: agg.dirty,
-          changed: agg.changed,
-          ahead: agg.ahead,
-          behind: agg.behind,
-          hasUpstream: repos.some((r) => r.hasUpstream),
-          defaultBranch: repos.find((r) => r.defaultBranch)?.defaultBranch ?? null
-        }
-      },
-      forgeStatus: lead ? { ...s.forgeStatus, [key]: lead } : s.forgeStatus
-    }))
-    return
+    if (repos.length) {
+      const agg = aggregateRepoStatus(repos)
+      // The chip describes the WHOLE workstream, folded from every repo - see
+      // `aggregateLifecycle`. It used to show the first repo that had a forge
+      // answer and let it speak for the rest, so three-pushed-one-local read as
+      // `pushed` and the repo that still needed work was invisible.
+      const composite = aggregateLifecycle(
+        repos.map((r) => ({
+          name: r.name,
+          isRepo: r.isRepo,
+          lifecycle: r.forge?.lifecycle ?? null
+        }))
+      )
+      const lead = composite
+        ? (repos.find((r) => r.isRepo && r.forge?.lifecycle.phase === composite.phase)?.forge ??
+          repos.find((r) => r.isRepo && r.forge)?.forge ??
+          null)
+        : null
+      set((s) => ({
+        repoStatus: { ...s.repoStatus, [key]: repos },
+        gitStatus: {
+          ...s.gitStatus,
+          [key]: {
+            // The composite directory isn't a repo, but the WORKSTREAM is
+            // repo-backed, and that is what this flag gates in the UI.
+            isRepo: agg.repoCount > 0,
+            root: key,
+            branch: agg.branch,
+            dirty: agg.dirty,
+            changed: agg.changed,
+            ahead: agg.ahead,
+            behind: agg.behind,
+            hasUpstream: repos.some((r) => r.hasUpstream),
+            defaultBranch: repos.find((r) => r.defaultBranch)?.defaultBranch ?? null
+          }
+        },
+        forgeStatus:
+          lead && composite
+            ? {
+                ...s.forgeStatus,
+                [key]: {
+                  ...lead,
+                  lifecycle: {
+                    ...lead.lifecycle,
+                    ...describeCompositeLifecycle(composite, lead.lifecycle),
+                    action: composite.action
+                  }
+                }
+              }
+            : s.forgeStatus
+      }))
+      return
+    }
+    // Fall through: the project scan said multi-repo but this session resolved
+    // to no repos at all. The single-repo path below is the honest fallback.
   }
 
   // One round trip for both. `forge.status` is cheap by construction: it
@@ -862,15 +909,18 @@ function syncOwner(get: () => RoxyStore, chatId: string): { chat: Chat } | { err
 async function syncAllRepos(
   get: () => RoxyStore,
   chatId: string,
-  mode: 'pull' | 'reset'
+  mode: 'pull' | 'reset' | 'push'
 ): Promise<MultiSyncOutcome> {
   const owner = syncOwner(get, chatId)
   if ('error' in owner) return { repos: [], error: owner.error }
 
-  const r =
+  const call =
     mode === 'pull'
-      ? await api.forge.pullMulti(owner.chat.id)
-      : await api.forge.resetMulti(owner.chat.id)
+      ? api.forge.pullMulti
+      : mode === 'reset'
+        ? api.forge.resetMulti
+        : api.forge.pushMulti
+  const r = await call(owner.chat.id)
   await get().refreshGitStatus(owner.chat.id)
   return r
 }
@@ -926,6 +976,10 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
       api.projects.listOrder(),
       api.settings.getTelemetry()
     ])
+    // Before `ready` flips: the splash is still up, so switching the catalog
+    // here means the first painted frame is already in the right language
+    // rather than flashing English and re-rendering.
+    await applyLanguage(settings.language)
     set({ settings, providers, chats, loops, projectOrder, telemetryEnabled, ready: true })
     // Warm the usage/cost dashboard for the titlebar pill (best-effort, async).
     void get().refreshUsage()
@@ -1172,8 +1226,16 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
       }
     }
     if (!get().gitAvailable) return
+    // Probe the project's shape before the first poll. `pollStatusInto` needs it
+    // to know a session belongs to a folder OF repos, and a session whose
+    // workstream is still pending has no links to say so on its own - without
+    // this the very first poll takes the single-repo path and the strip shows a
+    // bare "branch pending" until something else happens to probe. Cached after
+    // the first call, so this is one filesystem scan per project per app run.
+    const chatNow = get().chats.find((c) => c.id === chatId)
+    if (chatNow?.workspacePath) await get().ensureProjectRepos(chatNow.workspacePath)
     try {
-      await pollStatusInto(set, key, chatId, get().chats)
+      await pollStatusInto(set, key, chatId, get().chats, get().projectRepos)
     } catch {
       // Best-effort: a transient git failure leaves the last known state.
     }
@@ -1224,9 +1286,20 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
       // anyway, and firing N spawns at once on a machine with a dozen sessions is
       // a visible stall on the very interaction (opening the app) this is meant
       // to be invisible during.
+      // Same probe as `refreshGitStatus`, once per distinct project rather than
+      // per session: the sweep is what keeps the SIDEBAR current, and without
+      // this every multi-repo row there would fold to the single-repo path.
+      for (const workspace of new Set(
+        get()
+          .chats.map((c) => c.workspacePath)
+          .filter((p): p is string => !!p)
+      )) {
+        await get().ensureProjectRepos(workspace)
+      }
+
       for (const [key, chatId] of keys) {
         try {
-          await pollStatusInto(set, key, chatId, get().chats)
+          await pollStatusInto(set, key, chatId, get().chats, get().projectRepos)
         } catch {
           // Best-effort per session: a deleted worktree must not stop the sweep
           // and leave every row below it blank.
@@ -1256,6 +1329,7 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
 
   pullAllRepos: (chatId) => syncAllRepos(get, chatId, 'pull'),
   resetAllRepos: (chatId) => syncAllRepos(get, chatId, 'reset'),
+  pushAllRepos: (chatId) => syncAllRepos(get, chatId, 'push'),
 
   refreshWorktrees: async (workspacePath) => {
     if (!workspacePath || !get().gitAvailable) return
@@ -1415,13 +1489,17 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
     set({ telemetryEnabled: next })
   },
 
-  setBranchPrefix: async (prefix) => {
-    const settings = await api.settings.setBranchPrefix(prefix)
+  setLanguage: async (language) => {
+    // Apply FIRST, persist second. The click already told us what the user
+    // wants; making the UI wait on a database round trip just makes the picker
+    // feel broken. A failed write is a stale row, not a stuck interface.
+    await applyLanguage(language)
+    const settings = await api.settings.setLanguage(language)
     set({ settings })
   },
 
-  setWebSearchApiKey: async (key) => {
-    const settings = await api.settings.setWebSearchApiKey(key)
+  setBranchPrefix: async (prefix) => {
+    const settings = await api.settings.setBranchPrefix(prefix)
     set({ settings })
   },
 

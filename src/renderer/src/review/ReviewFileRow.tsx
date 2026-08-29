@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import { ChevronRight, Loader2, RotateCcw } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import type { GitReviewScope, ReviewDiff, ReviewFile, ReviewTarget } from '@shared/api'
 import { api } from '../lib/api'
 import { cn } from '../lib/cn'
@@ -20,6 +21,7 @@ export function ReviewFileRow({
   target: ReviewTarget | null
   onChanged: () => Promise<void>
 }): JSX.Element {
+  const { t } = useTranslation()
   const [open, setOpen] = useState(false)
   const [diff, setDiff] = useState<ReviewDiff | null>(null)
   const [busy, setBusy] = useState(false)
@@ -65,12 +67,12 @@ export function ReviewFileRow({
     setError(null)
     try {
       const result = await fn()
-      if (!result.ok) return setError(result.error ?? 'Failed')
+      if (!result.ok) return setError(result.error ?? t('review.failed'))
       // Staging moves a file out of this view entirely, so the row it was
       // rendered in is gone - hence a reload rather than a local update.
       await onChanged()
     } catch {
-      setError('Could not update this file')
+      setError(t('review.fileUpdateFailed'))
     } finally {
       setBusy(false)
     }
@@ -136,7 +138,7 @@ export function ReviewFileRow({
                   }
                   className="rounded px-1.5 py-0.5 text-[11px] text-text-subtle transition hover:bg-surface-2 hover:text-text"
                 >
-                  {scope === 'staged' ? 'Unstage' : 'Stage'}
+                  {t(scope === 'staged' ? 'review.unstage' : 'review.stage')}
                 </button>
                 <button
                   type="button"
@@ -148,7 +150,7 @@ export function ReviewFileRow({
                     void act(() => api.review.revert(rowTarget, paths))
                   }}
                   onBlur={() => setConfirmRevert(false)}
-                  title="Discard this file's changes"
+                  title={t('review.discardFile')}
                   className={cn(
                     'flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] transition',
                     confirmRevert
@@ -157,7 +159,7 @@ export function ReviewFileRow({
                   )}
                 >
                   <RotateCcw className="h-3 w-3" />
-                  {confirmRevert && 'Sure?'}
+                  {confirmRevert && t('review.revertConfirm')}
                 </button>
               </>
             )}
@@ -168,18 +170,18 @@ export function ReviewFileRow({
       {open && (
         <div className="border-t border-border/50 bg-bg/40 px-2.5 py-2">
           {file.binary || diff?.binary ? (
-            <p className="px-1 py-2 text-xs text-text-subtle">
-              Binary or very large file — not shown.
-            </p>
+            <p className="px-1 py-2 text-xs text-text-subtle">{t('review.binary')}</p>
           ) : error ? (
             <p className="px-1 py-2 text-xs text-danger">{error}</p>
           ) : !diff ? (
             <p className="flex items-center gap-2 px-1 py-2 text-xs text-text-subtle">
-              <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading diff…
+              <Loader2 className="h-3.5 w-3.5 animate-spin" /> {t('review.loadingDiff')}
             </p>
           ) : (
             <Suspense
-              fallback={<p className="px-1 py-2 text-xs text-text-subtle">Highlighting…</p>}
+              fallback={
+                <p className="px-1 py-2 text-xs text-text-subtle">{t('review.highlighting')}</p>
+              }
             >
               <FileDiffView path={diff.path} before={diff.before} after={diff.after} />
             </Suspense>
