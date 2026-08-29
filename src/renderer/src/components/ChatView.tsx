@@ -419,7 +419,8 @@ export function ChatView(): JSX.Element {
               <Settings className="h-3.5 w-3.5" /> Settings
             </button>
           )}
-          <UsageMeter />
+          {hasSessionInfo && <ChangesChip />}
+            <UsageMeter />
         </div>
       </header>
 
@@ -549,11 +550,7 @@ export function ChatView(): JSX.Element {
         </div>
       )}
 
-      {/* Directly above the composer, where it reads as "here is what has
-          changed" rather than as another status field. Clicking opens the
-          review WINDOW - unfolding a diff here buried the transcript. */}
-      <ChangesChip />
-
+      
       {/* A subagent's session can now be stopped from its own composer: the Stop
           cancels the DELEGATE (there is no local request here to abort), which
           is what the button visibly means in this view. */}

@@ -16,7 +16,7 @@ export default function Chat(): JSX.Element {
       <Sidebar />
       <ChatView />
       {reviewPaneOpen && activeChatId && (
-        <div className="w-[480px] shrink-0 border-l border-border bg-bg-app flex flex-col min-h-0 titlebar reserve-controls-right">
+        <div className="w-[480px] shrink-0 border-l border-border bg-bg-app flex flex-col min-h-0">
           <ReviewPane
             sessionId={activeChatId}
             className="flex-1"

@@ -1,8 +1,10 @@
+import { FileDiff } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { statusKeyForSession } from '@shared/workstream'
 import { api } from '../lib/api'
 import { GIT_POLL_MS } from '../lib/polling'
 import { useRoxyStore } from '../lib/store'
+import { cn } from '../lib/cn'
 
 /**
  * `Changes +12 -3` above the composer - the entry point to reviewing a
@@ -18,6 +20,8 @@ import { useRoxyStore } from '../lib/store'
  * tree is not nagged by a permanent `+0 -0`.
  */
 export function ChangesChip(): JSX.Element | null {
+  const setReviewPaneOpen = useRoxyStore((s) => s.setReviewPaneOpen)
+  const reviewPaneOpen = useRoxyStore((s) => s.reviewPaneOpen)
   const chats = useRoxyStore((s) => s.chats)
   const activeChatId = useRoxyStore((s) => s.activeChatId)
   const gitAvailable = useRoxyStore((s) => s.gitAvailable)
@@ -73,29 +77,28 @@ export function ChangesChip(): JSX.Element | null {
   if (!sessionId || !gitAvailable || changed === 0) return null
 
   return (
-    <div className="shrink-0 px-4 text-xs">
-      <div className="mx-auto max-w-3xl px-1">
-        <button
-          type="button"
-          onClick={() => {}}
-          title="Review these changes"
-          className="press-scale mb-1.5 flex items-center gap-1.5 rounded-full border border-border/60 px-2.5 py-1 text-text-muted transition hover:border-border hover:bg-white/5 hover:text-text"
-        >
-          <span>Changes</span>
-          {/* Falls back to a file count until the diff lands, because `+0 -0`
-              during the fetch would be a lie dressed as precision. */}
-          {counts && (counts.additions > 0 || counts.deletions > 0) ? (
-            <span className="flex items-center gap-1 tabular-nums">
-              {counts.additions > 0 && <span className="text-success">+{counts.additions}</span>}
-              {counts.deletions > 0 && <span className="text-danger">-{counts.deletions}</span>}
-            </span>
-          ) : (
-            <span className="tabular-nums text-text-subtle">
-              {changed} file{changed === 1 ? '' : 's'}
-            </span>
-          )}
-        </button>
-      </div>
-    </div>
+    <button
+      type="button"
+      onClick={() => setReviewPaneOpen(true)}
+      title="Review these changes"
+      className={cn(
+        '[-webkit-app-region:no-drag] press-scale flex h-7 items-center gap-1.5 sq sq-lg sq-ring rounded-lg border px-2 text-xs tabular-nums transition-colors',
+        reviewPaneOpen
+          ? 'border-border-strong [--sq-ring:var(--color-border-strong)] bg-elevated text-text'
+          : 'border-border bg-surface text-text-muted hover:border-border-strong hover:[--sq-ring:var(--color-border-strong)] hover:text-text'
+      )}
+    >
+      <FileDiff className="h-3.5 w-3.5" />
+      {counts && (counts.additions > 0 || counts.deletions > 0) ? (
+        <span className="flex items-center gap-1">
+          {counts.additions > 0 && <span className="text-success">+{counts.additions}</span>}
+          {counts.deletions > 0 && <span className="text-danger">-{counts.deletions}</span>}
+        </span>
+      ) : (
+        <span className="text-text-subtle">
+          {changed} file{changed === 1 ? '' : 's'}
+        </span>
+      )}
+    </button>
   )
 }
