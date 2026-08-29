@@ -54,7 +54,7 @@ export function BrowserChrome(): JSX.Element {
   // a session and stays that session's for its whole life.
   const [sessionId, setSessionId] = useState<string | null>(null)
 
-    const onReview = false /* removed review */
+  const onReview = false /* removed review */
   // There is only ever one review tab, so once it exists the menu drops the
   // row rather than offering an action that would just re-focus it.
   const hasReview = false /* removed review */

@@ -258,7 +258,7 @@ const roxy: RoxyApi = {
       ipcRenderer.invoke(CHANNELS.reviewCommits, sessionId, repo, limit),
     stage: (target, files) => ipcRenderer.invoke(CHANNELS.reviewStage, target, files),
     unstage: (target, files) => ipcRenderer.invoke(CHANNELS.reviewUnstage, target, files),
-    revert: (target, files) => ipcRenderer.invoke(CHANNELS.reviewRevert, target, files),
+    revert: (target, files) => ipcRenderer.invoke(CHANNELS.reviewRevert, target, files)
   },
   forge: {
     status: (cwd, force) => ipcRenderer.invoke(CHANNELS.forgeStatus, cwd, force),

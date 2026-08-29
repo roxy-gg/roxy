@@ -1182,7 +1182,6 @@ export interface RoxyApi {
      * git - untracked files are deleted outright. Confirm before calling.
      */
     revert(target: ReviewTarget, files: string[]): Promise<{ ok: boolean; error?: string }>
-
   }
   remote: {
     /** Mint a room on roxy.gg + open the host relay socket for a session. */

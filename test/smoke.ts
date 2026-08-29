@@ -3710,47 +3710,6 @@ async function main(): Promise<void> {
         after.join(',')
       )
     }
-    // Review is a TAB, not an overlay: it joins the strip beside the pages,
-    // only ever once, and closing it leaves the page tabs alone.
-    // Sit on the real page first, so the checks below prove review doesn't
-    // disturb the page the user was actually looking at.
-    const pageTabId = browser.listTabs().find((x) => x.url.includes('smoke.html'))!.id
-    browser.activateTab(pageTabId)
-    browser.newReviewTab()
-    const withReview = browser.listTabs()
-    const reviewTabs = withReview.filter((x) => x.kind === 'review')
-    check(
-      'browser.newReviewTab adds one active review tab beside the pages',
-      reviewTabs.length === 1 && reviewTabs[0].active && withReview.some((x) => x.kind === 'page'),
-      withReview.map((x) => `${x.kind}${x.active ? '*' : ''}`).join(',')
-    )
-    browser.newReviewTab()
-    check(
-      'browser.newReviewTab focuses the existing review tab instead of a second one',
-      browser.listTabs().filter((x) => x.kind === 'review').length === 1,
-      browser
-        .listTabs()
-        .map((x) => x.kind)
-        .join(',')
-    )
-    // The page tools must keep working while review is the tab in front, and
-    // on the page that was in front -- the agent shouldn't break, or quietly
-    // switch pages, because the user left the diff up.
-    const readOnReview = await withTimeout(browser.getHtml('#h'), 15_000, 'browser_read')
-    check(
-      'browser_read still reaches the last-active page while review is up',
-      readOnReview.includes('Hi roxy'),
-      readOnReview.slice(0, 80)
-    )
-    const pagesBefore = browser.listTabs().filter((x) => x.kind === 'page').length
-    browser.closeTab(reviewTabs[0].id)
-    const closed = browser.listTabs()
-    check(
-      'closing the review tab keeps the page tabs',
-      !closed.some((x) => x.kind === 'review') &&
-        closed.filter((x) => x.kind === 'page').length === pagesBefore,
-      closed.map((x) => x.kind).join(',')
-    )
     browser.close()
   } catch (e) {
     check('browser tools', false, e instanceof Error ? e.message : String(e))
