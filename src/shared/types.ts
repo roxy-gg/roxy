@@ -4,6 +4,7 @@
  * Node, Electron, or browser-specific imports.
  */
 import type { RepoLink } from './repos'
+import type { Language } from './i18n'
 
 // ---- Providers ---------------------------------------------------------------
 
@@ -416,6 +417,15 @@ export interface AppSettings {
    * people prefer; it is a real choice, not a reason to reimpose the default.
    */
   branchPrefix: string
+  /**
+   * Language for Roxy's own interface. Defaults to English.
+   *
+   * This is the CHROME only -- buttons, labels, settings copy. It is
+   * deliberately not passed to the model: what language the agent answers in is
+   * decided by what the user writes to it, and pinning that to a UI preference
+   * would surprise anyone who works in English inside a Spanish desktop.
+   */
+  language: Language
   /**
    * Which theme paints the UI. Null means the built-in default.
    *

@@ -1,6 +1,11 @@
 import '@fontsource-variable/geist/index.css'
 import '@fontsource-variable/geist-mono/index.css'
 import '../assets/main.css'
+// Its own i18n init: this window has a separate React root, so the main
+// window's bootstrap never runs here.
+import '../i18n'
+import { applyLanguage } from '../i18n'
+import { api } from '../lib/api'
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { BrowserChrome } from './BrowserChrome'
@@ -15,6 +20,13 @@ document.documentElement.dataset.platform = window.electron?.process?.platform ?
 // broadcast from main rather than reading a value once at launch.
 primeTheme()
 startTheme()
+
+// Best-effort: paint in English if the settings read fails rather than blocking
+// the toolbar on it.
+void api.settings
+  .getAll()
+  .then((s) => applyLanguage(s.language))
+  .catch(() => {})
 
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
   <React.StrictMode>

@@ -2,7 +2,8 @@ import { useCallback, useEffect, useRef, useState, type CSSProperties } from 're
 import { useMenuAnchor } from '../lib/useMenuAnchor'
 import { ExternalLink, Play, RotateCw, ScrollText, Square, Terminal } from 'lucide-react'
 import type { ServiceView } from '@shared/api'
-import { isServiceFailure, serviceStatusLabel, servicesSummary } from '@shared/services'
+import { isServiceFailure, serviceStatusLabel } from '@shared/services'
+import { useTranslation } from 'react-i18next'
 import { useRoxyStore } from '../lib/store'
 import { cn } from '../lib/cn'
 import { TerminalOutput } from './TerminalOutput'
@@ -81,6 +82,7 @@ export function ServicesSegment({
   services: ServiceView[]
   sessionId: string
 }): JSX.Element {
+  const { t } = useTranslation()
   const refreshServices = useRoxyStore((s) => s.refreshServices)
   const [open, setOpen] = useState(false)
   const [logsFor, setLogsFor] = useState<string | null>(null)
@@ -136,7 +138,7 @@ export function ServicesSegment({
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        title="Processes this session is running"
+        title={t('services.segmentTitle')}
         className={cn(
           'flex min-w-0 items-center gap-1.5 sq sq-md rounded-md px-1.5 py-1 transition hover:bg-white/5',
           open ? 'text-text' : 'text-text-muted hover:text-text'
@@ -160,7 +162,17 @@ export function ServicesSegment({
             noise teaches people to ignore it everywhere else in the app. Grey
             states the fact and leaves it there. */}
         <span className={cn('truncate', failed > 0 && 'text-text-muted')}>
-          {servicesSummary(services)}
+          {(() => {
+            // Same shape as `servicesSummary` in @shared, rebuilt here so each
+            // fragment is a real plural key. Ordered live-first, then broken;
+            // "done" is only worth saying once nothing is still running.
+            const settled = services.length - running - failed
+            const parts: string[] = []
+            if (running > 0) parts.push(t('services.running', { count: running }))
+            if (failed > 0) parts.push(t('services.failed', { count: failed }))
+            if (settled > 0 && running === 0) parts.push(t('services.done', { count: settled }))
+            return parts.join(' \u00b7 ') || t('services.done', { count: services.length })
+          })()}
         </span>
       </button>
     </div>
@@ -182,13 +194,16 @@ function ServicesMenu({
   /** Width + edge-clamped offset + height cap, from useMenuAnchor. */
   style: CSSProperties
 }): JSX.Element {
+  const { t } = useTranslation()
   return (
     // `left` and `maxHeight` come from the anchor rather than from classes: a
     // fixed `left-0` on a trigger this far right sends the menu off the window,
     // and there is no scroll container to rescue it.
     <div className="absolute bottom-full z-50 flex flex-col pb-1.5" style={style}>
       <div className="flex min-h-0 flex-col overflow-hidden sq-frame sq-xl sq-fill-elevated sq-ring rounded-xl border border-border bg-elevated py-1 shadow-2xl">
-        <div className="shrink-0 px-3 py-1 text-[11px] font-medium text-text-muted">Processes</div>
+        <div className="shrink-0 px-3 py-1 text-[11px] font-medium text-text-muted">
+          {t('services.menuHeader')}
+        </div>
         {/* Scrolls instead of growing past the top of the window: a worktree
             setup can leave several processes behind, and the header has to stay
             on screen or the list loses its label. */}
@@ -219,6 +234,7 @@ function ServiceRow({
   logsOpen: boolean
   onToggleLogs: () => void
 }): JSX.Element {
+  const { t } = useTranslation()
   const refreshServices = useRoxyStore((s) => s.refreshServices)
   const [busy, setBusy] = useState(false)
   const isRunning = service.status === 'running'
@@ -260,12 +276,12 @@ function ServiceRow({
         </span>
 
         <div className="flex shrink-0 items-center gap-0.5">
-          <RowAction onClick={onToggleLogs} label="Logs" active={logsOpen}>
+          <RowAction onClick={onToggleLogs} label={t('services.logs')} active={logsOpen}>
             <ScrollText className="h-3 w-3" />
           </RowAction>
           <RowAction
             onClick={() => void act(() => api().services.restart(sessionId, service.id))}
-            label={isRunning ? 'Restart' : 'Start'}
+            label={isRunning ? t('services.restart') : t('services.start')}
             disabled={busy}
           >
             {isRunning ? <RotateCw className="h-3 w-3" /> : <Play className="h-3 w-3" />}
@@ -273,7 +289,7 @@ function ServiceRow({
           {isRunning && (
             <RowAction
               onClick={() => void act(() => api().services.stop(sessionId, service.id))}
-              label="Stop"
+              label={t('services.stop')}
               disabled={busy}
             >
               <Square className="h-3 w-3" />
@@ -282,7 +298,7 @@ function ServiceRow({
           {isRunning && service.port != null && (
             <RowAction
               onClick={() => void api().services.open(sessionId, service.port!)}
-              label={`Open localhost:${service.port} in this session's browser`}
+              label={t('services.openPort', { port: service.port })}
             >
               <ExternalLink className="h-3 w-3" />
             </RowAction>

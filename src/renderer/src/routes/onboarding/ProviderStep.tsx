@@ -1,4 +1,5 @@
 import { useMemo, useState, type ReactNode } from 'react'
+import { useTranslation, Trans } from 'react-i18next'
 import {
   ArrowLeft,
   ArrowRight,
@@ -24,6 +25,7 @@ import { SubscriptionSetup } from '../../components/SubscriptionSetup'
 const LISTED_PROVIDERS = SEED_PROVIDERS
 
 export function ProviderStep(): JSX.Element {
+  const { t } = useTranslation()
   const providers = useRoxyStore((s) => s.providers)
   const connectedIds = new Set(providers.map((p) => p.id))
   const [query, setQuery] = useState('')
@@ -37,11 +39,8 @@ export function ProviderStep(): JSX.Element {
 
   return (
     <div>
-      <h1 className="text-2xl font-semibold tracking-tight">Connect a provider</h1>
-      <p className="mt-2 text-sm text-text-muted">
-        Start with Roxy&rsquo;s own inference — one key for 300+ models — or bring your own
-        provider. Add more anytime in Settings.
-      </p>
+      <h1 className="text-2xl font-semibold tracking-tight">{t('onboarding.connectProvider')}</h1>
+      <p className="mt-2 text-sm text-text-muted">{t('onboarding.connectProviderBody')}</p>
 
       {providers.length > 0 && (
         <div className="mt-5 flex flex-wrap gap-2">
@@ -60,7 +59,9 @@ export function ProviderStep(): JSX.Element {
 
       <div className="my-6 flex items-center gap-3">
         <span className="h-px flex-1 bg-border" />
-        <span className="text-xs font-medium uppercase tracking-wide text-text-subtle">or</span>
+        <span className="text-xs font-medium uppercase tracking-wide text-text-subtle">
+          {t('onboarding.or')}
+        </span>
         <span className="h-px flex-1 bg-border" />
       </div>
 
@@ -69,7 +70,7 @@ export function ProviderStep(): JSX.Element {
         <Input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder={`Search ${LISTED_PROVIDERS.length} providers…`}
+          placeholder={t('onboarding.searchProviders', { count: LISTED_PROVIDERS.length })}
           className="pl-9"
         />
       </div>
@@ -77,7 +78,7 @@ export function ProviderStep(): JSX.Element {
       <div className="mt-3 max-h-[320px] overflow-y-auto sq sq-xl sq-ring rounded-xl border border-border bg-surface">
         {filtered.length === 0 ? (
           <p className="px-4 py-8 text-center text-sm text-text-subtle">
-            No providers match “{query}”.
+            {t('onboarding.noMatch', { query })}
           </p>
         ) : (
           <div className="divide-y divide-border">
@@ -105,6 +106,7 @@ function RoxyHero({
   connected: boolean
   onClick: () => void
 }): JSX.Element {
+  const { t } = useTranslation()
   return (
     <button
       onClick={onClick}
@@ -119,22 +121,20 @@ function RoxyHero({
       </span>
       <span className="min-w-0 flex-1">
         <span className="flex items-center gap-2">
-          <span className="text-base font-semibold text-text">Roxy Inference</span>
+          <span className="text-base font-semibold text-text">{t('onboarding.roxyInference')}</span>
           <span className="shrink-0 rounded-full border border-accent/30 bg-accent/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-accent">
-            Recommended
+            {t('onboarding.recommended')}
           </span>
         </span>
-        <span className="mt-1 block text-sm text-text-muted">
-          One key for 300+ models, billed to your roxy.gg balance — the fastest way to start.
-        </span>
+        <span className="mt-1 block text-sm text-text-muted">{t('onboarding.roxyPitch')}</span>
       </span>
       {connected ? (
         <span className="inline-flex shrink-0 items-center gap-1.5 sq sq-lg sq-ring [--sq-ring:color-mix(in_srgb,var(--color-success)_30%,transparent)] rounded-lg border border-success/30 bg-success/10 px-3 py-2 text-sm font-medium text-success">
-          <Check className="h-4 w-4" /> Connected
+          <Check className="h-4 w-4" /> {t('onboarding.connected')}
         </span>
       ) : (
         <span className="inline-flex shrink-0 items-center gap-1.5 sq sq-lg rounded-lg bg-accent px-3.5 py-2 text-sm font-semibold text-white transition-[filter] group-hover:brightness-110">
-          Use Roxy <ArrowRight className="h-4 w-4" />
+          {t('onboarding.useRoxy')} <ArrowRight className="h-4 w-4" />
         </span>
       )}
     </button>
@@ -150,6 +150,7 @@ function ProviderRow({
   connected: boolean
   onClick: () => void
 }): JSX.Element {
+  const { t } = useTranslation()
   return (
     <button
       onClick={onClick}
@@ -163,7 +164,7 @@ function ProviderRow({
           <span className="truncate text-sm font-medium text-text">{seed.name}</span>
           {seed.recommended && seed.id !== 'roxy' && (
             <span className="shrink-0 rounded-full border border-accent/30 bg-accent/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-accent">
-              Recommended
+              {t('onboarding.recommended')}
             </span>
           )}
           {connected && <Check className="h-3.5 w-3.5 shrink-0 text-success" />}
@@ -182,6 +183,7 @@ function ProviderSetup({
   seed: SeedProvider
   onClose: () => void
 }): JSX.Element {
+  const { t } = useTranslation()
   const refreshProviders = useRoxyStore((s) => s.refreshProviders)
   const [apiKey, setApiKey] = useState('')
   const [baseURL, setBaseURL] = useState(seed.baseURL ?? '')
@@ -241,7 +243,7 @@ function ProviderSetup({
       <header className="titlebar reserve-controls-left reserve-controls-right flex h-14 shrink-0 items-center gap-3 border-b border-border px-5">
         <button
           onClick={onClose}
-          title="Back"
+          title={t('onboarding.back')}
           className="press-scale flex h-8 w-8 items-center justify-center sq sq-lg rounded-lg text-text-muted hover:bg-white/5 hover:text-text"
         >
           <ArrowLeft className="h-4 w-4" />
@@ -264,14 +266,16 @@ function ProviderSetup({
           ) : isConnectableNow(seed) ? (
             <div className="flex flex-col gap-4">
               <div>
-                <h2 className="text-lg font-semibold">Set up {seed.name}</h2>
+                <h2 className="text-lg font-semibold">
+                  {t('onboarding.setUp', { name: seed.name })}
+                </h2>
                 <p className="mt-1 text-sm text-text-muted">
-                  {needsKey ? 'Paste an API key to connect.' : 'Point Roxy at your local endpoint.'}
+                  {needsKey ? t('onboarding.pasteKey') : t('onboarding.pointAtEndpoint')}
                 </p>
                 {seed.notes && <p className="mt-2 text-xs text-text-subtle">{seed.notes}</p>}
               </div>
               {needsKey && (
-                <Field label="API key">
+                <Field label={t('onboarding.apiKey')}>
                   <Input
                     type="password"
                     value={apiKey}
@@ -287,12 +291,12 @@ function ProviderSetup({
                   onClick={() => void api.system.openExternal('https://roxy.gg/signup')}
                   className="-mt-1 inline-flex items-center gap-1 self-start text-xs text-accent transition-colors hover:underline"
                 >
-                  Get an API key from your roxy.gg dashboard
+                  {t('onboarding.getRoxyKey')}
                   <ExternalLink className="h-3 w-3" />
                 </button>
               )}
               {showBaseURL && (
-                <Field label="Base URL">
+                <Field label={t('onboarding.baseUrl')}>
                   <Input
                     value={baseURL}
                     onChange={(e) => setBaseURL(e.target.value)}
@@ -303,27 +307,30 @@ function ProviderSetup({
               {error && <p className="text-xs text-danger">{error}</p>}
               <div className="flex items-center gap-2">
                 <Button variant="primary" onClick={connect} disabled={!canConnect || connecting}>
-                  {connecting ? 'Connecting…' : 'Connect'}
+                  {connecting ? t('onboarding.connecting') : t('onboarding.connect')}
                 </Button>
                 <Button variant="ghost" onClick={onClose}>
-                  Cancel
+                  {t('common.cancel')}
                 </Button>
               </div>
-              <p className="text-[11px] text-text-subtle">
-                Keys are encrypted with your OS keychain and stored locally.
-              </p>
+              <p className="text-[11px] text-text-subtle">{t('onboarding.keysEncrypted')}</p>
             </div>
           ) : (
             <div className="flex flex-col gap-4">
               <div>
-                <h2 className="text-lg font-semibold">Set up {seed.name}</h2>
+                <h2 className="text-lg font-semibold">
+                  {t('onboarding.setUp', { name: seed.name })}
+                </h2>
                 <p className="mt-1 text-sm text-text-muted">
-                  Guided <span className="text-text">{AUTH_LABELS[seed.auth]}</span> sign-in is
-                  coming soon. API-key and local providers (and GitHub Copilot) work today.
+                  <Trans
+                    i18nKey="onboarding.guidedSoon"
+                    values={{ auth: AUTH_LABELS[seed.auth] }}
+                    components={{ strong: <span className="text-text" /> }}
+                  />
                 </p>
               </div>
               <Button variant="ghost" onClick={onClose}>
-                Back to list
+                {t('onboarding.backToList')}
               </Button>
             </div>
           )}
@@ -334,6 +341,7 @@ function ProviderSetup({
 }
 
 function CopilotSetup({ onConnected }: { onConnected: () => void }): JSX.Element {
+  const { t } = useTranslation()
   const [status, setStatus] = useState<'idle' | 'waiting' | 'error'>('idle')
   const [flow, setFlow] = useState<DeviceFlowStart | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -365,14 +373,12 @@ function CopilotSetup({ onConnected }: { onConnected: () => void }): JSX.Element
     return (
       <div className="flex flex-col gap-4">
         <div>
-          <h2 className="text-lg font-semibold">Sign in to GitHub Copilot</h2>
-          <p className="mt-1 text-sm text-text-muted">
-            Authorize Roxy with your GitHub account using a device code. Requires an active Copilot
-            subscription.
-          </p>
+          <h2 className="text-lg font-semibold">{t('onboarding.copilotTitle')}</h2>
+          <p className="mt-1 text-sm text-text-muted">{t('onboarding.copilotBody')}</p>
         </div>
         <Button variant="primary" onClick={begin}>
-          <ProviderLogo id="github-copilot" name="GitHub" size={16} /> Continue with GitHub
+          <ProviderLogo id="github-copilot" name="GitHub" size={16} />{' '}
+          {t('onboarding.copilotContinue')}
         </Button>
       </div>
     )
@@ -381,10 +387,10 @@ function CopilotSetup({ onConnected }: { onConnected: () => void }): JSX.Element
   if (status === 'error') {
     return (
       <div className="flex flex-col gap-4">
-        <h2 className="text-lg font-semibold">Couldn’t connect</h2>
+        <h2 className="text-lg font-semibold">{t('onboarding.copilotFailed')}</h2>
         <p className="text-sm text-danger">{error}</p>
         <Button variant="secondary" onClick={begin}>
-          Try again
+          {t('onboarding.tryAgain')}
         </Button>
       </div>
     )
@@ -393,10 +399,8 @@ function CopilotSetup({ onConnected }: { onConnected: () => void }): JSX.Element
   return (
     <div className="flex flex-col items-center gap-5 text-center">
       <div>
-        <h2 className="text-lg font-semibold">Enter this code on GitHub</h2>
-        <p className="mt-1 text-sm text-text-muted">
-          We opened github.com/login/device in your browser. Enter the code to authorize Roxy.
-        </p>
+        <h2 className="text-lg font-semibold">{t('onboarding.copilotCodeTitle')}</h2>
+        <p className="mt-1 text-sm text-text-muted">{t('onboarding.copilotCodeBody')}</p>
       </div>
       <button
         onClick={copyCode}
@@ -408,16 +412,16 @@ function CopilotSetup({ onConnected }: { onConnected: () => void }): JSX.Element
         <Copy className="h-4 w-4 text-text-subtle transition-colors group-hover:text-text" />
       </button>
       <span className="text-xs text-text-subtle">
-        {copied ? 'Copied!' : 'Click the code to copy'}
+        {copied ? t('onboarding.copied') : t('onboarding.clickToCopy')}
       </span>
       <Button
         variant="secondary"
         onClick={() => flow && api.system.openExternal(flow.verificationUri)}
       >
-        <ExternalLink className="h-4 w-4" /> Open GitHub
+        <ExternalLink className="h-4 w-4" /> {t('onboarding.openGitHub')}
       </Button>
       <div className="mt-1 flex items-center gap-2 text-sm text-text-muted">
-        <Loader2 className="h-4 w-4 animate-spin" /> Waiting for authorization…
+        <Loader2 className="h-4 w-4 animate-spin" /> {t('onboarding.waitingForAuth')}
       </div>
     </div>
   )

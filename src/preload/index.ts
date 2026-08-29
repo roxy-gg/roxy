@@ -30,6 +30,7 @@ const roxy: RoxyApi = {
     setContextLimit: (limit) => ipcRenderer.invoke(CHANNELS.settingsSetContextLimit, limit),
     setAutoWorkstream: (enabled) => ipcRenderer.invoke(CHANNELS.settingsSetAutoWorkstream, enabled),
     setBranchPrefix: (prefix) => ipcRenderer.invoke(CHANNELS.settingsSetBranchPrefix, prefix),
+    setLanguage: (language) => ipcRenderer.invoke(CHANNELS.settingsSetLanguage, language),
     completeOnboarding: () => ipcRenderer.invoke(CHANNELS.settingsCompleteOnboarding),
     reset: () => ipcRenderer.invoke(CHANNELS.settingsReset),
     getTelemetry: () => ipcRenderer.invoke(CHANNELS.settingsGetTelemetry),
