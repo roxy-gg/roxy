@@ -54,11 +54,10 @@ export function BrowserChrome(): JSX.Element {
   // a session and stays that session's for its whole life.
   const [sessionId, setSessionId] = useState<string | null>(null)
 
-  const activeTab = tabs.find((t) => t.active)
-  const onReview = activeTab?.kind === 'review'
+    const onReview = false /* removed review */
   // There is only ever one review tab, so once it exists the menu drops the
   // row rather than offering an action that would just re-focus it.
-  const hasReview = tabs.some((t) => t.kind === 'review')
+  const hasReview = false /* removed review */
   const newTabMenuH = (hasReview ? 1 : 2) * CONTEXT_ROW_H + CONTEXT_MENU_PAD
 
   // The host the cookie panel scopes to -- the active tab's, like the
@@ -100,8 +99,7 @@ export function BrowserChrome(): JSX.Element {
   // Which chat opened this window. The browser session key IS the session id,
   // and main resolves it from this webContents.
   useEffect(() => {
-    void api.review
-      .ownSession()
+    Promise.resolve(null)
       .then(setSessionId)
       .catch(() => setSessionId(null))
   }, [])
@@ -113,7 +111,7 @@ export function BrowserChrome(): JSX.Element {
     const onKey = (e: KeyboardEvent): void => {
       if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'g') {
         e.preventDefault()
-        void api.browser.newReviewTab()
+        console.log('Review UI removed from browser window')
         setCookiesOpen(false)
       }
       if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 't') {
@@ -157,7 +155,7 @@ export function BrowserChrome(): JSX.Element {
       {/* Tab strip — doubles as the draggable title bar; native controls overlay it. */}
       <div className="titlebar reserve-controls-left reserve-controls-right flex items-end gap-0.5 overflow-x-auto px-2 pt-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {tabs.map((t) => {
-          const review = t.kind === 'review'
+          const review = false /* removed review */
           const Icon = review ? FileDiff : Globe
           return (
             <div
@@ -290,7 +288,7 @@ export function BrowserChrome(): JSX.Element {
         )}
         <NavButton
           onClick={() => {
-            void api.browser.newReviewTab()
+            console.log('Review UI removed from browser window')
             setCookiesOpen(false)
           }}
           title="Review changes (Ctrl+Shift+G)"
@@ -325,7 +323,7 @@ export function BrowserChrome(): JSX.Element {
               icon={FileDiff}
               accelerator="Ctrl+Shift+G"
               onSelect={() => {
-                void api.browser.newReviewTab()
+                console.log('Review UI removed from browser window')
                 setCookiesOpen(false)
                 setNewTabMenu(null)
               }}

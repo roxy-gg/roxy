@@ -1504,6 +1504,9 @@ export async function stageFiles(
   cwd: string,
   files: string[]
 ): Promise<{ ok: boolean; error?: string }> {
+  if (files.length > 0 && files.some((f) => !reviewPath(cwd, f)))
+    return { ok: false, error: 'Path escapes repository.' }
+
   // `--` stops a path that looks like an option from being read as one.
   const args = files.length ? ['add', '--', ...files] : ['add', '-A']
   const r = await git(args, cwd)
@@ -1515,6 +1518,9 @@ export async function unstageFiles(
   cwd: string,
   files: string[]
 ): Promise<{ ok: boolean; error?: string }> {
+  if (files.length > 0 && files.some((f) => !reviewPath(cwd, f)))
+    return { ok: false, error: 'Path escapes repository.' }
+
   const hasHead = !!(await resolveCommit(cwd))
   const args = hasHead
     ? files.length

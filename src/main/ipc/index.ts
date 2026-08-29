@@ -787,7 +787,6 @@ export function registerIpc(): void {
   ipcMain.handle(CHANNELS.browserReload, (e) => browser.reload(keyOf(e)))
   ipcMain.handle(CHANNELS.browserStop, (e) => browser.stop(keyOf(e)))
   ipcMain.handle(CHANNELS.browserNewTab, (e, url?: string) => browser.newTab(url, keyOf(e)))
-  ipcMain.handle(CHANNELS.browserNewReviewTab, (e) => browser.newReviewTab(keyOf(e)))
   ipcMain.handle(CHANNELS.browserCloseTab, (e, id: string) => browser.closeTab(id, keyOf(e)))
   ipcMain.handle(CHANNELS.browserActivateTab, (e, id: string) => browser.activateTab(id, keyOf(e)))
   ipcMain.handle(CHANNELS.browserMoveTab, (e, id: string, toIndex: number) =>
@@ -999,10 +998,17 @@ export function registerIpc(): void {
   }
 
   // ---- review (what actually changed: the Changes chip's diff pane) ----
+  const requireMainWindow = (e: Electron.IpcMainInvokeEvent): void => {
+    if (browser.keyForContents(e.sender)) {
+      throw new Error('Access denied: action not allowed from browser windows')
+    }
+  }
+
   // Same never-throw contract as the git handlers above. A missing repo means
   // "all linked repos" for lists and bulk actions; a row-level action always
   // sends the repo name carried by that row.
   ipcMain.handle(CHANNELS.reviewFiles, async (_e, target: ReviewTarget): Promise<ReviewFile[]> => {
+    requireMainWindow(_e)
     const groups = await Promise.all(
       reviewRepos(target.sessionId, target.repo).map(async ({ name, cwd }) => {
         const files = await git.reviewFiles(cwd, target.scope, target.commit)
@@ -1015,6 +1021,7 @@ export function registerIpc(): void {
   ipcMain.handle(
     CHANNELS.reviewDiff,
     async (_e, target: ReviewTarget, file: string): Promise<ReviewDiff | null> => {
+      requireMainWindow(_e)
       const selected = reviewRepos(target.sessionId, target.repo)
       // A file path is only meaningful inside one repository. Multi-repo rows
       // always carry their repo name, so an ambiguous target is rejected.
@@ -1026,6 +1033,7 @@ export function registerIpc(): void {
   ipcMain.handle(
     CHANNELS.reviewCommits,
     async (_e, sessionId: string, repoName?: string, limit?: number): Promise<ReviewCommit[]> => {
+      requireMainWindow(_e)
       const selected = reviewRepos(sessionId, repoName)
       const n = Math.min(Math.max(Math.trunc(Number(limit) || 30), 1), 100)
       const groups = await Promise.all(
@@ -1060,28 +1068,20 @@ export function registerIpc(): void {
     return errors.length ? { ok: false, error: errors.join('\n') } : { ok: true }
   }
 
-  ipcMain.handle(CHANNELS.reviewStage, (_e, target: ReviewTarget, files: string[]) =>
-    mutateReviewRepos(target, files, git.stageFiles)
-  )
-
-  ipcMain.handle(CHANNELS.reviewUnstage, (_e, target: ReviewTarget, files: string[]) =>
-    mutateReviewRepos(target, files, git.unstageFiles)
-  )
-
-  // The browser window's chrome has no store, so it cannot know which chat
-  // opened it. Its session key IS the session id (see browserKey in the
-  // harness), and main already maps a chrome webContents back to that key.
-  ipcMain.handle(CHANNELS.reviewOwnSession, (e): string | null => browser.keyForContents(e.sender))
-
-  // The chat's only door to the review pane, which lives in the browser
-  // window's chrome and cannot be reached from the main window at all.
-  ipcMain.handle(CHANNELS.reviewOpenWindow, (_e, sessionId: string) => {
-    if (sessionId) browser.openReview(sessionId)
+  ipcMain.handle(CHANNELS.reviewStage, (_e, target: ReviewTarget, files: string[]) => {
+    requireMainWindow(_e)
+    return mutateReviewRepos(target, files, git.stageFiles)
   })
 
-  ipcMain.handle(CHANNELS.reviewRevert, (_e, target: ReviewTarget, files: string[]) =>
-    mutateReviewRepos(target, files, git.revertFiles)
-  )
+  ipcMain.handle(CHANNELS.reviewUnstage, (_e, target: ReviewTarget, files: string[]) => {
+    requireMainWindow(_e)
+    return mutateReviewRepos(target, files, git.unstageFiles)
+  })
+
+  ipcMain.handle(CHANNELS.reviewRevert, (_e, target: ReviewTarget, files: string[]) => {
+    requireMainWindow(_e)
+    return mutateReviewRepos(target, files, git.revertFiles)
+  })
 
   // ---- forge (the git host behind `origin`: PR state for the branch) ----
   // Same degrade-never-throw contract as the git handlers above: no remote, an

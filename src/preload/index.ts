@@ -208,7 +208,6 @@ const roxy: RoxyApi = {
     reload: () => ipcRenderer.invoke(CHANNELS.browserReload),
     stop: () => ipcRenderer.invoke(CHANNELS.browserStop),
     newTab: (url) => ipcRenderer.invoke(CHANNELS.browserNewTab, url),
-    newReviewTab: () => ipcRenderer.invoke(CHANNELS.browserNewReviewTab),
     closeTab: (id) => ipcRenderer.invoke(CHANNELS.browserCloseTab, id),
     activateTab: (id) => ipcRenderer.invoke(CHANNELS.browserActivateTab, id),
     moveTab: (id, toIndex) => ipcRenderer.invoke(CHANNELS.browserMoveTab, id, toIndex),
@@ -260,8 +259,6 @@ const roxy: RoxyApi = {
     stage: (target, files) => ipcRenderer.invoke(CHANNELS.reviewStage, target, files),
     unstage: (target, files) => ipcRenderer.invoke(CHANNELS.reviewUnstage, target, files),
     revert: (target, files) => ipcRenderer.invoke(CHANNELS.reviewRevert, target, files),
-    ownSession: () => ipcRenderer.invoke(CHANNELS.reviewOwnSession),
-    openWindow: (sessionId) => ipcRenderer.invoke(CHANNELS.reviewOpenWindow, sessionId)
   },
   forge: {
     status: (cwd, force) => ipcRenderer.invoke(CHANNELS.forgeStatus, cwd, force),

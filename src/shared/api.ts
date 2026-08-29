@@ -587,12 +587,7 @@ export interface BrowserState {
 /** One open tab in the Roxy browser, for the toolbar's tab strip. */
 export interface BrowserTab {
   id: string
-  /**
-   * 'page' tabs show a website. The 'review' tab shows the session's diff,
-   * rendered by the chrome itself rather than by a page - so review is a tab
-   * beside your pages, not a panel that covers one.
-   */
-  kind: 'page' | 'review'
+  kind: 'page'
   title: string
   url: string
   active: boolean
@@ -1025,8 +1020,7 @@ export interface RoxyApi {
     stop(): Promise<void>
     /** Open a new tab (optionally at a URL) and make it active. */
     newTab(url?: string): Promise<void>
-    /** Open (or focus) this window's review tab - at most one per window. */
-    newReviewTab(): Promise<void>
+
     closeTab(id: string): Promise<void>
     activateTab(id: string): Promise<void>
     /** Reorder a tab to a new index in the strip (drag-to-reorder). */
@@ -1188,20 +1182,7 @@ export interface RoxyApi {
      * git - untracked files are deleted outright. Confirm before calling.
      */
     revert(target: ReviewTarget, files: string[]): Promise<{ ok: boolean; error?: string }>
-    /**
-     * The session this WINDOW belongs to, or null in the main window.
-     *
-     * Only the browser window needs this: it is a separate renderer with no
-     * store, so it cannot know which chat opened it. Main resolves it from the
-     * calling webContents.
-     */
-    ownSession(): Promise<string | null>
-    /**
-     * Open this session's browser window on its review tab.
-     *
-     * Review lives in that window, so this is the chat's only door to it.
-     */
-    openWindow(sessionId: string): Promise<void>
+
   }
   remote: {
     /** Mint a room on roxy.gg + open the host relay socket for a session. */

@@ -51,13 +51,7 @@ export interface ConsoleEntry {
  *  window; the rest sit at zero size (still alive, so their pages are kept). */
 interface Tab {
   id: string
-  /**
-   * 'page' tabs own a BrowserView. The 'review' tab owns NO view: the diff
-   * viewer is rendered by the chrome's own React tree, so it shows simply by
-   * every page view parking at zero size. That makes review a real tab sitting
-   * next to pages instead of a panel that hides one.
-   */
-  kind: 'page' | 'review'
+  kind: 'page'
   view: BrowserView | null
 }
 
@@ -69,11 +63,7 @@ interface Session {
   win: BrowserWindow | null
   tabs: Tab[]
   activeTabId: string | null
-  /**
-   * The page tab that was last in front. The review tab has no page of its
-   * own, so this is the page the browser_* tools keep driving while the user
-   * reads a diff -- it stays the page they were actually looking at.
-   */
+  /** The page tab that was last in front, so re-focusing after a reload lands on the right one. */
   lastPageId?: string
   consoleLog: ConsoleEntry[]
   tabSeq: number
@@ -105,7 +95,7 @@ function peek(key: string): Session | undefined {
   return sessions.get(key)
 }
 
-/** The active tab's page view, or null when the active tab is review/dead. */
+/** The active tab's page view, or null if destroyed. */
 function activeView(s: Session): BrowserView | null {
   const t = s.tabs.find((x) => x.id === s.activeTabId)
   return t?.view && !t.view.webContents.isDestroyed() ? t.view : null
@@ -124,9 +114,6 @@ function pageTab(s: Session): Tab | null {
 /** The active page's contents for `key` â€” what every browser_* tool drives. */
 function pageContents(key: string): Electron.WebContents {
   const s = peek(key)
-  // The review tab has no page of its own, so fall back to any live page tab:
-  // an agent reading/clicking the page shouldn't fail just because the user
-  // left review in front.
   const v = s ? (activeView(s) ?? pageTab(s)?.view ?? null) : null
   if (!v) throw new Error('No browser is open. Use browser_open first.')
   return v.webContents
@@ -206,8 +193,6 @@ function layout(s: Session): void {
   const { width, height } = s.win.getContentBounds()
   const top = s.chromeH ?? BROWSER_CHROME_H
   for (const t of s.tabs) {
-    // The review tab has no view to place; it shows because every page view
-    // below parks at zero size, leaving the chrome's own React tree visible.
     if (!t.view || t.view.webContents.isDestroyed()) continue
     t.view.setBounds(
       t.id === s.activeTabId
@@ -292,8 +277,6 @@ function pushState(s: Session): void {
   if (!s.win || s.win.isDestroyed() || s.win.webContents.isDestroyed()) return
   const v = activeView(s)
   const wc = v?.webContents
-  // On the review tab there is no page, so the URL bar goes empty rather than
-  // showing whichever page happens to be parked behind it.
   const state: BrowserState = {
     url: wc?.getURL() ?? '',
     title: wc?.getTitle() ?? '',
@@ -308,9 +291,6 @@ function pushState(s: Session): void {
 function tabsOf(s: Session): BrowserTab[] {
   return s.tabs.map((t) => {
     const wc = t.view && !t.view.webContents.isDestroyed() ? t.view.webContents : null
-    if (t.kind === 'review') {
-      return { id: t.id, kind: t.kind, title: 'Review', url: '', active: t.id === s.activeTabId }
-    }
     return {
       id: t.id,
       kind: t.kind,
@@ -335,8 +315,7 @@ function pushTabs(s: Session): void {
 
 /**
  * Make sure a PAGE tab is the active one, so a navigation has somewhere to
- * land: hitting Enter in the URL bar while the review tab is up should show
- * the page it just loaded, not stay on the diff.
+ * land (e.g. after the active tab's view was destroyed).
  */
 function focusPage(s: Session, key: string): void {
   if (activeView(s)) return
@@ -471,29 +450,6 @@ export function newTab(rawUrl?: string, key: string = DEFAULT_KEY): void {
   createTab(s, rawUrl)
 }
 
-/**
- * Focus this session's review tab, creating it if it isn't open yet.
- *
- * There is at most one: review is a view of the session's working tree, so a
- * second copy of it would just be the same diff twice.
- */
-export function newReviewTab(key: string = DEFAULT_KEY): void {
-  const s = getSession(key)
-  ensureWindow(s)
-  if (!s.win || s.win.isDestroyed()) return
-  const existing = s.tabs.find((t) => t.kind === 'review')
-  if (existing) {
-    activateTab(existing.id, key)
-    return
-  }
-  const id = `tab-${++s.tabSeq}`
-  s.tabs.push({ id, kind: 'review', view: null })
-  s.activeTabId = id
-  layout(s)
-  pushState(s)
-  pushTabs(s)
-}
-
 /** Switch the visible tab. */
 export function activateTab(id: string, key: string = DEFAULT_KEY): void {
   const s = peek(key)
@@ -556,23 +512,6 @@ export function openWindow(key: string = DEFAULT_KEY): void {
   s.win?.show()
   s.win?.focus()
   if (!pageContents(key).getURL()) void pageContents(key).loadURL(HOME_URL)
-}
-
-/**
- * Open (or focus) this session's window on its review tab.
- *
- * Review lives in the browser window, so this is the chat's only door to it.
- * It is a tab rather than an overlay, which is why the chat can just ask for
- * the tab and let the chrome render it - no message that has to survive a cold
- * window load.
- */
-export function openReview(key: string = DEFAULT_KEY): void {
-  const s = getSession(key)
-  ensureWindow(s)
-  if (s.win?.isMinimized()) s.win.restore()
-  s.win?.show()
-  s.win?.focus()
-  newReviewTab(key)
 }
 
 export async function navigate(rawUrl: string, key: string = DEFAULT_KEY): Promise<void> {

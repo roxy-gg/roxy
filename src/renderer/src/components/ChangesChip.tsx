@@ -77,7 +77,7 @@ export function ChangesChip(): JSX.Element | null {
       <div className="mx-auto max-w-3xl px-1">
         <button
           type="button"
-          onClick={() => void api.review.openWindow(sessionId)}
+          onClick={() => {}}
           title="Review these changes"
           className="press-scale mb-1.5 flex items-center gap-1.5 rounded-full border border-border/60 px-2.5 py-1 text-text-muted transition hover:border-border hover:bg-white/5 hover:text-text"
         >
