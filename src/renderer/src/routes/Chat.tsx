@@ -2,7 +2,7 @@ import { Sidebar } from '../components/Sidebar'
 import { ChatView } from '../components/ChatView'
 import { ReviewPane } from '../review/ReviewPane'
 import { useRoxyStore } from '../lib/store'
-import { useRef, useEffect } from 'react'
+import type { MouseEvent as ReactMouseEvent } from 'react'
 
 
 import { X } from 'lucide-react'
@@ -14,40 +14,29 @@ export default function Chat(): JSX.Element {
   const reviewPaneWidth = useRoxyStore((s) => s.reviewPaneWidth)
   const setReviewPaneWidth = useRoxyStore((s) => s.setReviewPaneWidth)
 
-  const resizerRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    const resizer = resizerRef.current
-    if (!resizer) return
-
-    let startX = 0
-    let startWidth = 0
-
-    const onPointerDown = (e: PointerEvent): void => {
-      startX = e.clientX
-      startWidth = reviewPaneWidth
-      document.body.style.cursor = 'col-resize'
-      resizer.setPointerCapture(e.pointerId)
-      resizer.addEventListener('pointermove', onPointerMove)
-      resizer.addEventListener('pointerup', onPointerUp)
-    }
-
-    const onPointerMove = (e: PointerEvent): void => {
-      // Delta is negative if moving left, which INCREASES right-pane width.
-      const newWidth = Math.min(Math.max(200, startWidth - (e.clientX - startX)), 1200)
+  
+  const startResize = (e: ReactMouseEvent): void => {
+    e.preventDefault()
+    const startX = e.clientX
+    const startW = reviewPaneWidth
+    
+    // Moving mouse left (negative delta) means panel gets WIDER since it's on the right.
+    const onMove = (ev: MouseEvent): void => {
+      const delta = ev.clientX - startX
+      const newWidth = Math.min(Math.max(360, startW - delta), 1200)
       setReviewPaneWidth(newWidth)
     }
-
-    const onPointerUp = (e: PointerEvent): void => {
+    
+    const onUp = (): void => {
       document.body.style.cursor = ''
-      resizer.releasePointerCapture(e.pointerId)
-      resizer.removeEventListener('pointermove', onPointerMove)
-      resizer.removeEventListener('pointerup', onPointerUp)
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
     }
-
-    resizer.addEventListener('pointerdown', onPointerDown)
-    return () => resizer.removeEventListener('pointerdown', onPointerDown)
-  }, [reviewPaneWidth, setReviewPaneWidth])
+    
+    document.body.style.cursor = 'col-resize'
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+  }
 
   return (
     <div className="flex h-full w-full">
@@ -59,7 +48,7 @@ export default function Chat(): JSX.Element {
           style={{ width: reviewPaneWidth }}
         >
           <div
-            ref={resizerRef}
+            onMouseDown={startResize}
             className="absolute -left-1 top-0 bottom-0 w-2 cursor-col-resize z-10 transition-colors hover:bg-accent/30"
           />
           <ReviewPane
