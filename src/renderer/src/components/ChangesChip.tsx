@@ -10,11 +10,11 @@ import { cn } from '../lib/cn'
  * `Changes +12 -3` above the composer - the entry point to reviewing a
  * session's diff.
  *
- * Clicking OPENS THE REVIEW WINDOW rather than expanding inline. An earlier
+ * Clicking TOGGLES THE REVIEW PANE rather than expanding inline. An earlier
  * version unfolded the diff right here and it covered half the transcript,
  * which is exactly the conversation you read a diff against. So the chip stays
  * a chip: it reports that there is something to look at, and hands off to a
- * surface with the height to actually show it.
+ * surface with the room to actually show it.
  *
  * Renders nothing when there is nothing to review, so a session with a clean
  * tree is not nagged by a permanent `+0 -0`.

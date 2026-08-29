@@ -420,7 +420,7 @@ export function ChatView(): JSX.Element {
             </button>
           )}
           {hasSessionInfo && <ChangesChip />}
-            <UsageMeter />
+          <UsageMeter />
         </div>
       </header>
 
@@ -550,7 +550,6 @@ export function ChatView(): JSX.Element {
         </div>
       )}
 
-      
       {/* A subagent's session can now be stopped from its own composer: the Stop
           cancels the DELEGATE (there is no local request here to abort), which
           is what the button visibly means in this view. */}
