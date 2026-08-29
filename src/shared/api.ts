@@ -2,6 +2,7 @@
  * The typed contract exposed to the renderer as `window.roxy`.
  * Implemented in src/preload/index.ts, handled in src/main/ipc/*.
  */
+import type { Language } from './i18n'
 import type {
   AddMessageInput,
   AppSettings,
@@ -692,6 +693,8 @@ export interface RoxyApi {
     setWebSearchApiKey(key: string | null): Promise<AppSettings>
     setAutoWorkstream(enabled: boolean): Promise<AppSettings>
     setBranchPrefix(prefix: string): Promise<AppSettings>
+    /** Set the UI language. An unknown code falls back to English. */
+    setLanguage(language: Language): Promise<AppSettings>
     completeOnboarding(): Promise<AppSettings>
     reset(): Promise<void>
     /**

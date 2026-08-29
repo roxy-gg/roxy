@@ -1,5 +1,7 @@
 import { create } from 'zustand'
 import { DEFAULT_AGENT_ID, getAgent } from '@shared/agents'
+import type { Language } from '@shared/i18n'
+import { applyLanguage } from '../i18n'
 import type {
   AppSettings,
   Chat,
@@ -208,6 +210,7 @@ interface RoxyStore {
   setAutoWorkstream: (enabled: boolean) => Promise<void>
   setTelemetryEnabled: (enabled: boolean) => Promise<void>
   setBranchPrefix: (prefix: string) => Promise<void>
+  setLanguage: (language: Language) => Promise<void>
   selectChat: (id: string) => Promise<void>
   clearActive: () => void
   newSession: () => Promise<void>
@@ -966,6 +969,10 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
       api.projects.listOrder(),
       api.settings.getTelemetry()
     ])
+    // Before `ready` flips: the splash is still up, so switching the catalog
+    // here means the first painted frame is already in the right language
+    // rather than flashing English and re-rendering.
+    await applyLanguage(settings.language)
     set({ settings, providers, chats, loops, projectOrder, telemetryEnabled, ready: true })
     // Warm the usage/cost dashboard for the titlebar pill (best-effort, async).
     void get().refreshUsage()
@@ -1473,6 +1480,15 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
     set({ telemetryEnabled: enabled })
     const next = await api.settings.setTelemetry(enabled)
     set({ telemetryEnabled: next })
+  },
+
+  setLanguage: async (language) => {
+    // Apply FIRST, persist second. The click already told us what the user
+    // wants; making the UI wait on a database round trip just makes the picker
+    // feel broken. A failed write is a stale row, not a stuck interface.
+    await applyLanguage(language)
+    const settings = await api.settings.setLanguage(language)
+    set({ settings })
   },
 
   setBranchPrefix: async (prefix) => {

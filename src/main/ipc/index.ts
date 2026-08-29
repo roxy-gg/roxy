@@ -1,5 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import { CHANNELS } from '../../shared/ipc'
+import type { Language } from '../../shared/i18n'
 import type { SessionConfigPatch } from '../../shared/session-config'
 import type { ClipboardAction } from '../../shared/context-menu'
 import { clipboardHasContent, runClipboardAction } from '../services/context-menu'
@@ -188,6 +189,9 @@ export function registerIpc(): void {
   )
   ipcMain.handle(CHANNELS.settingsSetAutoWorkstream, (_e, enabled: boolean) =>
     repo.setAutoWorkstream(enabled)
+  )
+  ipcMain.handle(CHANNELS.settingsSetLanguage, (_e, language: Language) =>
+    repo.setLanguage(language)
   )
   ipcMain.handle(CHANNELS.settingsSetBranchPrefix, (_e, prefix: string) =>
     repo.setBranchPrefix(prefix)

@@ -8,6 +8,7 @@ export const CHANNELS = {
   settingsSetWebSearchApiKey: 'settings:setWebSearchApiKey',
   settingsSetAutoWorkstream: 'settings:setAutoWorkstream',
   settingsSetBranchPrefix: 'settings:setBranchPrefix',
+  settingsSetLanguage: 'settings:setLanguage',
   settingsCompleteOnboarding: 'settings:completeOnboarding',
   settingsReset: 'settings:reset',
   // Anonymous usage tracking. Its own pair of channels rather than a field on

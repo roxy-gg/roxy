@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { ArrowRight } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import { DitherGradient } from '../../components/DitherGradient'
 
 /**
@@ -37,6 +38,7 @@ const HOLD_MS = 3400
  * a greeting that drifts between languages, and a single way forward.
  */
 export function WelcomeStep({ onContinue }: { onContinue: () => void }): JSX.Element {
+  const { t } = useTranslation()
   const [index, setIndex] = useState(0)
   const [visible, setVisible] = useState(true)
 
@@ -93,14 +95,14 @@ export function WelcomeStep({ onContinue }: { onContinue: () => void }): JSX.Ele
 
         {/* Static on purpose — it anchors the block while the greeting cycles. */}
         <p className="-mt-3 max-w-sm text-center text-sm text-white/60">
-          This might be a complete disaster. It might also be the best thing you use all year!
+          {t('onboarding.welcomeTagline')}
         </p>
 
         <button
           onClick={onContinue}
           className="press-scale flex h-10 items-center justify-center gap-2 sq sq-lg rounded-lg bg-white px-6 text-sm font-medium text-black hover:bg-white/90"
         >
-          Continue
+          {t('onboarding.continue')}
           <ArrowRight className="h-4 w-4" />
         </button>
       </div>

@@ -2,6 +2,8 @@ import { randomUUID } from 'node:crypto'
 import { resolveSeed } from '../../shared/providers'
 import { normalizeServerConfig, type McpServerConfig, type McpServerRecord } from '../../shared/mcp'
 import { DEFAULT_BRANCH_PREFIX, normalizeBranchPrefix } from '../../shared/branch'
+import { DEFAULT_LANGUAGE, normalizeLanguage } from '../../shared/i18n'
+import type { Language } from '../../shared/i18n'
 import type {
   AddMessageInput,
   AppSettings,
@@ -119,7 +121,11 @@ export function getSettings(): AppSettings {
     autoWorkstream: map.get('auto_workstream') !== '0',
     // `?? DEFAULT` and not `|| DEFAULT`: an EMPTY string is a deliberate
     // "no prefix", and must survive a round trip through settings.
-    branchPrefix: map.get('branch_prefix') ?? DEFAULT_BRANCH_PREFIX
+    branchPrefix: map.get('branch_prefix') ?? DEFAULT_BRANCH_PREFIX,
+    // Normalised on the way OUT as well as in: a row written by an older build
+    // (or a language later dropped from the app) must degrade to English rather
+    // than leave the UI rendering raw keys.
+    language: normalizeLanguage(map.get('language'))
   }
 }
 
@@ -204,6 +210,14 @@ export function setContextLimit(limit: number | null): AppSettings {
 export function setBranchPrefix(prefix: string): AppSettings {
   // Store even the empty string, so "no prefix" is distinguishable from unset.
   setSetting('branch_prefix', normalizeBranchPrefix(prefix))
+  return getSettings()
+}
+
+export function setLanguage(language: Language): AppSettings {
+  const lang = normalizeLanguage(language)
+  // English is the default, so it clears the row instead of writing one - the
+  // absence of a row and an explicit 'en' must not drift apart.
+  setSetting('language', lang === DEFAULT_LANGUAGE ? null : lang)
   return getSettings()
 }
 

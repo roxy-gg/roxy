@@ -7,6 +7,8 @@ import {
   type MouseEvent as ReactMouseEvent
 } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useTranslation } from 'react-i18next'
+import type { TFunction } from 'i18next'
 import {
   FolderOpen,
   GitBranch,
@@ -75,15 +77,27 @@ interface Project {
  * covers the WHOLE row - which is also why the dirty dot has no `title` of its
  * own: a 4px target is too small to hover deliberately.
  */
-function sessionRowTitle(chat: Chat, dirty: boolean, pull: LifecycleView | undefined): string {
+function sessionRowTitle(
+  chat: Chat,
+  dirty: boolean,
+  pull: LifecycleView | undefined,
+  t: TFunction
+): string {
   const bits = [chat.title]
   if (chat.branch) bits.push(chat.branch)
   // Multi-repo: name the repos. "uncommitted changes" is not actionable when a
   // session spans four of them, and the row itself has no space to say which.
   const repos = chat.repos ?? []
-  if (repos.length > 1) bits.push(`${repos.length} repos: ${repos.map((r) => r.name).join(', ')}`)
+  if (repos.length > 1) {
+    bits.push(
+      t('sidebar.rowRepos', {
+        count: repos.length,
+        names: repos.map((r) => r.name).join(', ')
+      })
+    )
+  }
   if (pull) bits.push(pull.title)
-  if (dirty) bits.push('uncommitted changes')
+  if (dirty) bits.push(t('sidebar.rowDirty'))
   return bits.join(' - ')
 }
 
@@ -138,6 +152,7 @@ function FolderMorph({ open, className }: { open: boolean; className?: string })
 }
 
 export function Sidebar(): JSX.Element {
+  const { t } = useTranslation()
   const navigate = useNavigate()
   const chats = useRoxyStore((s) => s.chats)
   const activeChatId = useRoxyStore((s) => s.activeChatId)
@@ -266,17 +281,21 @@ export function Sidebar(): JSX.Element {
   const contextMenuItems = (chat: Chat): MenuItem[] => {
     const busy = isBusy(chat)
     return [
-      { label: 'Fork session history', icon: GitFork, onSelect: () => void forkChat(chat.id) },
-      { label: 'Rename', icon: SquarePen, onSelect: () => beginRename(chat) },
+      {
+        label: t('sidebar.menu.fork'),
+        icon: GitFork,
+        onSelect: () => void forkChat(chat.id)
+      },
+      { label: t('sidebar.menu.rename'), icon: SquarePen, onSelect: () => beginRename(chat) },
       {
         // The label carries the reason. A greyed row with no explanation reads
         // as a bug; this one names the single step that re-enables it, and the
         // control to do it is already on the row you right-clicked.
         label: busy
           ? chat.kind === 'sub'
-            ? 'Delete — cancel it first'
-            : 'Delete — stop the turn first'
-          : 'Delete session',
+            ? t('sidebar.menu.deleteBusySub')
+            : t('sidebar.menu.deleteBusyTurn')
+          : t('sidebar.menu.delete'),
         icon: Trash2,
         danger: true,
         disabled: busy,
@@ -492,14 +511,14 @@ export function Sidebar(): JSX.Element {
         <div className="flex flex-col items-center gap-1 pt-1">
           <button
             onClick={() => setRailed(false)}
-            title="Expand sidebar"
+            title={t('sidebar.expand')}
             className="press-scale flex h-8 w-8 items-center justify-center sq sq-lg rounded-lg text-text-muted hover:bg-white/5 hover:text-text"
           >
             <PanelLeftOpen className="h-4 w-4" />
           </button>
           <button
             onClick={newSession}
-            title="New project"
+            title={t('sidebar.newProject')}
             className="press-scale flex h-8 w-8 items-center justify-center sq sq-lg rounded-lg text-text-muted hover:bg-white/5 hover:text-text"
           >
             <FolderOpen className="h-4 w-4" />
@@ -508,7 +527,7 @@ export function Sidebar(): JSX.Element {
         <div className="mb-3 mt-auto flex flex-col items-center gap-1">
           <button
             onClick={() => setRemoteOpen(true)}
-            title="Remote Workspace"
+            title={t('sidebar.remoteWorkspace')}
             className="relative press-scale flex h-8 w-8 items-center justify-center sq sq-lg rounded-lg text-text-muted hover:bg-white/5 hover:text-text"
           >
             <MonitorSmartphone className="h-4 w-4" />
@@ -523,21 +542,21 @@ export function Sidebar(): JSX.Element {
           </button>
           <button
             onClick={() => navigate('/skills')}
-            title="Skills"
+            title={t('sidebar.skills')}
             className="press-scale flex h-8 w-8 items-center justify-center sq sq-lg rounded-lg text-text-muted hover:bg-white/5 hover:text-text"
           >
             <Lightbulb className="h-4 w-4" />
           </button>
           <button
             onClick={() => navigate('/mcp')}
-            title="MCP Servers"
+            title={t('sidebar.mcpServers')}
             className="press-scale flex h-8 w-8 items-center justify-center sq sq-lg rounded-lg text-text-muted hover:bg-white/5 hover:text-text"
           >
             <Plug className="h-4 w-4" />
           </button>
           <button
             onClick={() => navigate('/settings')}
-            title="Settings"
+            title={t('sidebar.settings')}
             className="press-scale flex h-8 w-8 items-center justify-center sq sq-lg rounded-lg text-text-muted hover:bg-white/5 hover:text-text"
           >
             <SettingsIcon className="h-4 w-4" />
@@ -565,14 +584,14 @@ export function Sidebar(): JSX.Element {
         <div className="sidebar-controls ml-auto flex items-center gap-1">
           <button
             onClick={() => navigate('/settings')}
-            title="Settings"
+            title={t('sidebar.settings')}
             className="press-scale flex h-7 w-7 items-center justify-center sq sq-lg rounded-lg text-text-muted hover:bg-white/5 hover:text-text"
           >
             <SettingsIcon className="h-4 w-4" />
           </button>
           <button
             onClick={() => setRailed(true)}
-            title="Collapse sidebar"
+            title={t('sidebar.collapse')}
             className="press-scale flex h-7 w-7 items-center justify-center sq sq-lg rounded-lg text-text-muted hover:bg-white/5 hover:text-text"
           >
             <PanelLeftClose className="h-4 w-4" />
@@ -583,22 +602,20 @@ export function Sidebar(): JSX.Element {
       <div className="px-3">
         <button
           onClick={newSession}
-          title="Open a folder as a new project"
+          title={t('sidebar.newProjectTitle')}
           className="press-scale flex h-9 w-full items-center justify-center gap-2 sq sq-lg rounded-lg bg-white text-sm font-medium text-black hover:bg-white/90"
         >
-          <FolderOpen className="h-4 w-4" /> New project
+          <FolderOpen className="h-4 w-4" /> {t('sidebar.newProject')}
         </button>
       </div>
 
       <div className="mt-4 flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-3 pb-3">
         <section className="flex min-h-0 flex-1 flex-col">
           <div className="mb-2 flex items-center px-1">
-            <span className="text-xs font-medium text-text-muted">Projects</span>
+            <span className="text-xs font-medium text-text-muted">{t('sidebar.projects')}</span>
           </div>
           {projects.length === 0 ? (
-            <p className="px-1 text-xs text-text-subtle">
-              No sessions yet — open a folder to start one.
-            </p>
+            <p className="px-1 text-xs text-text-subtle">{t('sidebar.empty')}</p>
           ) : (
             <div className="flex flex-col gap-2">
               {projects.map((project) => {
@@ -670,7 +687,7 @@ export function Sidebar(): JSX.Element {
                       </button>
                       <button
                         onClick={() => void newSessionInProject(project.path)}
-                        title="New session in this project"
+                        title={t('sidebar.newSessionInProject')}
                         className="press-scale flex h-5 w-5 shrink-0 items-center justify-center sq sq-base rounded text-text-subtle hover:bg-white/5 hover:text-text"
                       >
                         <Plus className="h-3.5 w-3.5" />
@@ -711,7 +728,7 @@ export function Sidebar(): JSX.Element {
                                   </button>
                                   <button
                                     onClick={() => removeLoop(loop.id)}
-                                    title="Delete loop"
+                                    title={t('sidebar.deleteLoop')}
                                     className="flex h-6 w-6 shrink-0 items-center justify-center sq sq-md rounded-md text-text-subtle opacity-0 transition-[opacity,color,background-color] hover:bg-white/5 hover:text-danger group-hover:opacity-100"
                                   >
                                     <Trash2 className="h-3.5 w-3.5" />
@@ -809,7 +826,7 @@ export function Sidebar(): JSX.Element {
                                     <button
                                       onClick={() => selectChat(chat.id)}
                                       onDoubleClick={() => beginRename(chat)}
-                                      title={sessionRowTitle(chat, dirtyById.has(chat.id), pull)}
+                                      title={sessionRowTitle(chat, dirtyById.has(chat.id), pull, t)}
                                       className="min-w-0 flex-1 text-left"
                                     >
                                       <span className="block truncate">{chat.title}</span>
@@ -875,9 +892,22 @@ export function Sidebar(): JSX.Element {
                                   {subs.length > 0 && (
                                     <button
                                       onClick={() => toggleSubs(chat.id)}
-                                      title={`${subs.length} subagent${subs.length === 1 ? '' : 's'}${
-                                        liveSubs > 0 ? ` (${liveSubs} working)` : ''
-                                      } — tap to ${subsOpen ? 'hide' : 'view'}`}
+                                      title={t('sidebar.subagentTooltip', {
+                                        subagents: t('sidebar.subagentCount', {
+                                          count: subs.length
+                                        }),
+                                        working:
+                                          liveSubs > 0
+                                            ? t('sidebar.subagentWorking', { count: liveSubs })
+                                            : '',
+                                        action: subsOpen
+                                          ? t('sidebar.subagentToggleHide', {
+                                              count: subs.length
+                                            })
+                                          : t('sidebar.subagentToggleView', {
+                                              count: subs.length
+                                            })
+                                      })}
                                       className={cn(
                                         'flex h-5 min-w-[1.25rem] shrink-0 items-center justify-center rounded-full px-1 text-[10px] font-medium tabular-nums transition-[opacity,color,background-color]',
                                         liveSubs > 0
@@ -916,7 +946,7 @@ export function Sidebar(): JSX.Element {
                                     // could not be stopped without switching to it first.
                                     <button
                                       onClick={() => stop(chat.id)}
-                                      title="Stop this session"
+                                      title={t('sidebar.stopSession')}
                                       className="group/stop flex h-6 w-6 shrink-0 items-center justify-center sq sq-md rounded-md text-accent transition-colors hover:bg-white/10"
                                     >
                                       <BrailleSpinner className="text-sm group-hover/stop:hidden" />
@@ -925,7 +955,7 @@ export function Sidebar(): JSX.Element {
                                   ) : (
                                     <button
                                       onClick={() => deleteChat(chat.id)}
-                                      title="Delete session"
+                                      title={t('sidebar.deleteSession')}
                                       className="flex h-6 w-6 shrink-0 items-center justify-center sq sq-md rounded-md text-text-subtle opacity-0 transition-[opacity,color,background-color] hover:bg-white/5 hover:text-danger group-hover:opacity-100"
                                     >
                                       <Trash2 className="h-3.5 w-3.5" />
@@ -978,7 +1008,7 @@ export function Sidebar(): JSX.Element {
                                             // subagent I don't want" case, with nothing to open.
                                             <button
                                               onClick={() => void cancelSubagent(sub.id)}
-                                              title="Cancel this subagent"
+                                              title={t('sidebar.cancelSubagent')}
                                               className="group/cancel flex h-5 w-5 shrink-0 items-center justify-center sq sq-base rounded text-accent transition-colors hover:bg-white/10"
                                             >
                                               <BrailleSpinner className="text-xs group-hover/cancel:hidden" />
@@ -987,7 +1017,7 @@ export function Sidebar(): JSX.Element {
                                           ) : (
                                             <button
                                               onClick={() => deleteChat(sub.id)}
-                                              title="Delete subagent session"
+                                              title={t('sidebar.deleteSubagentSession')}
                                               className="flex h-5 w-5 shrink-0 items-center justify-center sq sq-base rounded text-text-subtle opacity-0 transition-[opacity,color,background-color] hover:bg-white/5 hover:text-danger group-hover/sub:opacity-100"
                                             >
                                               <Trash2 className="h-3 w-3" />
@@ -1031,7 +1061,7 @@ export function Sidebar(): JSX.Element {
       <div
         onMouseDown={startResize}
         onDoubleClick={() => setWidth(DEFAULT_WIDTH)}
-        title="Drag to resize · double-click to reset"
+        title={t('sidebar.resizeHandle')}
         className="absolute inset-y-0 right-0 z-20 w-1 cursor-col-resize transition-colors hover:bg-accent/50"
       />
     </aside>
@@ -1128,6 +1158,7 @@ function CustomizeNav({
   onOpenRemote: () => void
   remoteDot: 'green' | 'amber' | null
 }): JSX.Element {
+  const { t } = useTranslation()
   const navigate = useNavigate()
   const counts = useCustomizeCounts()
   const items: {
@@ -1137,9 +1168,24 @@ function CustomizeNav({
     count?: number
     dot?: 'green' | 'amber' | null
   }[] = [
-    { label: 'Remote Workspace', icon: MonitorSmartphone, onClick: onOpenRemote, dot: remoteDot },
-    { label: 'Skills', icon: Lightbulb, onClick: () => navigate('/skills'), count: counts.skills },
-    { label: 'MCP Servers', icon: Plug, onClick: () => navigate('/mcp'), count: counts.mcp }
+    {
+      label: t('sidebar.remoteWorkspace'),
+      icon: MonitorSmartphone,
+      onClick: onOpenRemote,
+      dot: remoteDot
+    },
+    {
+      label: t('sidebar.skills'),
+      icon: Lightbulb,
+      onClick: () => navigate('/skills'),
+      count: counts.skills
+    },
+    {
+      label: t('sidebar.mcpServers'),
+      icon: Plug,
+      onClick: () => navigate('/mcp'),
+      count: counts.mcp
+    }
   ]
   return (
     <div className="border-t border-border px-3 py-2">
@@ -1155,7 +1201,9 @@ function CustomizeNav({
             {it.dot ? (
               <span
                 className="relative flex h-2 w-2 shrink-0"
-                title={it.dot === 'green' ? 'Sharing — live' : 'Sharing — connecting'}
+                title={
+                  it.dot === 'green' ? t('sidebar.sharingLive') : t('sidebar.sharingConnecting')
+                }
               >
                 <span
                   className={cn(

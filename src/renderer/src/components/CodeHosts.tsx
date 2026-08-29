@@ -22,6 +22,7 @@
  * no bookkeeping on Roxy's side.
  */
 import { useEffect, useState } from 'react'
+import { useTranslation, Trans } from 'react-i18next'
 import type { ForgeHostView, ForgeKind } from '@shared/forge'
 import { FORGE_NAMES } from '@shared/forge'
 import { api } from '../lib/api'
@@ -29,6 +30,7 @@ import { api } from '../lib/api'
 const KINDS: ForgeKind[] = ['github', 'azure-devops', 'gitlab', 'bitbucket']
 
 export function CodeHosts(): JSX.Element {
+  const { t } = useTranslation()
   const [hosts, setHosts] = useState<ForgeHostView[]>([])
   const [loading, setLoading] = useState(true)
 
@@ -55,18 +57,18 @@ export function CodeHosts(): JSX.Element {
   return (
     <div className="flex flex-col gap-3 sq sq-xl sq-ring rounded-xl border border-border bg-surface p-4">
       <div className="min-w-0">
-        <div className="text-sm font-medium text-text">Pull requests</div>
+        <div className="text-sm font-medium text-text">{t('codeHosts.pullRequests')}</div>
         <p className="mt-0.5 text-xs text-text-muted">
-          Roxy reads pull request state for your branches from whichever host your{' '}
-          <code className="text-text-subtle">origin</code> points at. It uses the credentials git
-          already has, so there is nothing to sign into here — if{' '}
-          <code className="text-text-subtle">git push</code> works, this works.
+          <Trans
+            i18nKey="codeHosts.pullRequestsDescription"
+            components={{ code: <code className="text-text-subtle" /> }}
+          />
         </p>
       </div>
 
       {loading ? null : hosts.length === 0 ? (
         <p className="text-xs text-text-subtle">
-          No git remotes yet. Open a project with an <code>origin</code> and its host appears here.
+          <Trans i18nKey="codeHosts.noRemotes" />
         </p>
       ) : (
         <div className="flex flex-col gap-1">
@@ -86,17 +88,16 @@ function HostRow({
   host: ForgeHostView
   onChoose: (host: string, kind: ForgeKind | null) => Promise<void>
 }): JSX.Element {
+  const { t } = useTranslation()
   return (
     <div className="flex items-center gap-3 sq sq-lg rounded-lg px-2 py-2 transition hover:bg-white/5">
       <StatusDot host={host} />
       <div className="min-w-0 flex-1">
         <div className="truncate text-sm text-text">{host.host}</div>
         <div className="truncate text-[11px] text-text-subtle">
-          {host.kind ? FORGE_NAMES[host.kind] : 'Unrecognised host'}
+          {host.kind ? FORGE_NAMES[host.kind] : t('codeHosts.unrecognisedHost')}
           {host.username ? ` · ${host.username}` : ''}
-          {host.repos.length
-            ? ` · ${host.repos.length} repo${host.repos.length === 1 ? '' : 's'}`
-            : ''}
+          {host.repos.length ? ` · ${t('codeHosts.repoCount', { count: host.repos.length })}` : ''}
         </div>
       </div>
 
@@ -109,7 +110,7 @@ function HostRow({
           onChange={(e) => void onChoose(host.host, (e.target.value || null) as ForgeKind | null)}
           className="shrink-0 sq sq-lg sq-ring rounded-lg border border-border bg-surface-2 px-2 py-1 text-xs text-text"
         >
-          <option value="">Which host?</option>
+          <option value="">{t('codeHosts.whichHost')}</option>
           {KINDS.map((k) => (
             <option key={k} value={k}>
               {FORGE_NAMES[k]}
@@ -118,7 +119,7 @@ function HostRow({
         </select>
       ) : (
         <span className="shrink-0 text-[11px] text-text-subtle">
-          {host.connected ? 'Connected' : 'No credential'}
+          {host.connected ? t('codeHosts.connected') : t('codeHosts.noCredential')}
         </span>
       )}
     </div>
@@ -131,13 +132,14 @@ function HostRow({
  * user.
  */
 function StatusDot({ host }: { host: ForgeHostView }): JSX.Element {
+  const { t } = useTranslation()
   const cls =
     host.kind === null ? 'bg-warning' : host.connected ? 'bg-success' : 'bg-text-subtle/70'
   const title =
     host.kind === null
-      ? 'Roxy needs to know which software this host runs'
+      ? t('codeHosts.statusUnrecognised')
       : host.connected
-        ? 'git has a credential for this host'
-        : 'No stored credential — run any git command against this host to create one'
+        ? t('codeHosts.statusConnected')
+        : t('codeHosts.statusNoCredential')
   return <span className={`h-2 w-2 shrink-0 rounded-full ${cls}`} title={title} />
 }

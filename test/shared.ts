@@ -132,6 +132,15 @@ import {
 } from '../src/shared/web'
 import { resolveWorktreeCwd } from '../src/shared/workspace'
 import {
+  DEFAULT_LANGUAGE,
+  LANGUAGES,
+  LANGUAGE_CODES,
+  SOURCE_LANGUAGE,
+  isLanguage,
+  languageOption,
+  normalizeLanguage
+} from '../src/shared/i18n'
+import {
   aggregateLifecycle,
   aggregateRepoStatus,
   aggregateSyncTarget,
@@ -5809,6 +5818,38 @@ async function main(): Promise<void> {
   check(
     'responses: unknown events are ignored',
     !applyResponsesEvent({ type: 'response.in_progress' }, { onText: () => {} })
+  )
+
+  // ---- i18n ----------------------------------------------------------------
+
+  check('i18n: English is the source language', SOURCE_LANGUAGE === 'en')
+  check('i18n: the default is the source language', DEFAULT_LANGUAGE === SOURCE_LANGUAGE)
+  check('i18n: the source language ships a catalog', LANGUAGE_CODES.includes(SOURCE_LANGUAGE))
+  check('i18n: Spanish is offered', LANGUAGE_CODES.includes('es'))
+  check(
+    'i18n: every language has a name and a native name',
+    LANGUAGES.every((l) => !!l.code && !!l.name && !!l.nativeName)
+  )
+  check('i18n: language codes are unique', new Set(LANGUAGE_CODES).size === LANGUAGE_CODES.length)
+  check('i18n: a known code is a language', isLanguage('es'))
+  check('i18n: an unknown code is not', !isLanguage('fr') && !isLanguage('') && !isLanguage(null))
+  check('i18n: normalize keeps a known code', normalizeLanguage('es') === 'es')
+  // Regional tags must resolve, or a Mexican install silently renders English.
+  check('i18n: normalize folds a region tag', normalizeLanguage('es-MX') === 'es')
+  check('i18n: normalize folds es-419', normalizeLanguage('es-419') === 'es')
+  check('i18n: normalize folds an underscore tag', normalizeLanguage('es_ES') === 'es')
+  check('i18n: normalize is case-insensitive', normalizeLanguage('ES') === 'es')
+  check('i18n: normalize trims', normalizeLanguage('  es  ') === 'es')
+  // A bad settings row must never be able to stop the UI from rendering.
+  check('i18n: an unknown language falls back', normalizeLanguage('fr') === DEFAULT_LANGUAGE)
+  check('i18n: null falls back', normalizeLanguage(null) === DEFAULT_LANGUAGE)
+  check('i18n: undefined falls back', normalizeLanguage(undefined) === DEFAULT_LANGUAGE)
+  check('i18n: a non-string falls back', normalizeLanguage(42) === DEFAULT_LANGUAGE)
+  check('i18n: an explicit fallback is honoured', normalizeLanguage('fr', 'es') === 'es')
+  check('i18n: languageOption resolves a code', languageOption('es').code === 'es')
+  check(
+    'i18n: languageOption never returns undefined',
+    LANGUAGE_CODES.every((c) => !!languageOption(c).nativeName)
   )
 
   if (fails.length) {

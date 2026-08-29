@@ -199,6 +199,20 @@ async function main(): Promise<void> {
   check('setContextLimit persists', repo.getSettings().contextLimit === 1_000_000)
   repo.setContextLimit(null)
   check('setContextLimit clears', repo.getSettings().contextLimit === null)
+  check('language defaults to English', repo.getSettings().language === 'en')
+  repo.setLanguage('es')
+  check('setLanguage persists', repo.getSettings().language === 'es')
+  // English is the default and clears its row, so it must still READ as 'en'
+  // rather than falling through to whatever was there before.
+  repo.setLanguage('en')
+  check('setLanguage back to the default persists', repo.getSettings().language === 'en')
+  // A row written by a newer build, or a language since removed, must degrade
+  // to English instead of leaving the UI rendering raw keys.
+  repo.setLanguage('kl' as never)
+  check('an unknown language falls back to English', repo.getSettings().language === 'en')
+  repo.setLanguage('es-MX' as never)
+  check('a regional tag folds to its base language', repo.getSettings().language === 'es')
+  repo.setLanguage('en')
   check('web search key default null', repo.getSettings().webSearchApiKey === null)
   repo.setWebSearchApiKey('exa_test_key')
   check('setWebSearchApiKey persists', repo.getSettings().webSearchApiKey === 'exa_test_key')
