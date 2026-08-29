@@ -40,7 +40,6 @@ const TOOL_ICON: Record<string, LucideIcon> = {
   glob: Search,
   grep: Search,
   webfetch: Globe,
-  websearch: Globe,
   task: Hammer,
   browser_open: Globe,
   browser_screenshot: Camera,

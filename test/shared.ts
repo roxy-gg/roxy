@@ -123,12 +123,7 @@ import {
   decodeEntities,
   htmlToText,
   htmlToMarkdown,
-  convertWebContent,
-  buildExaRequestBody,
-  clampResults,
-  parseExaResponse,
-  WEBSEARCH_MAX_RESULTS,
-  WEBSEARCH_DEFAULT_RESULTS
+  convertWebContent
 } from '../src/shared/web'
 import { resolveWorktreeCwd } from '../src/shared/workspace'
 import {
@@ -361,9 +356,7 @@ check(
 )
 check(
   'the long-blocking tools are cancellable',
-  ['bash', 'webfetch', 'websearch', 'grep', 'glob', 'lsp', 'browser_open'].every((id) =>
-    isInterruptibleTool(id)
-  )
+  ['bash', 'webfetch', 'grep', 'glob', 'lsp', 'browser_open'].every((id) => isInterruptibleTool(id))
 )
 check(
   'instant local tools offer no cancel button',
@@ -1178,7 +1171,7 @@ check(
   )
 )
 
-// ---- web helpers (Phase 6: webfetch + websearch) ----
+// ---- web helpers (Phase 6: webfetch) ----
 check(
   'normalizeFetchUrl upgrades http→https',
   normalizeFetchUrl('http://example.com/x') === 'https://example.com/x'
@@ -1271,43 +1264,6 @@ check(
 check(
   'convertWebContent html format returns raw html',
   convertWebContent('<p>hi</p>', 'text/html', 'html') === '<p>hi</p>'
-)
-check(
-  'clampResults default when invalid',
-  clampResults('abc') === WEBSEARCH_DEFAULT_RESULTS && clampResults(0) === WEBSEARCH_DEFAULT_RESULTS
-)
-check('clampResults caps at max', clampResults(999) === WEBSEARCH_MAX_RESULTS)
-check('clampResults passes valid through', clampResults(5) === 5)
-check(
-  'buildExaRequestBody is valid JSON-RPC tools/call',
-  (() => {
-    const body = JSON.parse(buildExaRequestBody('roxy harness', 8)) as {
-      jsonrpc: string
-      method: string
-      params: { name: string; arguments: { query: string; numResults: number } }
-    }
-    return (
-      body.jsonrpc === '2.0' &&
-      body.method === 'tools/call' &&
-      body.params.name === 'web_search_exa' &&
-      body.params.arguments.query === 'roxy harness' &&
-      body.params.arguments.numResults === 8
-    )
-  })()
-)
-check(
-  'parseExaResponse reads a direct JSON body',
-  parseExaResponse('{"result":{"content":[{"type":"text","text":"result A"}]}}') === 'result A'
-)
-check(
-  'parseExaResponse reads an SSE data: stream',
-  parseExaResponse(
-    'event: message\ndata: {"result":{"content":[{"type":"text","text":"streamed B"}]}}\n\n'
-  ) === 'streamed B'
-)
-check(
-  'parseExaResponse returns undefined on empty/garbage',
-  parseExaResponse('not json') === undefined
 )
 
 // ---- context management (Phase 9) ----
@@ -4827,8 +4783,7 @@ async function main(): Promise<void> {
     activeModel: 'claude-opus-5',
     activeAgentId: 'plan',
     reasoningEffort: 'max' as const,
-    contextLimit: 1_000_000,
-    webSearchApiKey: null
+    contextLimit: 1_000_000
   }
   const bare = {
     providerId: null,

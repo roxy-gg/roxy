@@ -396,8 +396,6 @@ export interface AppSettings {
   reasoningEffort: ReasoningEffort
   /** Chosen context-window budget in tokens; null = use the model default. */
   contextLimit: number | null
-  /** Optional Exa API key for `websearch` (empty = use the keyless public endpoint). */
-  webSearchApiKey: string | null
   /**
    * Give every new session in a git repo its own workstream (an isolated
    * worktree on its own branch) instead of running it in the project folder.

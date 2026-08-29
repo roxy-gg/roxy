@@ -352,7 +352,6 @@ const REPORTABLE_TOOLS = new Set<string>([
   'bash_kill',
   // Web
   'webfetch',
-  'websearch',
   // Browser
   'browser_open',
   'browser_screenshot',
