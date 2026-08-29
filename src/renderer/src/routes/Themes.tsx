@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useTranslation, Trans } from 'react-i18next'
 import {
   Check,
   ChevronsDownUp,
@@ -26,10 +27,8 @@ import { cn } from '../lib/cn'
 import { Button, Textarea } from '../components/ui'
 import { PageShell } from '../components/PageShell'
 
-const SUBTITLE =
-  'A theme is a small JSON file that re-points the app\u2019s design tokens \u2014 surfaces, text, accents, and the fonts for the UI and for code. Pick one below, or duplicate it to make your own. Themes are read from your themes folder, so they can be edited in any editor, checked into dotfiles, and shared as a file.'
-
 export default function Themes(): JSX.Element {
+  const { t } = useTranslation()
   const navigate = useNavigate()
   const [data, setData] = useState<ThemeListResult | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
@@ -69,11 +68,11 @@ export default function Themes(): JSX.Element {
     try {
       const source = from ? data?.themes.find((t) => t.id === from) : undefined
       const res = await api.themes.create({
-        name: source ? `${source.name} copy` : 'My theme',
+        name: source ? t('themes.copyOf', { name: source.name }) : t('themes.myTheme'),
         from
       })
       if (!res.ok) {
-        setError(res.error ?? 'Could not create the theme.')
+        setError(res.error ?? t('themes.createFailed'))
         return
       }
       await load(true)
@@ -90,7 +89,7 @@ export default function Themes(): JSX.Element {
     setError('')
     try {
       const res = await api.themes.remove(id)
-      if (!res.ok) setError(res.error ?? 'Could not delete the theme.')
+      if (!res.ok) setError(res.error ?? t('themes.deleteFailed'))
       setConfirmDelete(null)
       if (editing === id) setEditing(null)
       await load(true)
@@ -105,12 +104,16 @@ export default function Themes(): JSX.Element {
   const custom = themes.filter((t) => t.source === 'user')
 
   return (
-    <PageShell title="Themes" subtitle={SUBTITLE} onBack={() => navigate('/')}>
+    <PageShell
+      title={t('themes.title')}
+      subtitle={t('themes.subtitle')}
+      onBack={() => navigate('/')}
+    >
       {error && <p className="mb-4 text-xs text-danger">{error}</p>}
 
       <section className="mb-8">
         <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-text-subtle">
-          Built in
+          {t('themes.builtIn')}
         </h2>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           {builtins.map((t) => (
@@ -132,7 +135,7 @@ export default function Themes(): JSX.Element {
             Keeping them on the section header puts them where their effect is. */}
         <div className="mb-3 flex items-center justify-between gap-3">
           <h2 className="text-xs font-semibold uppercase tracking-wide text-text-subtle">
-            Your themes
+            {t('themes.yourThemes')}
           </h2>
           <div className="flex items-center gap-1">
             {/* Reveals the FOLDER, not the active theme: this sits under "Your
@@ -145,22 +148,22 @@ export default function Themes(): JSX.Element {
                 title={data.directory}
                 onClick={() => void api.themes.reveal('')}
               >
-                <FolderOpen className="h-3.5 w-3.5" /> Open folder
+                <FolderOpen className="h-3.5 w-3.5" /> {t('themes.openFolder')}
               </Button>
             )}
             <Button size="sm" variant="ghost" onClick={() => void load(true)}>
-              <RefreshCw className="h-3.5 w-3.5" /> Rescan
+              <RefreshCw className="h-3.5 w-3.5" /> {t('themes.rescan')}
             </Button>
             <Button size="sm" variant="ghost" onClick={() => void create()}>
-              <Plus className="h-3.5 w-3.5" /> New theme
+              <Plus className="h-3.5 w-3.5" /> {t('themes.newTheme')}
             </Button>
           </div>
         </div>
 
         {custom.length === 0 ? (
           <div className="sq sq-xl sq-ring sq-dashed rounded-xl border border-dashed border-border bg-surface/50 p-5 text-xs text-text-muted">
-            No custom themes yet. Duplicate one above to get a file you can edit, or drop a{' '}
-            <code className="text-text-subtle">theme.json</code> into any of these:
+            {t('themes.emptyLead')} <code className="text-text-subtle">theme.json</code>{' '}
+            {t('themes.emptyTail')}
             <ul className="mt-2 flex flex-col gap-1 text-text-subtle">
               <li>
                 <code>{data?.directory ?? '\u2026/themes'}</code>
@@ -195,7 +198,9 @@ export default function Themes(): JSX.Element {
       {editing && (
         <section className="mb-8">
           <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-text-subtle">
-            Editing {themes.find((t) => t.id === editing)?.name ?? editing}
+            {t('themes.editing', {
+              name: themes.find((x) => x.id === editing)?.name ?? editing
+            })}
           </h2>
           {/* Editor and reference side by side: the reference is only really
               actionable with a file open, and you shouldn't have to scroll away
@@ -216,7 +221,7 @@ export default function Themes(): JSX.Element {
       {data && data.warnings.length > 0 && (
         <section className="mb-8">
           <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-warning">
-            Problems found
+            {t('themes.problemsFound')}
           </h2>
           <div className="flex flex-col gap-2 sq sq-xl sq-ring rounded-xl border border-border bg-surface p-4">
             {data.warnings.map((w, i) => (
@@ -277,6 +282,7 @@ function ThemeCard({
   onCancelDelete?: () => void
   onConfirmDelete?: () => void
 }): JSX.Element {
+  const { t } = useTranslation()
   return (
     <div
       className={cn(
@@ -295,12 +301,12 @@ function ThemeCard({
             <span className="truncate text-sm font-medium text-text">{theme.name}</span>
             {active && (
               <span className="shrink-0 rounded-full bg-success/15 px-2 py-0.5 text-[11px] text-success">
-                Active
+                {t('themes.active')}
               </span>
             )}
           </div>
           <p className="mt-0.5 line-clamp-2 text-xs text-text-muted">
-            {theme.description ?? `${theme.appearance} theme`}
+            {theme.description ?? t('themes.appearanceTheme', { appearance: theme.appearance })}
           </p>
         </div>
         <Swatches theme={theme} />
@@ -309,12 +315,12 @@ function ThemeCard({
       <div className="flex items-center gap-1">
         {confirmingDelete ? (
           <>
-            <span className="mr-auto text-xs text-text-muted">Delete this theme?</span>
+            <span className="mr-auto text-xs text-text-muted">{t('themes.confirmDelete')}</span>
             <Button size="sm" variant="ghost" onClick={onCancelDelete}>
-              Cancel
+              {t('common.cancel')}
             </Button>
             <Button size="sm" variant="danger" disabled={busy} onClick={onConfirmDelete}>
-              Delete
+              {t('common.delete')}
             </Button>
           </>
         ) : (
@@ -327,23 +333,23 @@ function ThemeCard({
             >
               {active ? (
                 <>
-                  <Check className="h-3.5 w-3.5" /> Applied
+                  <Check className="h-3.5 w-3.5" /> {t('themes.applied')}
                 </>
               ) : (
-                'Apply'
+                t('themes.apply')
               )}
             </Button>
             <Button size="sm" variant="ghost" disabled={busy} onClick={onDuplicate}>
-              <Copy className="h-3.5 w-3.5" /> Duplicate
+              <Copy className="h-3.5 w-3.5" /> {t('themes.duplicate')}
             </Button>
             {editable && (
               <div className="ml-auto flex items-center gap-1">
                 <Button size="sm" variant="ghost" onClick={onEdit}>
-                  Edit
+                  {t('common.edit')}
                 </Button>
                 <button
                   onClick={onDelete}
-                  title="Delete theme"
+                  title={t('themes.deleteTheme')}
                   className="press-scale flex h-8 w-8 items-center justify-center sq sq-lg rounded-lg text-text-subtle opacity-0 hover:bg-danger/10 hover:text-danger group-hover:opacity-100"
                 >
                   <Trash2 className="h-3.5 w-3.5" />
@@ -374,6 +380,7 @@ function ThemeEditor({
   onClose: () => void
   onSaved: () => void
 }): JSX.Element {
+  const { t } = useTranslation()
   const [source, setSource] = useState<string | null>(null)
   const [dirty, setDirty] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -402,12 +409,12 @@ function ThemeEditor({
     try {
       const res = await api.themes.save(id, source)
       if (!res.ok) {
-        setError(res.error ?? 'Could not save the theme.')
+        setError(res.error ?? t('themes.saveFailed'))
         return
       }
       setWarnings(res.warnings ?? [])
       setDirty(false)
-      setStatus('Saved')
+      setStatus(t('themes.saved'))
       setTimeout(() => setStatus(''), 2000)
       onSaved()
     } finally {
@@ -415,7 +422,7 @@ function ThemeEditor({
     }
   }
 
-  if (source === null) return <p className="text-xs text-text-subtle">Loading&#8230;</p>
+  if (source === null) return <p className="text-xs text-text-subtle">{t('themes.loading')}</p>
 
   return (
     <div className="flex flex-col gap-3 sq sq-xl sq-ring rounded-xl border border-border bg-surface p-4">
@@ -450,10 +457,10 @@ function ThemeEditor({
       ))}
       <div className="flex flex-wrap items-center gap-2">
         <Button variant="primary" disabled={!dirty || saving} onClick={() => void save()}>
-          {saving ? 'Saving\u{2026}' : status || 'Save'}
+          {saving ? t('themes.saving') : status || t('themes.save')}
         </Button>
         <Button variant="ghost" onClick={onClose}>
-          Close
+          {t('themes.close')}
         </Button>
         {/* Only offer this when there is something to reveal -- a 4-line theme
             is already fully visible, and a toggle that does nothing is noise. */}
@@ -461,12 +468,14 @@ function ThemeEditor({
           <Button size="sm" variant="ghost" onClick={() => setExpanded(!expanded)}>
             {expanded ? (
               <>
-                <ChevronsDownUp className="h-3.5 w-3.5" /> Collapse
+                <ChevronsDownUp className="h-3.5 w-3.5" /> {t('themes.collapse')}
               </>
             ) : (
               <>
-                <ChevronsUpDown className="h-3.5 w-3.5" /> Expand
-                <span className="text-text-subtle">{lineCount} lines</span>
+                <ChevronsUpDown className="h-3.5 w-3.5" /> {t('themes.expand')}
+                <span className="text-text-subtle">
+                  {t('themes.lineCount', { count: lineCount })}
+                </span>
               </>
             )}
           </Button>
@@ -476,7 +485,7 @@ function ThemeEditor({
             broken. It is the least important thing in the row, so it drops out
             rather than wrapping into a vertical stripe. */}
         <span className="ml-auto hidden shrink-0 text-[11px] text-text-subtle lg:inline">
-          Saving re-applies the theme if it&#8217;s the active one.
+          {t('themes.reappliesHint')}
         </span>
       </div>
     </div>
@@ -501,17 +510,18 @@ function ThemeReference({
 }: {
   variant?: 'collapsed' | 'panel'
 }): JSX.Element {
+  const { t } = useTranslation()
   const isPanel = variant === 'panel'
   const [open, setOpen] = useState(isPanel)
   const [copied, setCopied] = useState(false)
   const groups = useMemo(
     () => [
-      { id: 'surfaces', label: 'Surfaces' },
-      { id: 'text', label: 'Text' },
-      { id: 'accents', label: 'Accents' },
-      { id: 'polarity', label: 'Contrast pair' }
+      { id: 'surfaces', label: t('themes.groupSurfaces') },
+      { id: 'text', label: t('themes.groupText') },
+      { id: 'accents', label: t('themes.groupAccents') },
+      { id: 'polarity', label: t('themes.groupPolarity') }
     ],
-    []
+    [t]
   )
 
   const copyPrompt = async (): Promise<void> => {
@@ -528,12 +538,8 @@ function ThemeReference({
   // the BOTTOM full-width, without duplicating the markup.
   const aiBlock = (
     <div className={cn(!isPanel && 'border-t border-border pt-4')}>
-      <div className="text-sm font-medium text-text">Build one with AI</div>
-      <p className="mt-0.5 text-xs text-text-muted">
-        Copies a full spec of this format &#8212; every token, what it paints, the rules and a
-        worked example. Paste it into any model, describe the theme you want, and drop the JSON it
-        returns into the editor.
-      </p>
+      <div className="text-sm font-medium text-text">{t('themes.buildWithAi')}</div>
+      <p className="mt-0.5 text-xs text-text-muted">{t('themes.buildWithAiBody')}</p>
       <Button
         variant={copied ? 'secondary' : 'primary'}
         onClick={() => void copyPrompt()}
@@ -541,11 +547,11 @@ function ThemeReference({
       >
         {copied ? (
           <>
-            <Check className="h-3.5 w-3.5" /> Copied to clipboard
+            <Check className="h-3.5 w-3.5" /> {t('themes.copiedToClipboard')}
           </>
         ) : (
           <>
-            <Copy className="h-3.5 w-3.5" /> Copy prompt
+            <Copy className="h-3.5 w-3.5" /> {t('themes.copyPrompt')}
           </>
         )}
       </Button>
@@ -562,11 +568,9 @@ function ThemeReference({
       {isPanel && aiBlock}
 
       <div className={cn(isPanel && 'border-t border-border pt-4')}>
-        <div className="text-sm font-medium text-text">Colors</div>
+        <div className="text-sm font-medium text-text">{t('themes.colors')}</div>
         <p className="mt-0.5 text-xs text-text-muted">
-          Any CSS color &#8212; hex, <code>rgb()</code>, <code>oklch()</code>, or a{' '}
-          <code>color-mix()</code>. Anything you leave out is inherited from the theme you{' '}
-          <code>extends</code>, so a theme can be three lines long.
+          <Trans i18nKey="themes.colorsBody" />
         </p>
       </div>
       {groups.map((g) => (
@@ -575,13 +579,17 @@ function ThemeReference({
             {g.label}
           </div>
           <div className={cn('grid grid-cols-1 gap-1.5', !isPanel && 'sm:grid-cols-2')}>
-            {THEME_COLOR_TOKENS.filter((t) => t.group === g.id).map((t) => (
-              <div key={t.key} className="flex items-baseline gap-2 text-xs">
-                <code className="shrink-0 text-text">{t.key}</code>
+            {THEME_COLOR_TOKENS.filter((tok) => tok.group === g.id).map((tok) => (
+              <div key={tok.key} className="flex items-baseline gap-2 text-xs">
+                <code className="shrink-0 text-text">{tok.key}</code>
                 {/* Wraps in the side panel: the polarity hints are the most
-                    important text here and truncating them loses the warning. */}
-                <span className={cn('text-text-subtle', !isPanel && 'truncate')} title={t.hint}>
-                  {t.hint}
+                    important text here and truncating them loses the warning.
+
+                    Deliberately NOT translated: these hints are the same strings
+                    `buildThemePrompt()` ships to a model, and the validator
+                    enforces the English token vocabulary they describe. */}
+                <span className={cn('text-text-subtle', !isPanel && 'truncate')} title={tok.hint}>
+                  {tok.hint}
                 </span>
               </div>
             ))}
@@ -589,12 +597,9 @@ function ThemeReference({
         </div>
       ))}
       <div>
-        <div className="text-sm font-medium text-text">Fonts</div>
+        <div className="text-sm font-medium text-text">{t('themes.fonts')}</div>
         <p className="mt-0.5 text-xs text-text-muted">
-          <code>sans</code> is the UI font and <code>mono</code> is the code font &#8212; tool
-          calls, terminal output, diffs and code blocks. Give one family, an array to build your own
-          stack, or <code>&quot;system&quot;</code> for the platform&apos;s native font. Fallbacks
-          are appended automatically, so naming a font you don&apos;t have degrades gracefully.
+          <Trans i18nKey="themes.fontsBody" />
         </p>
         <div className="mt-2 flex flex-wrap gap-1.5">
           {FONT_PRESETS.mono.map((f) => (
@@ -608,7 +613,7 @@ function ThemeReference({
         </div>
       </div>
       <div>
-        <div className="text-sm font-medium text-text">Example</div>
+        <div className="text-sm font-medium text-text">{t('themes.example')}</div>
         <pre className="mt-1.5 overflow-x-auto sq sq-lg rounded-lg bg-surface-2 p-3 font-mono text-[11px] leading-relaxed text-text-muted">
           {EXAMPLE}
         </pre>
@@ -628,7 +633,7 @@ function ThemeReference({
         onClick={() => setOpen(!open)}
         className="mb-3 text-xs font-semibold uppercase tracking-wide text-text-subtle hover:text-text"
       >
-        {open ? 'Hide' : 'Show'} reference
+        {open ? t('themes.hideReference') : t('themes.showReference')}
       </button>
       {open && body}
     </section>
