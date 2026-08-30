@@ -1,9 +1,13 @@
 /**
  * Minimal mock MCP server for the Phase 13 smoke test. Speaks the real
  * newline-delimited JSON-RPC-over-stdio MCP wire protocol so it exercises the
- * ACTUAL @modelcontextprotocol/sdk Client machinery — initialize handshake,
- * capability negotiation, tools/list, tools/call — without needing an external
+ * ACTUAL @modelcontextprotocol/client machinery - the `initialize` handshake,
+ * capability negotiation, tools/list, tools/call - without needing an external
  * MCP server installed.
+ *
+ * This is a 2025-era (`legacy`) server: it answers `initialize` and returns
+ * method-not-found for `server/discover`, so it exercises the FALLBACK branch of
+ * the client’s era negotiation. Its 2026-era counterpart is mock-mcp-modern.cjs.
  *
  * Tools:
  *   - echo: returns a text result echoing its `message` argument.

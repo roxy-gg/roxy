@@ -84,6 +84,10 @@ import * as lsp from '../src/main/services/lsp'
 import {
   ensureMcpConnected,
   mcpToolSchemas,
+  mcpToolDefinition,
+  lastMcpCallResult,
+  listMcpResources,
+  readMcpResource,
   callMcpTool,
   isMcpTool,
   mcpToolTitle,
@@ -95,6 +99,21 @@ import {
   loadWorkspaceMcpServers,
   _resetMcpForTests
 } from '../src/main/services/mcp'
+import {
+  launchMcpApp,
+  handleMcpAppRequest,
+  closeMcpApp,
+  setMcpAppApprover,
+  _resetMcpAppsForTests
+} from '../src/main/services/mcp-apps'
+import {
+  SANDBOX_SCHEME,
+  SANDBOX_URL,
+  registerSandboxScheme,
+  serveSandbox
+} from '../src/main/services/mcp-app-sandbox'
+import { SANDBOX_ORIGIN_HINT, uiResourceUri } from '../src/shared/mcp-apps'
+import { _resetTrustForTests } from '../src/main/services/mcp-trust'
 import type { McpServerRecord } from '../src/shared/mcp'
 import {
   listSkills,
@@ -1349,7 +1368,12 @@ async function main(): Promise<void> {
     {
       const db = new Database(path.join(healDir, 'v22.db'))
       // Stop one rung short, at v21 — the last release that still had the box.
-      const priorSteps = MIGRATIONS.slice(0, MIGRATIONS.length - 1)
+      // Indexed from the START of the ladder, not the end: it is append-only, so
+      // "the last migration" stops being v22 the moment anything lands after it,
+      // and this test would silently start asserting about an unrelated future
+      // step. v22 is the 22nd rung, and always will be.
+      const V22 = 22
+      const priorSteps = MIGRATIONS.slice(0, V22 - 1)
       for (const step of priorSteps) {
         if (typeof step === 'string') db.exec(step)
         else step(db)
@@ -2849,7 +2873,7 @@ async function main(): Promise<void> {
   }
 
   // ---- MCP client (Phase 13) via a real mock MCP server over the official SDK ----
-  // Exercises the ACTUAL @modelcontextprotocol/sdk Client: stdio spawn → initialize
+  // Exercises the ACTUAL @modelcontextprotocol/client: stdio spawn → initialize
   // handshake → capability negotiation → tools/list → tools/call, plus roxy's pool,
   // schema conversion, namespaced dispatch (through runTool), and lifecycle.
   {
@@ -2995,6 +3019,394 @@ async function main(): Promise<void> {
       check('mcp: shutdownAllMcp clears the pool', mcpToolSchemas().length === 0)
       await _resetMcpForTests()
 
+      // ---- protocol era negotiation (the v2 `mode: 'auto'` payoff) ----------
+      // The legacy mock above rejects `server/discover`, so every check so far
+      // exercised the FALLBACK branch. This block pins the other one against a
+      // server that answers the probe and has no `initialize` at all - a server
+      // the v1 client could not have talked to.
+      const modernPath = path.join(process.cwd(), 'test', 'fixtures', 'mock-mcp-modern.cjs')
+      if (!existsSync(modernPath)) {
+        check('mock-mcp-modern fixture is present', false, modernPath)
+      } else {
+        const modernRec: McpServerRecord = {
+          id: 'modernmcp',
+          enabled: true,
+          config: {
+            type: 'local',
+            command: [process.execPath, modernPath],
+            environment: { ELECTRON_RUN_AS_NODE: '1' }
+          }
+        }
+        await ensureMcpConnected([modernRec], process.cwd())
+        const modernSummary = mcpServerSummaries(new Set(['modernmcp']))[0]
+        check(
+          'mcp era: a 2026-era server connects without `initialize`',
+          modernSummary?.status === 'connected',
+          modernSummary?.error
+        )
+        check('mcp era: ...and reports the modern era', modernSummary?.era === 'modern')
+        check(
+          'mcp era: its tools are discovered',
+          !!modernSummary && modernSummary.tools.includes('structured')
+        )
+
+        // A modern result may carry ONLY structuredContent. The v1 path rendered
+        // that as "(no output)" - a successful call reported as empty.
+        const structured = await withTimeout(
+          callMcpTool('mcp__modernmcp__structured', {}),
+          15_000,
+          'mcp structured'
+        )
+        check(
+          'mcp era: a structured-only result is not reported as empty',
+          structured.ok && structured.output.includes('61.5') && structured.output.includes('EUR'),
+          structured.output
+        )
+
+        // Ordinary calls behave identically across eras - that is the point of
+        // negotiating rather than branching at every call site.
+        const modernEcho = await withTimeout(
+          callMcpTool('mcp__modernmcp__echo', { message: 'hi' }),
+          15_000,
+          'mcp modern echo'
+        )
+        check(
+          'mcp era: tool calls work the same on the modern wire',
+          modernEcho.ok && modernEcho.output.includes('echo: hi'),
+          modernEcho.output
+        )
+
+        // Groundwork for MCP Apps: the extension metadata a server attaches to a
+        // tool must survive discovery. The v1 code kept only name/description/
+        // inputSchema, so a UI-bearing tool arrived indistinguishable from a
+        // plain one and Apps could not be built on top without re-listing.
+        const def = mcpToolDefinition('mcp__modernmcp__structured')
+        // Read through `uiResourceUri` rather than indexing one literal key: the
+        // official SDK emits the short `_meta.ui`, the spec reserves the
+        // qualified label, and a host has to accept both. Asserting the raw key
+        // here would pass only against whichever spelling the fixture happened
+        // to use - which is exactly how the interop gap went unnoticed.
+        check(
+          "mcp apps: a tool's `_meta` survives discovery",
+          uiResourceUri(def?._meta) === 'ui://mockmodern/app.html',
+          JSON.stringify(def?._meta)
+        )
+        check('mcp apps: its outputSchema is kept too', !!def?.outputSchema)
+
+        // App-only tools: reachable by the view, invisible to the model. A host
+        // that leaks them offers the model operations the server explicitly
+        // said were not for it.
+        const modelNames = mcpToolSchemas(new Set(['modernmcp'])).map((sc) => sc.function.name)
+        check(
+          'mcp apps: an app-only tool is hidden from the model',
+          !modelNames.includes('mcp__modernmcp__set_cell'),
+          modelNames.join(',')
+        )
+        check(
+          'mcp apps: ...but is still routable for its view',
+          !!mcpToolDefinition('mcp__modernmcp__set_cell')
+        )
+        check(
+          'mcp apps: ordinary tools are unaffected',
+          modelNames.includes('mcp__modernmcp__echo')
+        )
+
+        // ---- results stay lossless end-to-end -----------------------------
+        // Same property as the shared unit tests, but over a REAL wire: what a
+        // server actually sent must still be there after the client, the
+        // service, and the pool have handled it.
+        const rich = await withTimeout(callMcpTool('mcp__modernmcp__rich', {}), 15_000, 'mcp rich')
+        check('mcp lossless: the flat result still reads naturally', rich.ok, rich.output)
+        check(
+          'mcp lossless: the flat form previews the first image',
+          rich.image === 'data:image/png;base64,AAA'
+        )
+        const full = lastMcpCallResult('mcp__modernmcp__rich')
+        check(
+          'mcp lossless: every block survives the round trip',
+          full?.content.length === 4,
+          String(full?.content.length)
+        )
+        const linkBlock = full?.content.find((b) => b.kind === 'resource_link')
+        check(
+          'mcp lossless: a resource link is still addressable',
+          linkBlock?.kind === 'resource_link' && linkBlock.uri === 'file:///repo/report.pdf'
+        )
+        check(
+          'mcp lossless: the second image is not discarded',
+          full?.content.filter((b) => b.kind === 'image').length === 2
+        )
+        const resultUi = full?._meta?.['io.modelcontextprotocol/ui'] as
+          | { resourceUri?: string }
+          | undefined
+        check(
+          'mcp lossless: result _meta reaches the consumer',
+          resultUi?.resourceUri === 'ui://mockmodern/app.html'
+        )
+        // Retaining structure is only defensible if it is also released. The
+        // pool is warm and long-lived, so a cached payload that outlived its
+        // connection would be a per-session leak.
+        await disposeConnection('modernmcp')
+        check(
+          'mcp lossless: cached results are released with the connection',
+          lastMcpCallResult('mcp__modernmcp__rich') === undefined
+        )
+        await ensureMcpConnected([modernRec], process.cwd())
+
+        // ---- resources -----------------------------------------------------
+        // The half of MCP that isn't tools, and the delivery mechanism for MCP
+        // Apps: a UI arrives as a `ui://` resource read over this same path.
+        const resources = await withTimeout(
+          listMcpResources('modernmcp'),
+          15_000,
+          'mcp resources/list'
+        )
+        check(
+          'mcp resources: a server\u2019s resources are listed',
+          resources.length === 2 && resources.some((r) => r.uri === 'ui://mockmodern/app.html'),
+          JSON.stringify(resources.map((r) => r.uri))
+        )
+        const uiRes = await withTimeout(
+          readMcpResource('modernmcp', 'ui://mockmodern/app.html'),
+          15_000,
+          'mcp resources/read'
+        )
+        check(
+          'mcp resources: a ui:// resource reads back as text',
+          'text' in uiRes && !!uiRes.text && uiRes.text.includes('<h1>hi</h1>'),
+          JSON.stringify(uiRes)
+        )
+        check(
+          'mcp resources: ...carrying the MCP Apps mime profile',
+          'mimeType' in uiRes && uiRes.mimeType === 'text/html;profile=mcp-app'
+        )
+        // A missing URI is an error VALUE, not a thrown exception: a resource
+        // read happens inside a turn and must not take the turn with it.
+        const missing = await withTimeout(
+          readMcpResource('modernmcp', 'file:///nope'),
+          15_000,
+          'mcp resources/read missing'
+        )
+        check('mcp resources: an unknown URI degrades to an error value', 'error' in missing)
+        check(
+          'mcp resources: listing a server without the capability is empty, not an error',
+          (await listMcpResources('mockmcp')).length === 0
+        )
+
+        // ---- MCP Apps: the broker end to end -------------------------------
+        // Loads a real `ui://` resource over the real client, then exercises the
+        // boundary the whole feature rests on.
+        const launched = await withTimeout(
+          launchMcpApp('modernmcp', 'mcp__modernmcp__structured', 'ui://mockmodern/app.html'),
+          15_000,
+          'mcp app launch'
+        )
+        check(
+          'mcp app: a ui:// view loads',
+          !!launched && launched.html.includes('<h1>hi</h1>'),
+          JSON.stringify(launched)?.slice(0, 120)
+        )
+        check(
+          'mcp app: it arrives with a restrictive CSP',
+          !!launched?.csp.includes("default-src 'none'")
+        )
+
+        if (launched) {
+          // A view names an UNQUALIFIED tool; the broker qualifies it against the
+          // session's own server. There is no code path that reads a server id
+          // from the view, which is what makes cross-server calls impossible
+          // rather than merely discouraged.
+          setMcpAppApprover(async () => true)
+          const ok = await withTimeout(
+            handleMcpAppRequest({
+              sessionId: launched.sessionId,
+              id: 1,
+              method: 'tools/call',
+              params: { name: 'echo', arguments: { message: 'from-view' } }
+            }),
+            15_000,
+            'mcp app tools/call'
+          )
+          check(
+            'mcp app: an approved tool call reaches its own server',
+            JSON.stringify(ok.result ?? '').includes('from-view'),
+            JSON.stringify(ok)
+          )
+
+          // The same call, denied.
+          setMcpAppApprover(async () => false)
+          const denied = await withTimeout(
+            handleMcpAppRequest({
+              sessionId: launched.sessionId,
+              id: 2,
+              method: 'tools/call',
+              params: { name: 'boom', arguments: {} }
+            }),
+            15_000,
+            'mcp app denied call'
+          )
+          check('mcp app: an unapproved tool call is refused', !!denied.error)
+
+          // The legacy mock's `echo` exists, but not on THIS view's server.
+          setMcpAppApprover(async () => true)
+          const cross = await withTimeout(
+            handleMcpAppRequest({
+              sessionId: launched.sessionId,
+              id: 3,
+              method: 'tools/call',
+              params: { name: 'mcp__mockmcp__echo', arguments: {} }
+            }),
+            15_000,
+            'mcp app cross-server'
+          )
+          check('mcp app: a view cannot reach another server', !!cross.error, JSON.stringify(cross))
+
+          // Methods outside the allowlist never reach a server.
+          const bad = await withTimeout(
+            handleMcpAppRequest({
+              sessionId: launched.sessionId,
+              id: 4,
+              method: 'sampling/createMessage',
+              params: {}
+            }),
+            15_000,
+            'mcp app bad method'
+          )
+          check('mcp app: an unsupported method is rejected', !!bad.error)
+
+          // Teardown must actually invalidate the session, or a stale frame
+          // could keep calling tools after its card is gone.
+          closeMcpApp(launched.sessionId)
+          const afterClose = await withTimeout(
+            handleMcpAppRequest({
+              sessionId: launched.sessionId,
+              id: 5,
+              method: 'tools/call',
+              params: { name: 'echo', arguments: {} }
+            }),
+            15_000,
+            'mcp app after close'
+          )
+          check('mcp app: a closed session serves nothing', !!afterClose.error)
+        }
+        // The renderer names an explicit targetOrigin on every postMessage, so
+        // the constant it uses MUST match the scheme main actually serves. If
+        // these drift, every reply is silently dropped by the browser and the
+        // bridge dies with no error anywhere.
+        check(
+          'mcp app: the sandbox origin matches the served scheme',
+          SANDBOX_ORIGIN_HINT.startsWith(SANDBOX_SCHEME + '://') &&
+            SANDBOX_URL.startsWith(SANDBOX_ORIGIN_HINT)
+        )
+        // ---- the sandbox origin, for real ----------------------------------
+        // Everything above tests the BROKER. None of it proves the custom
+        // scheme actually serves, and that is the one layer whose failure mode
+        // is invisible: `registerSchemesAsPrivileged` has to run before
+        // app-ready, and if it didn't, every app view silently renders a blank
+        // frame with no error on any channel. Load it in a real window.
+        {
+          const win = new BrowserWindow({ show: false })
+          try {
+            await win.loadURL(SANDBOX_URL)
+            const probe = (await win.webContents.executeJavaScript(
+              `(() => ({
+                 origin: String(window.origin),
+                 secure: Boolean(window.isSecureContext),
+                 hasProxy: typeof window.__roxyProxyReady !== 'undefined' || !!document.querySelector('script'),
+                 title: document.title
+               }))()`
+            )) as { origin: string; secure: boolean; hasProxy: boolean; title: string }
+            check(
+              'mcp app: the sandbox origin actually loads',
+              probe.origin.startsWith(SANDBOX_SCHEME + '://'),
+              probe.origin
+            )
+            // Privileged registration is what grants a secure context. Without
+            // it the proxy still "loads" but modern APIs quietly degrade.
+            check('mcp app: ...as a secure context', probe.secure === true)
+            check('mcp app: ...serving the proxy document', probe.hasProxy === true)
+          } catch (e) {
+            check('mcp app: the sandbox origin actually loads', false, String(e))
+          } finally {
+            win.destroy()
+          }
+        }
+
+        _resetMcpAppsForTests()
+
+        // ---- cancellation --------------------------------------------------
+        // The `slow` tool never replies. Without a signal this would block for
+        // the full request timeout; with one it returns as soon as we abort.
+        const ac = new AbortController()
+        const startedAt = Date.now()
+        setTimeout(() => ac.abort(), 250)
+        const cancelled = await withTimeout(
+          callMcpTool('mcp__modernmcp__slow', {}, ac.signal),
+          15_000,
+          'mcp cancel'
+        )
+        check(
+          'mcp cancel: an aborted call returns promptly',
+          Date.now() - startedAt < 5_000,
+          `${Date.now() - startedAt}ms`
+        )
+        check(
+          'mcp cancel: ...and reports cancellation, not a server failure',
+          !cancelled.ok && /cancelled/i.test(cancelled.output),
+          cancelled.output
+        )
+
+        // ---- per-server request timeouts -----------------------------------
+        // Calls arrive by TOOL name, so `callMcpTool` has no config in hand and
+        // used to fall back to the global 120s default - a server configured
+        // with `timeout: 800` still hung a turn for two minutes. The budget is
+        // resolved at connect and carried on the connection.
+        const impatientRec: McpServerRecord = {
+          id: 'impatient',
+          enabled: true,
+          config: {
+            type: 'local',
+            command: [process.execPath, modernPath],
+            environment: { ELECTRON_RUN_AS_NODE: '1' },
+            timeout: 800
+          }
+        }
+        await ensureMcpConnected([impatientRec], process.cwd())
+        const slowStart = Date.now()
+        const timedOut = await withTimeout(
+          callMcpTool('mcp__impatient__slow', {}),
+          20_000,
+          'mcp per-server timeout'
+        )
+        const elapsed = Date.now() - slowStart
+        check(
+          'mcp timeout: a server\u2019s own budget is honoured, not the global default',
+          !timedOut.ok && elapsed < 10_000,
+          `${elapsed}ms`
+        )
+        await disposeConnection('impatient')
+
+        // ...and none of it leaks into what the model sees.
+        const modelSchema = mcpToolSchemas(new Set(['modernmcp'])).find(
+          (s) => s.function.name === 'mcp__modernmcp__structured'
+        )
+        check(
+          "mcp apps: extension metadata stays out of the model's tool list",
+          !!modelSchema && !JSON.stringify(modelSchema).includes('io.modelcontextprotocol/ui')
+        )
+
+        // Both eras coexist in one warm pool, each on its own negotiated wire.
+        await ensureMcpConnected([rec], process.cwd())
+        const legacySummary = mcpServerSummaries(new Set(['mockmcp']))[0]
+        check(
+          'mcp era: a 2025-era server still negotiates legacy alongside it',
+          legacySummary?.status === 'connected' && legacySummary?.era === 'legacy',
+          `${legacySummary?.era} / ${legacySummary?.error}`
+        )
+
+        await _resetMcpForTests()
+      }
+
       // ---- the `mcp` MANAGEMENT tool (add/list/enable/disable/reconnect/remove) ----
       // Drives the agent-facing tool through runTool end-to-end against the real DB
       // + the mock server: add → connect → use in the same flow → toggle → remove.
@@ -3004,6 +3416,12 @@ async function main(): Promise<void> {
         command: [process.execPath, mockPath],
         env: { ELECTRON_RUN_AS_NODE: '1' }
       }
+      // ---- the default: an agent-added server just runs ----------------------
+      // Installing a server is the user's decision, so the `mcp` tool connects
+      // it and Roxy discloses what it exposed afterwards. No prompt, no window
+      // needed - which is why this works in a headless run.
+      _resetTrustForTests()
+      repo.revokeMcpTrust('toolmcp')
       const added = await withTimeout(run('mcp', mcpCmd), 20_000, 'mcp tool add')
       check(
         'mcp tool: add connects the server and names its tools',
@@ -3013,6 +3431,47 @@ async function main(): Promise<void> {
       check(
         'mcp tool: add persists the server to the DB',
         repo.listMcpServers().some((r) => r.id === 'toolmcp')
+      )
+      // Provenance still survives the write. It no longer gates anything by
+      // default, but it is what the disclosure says ("added by the agent") and
+      // what the opt-in confirm posture keys off.
+      check(
+        'mcp trust: an agent-added row stays marked agent-added',
+        repo.listMcpServers().find((r) => r.id === 'toolmcp')?.origin === 'agent'
+      )
+      // Connecting records the server, so the notice is a one-off rather than a
+      // banner on every turn.
+      check(
+        'mcp trust: connecting remembers the server',
+        repo.getMcpTrustStore().entries.some((e) => e.id === 'toolmcp' && e.decision === 'allow')
+      )
+
+      // ---- the exception: a KNOWN name now running something else ------------
+      // This is the one case that interrupts. With no window to ask, it must
+      // resolve to "not connected" rather than silently running the substitute.
+      const swapped = await withTimeout(
+        run('mcp', {
+          action: 'add',
+          id: 'toolmcp',
+          command: [process.execPath, mockPath, '--different'],
+          env: { ELECTRON_RUN_AS_NODE: '1' }
+        }),
+        20_000,
+        'mcp tool add (swapped)'
+      )
+      check(
+        'mcp trust: swapping a known server does not silently run it',
+        !swapped.ok && /declined/i.test(swapped.output),
+        swapped.output
+      )
+      // A refused swap must leave NO trace: the rejected command must not be
+      // sitting in the DB waiting to be picked up by the next enable/reconnect.
+      check(
+        'mcp trust: a declined swap does not overwrite the stored config',
+        repo.listMcpServers().find((r) => r.id === 'toolmcp')?.config.type === 'local' &&
+          !JSON.stringify(repo.listMcpServers().find((r) => r.id === 'toolmcp')?.config).includes(
+            '--different'
+          )
       )
       // This is what runLoop calls to rebuild the live tool list mid-turn:
       check(
@@ -4834,7 +5293,14 @@ async function main(): Promise<void> {
   await fs.rm(tmp, { recursive: true, force: true }).catch(() => undefined)
 }
 
+// Mirror src/main/index.ts: the MCP App sandbox scheme's privileges are locked
+// in at app-ready, so registration has to happen before it. Without this the
+// smoke process cannot load the sandbox origin at all - which is a property of
+// THIS harness, not of the product.
+registerSandboxScheme()
+
 app.whenReady().then(async () => {
+  serveSandbox()
   console.log('roxy runtime smoke test\n')
   // Watchdog so an overnight run can never hang.
   //
