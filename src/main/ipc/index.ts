@@ -95,7 +95,6 @@ import {
   setMcpAppApprover,
   type BridgeRequest
 } from '../services/mcp-apps'
-import type { McpUiTheme } from '../../shared/mcp-apps'
 import {
   listSkills,
   refreshSkills,
@@ -481,7 +480,7 @@ export function registerIpc(): void {
   )
   ipcMain.handle(CHANNELS.mcpAppRequest, (_e, req: BridgeRequest) => handleMcpAppRequest(req))
   ipcMain.handle(CHANNELS.mcpAppClose, (_e, sessionId: string) => closeMcpApp(sessionId))
-  ipcMain.on(CHANNELS.mcpAppTheme, (_e, theme: McpUiTheme) => setMcpAppTheme(theme))
+  ipcMain.on(CHANNELS.mcpAppTheme, (_e, theme: unknown) => setMcpAppTheme(theme))
   ipcMain.on(CHANNELS.mcpAppApprovalRespond, (_e, res: { requestId: string; allowed: boolean }) =>
     resolveAppApproval(res)
   )

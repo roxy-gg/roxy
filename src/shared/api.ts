@@ -26,6 +26,7 @@ import type {
   WorktreeIntent
 } from './types'
 import type { McpProtocolEra, McpServerConfig } from './mcp'
+import type { McpAppHostTheme } from './mcp-apps'
 import type {
   McpConsentRequest,
   McpConsentResponse,
@@ -887,7 +888,7 @@ export interface RoxyApi {
       /** Drop a view’s session (its card unmounted). */
       close(sessionId: string): Promise<void>
       /** Publish the host theme so views can match it. */
-      setTheme(theme: { mode: string; variables: Record<string, string> }): void
+      setTheme(theme: McpAppHostTheme): void
       /** Subscribe to view-initiated tool-call approvals. */
       onApprovalRequest(callback: (req: McpAppApprovalRequest) => void): () => void
       /** Answer one approval request. */

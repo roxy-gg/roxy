@@ -104,6 +104,7 @@ import {
   handleMcpAppRequest,
   closeMcpApp,
   setMcpAppApprover,
+  setMcpAppTheme,
   _resetMcpAppsForTests
 } from '../src/main/services/mcp-apps'
 import {
@@ -3226,6 +3227,44 @@ async function main(): Promise<void> {
         )
 
         if (launched) {
+          // Reproduce the exact pre-fix renderer payload from the user-visible
+          // schema error. Optional styling must never break the handshake.
+          setMcpAppTheme({
+            mode: 'light',
+            variables: {
+              '--mcp-ui-background': '#fff',
+              '--mcp-ui-foreground': '#111',
+              '--mcp-ui-muted': '#777',
+              '--mcp-ui-border': '#ddd',
+              '--mcp-ui-accent': '#06f',
+              '--mcp-ui-font-family': 'system-ui',
+              '--color-background-primary': '#f7f7f8'
+            }
+          })
+          const initialized = await handleMcpAppRequest({
+            sessionId: launched.sessionId,
+            id: 'init',
+            method: 'ui/initialize',
+            params: {
+              protocolVersion: '2026-01-26',
+              appInfo: { name: 'schema-probe', version: '1.0.0' },
+              appCapabilities: {}
+            }
+          })
+          const hostContext = (
+            initialized.result as {
+              hostContext?: { theme?: string; styles?: { variables?: Record<string, string> } }
+            }
+          )?.hostContext
+          check(
+            'mcp app: ui/initialize strips non-protocol theme keys',
+            hostContext?.theme === 'light' &&
+              hostContext.styles?.variables?.['--color-background-primary'] === '#f7f7f8' &&
+              !Object.keys(hostContext.styles?.variables ?? {}).some((key) =>
+                key.startsWith('--mcp-ui-')
+              ),
+            JSON.stringify(initialized)
+          )
           check(
             'mcp app: the complete tool result reaches the launch payload',
             (launched.toolResult as { _meta?: { viewUUID?: string } })?._meta?.viewUUID ===

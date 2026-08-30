@@ -383,10 +383,53 @@ export function isOpenableUrl(raw: unknown): boolean {
  * Sent as data rather than injected CSS: the view decides how to use them, and
  * the host never writes into the view's document.
  */
-export interface McpUiTheme {
-  mode: 'light' | 'dark'
-  /** CSS custom properties, e.g. `--mcp-ui-background`. */
-  variables: Record<string, string>
+export const MCP_APP_HOST_STYLE_KEYS = [
+  '--color-background-primary',
+  '--color-background-secondary',
+  '--color-background-tertiary',
+  '--color-text-primary',
+  '--color-text-secondary',
+  '--color-text-tertiary',
+  '--color-border-primary',
+  '--color-border-secondary',
+  '--color-ring-primary',
+  '--font-sans',
+  '--font-mono'
+] as const
+
+export type McpAppHostStyleKey = (typeof MCP_APP_HOST_STYLE_KEYS)[number]
+export type McpAppHostStyles = Partial<Record<McpAppHostStyleKey, string>>
+export type McpUiTheme = 'light' | 'dark'
+
+/** Renderer snapshot of Roxy's theme, translated to official MCP App tokens. */
+export interface McpAppHostTheme {
+  mode: McpUiTheme
+  variables: McpAppHostStyles
+}
+
+/**
+ * Validate the IPC theme snapshot before including it in `ui/initialize`.
+ *
+ * MCP Apps style variables are a closed schema. Unknown CSS properties make the
+ * official SDK reject the entire initialization result, so stale renderers and
+ * malformed IPC payloads are stripped rather than turning cosmetic data into a
+ * connection failure.
+ */
+export function sanitizeMcpAppHostTheme(value: unknown): McpAppHostTheme {
+  const raw = value && typeof value === 'object' ? (value as Record<string, unknown>) : {}
+  const rawVariables =
+    raw.variables && typeof raw.variables === 'object'
+      ? (raw.variables as Record<string, unknown>)
+      : {}
+  const variables: McpAppHostStyles = {}
+  for (const key of MCP_APP_HOST_STYLE_KEYS) {
+    const style = rawVariables[key]
+    if (typeof style === 'string' && style.length <= 512) variables[key] = style
+  }
+  return {
+    mode: raw.mode === 'light' ? 'light' : 'dark',
+    variables
+  }
 }
 
 /** The result of a view's `ui/initialize` request. */
@@ -406,7 +449,7 @@ export interface McpUiInitializeResult {
   /** Rich host context. The official App SDK expects these fields nested here. */
   hostContext: {
     theme?: 'light' | 'dark'
-    styles?: { variables?: Record<string, string> }
+    styles?: { variables?: McpAppHostStyles }
     displayMode?: McpUiDisplayMode
     availableDisplayModes?: McpUiDisplayMode[]
     containerDimensions?: { maxHeight?: number; maxWidth?: number }

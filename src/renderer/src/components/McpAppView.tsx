@@ -6,6 +6,29 @@ import { APP_HEIGHT, clampAppHeight, SANDBOX_POST_TARGET } from '@shared/mcp-app
 import { api } from '../lib/api'
 import { cn } from '../lib/cn'
 
+/** Publish Roxy's live palette using the protocol's closed style-token schema. */
+function publishMcpAppTheme(): void {
+  const root = document.documentElement
+  const styles = getComputedStyle(root)
+  const read = (name: string): string => styles.getPropertyValue(name).trim()
+  api.mcp.app.setTheme({
+    mode: root.dataset.appearance === 'light' ? 'light' : 'dark',
+    variables: {
+      '--color-background-primary': read('--color-surface'),
+      '--color-background-secondary': read('--color-surface-2'),
+      '--color-background-tertiary': read('--color-elevated'),
+      '--color-text-primary': read('--color-text'),
+      '--color-text-secondary': read('--color-text-muted'),
+      '--color-text-tertiary': read('--color-text-subtle'),
+      '--color-border-primary': read('--color-border'),
+      '--color-border-secondary': read('--color-border-strong'),
+      '--color-ring-primary': read('--color-accent'),
+      '--font-sans': read('--font-sans') || 'system-ui, sans-serif',
+      '--font-mono': read('--font-mono') || 'ui-monospace, monospace'
+    }
+  })
+}
+
 /**
  * Renders one MCP App — a server-supplied UI — inside a tool card.
  *
@@ -54,9 +77,12 @@ export function McpAppView({
   const [height, setHeight] = useState<number>(APP_HEIGHT.initial)
   const [fullscreen, setFullscreen] = useState(false)
 
-  // Load the view's HTML once per tool call.
+  // Load the view's HTML once per tool call. Publish the theme first: an app can
+  // send ui/initialize as soon as its inline script runs, so a later effect can
+  // race and leave it with main's stale/default snapshot.
   useEffect(() => {
     let alive = true
+    publishMcpAppTheme()
     void api.mcp.app
       .launch({ serverId, toolName, resourceUri })
       .then((res) => {
@@ -180,25 +206,6 @@ export function McpAppView({
     window.addEventListener('message', listener)
     return () => window.removeEventListener('message', listener)
   }, [launch, toolInput, toolResult])
-
-  // Publish the host theme so the view can match it. Read from the live document
-  // rather than a constant, so a theme switch is reflected on the next mount.
-  useEffect(() => {
-    if (!launch) return
-    const styles = getComputedStyle(document.documentElement)
-    const read = (name: string): string => styles.getPropertyValue(name).trim()
-    api.mcp.app.setTheme({
-      mode: document.documentElement.classList.contains('light') ? 'light' : 'dark',
-      variables: {
-        '--mcp-ui-background': read('--color-surface'),
-        '--mcp-ui-foreground': read('--color-text'),
-        '--mcp-ui-muted': read('--color-text-muted'),
-        '--mcp-ui-border': read('--color-border'),
-        '--mcp-ui-accent': read('--color-accent'),
-        '--mcp-ui-font-family': read('--font-sans') || 'system-ui, sans-serif'
-      }
-    })
-  }, [launch])
 
   if (failed) return null
   if (!launch) {

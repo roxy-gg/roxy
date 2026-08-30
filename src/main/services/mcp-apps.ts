@@ -31,8 +31,9 @@ import {
   APPS_PROTOCOL_VERSION,
   SUPPORTED_DISPLAY_MODES,
   UI_MIME,
-  type McpUiInitializeResult,
-  type McpUiTheme
+  sanitizeMcpAppHostTheme,
+  type McpAppHostTheme,
+  type McpUiInitializeResult
 } from '../../shared/mcp-apps'
 import {
   callMcpTool,
@@ -218,10 +219,10 @@ export function setMcpAppApprover(fn: ApprovalFn): void {
 }
 
 /** Host theme, supplied by the renderer at launch so the view can match it. */
-let currentTheme: McpUiTheme = { mode: 'dark', variables: {} }
+let currentTheme: McpAppHostTheme = { mode: 'dark', variables: {} }
 
-export function setMcpAppTheme(theme: McpUiTheme): void {
-  currentTheme = theme
+export function setMcpAppTheme(theme: unknown): void {
+  currentTheme = sanitizeMcpAppHostTheme(theme)
 }
 
 /**

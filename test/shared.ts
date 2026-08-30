@@ -289,6 +289,7 @@ import {
   negotiateDisplayMode,
   routeBridgeMethod,
   sanitizeDomains,
+  sanitizeMcpAppHostTheme,
   uiResourceUri
 } from '../src/shared/mcp-apps'
 import {
@@ -2577,6 +2578,31 @@ check(
   'mcp apps: wss:// is allowed for live views',
   sanitizeDomains(['wss://x.example.com']).length === 1
 )
+
+// Theme styling is optional. The official SDK validates a closed set of CSS
+// variable names, so an old or malformed renderer payload must be filtered
+// rather than making `ui/initialize` fail.
+{
+  const theme = sanitizeMcpAppHostTheme({
+    mode: 'light',
+    variables: {
+      '--color-background-primary': '#fff',
+      '--font-sans': 'system-ui',
+      '--mcp-ui-background': '#000',
+      '--unknown': 'bad'
+    }
+  })
+  check('mcp apps: a valid host theme mode survives', theme.mode === 'light')
+  check(
+    'mcp apps: official host style variables survive IPC sanitizing',
+    theme.variables['--color-background-primary'] === '#fff' &&
+      theme.variables['--font-sans'] === 'system-ui'
+  )
+  check(
+    'mcp apps: unknown host style variables cannot break initialization',
+    !Object.keys(theme.variables).some((key) => key.startsWith('--mcp-ui-') || key === '--unknown')
+  )
+}
 
 // ---- permissions: off unless asked ----------------------------------------
 check('mcp apps: no permissions means an empty allow attribute', buildAllow(undefined) === '')
