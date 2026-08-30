@@ -62,9 +62,16 @@ import {
   mcpInstructions,
   mcpToolSchemas,
   mcpToolTitle,
+  mcpServerSummaries,
+  mcpToolDefinition,
   isMcpTool
 } from '../services/mcp'
-import type { McpServerRecord } from '../../shared/mcp'
+import {
+  gateRecords as gateMcpRecords,
+  discloseConnected as discloseMcpConnected,
+  type McpCandidate
+} from '../services/mcp-trust'
+import { uiResourceUri } from '../../shared/mcp-apps'
 import { SKILL_TOOL_NAME, SKILL_TOOL_DESCRIPTION } from '../../shared/skills'
 import { listSkills, skillInstructions } from '../services/skills'
 import { findGitRoot } from '../services/workspace'
@@ -497,13 +504,42 @@ function stripAnsi(s: string): string {
 }
 
 /**
+ * The server id embedded in a namespaced MCP tool name.
+ *
+ * `mcp__<server>__<tool>`; the server half is everything between the prefix and
+ * the final separator, so a server id containing the separator still resolves.
+ */
+function mcpServerIdOf(qualified: string): string {
+  const rest = qualified.slice('mcp__'.length)
+  const cut = rest.lastIndexOf('__')
+  return cut > 0 ? rest.slice(0, cut) : rest
+}
+
+/**
  * The MCP servers to connect for a turn: DB-configured globals overlaid by any
  * workspace `.roxy/mcp.json` entries (workspace wins on an id collision).
+ *
+ * Each record keeps its PROVENANCE, because that is what decides whether it may
+ * run at all. A DB row was typed by the user in Settings and is self-consenting;
+ * a workspace entry arrived with `git clone` and is attacker-controlled, so it
+ * has to clear the consent gate first (see services/mcp-trust.ts).
+ *
+ * The workspace-wins overlay is kept - a project overriding a global server by
+ * name is a legitimate thing to want - but the override INHERITS the workspace
+ * provenance, so shadowing a trusted global name cannot launder an untrusted
+ * command into a self-consenting one.
  */
-function gatherMcpRecords(cwd: string): McpServerRecord[] {
-  const byId = new Map<string, McpServerRecord>()
-  for (const r of repo.listMcpServers()) byId.set(r.id, r)
-  for (const r of loadWorkspaceMcpServers(cwd)) byId.set(r.id, r)
+function gatherMcpCandidates(cwd: string): McpCandidate[] {
+  const byId = new Map<string, McpCandidate>()
+  for (const record of repo.listMcpServers()) {
+    // A DB row is only self-consenting when a human wrote it; rows the `mcp`
+    // tool added still have to clear the gate (see McpServerRecord.origin).
+    const provenance = record.origin === 'agent' ? 'agent' : 'user'
+    byId.set(record.id, { record, provenance, workspace: null })
+  }
+  for (const record of loadWorkspaceMcpServers(cwd)) {
+    byId.set(record.id, { record, provenance: 'workspace', workspace: cwd })
+  }
   return [...byId.values()]
 }
 
@@ -987,14 +1023,30 @@ export async function runAgentTurn(opts: RunTurnOptions): Promise<void> {
   let mcpSchemas: ReturnType<typeof mcpToolSchemas> = []
   let mcpInfo: string | undefined
   if (toolCapable && cwd && !readOnly) {
-    const records = gatherMcpRecords(cwd)
-    if (records.length) {
-      await ensureMcpConnected(records, cwd)
-      // Scope to THIS turn's records so a workspace's `.roxy/mcp.json` servers can't
-      // leak into a different workspace's chat (the pool is process-global).
-      const ids = new Set(records.map((r) => r.id))
-      mcpSchemas = mcpToolSchemas(ids)
-      mcpInfo = mcpInstructions(ids)
+    const candidates = gatherMcpCandidates(cwd)
+    if (candidates.length) {
+      // Consent gate BEFORE connect: `ensureMcpConnected` spawns processes, so a
+      // server the user has not approved must never reach it. Servers that are
+      // denied (or whose prompt times out) are simply dropped, exactly like one
+      // that fails to spawn - a turn is never blocked on them.
+      const { records, disclose } = await gateMcpRecords(candidates)
+      if (records.length) {
+        await ensureMcpConnected(records, cwd)
+        // Scope to THIS turn's records so a workspace's `.roxy/mcp.json` servers can't
+        // leak into a different workspace's chat (the pool is process-global).
+        const ids = new Set(records.map((r) => r.id))
+        mcpSchemas = mcpToolSchemas(ids)
+        mcpInfo = mcpInstructions(ids)
+        // Tell the user what any newly-seen server actually turned out to be.
+        // Deliberately AFTER connecting: the tool list is the useful part of the
+        // notice, and it does not exist until the handshake has happened.
+        if (disclose.size) {
+          for (const summary of mcpServerSummaries(new Set(disclose.keys()))) {
+            const candidate = disclose.get(summary.id)
+            if (candidate) discloseMcpConnected(candidate, summary.tools, summary.error)
+          }
+        }
+      }
     }
   }
 
@@ -1364,13 +1416,25 @@ async function runLoop(o: LoopOptions): Promise<string> {
         run.end()
         signal.removeEventListener('abort', cascade)
       }
+      // Does this tool ship its own UI? Resolved here from the definition the
+      // server sent at discovery, so the renderer never reasons about MCP
+      // metadata - it is simply told that a view exists and where it lives.
+      //
+      // Only on success: a view is handed the tool result at initialize, and
+      // mounting one for a failed call would render an interface around an
+      // error the user is better off reading as text.
+      const uiUri =
+        result.ok && isMcpTool(tc.name)
+          ? uiResourceUri(mcpToolDefinition(tc.name)?._meta)
+          : undefined
       emitTool({
         type: 'tool-end',
         callId: tc.id,
         output: result.output,
         ok: result.ok,
         image: result.image,
-        diff: result.diff
+        diff: result.diff,
+        ...(uiUri ? { mcpApp: { serverId: mcpServerIdOf(tc.name), resourceUri: uiUri } } : {})
       })
       // Count the call. `recordTool` collapses the name through the closed
       // vocabulary, so an MCP tool reports as the literal `mcp` and its
@@ -1393,7 +1457,11 @@ async function runLoop(o: LoopOptions): Promise<string> {
     // workspace's MCP schemas and merge them into the tool list so the new tools
     // are callable on the very next model step (this turn), not only next message.
     if (cwd && !readOnly && others.some((tc) => tc.name === 'mcp')) {
-      const ids = new Set(gatherMcpRecords(cwd).map((r) => r.id))
+      // No gate here: this only re-reads schemas from servers ALREADY in the
+      // warm pool, and nothing reaches that pool without passing the consent
+      // check in the `mcp` tool itself. An unapproved server contributes no
+      // connection, so it contributes no tools.
+      const ids = new Set(gatherMcpCandidates(cwd).map((c) => c.record.id))
       liveMcpTools = mcpToolSchemas(ids)
       liveTools = [...baseTools, ...liveMcpTools]
     }

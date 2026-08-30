@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { resolveSeed } from '../../shared/providers'
 import { normalizeServerConfig, type McpServerConfig, type McpServerRecord } from '../../shared/mcp'
+import type { McpTrustEntry, McpTrustStore } from '../../shared/mcp-trust'
 import { DEFAULT_BRANCH_PREFIX, normalizeBranchPrefix } from '../../shared/branch'
 import { DEFAULT_LANGUAGE, normalizeLanguage } from '../../shared/i18n'
 import type { Language } from '../../shared/i18n'
@@ -251,6 +252,9 @@ export function resetAll(): void {
        DELETE FROM providers;
        DELETE FROM integrations;
        DELETE FROM mcp_servers;
+       DELETE FROM mcp_oauth;
+       DELETE FROM mcp_trust;
+       DELETE FROM mcp_trusted_workspaces;
        DELETE FROM activity;
        DELETE FROM settings;`
     )
@@ -1409,6 +1413,7 @@ interface McpServerRow {
   config: string
   enabled: number
   created_at: number
+  origin: string | null
 }
 
 /** Every configured MCP server (a bad/legacy config row is skipped, not thrown). */
@@ -1420,30 +1425,53 @@ export function listMcpServers(): McpServerRecord[] {
   for (const row of rows) {
     const config = normalizeServerConfig(safeParse(row.config))
     if (!config) continue
-    out.push({ id: row.id, config, enabled: row.enabled > 0 })
+    // Anything that isn't exactly 'user' is treated as agent-added. Unknown
+    // values must fall to the side that still requires consent.
+    out.push({
+      id: row.id,
+      config,
+      enabled: row.enabled > 0,
+      origin: row.origin === 'user' ? 'user' : 'agent'
+    })
   }
   return out
 }
 
-/** Create or replace a server by id (name). Returns the stored record. */
+/**
+ * Create or replace a server by id (name). Returns the stored record.
+ *
+ * `origin` records WHO is writing (see McpServerRecord.origin). It defaults to
+ * 'agent' so a new call site cannot accidentally mint a self-consenting row:
+ * being wrongly asked to approve a server is a papercut, being wrongly NOT asked
+ * is arbitrary code execution.
+ *
+ * An existing row's origin is preserved on conflict unless the writer is the
+ * user: the user editing a config is a fresh human decision and upgrades the
+ * row, while the agent rewriting one must never launder it into 'user'.
+ */
 export function upsertMcpServer(input: {
   id: string
   config: McpServerConfig
   enabled?: boolean
+  origin?: 'user' | 'agent'
 }): McpServerRecord {
   const id = input.id.trim()
   if (!id) throw new Error('MCP server id is required')
   const config = normalizeServerConfig(input.config)
   if (!config) throw new Error('Invalid MCP server config')
   const enabled = input.enabled === false ? 0 : 1
+  const origin = input.origin ?? 'agent'
   getDb()
     .prepare(
-      `INSERT INTO mcp_servers(id, config, enabled, created_at)
-       VALUES(?, ?, ?, ?)
-       ON CONFLICT(id) DO UPDATE SET config = excluded.config, enabled = excluded.enabled`
+      `INSERT INTO mcp_servers(id, config, enabled, created_at, origin)
+       VALUES(?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET
+         config  = excluded.config,
+         enabled = excluded.enabled,
+         origin  = CASE WHEN excluded.origin = 'user' THEN 'user' ELSE mcp_servers.origin END`
     )
-    .run(id, JSON.stringify(config), enabled, Date.now())
-  return { id, config, enabled: enabled > 0 }
+    .run(id, JSON.stringify(config), enabled, Date.now(), origin)
+  return { id, config, enabled: enabled > 0, origin }
 }
 
 export function deleteMcpServer(id: string): void {
@@ -1454,6 +1482,225 @@ export function setMcpServerEnabled(id: string, enabled: boolean): void {
   getDb()
     .prepare('UPDATE mcp_servers SET enabled = ? WHERE id = ?')
     .run(enabled ? 1 : 0, id)
+}
+
+// ---- MCP trust (consent to actually RUN a server) ----------------------------
+// See src/shared/mcp-trust.ts for what a fingerprint is and why consent is keyed
+// by it rather than by server name. This layer is storage only: it holds no
+// policy and makes no decisions.
+//
+// Every read degrades to "nothing is trusted" rather than throwing. A corrupt or
+// missing trust store must fail CLOSED - the user gets asked again, which is
+// merely annoying, instead of an approval being fabricated for a command nobody
+// approved.
+
+interface McpTrustRow {
+  id: string
+  fingerprint: string
+  provenance: string
+  scope: string
+  decision: string
+  decided_at: number
+}
+
+/** Empty string is how "applies anywhere" is stored; see the v23 migration. */
+const GLOBAL_SCOPE = ''
+
+/** Narrow one untrusted row; anything unrecognised is dropped (fail closed). */
+function toTrustEntry(row: McpTrustRow): McpTrustEntry | null {
+  if (row.decision !== 'allow' && row.decision !== 'deny') return null
+  const p = row.provenance
+  if (p !== 'user' && p !== 'workspace' && p !== 'agent' && p !== 'import') return null
+  return {
+    id: row.id,
+    fingerprint: row.fingerprint,
+    provenance: p,
+    scope: row.scope === GLOBAL_SCOPE ? null : row.scope,
+    decision: row.decision,
+    decidedAt: row.decided_at
+  }
+}
+
+/**
+ * Whether the user opted into confirming each new MCP server BEFORE it runs.
+ *
+ * Off by default: choosing to install a server is itself the decision, so the
+ * default posture is to run it and disclose what it exposed. This is the
+ * stricter opt-in for shared machines and untrusted repos.
+ *
+ * Its own accessor rather than a field on `AppSettings` because it is read on
+ * the connect path, not from a cached settings object the renderer also writes.
+ */
+export function getMcpConfirmBeforeRun(): boolean {
+  const row = getDb()
+    .prepare('SELECT value FROM settings WHERE key = ?')
+    .get('mcp_confirm_before_run') as { value: string } | undefined
+  return row?.value === '1'
+}
+
+/** Opt into confirming each new server before it runs (default: off). */
+export function setMcpConfirmBeforeRun(enabled: boolean): void {
+  setSetting('mcp_confirm_before_run', enabled ? '1' : null)
+}
+
+/** The whole trust store, for the pure resolver in shared/mcp-trust.ts. */
+export function getMcpTrustStore(): McpTrustStore {
+  try {
+    const entries = (
+      getDb().prepare('SELECT * FROM mcp_trust ORDER BY decided_at ASC').all() as McpTrustRow[]
+    )
+      .map(toTrustEntry)
+      .filter((e): e is McpTrustEntry => e !== null)
+    const workspaces = (
+      getDb()
+        .prepare('SELECT path, trusted_at FROM mcp_trusted_workspaces ORDER BY trusted_at ASC')
+        .all() as { path: string; trusted_at: number }[]
+    ).map((r) => ({ path: r.path, trustedAt: r.trusted_at }))
+    return { entries, workspaces }
+  } catch {
+    // Fail closed: an unreadable store means "ask", never "allow".
+    return { entries: [], workspaces: [] }
+  }
+}
+
+/** Remember one decision. Re-deciding the same (id, fingerprint, scope) replaces it. */
+export function recordMcpTrust(entry: McpTrustEntry): void {
+  getDb()
+    .prepare(
+      `INSERT INTO mcp_trust(id, fingerprint, provenance, scope, decision, decided_at)
+       VALUES(?, ?, ?, ?, ?, ?)
+       ON CONFLICT(id, fingerprint, scope) DO UPDATE SET
+         decision   = excluded.decision,
+         provenance = excluded.provenance,
+         decided_at = excluded.decided_at`
+    )
+    .run(
+      entry.id,
+      entry.fingerprint,
+      entry.provenance,
+      entry.scope ?? GLOBAL_SCOPE,
+      entry.decision,
+      entry.decidedAt
+    )
+}
+
+/**
+ * Forget decisions for a server id.
+ *
+ * With a `scope` argument this is scoped, so revoking a server in one project
+ * cannot silently revoke the same-named server the user approved in another.
+ * Omit it to forget the id everywhere (what "Revoke" in Settings does).
+ */
+export function revokeMcpTrust(id: string, scope?: string | null): void {
+  if (scope === undefined) {
+    getDb().prepare('DELETE FROM mcp_trust WHERE id = ?').run(id)
+    return
+  }
+  getDb()
+    .prepare('DELETE FROM mcp_trust WHERE id = ? AND scope = ?')
+    .run(id, scope ?? GLOBAL_SCOPE)
+}
+
+// ---- MCP OAuth (credentials for remote servers) ------------------------------
+// Encrypted at rest via secure.ts. Every read fails CLOSED to `null`: a
+// credential that cannot be decrypted (keychain moved, profile copied to another
+// machine) must send the user back through sign-in, never surface a broken token
+// that fails confusingly on the wire.
+
+type McpOAuthKind = 'client' | 'tokens' | 'verifier'
+
+function readOAuth<T>(serverId: string, kind: McpOAuthKind): T | null {
+  try {
+    const row = getDb()
+      .prepare('SELECT payload, encrypted FROM mcp_oauth WHERE server_id = ? AND kind = ?')
+      .get(serverId, kind) as { payload: string; encrypted: number } | undefined
+    if (!row) return null
+    return JSON.parse(decryptSecret({ data: row.payload, encrypted: row.encrypted > 0 })) as T
+  } catch {
+    return null
+  }
+}
+
+function writeOAuth(serverId: string, kind: McpOAuthKind, value: unknown): void {
+  const secure = encryptSecret(JSON.stringify(value))
+  getDb()
+    .prepare(
+      `INSERT INTO mcp_oauth(server_id, kind, payload, encrypted, updated_at)
+       VALUES(?, ?, ?, ?, ?)
+       ON CONFLICT(server_id, kind) DO UPDATE SET
+         payload    = excluded.payload,
+         encrypted  = excluded.encrypted,
+         updated_at = excluded.updated_at`
+    )
+    .run(serverId, kind, secure.data, secure.encrypted ? 1 : 0, Date.now())
+}
+
+/** The dynamic client registration earned for this server, if any. */
+export function getMcpOAuthClient<T>(serverId: string): T | null {
+  return readOAuth<T>(serverId, 'client')
+}
+
+export function saveMcpOAuthClient(serverId: string, info: unknown): void {
+  writeOAuth(serverId, 'client', info)
+}
+
+/** The access/refresh tokens for this server, if any. */
+export function getMcpOAuthTokens<T>(serverId: string): T | null {
+  return readOAuth<T>(serverId, 'tokens')
+}
+
+export function saveMcpOAuthTokens(serverId: string, tokens: unknown): void {
+  writeOAuth(serverId, 'tokens', tokens)
+}
+
+/**
+ * The in-flight PKCE code verifier.
+ *
+ * Read-once: the verifier is single-use by design, and leaving it behind after
+ * the exchange means a stale secret sitting in the database for a flow that
+ * already completed.
+ */
+export function getMcpOAuthVerifier(serverId: string): string | null {
+  const v = readOAuth<string>(serverId, 'verifier')
+  if (v) {
+    getDb().prepare("DELETE FROM mcp_oauth WHERE server_id = ? AND kind = 'verifier'").run(serverId)
+  }
+  return v
+}
+
+export function saveMcpOAuthVerifier(serverId: string, verifier: string): void {
+  writeOAuth(serverId, 'verifier', verifier)
+}
+
+/** Whether this server has usable stored tokens (drives the "signed in" badge). */
+export function hasMcpOAuth(serverId: string): boolean {
+  return getMcpOAuthTokens(serverId) !== null
+}
+
+/** Forget every credential for a server (sign out / server removed). */
+export function clearMcpOAuth(serverId: string): void {
+  getDb().prepare('DELETE FROM mcp_oauth WHERE server_id = ?').run(serverId)
+}
+
+/** Trust a whole workspace: every server it declares, now and in the future. */
+export function trustMcpWorkspace(path: string): void {
+  getDb()
+    .prepare(
+      `INSERT INTO mcp_trusted_workspaces(path, trusted_at) VALUES(?, ?)
+       ON CONFLICT(path) DO UPDATE SET trusted_at = excluded.trusted_at`
+    )
+    .run(path, Date.now())
+}
+
+/**
+ * Withdraw workspace-wide trust.
+ *
+ * Individual per-server decisions are deliberately left alone: each was made
+ * about one specific command, and this action means "stop blanket-trusting NEW
+ * servers here", not "forget everything I ever approved".
+ */
+export function untrustMcpWorkspace(path: string): void {
+  getDb().prepare('DELETE FROM mcp_trusted_workspaces WHERE path = ?').run(path)
 }
 
 // ---- Usage / cost ------------------------------------------------------------

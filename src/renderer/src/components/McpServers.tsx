@@ -209,6 +209,17 @@ export function McpServers({ showBackup = false }: { showBackup?: boolean } = {}
                         ? t('mcp.statusError')
                         : t('mcp.statusDisabled')}
                   </Badge>
+                  {/* Which protocol era this server negotiated. Shown only for
+                      `modern`: legacy is the overwhelming majority today, so
+                      badging it would be noise on every row - the interesting
+                      signal is a server that speaks the 2026 revision. */}
+                  {s.era === 'modern' && (
+                    <span title={t('mcp.eraModernHelp')} className="inline-flex">
+                      <Badge className="border-info/30 bg-info/10 text-info">
+                        {t('mcp.eraModern')}
+                      </Badge>
+                    </span>
+                  )}
                 </div>
                 <p
                   className="mt-0.5 truncate text-xs text-text-subtle"

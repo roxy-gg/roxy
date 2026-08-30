@@ -55,6 +55,50 @@ export const CHANNELS = {
   mcpSetEnabled: 'mcp:setEnabled',
   mcpReconnect: 'mcp:reconnect',
 
+  /** Sign in to a remote (OAuth-protected) MCP server; opens the browser. */
+  mcpSignIn: 'mcp:sign-in',
+  /** Forget a remote server OAuth credentials. */
+  mcpSignOut: 'mcp:sign-out',
+
+  // ---- MCP trust (consent before Roxy spawns a server) ----
+  // A local MCP server is an arbitrary command. Definitions that did not come
+  // from the user - a cloned repo's `.roxy/mcp.json`, or the model calling the
+  // `mcp` tool - must be approved before they run. See shared/mcp-trust.ts.
+  /**
+   * main -> renderer: "here's what just connected" - the tools a newly-seen
+   * server exposed and the source it came from. The NORMAL path: a receipt, not
+   * a permission request.
+   */
+  mcpInstallNotice: 'mcp:install-notice',
+  /**
+   * main -> renderer: the rare blocking question (a trusted server's command
+   * changed, or the user opted into confirming first).
+   */
+  mcpConsentRequest: 'mcp:consent-request',
+  /** renderer -> main: the user's answer, correlated by `requestId`. */
+  mcpConsentRespond: 'mcp:consent-respond',
+  /** Trusted servers + workspaces, for the Settings list. */
+  mcpTrustList: 'mcp:trust-list',
+  /** Forget a stored decision (per-server or a whole workspace). */
+  mcpTrustRevoke: 'mcp:trust-revoke',
+  /** Read/write the opt-in "confirm before running a new server" toggle. */
+  mcpTrustGetPolicy: 'mcp:trust-get-policy',
+  mcpTrustSetPolicy: 'mcp:trust-set-policy',
+
+  // ---- MCP Apps (server-supplied UI rendered in a sandboxed frame) ----
+  /** Load a view for a completed UI-bearing tool call. */
+  mcpAppLaunch: 'mcp-app:launch',
+  /** One JSON-RPC frame from a view, relayed by the renderer. */
+  mcpAppRequest: 'mcp-app:request',
+  /** A view was unmounted; drop its session. */
+  mcpAppClose: 'mcp-app:close',
+  /** Publish the host theme so views can match it. */
+  mcpAppTheme: 'mcp-app:theme',
+  /** main -> renderer: approve a view-initiated tool call. */
+  mcpAppApprovalRequest: 'mcp-app:approval-request',
+  /** renderer -> main: the answer. */
+  mcpAppApprovalRespond: 'mcp-app:approval-respond',
+
   skillsList: 'skills:list',
   skillsRefresh: 'skills:refresh',
   skillsRead: 'skills:read',

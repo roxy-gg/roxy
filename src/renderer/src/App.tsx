@@ -9,6 +9,9 @@ import Skills from './routes/Skills'
 import Mcp from './routes/Mcp'
 import Themes from './routes/Themes'
 import Settings from './routes/Settings'
+import { McpConsentDialog } from './components/McpConsentDialog'
+import { McpInstallSheet } from './components/McpInstallSheet'
+import { McpAppApprovalDialog } from './components/McpAppApprovalDialog'
 
 function Splash(): JSX.Element {
   return (
@@ -47,6 +50,12 @@ export default function App(): JSX.Element {
         <Route path="/settings" element={<Settings />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
+      {/* Outside <Routes>: a turn can hit an unapproved MCP server from any
+          screen, and the prompt blocks a process from spawning - it must not
+          depend on which route happens to be mounted. */}
+      <McpInstallSheet />
+      <McpConsentDialog />
+      <McpAppApprovalDialog />
     </HashRouter>
   )
 }

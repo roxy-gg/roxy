@@ -39,8 +39,14 @@ import {
   normalizeServerConfig,
   qualifyToolName,
   type McpServerConfig,
+  type McpServerRecord,
   type McpServerSummary
 } from '../../shared/mcp'
+import {
+  ensureTrusted as ensureMcpTrusted,
+  discloseConnected as discloseMcpConnected,
+  type McpCandidate
+} from '../services/mcp-trust'
 import {
   loadSkill,
   listSkills,
@@ -287,9 +293,15 @@ export async function runTool(
       default:
         // Tools contributed by connected MCP servers use namespaced names
         // (`mcp__<server>__<tool>`) — route them to the MCP pool. An MCP round
-        // trip has its own 120s timeout and no signal, so the turn stops
-        // waiting rather than blocking Stop for up to two minutes.
-        if (isMcpTool(name)) return await untilAborted(ctx.signal, () => callMcpTool(name, input))
+        // trip carries the server's own timeout budget.
+        // The signal goes BOTH ways now: `untilAborted` stops the turn waiting,
+        // and passing it into `callMcpTool` cancels the request itself, so the
+        // SDK emits `notifications/cancelled` and a well-behaved server can
+        // abandon its work instead of finishing into a void. Without the inner
+        // half, Stop only stopped us listening - the server kept going.
+        if (isMcpTool(name)) {
+          return await untilAborted(ctx.signal, () => callMcpTool(name, input, ctx.signal))
+        }
         return { ok: false, output: `Unknown tool: ${name}` }
     }
   } catch (e) {
@@ -1460,8 +1472,26 @@ async function runMcpTool(input: Record<string, unknown>, cwd: string): Promise<
             'mcp add: provide a LOCAL server "command" (argv array, e.g. ["npx","-y","@modelcontextprotocol/server-filesystem","/dir"]) OR a REMOTE "url".'
         }
       }
-      repo.upsertMcpServer({ id, config, enabled: true })
-      const summary = await reconnectMcpServer({ id, config, enabled: true }, cwd)
+      // Check BEFORE persisting. Normally this is a no-op that returns "run it",
+      // but when it does interrupt - a known server id now pointing at a
+      // different command - a declined answer must leave NOTHING behind. Writing
+      // first would park the rejected config in the DB, where the next `enable`
+      // or `reconnect` would read it back and be blocked by the very swap the
+      // user just refused.
+      const record: McpServerRecord = { id, config, enabled: true, origin: 'agent' }
+      const candidate = { record, provenance: 'agent' as const, workspace: cwd || null }
+      const { allowed, disclose } = await ensureMcpTrusted(candidate)
+      if (!allowed) {
+        return {
+          ok: false,
+          output: `MCP server "${id}" was not added: the user declined to run it.`
+        }
+      }
+      repo.upsertMcpServer({ id, config, enabled: true, origin: 'agent' })
+      const summary = await reconnectMcpServer(record, cwd)
+      // Show the user what the agent just wired up: the tool list is the whole
+      // point of the notice, and it only exists once the server has connected.
+      if (disclose) discloseMcpConnected(candidate, summary.tools, summary.error)
       return summarizeMcpConnect('Added', id, summary)
     }
     case 'reconnect':
@@ -1526,11 +1556,40 @@ function mcpListServers(): ToolResult {
   return { ok: true, output: `MCP servers (${records.length}):\n${lines.join('\n')}` }
 }
 
+/**
+ * Consent check shared by the connect-causing actions (`add`, `reconnect`,
+ * `enable`). All three end in a spawned process, so all three are gated - a gate
+ * on `add` alone would be trivially bypassed by adding a server while the user
+ * declines, then calling `reconnect`.
+ */
+/**
+ * Trust check shared by the connect-causing actions (`add`, `reconnect`,
+ * `enable`). Normally a no-op that returns "run it"; it only interrupts when a
+ * trusted entry's command changed, or when the user opted into confirming.
+ */
+async function mcpTrustCheck(
+  rec: McpServerRecord,
+  cwd: string
+): Promise<{ allowed: boolean; disclose: boolean; candidate: McpCandidate }> {
+  const candidate: McpCandidate = {
+    record: rec,
+    provenance: rec.origin === 'agent' ? 'agent' : 'user',
+    workspace: cwd || null
+  }
+  const { allowed, disclose } = await ensureMcpTrusted(candidate)
+  return { allowed, disclose, candidate }
+}
+
 async function mcpReconnectServer(id: string, cwd: string): Promise<ToolResult> {
   const rec = repo.listMcpServers().find((r) => r.id === id)
   if (!rec)
     return { ok: false, output: `mcp reconnect: no server named "${id}". Run action:"list".` }
+  const { allowed, disclose, candidate } = await mcpTrustCheck(rec, cwd)
+  if (!allowed) {
+    return { ok: false, output: `MCP server "${id}" was not connected: the user declined it.` }
+  }
   const summary = await reconnectMcpServer(rec, cwd)
+  if (disclose) discloseMcpConnected(candidate, summary.tools, summary.error)
   return summarizeMcpConnect('Reconnected', id, summary)
 }
 
@@ -1542,12 +1601,20 @@ async function mcpSetServerEnabled(id: string, enabled: boolean, cwd: string): P
       output: `mcp ${enabled ? 'enable' : 'disable'}: no server named "${id}". Run action:"list".`
     }
   }
-  repo.setMcpServerEnabled(id, enabled)
+  // Disabling is always allowed: it only ever REMOVES a capability.
   if (!enabled) {
+    repo.setMcpServerEnabled(id, false)
     await disposeConnection(id)
     return { ok: true, output: `Disabled MCP server "${id}" and disconnected it.` }
   }
-  const summary = await reconnectMcpServer({ ...rec, enabled: true }, cwd)
+  const enabledRec = { ...rec, enabled: true }
+  const { allowed, disclose, candidate } = await mcpTrustCheck(enabledRec, cwd)
+  if (!allowed) {
+    return { ok: false, output: `MCP server "${id}" was not enabled: the user declined it.` }
+  }
+  repo.setMcpServerEnabled(id, true)
+  const summary = await reconnectMcpServer(enabledRec, cwd)
+  if (disclose) discloseMcpConnected(candidate, summary.tools, summary.error)
   return summarizeMcpConnect('Enabled', id, summary)
 }
 

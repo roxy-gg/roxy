@@ -81,6 +81,19 @@ const REPAIR_SCHEMA_SQL = /* sql */ `
         config     TEXT NOT NULL DEFAULT '{}',
         enabled    INTEGER NOT NULL DEFAULT 1,
         created_at INTEGER NOT NULL
+      , origin TEXT NOT NULL DEFAULT 'user');
+  CREATE TABLE IF NOT EXISTS mcp_trust (
+        id          TEXT NOT NULL,
+        fingerprint TEXT NOT NULL,
+        provenance  TEXT NOT NULL,
+        scope       TEXT NOT NULL DEFAULT '',
+        decision    TEXT NOT NULL,
+        decided_at  INTEGER NOT NULL,
+        PRIMARY KEY (id, fingerprint, scope)
+      );
+  CREATE TABLE IF NOT EXISTS mcp_trusted_workspaces (
+        path       TEXT PRIMARY KEY,
+        trusted_at INTEGER NOT NULL
       );
   CREATE TABLE IF NOT EXISTS messages (
         id         TEXT PRIMARY KEY,
@@ -474,6 +487,76 @@ export const MIGRATIONS: Migration[] = [
   // deliberately structure-only and runs on every open). One DELETE, once.
   /* sql */ `
     DELETE FROM settings WHERE key = 'web_search_api_key';
+  `,
+
+  // ---- v23: MCP server trust (consent before Roxy spawns anything) ----
+  // A local MCP server is an arbitrary command run with the user’s own
+  // privileges, and two of the three places Roxy reads server definitions from
+  // are not the user: a workspace `.roxy/mcp.json` arrives with `git clone`, and
+  // the `mcp` agent tool is driven by a model that reads web pages and issues.
+  // Both used to connect automatically, which made "clone a repo, send any
+  // message" enough to execute attacker-chosen code.
+  //
+  // Consent is keyed by a FINGERPRINT of what actually executes (argv, cwd, env
+  // var NAMES, never their values) rather than by server id, so renaming an entry
+  // keeps its approval while swapping its command revokes it. `scope` is the
+  // workspace a decision belongs to (empty string = anywhere), so approving `db`
+  // in one repo never pre-approves a different repo's `db`. It is NOT NULL with a
+  // default because SQLite treats NULLs as distinct in a PRIMARY KEY, which would
+  // let duplicate global rows accumulate for the same decision.
+  //
+  // Two tables, not one: individual decisions, and whole workspaces trusted
+  // wholesale, which must also cover servers added to that project later and so
+  // cannot be expressed as a set of per-server rows.
+  /* sql */ `
+    CREATE TABLE IF NOT EXISTS mcp_trust (
+      id          TEXT NOT NULL,
+      fingerprint TEXT NOT NULL,
+      provenance  TEXT NOT NULL,
+      scope       TEXT NOT NULL DEFAULT '',
+      decision    TEXT NOT NULL,
+      decided_at  INTEGER NOT NULL,
+      PRIMARY KEY (id, fingerprint, scope)
+    );
+    CREATE TABLE IF NOT EXISTS mcp_trusted_workspaces (
+      path       TEXT PRIMARY KEY,
+      trusted_at INTEGER NOT NULL
+    );
+  `,
+
+  // ---- v24: record WHO added each MCP server row ----
+  // The `mcp` agent tool writes to `mcp_servers`, the same table Settings writes
+  // to. Without this column, a server the MODEL added became indistinguishable
+  // from one the user typed in the moment it was persisted - so the consent gate
+  // would read it back as self-consenting and launch it unprompted. That would
+  // turn the trust check into a formality a single prompt-injection can bypass.
+  //
+  // Existing rows are backfilled to 'user': they predate the agent tool being
+  // gated, and they are all rows a human could see and remove in Settings.
+  (db) => {
+    addColumnIfMissing(db, 'mcp_servers', 'origin', "TEXT NOT NULL DEFAULT 'user'")
+  },
+
+  // ---- v25: OAuth credentials for remote MCP servers ----
+  // A remote MCP server is an HTTP API that may hold the user's issues, calendar
+  // or database, so the spec protects it with OAuth 2.1 + PKCE + dynamic client
+  // registration. The SDK runs that dance but needs the host to persist what it
+  // earns.
+  //
+  // `payload` is encrypted at rest via secure.ts (OS keychain when available) -
+  // a refresh token is a long-lived bearer credential for a third-party account,
+  // and the settings table is not a place to keep one. `kind` separates the
+  // three lifetimes: the client registration and tokens persist, while the PKCE
+  // verifier is single-use and deleted the moment the code is exchanged.
+  /* sql */ `
+    CREATE TABLE IF NOT EXISTS mcp_oauth (
+      server_id  TEXT NOT NULL,
+      kind       TEXT NOT NULL,
+      payload    TEXT NOT NULL,
+      encrypted  INTEGER NOT NULL DEFAULT 0,
+      updated_at INTEGER NOT NULL,
+      PRIMARY KEY (server_id, kind)
+    );
   `
 ]
 
@@ -528,6 +611,38 @@ export function repairSchema(db: Database): void {
   db.exec(
     'CREATE TABLE IF NOT EXISTS pinned_models (provider_id TEXT NOT NULL, model TEXT NOT NULL, pinned_at INTEGER NOT NULL, PRIMARY KEY (provider_id, model))'
   )
+  // v23 MCP trust. Structure only: these tables record CONSENT, so a lost row
+  // must degrade to asking the user again, never to inventing an approval.
+  // v24's provenance column on mcp_servers (see the migration for why it is
+  // security-relevant, not cosmetic).
+  addColumnIfMissing(db, 'mcp_servers', 'origin', "TEXT NOT NULL DEFAULT 'user'")
+  // v25 OAuth credentials for remote MCP servers. Structure only: a lost row
+  // means the user signs in again, never a fabricated credential.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS mcp_oauth (
+      server_id  TEXT NOT NULL,
+      kind       TEXT NOT NULL,
+      payload    TEXT NOT NULL,
+      encrypted  INTEGER NOT NULL DEFAULT 0,
+      updated_at INTEGER NOT NULL,
+      PRIMARY KEY (server_id, kind)
+    );
+  `)
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS mcp_trust (
+      id          TEXT NOT NULL,
+      fingerprint TEXT NOT NULL,
+      provenance  TEXT NOT NULL,
+      scope       TEXT NOT NULL DEFAULT '',
+      decision    TEXT NOT NULL,
+      decided_at  INTEGER NOT NULL,
+      PRIMARY KEY (id, fingerprint, scope)
+    );
+    CREATE TABLE IF NOT EXISTS mcp_trusted_workspaces (
+      path       TEXT PRIMARY KEY,
+      trusted_at INTEGER NOT NULL
+    );
+  `)
   // `projects` is derived state — one row per workspace folder its sessions use
   // — so a restored table can be rebuilt from the chats themselves, exactly as
   // v13 did on first upgrade. Only when empty, so a hand-ordered project list is
