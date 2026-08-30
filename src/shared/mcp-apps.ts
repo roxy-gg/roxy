@@ -73,6 +73,41 @@ export const UI_SCHEME = 'ui://'
  */
 export const SANDBOX_ORIGIN_HINT = 'roxy-mcp-app://view'
 
+/**
+ * `targetOrigin` for host -> proxy `postMessage`. Necessarily `'*'`.
+ *
+ * This looks like the sloppy choice and is in fact the only legal one, so the
+ * reasoning is written down rather than left to be rediscovered:
+ *
+ *  1. The proxy frame is `sandbox="allow-scripts"` WITHOUT `allow-same-origin`.
+ *     That is deliberate - it is what makes the document opaque, so it cannot
+ *     touch Roxy's storage or cookies.
+ *  2. An opaque document's origin is not its URL. Posting to
+ *     `roxy-mcp-app://view` matches nothing and the browser drops the message
+ *     silently: the proxy waits forever for a resource that WAS sent, and the
+ *     user sees a blank frame with no error on any channel.
+ *  3. The obvious repair - posting to the literal `'null'` - is rejected by the
+ *     browser outright: "Invalid target origin 'null' in a call to
+ *     'postMessage'". There is no origin string that addresses an opaque frame.
+ *
+ * So `'*'` is forced. What matters is that it costs nothing here, because the
+ * targetOrigin was never the control doing the work:
+ *
+ *  - Confidentiality is bounded by WHO can receive. The only reader is the frame
+ *    we created and hold a handle to; it cannot navigate itself elsewhere
+ *    (`allow-top-navigation` is off, and it has no `allow-same-origin` to
+ *    re-enter our origin with), so there is no third party for a wildcard to
+ *    leak to.
+ *  - Authenticity is enforced on the RECEIVING side, which is where it belongs:
+ *    the host checks `event.source === frame.contentWindow` (exact window
+ *    identity, not a shared origin string), and the proxy pins the host's real
+ *    origin from the first inbound message and rejects everything else.
+ *
+ * A comparable host (`ext-apps`'s own reference proxy) reaches the same
+ * conclusion for the same reason.
+ */
+export const SANDBOX_POST_TARGET = '*'
+
 /** Protocol revision this implementation speaks. */
 export const APPS_PROTOCOL_VERSION = '2026-01-26'
 

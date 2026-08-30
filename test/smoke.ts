@@ -3307,26 +3307,84 @@ async function main(): Promise<void> {
         {
           const win = new BrowserWindow({ show: false })
           try {
+            // Load the proxy the way the product does: inside a
+            // `sandbox="allow-scripts"` iframe, on a page that then drives the
+            // real handshake. Loading SANDBOX_URL top-level (the previous
+            // version of this test) proves the scheme serves, but reports an
+            // origin the product NEVER sees - a sandboxed document without
+            // `allow-same-origin` is opaque, and its origin is the string
+            // 'null'. That gap is exactly how a targetOrigin bug shipped while
+            // this test was green.
+            // Parent must be a REAL origin, as Roxy's renderer is; a `data:` parent
+            // is itself opaque and would test a situation the product never
+            // creates. The proxy is served on its own scheme, so loading it
+            // top-level gives the probe page a normal origin to act as host.
             await win.loadURL(SANDBOX_URL)
             const probe = (await win.webContents.executeJavaScript(
-              `(() => ({
-                 origin: String(window.origin),
-                 secure: Boolean(window.isSecureContext),
-                 hasProxy: typeof window.__roxyProxyReady !== 'undefined' || !!document.querySelector('script'),
-                 title: document.title
-               }))()`
-            )) as { origin: string; secure: boolean; hasProxy: boolean; title: string }
+              `new Promise((resolve) => {
+                 document.body.innerHTML = ''
+                 const seen = []
+                 let delivered = false
+                 // Listener BEFORE the frame exists: the proxy announces itself
+                 // the moment its script runs, and registering afterwards loses
+                 // the very message under test.
+                 window.addEventListener('message', (e) => {
+                   if (e.source !== f.contentWindow) return
+                   seen.push({ method: e.data && e.data.method, origin: e.origin })
+                   if (e.data && e.data.method === "ui/notifications/sandbox-proxy-ready") {
+                     // Reply with the SAME target origin McpAppView uses, so a
+                     // mismatch fails here rather than as a blank frame in the
+                     // product.
+                     f.contentWindow.postMessage(
+                       {
+                         jsonrpc: '2.0',
+                         method: "ui/notifications/sandbox-resource-ready",
+                         params: {
+                           html: '<script>parent.postMessage({jsonrpc:"2.0",method:"ui/notifications/initialized"},"*")<\/script>',
+                           csp: "default-src 'none'; script-src 'unsafe-inline'"
+                         }
+                       },
+                       "*"
+                     )
+                   }
+                   // The inner view only speaks if the reply above arrived and
+                   // the proxy built its frame - end-to-end delivery, not a
+                   // guess about it.
+                   if (e.data && e.data.method === "ui/notifications/initialized") {
+                     delivered = true
+                     resolve({ seen, delivered })
+                   }
+                 })
+                 const f = document.createElement('iframe')
+                 f.setAttribute('sandbox', 'allow-scripts')
+                 f.src = window.location.href
+                 document.body.appendChild(f)
+                 setTimeout(() => resolve({ seen, delivered }), 4000)
+               })`
+            )) as { seen: { method?: string; origin: string }[]; delivered: boolean }
+            const ready = probe.seen.find((m) => m.method?.endsWith('proxy-ready'))
             check(
-              'mcp app: the sandbox origin actually loads',
-              probe.origin.startsWith(SANDBOX_SCHEME + '://'),
-              probe.origin
+              'mcp app: the proxy announces itself from inside a sandboxed frame',
+              !!ready,
+              JSON.stringify(probe.seen)
             )
-            // Privileged registration is what grants a secure context. Without
-            // it the proxy still "loads" but modern APIs quietly degrade.
-            check('mcp app: ...as a secure context', probe.secure === true)
-            check('mcp app: ...serving the proxy document', probe.hasProxy === true)
+            // The observable fact the product must encode as its targetOrigin.
+            // A top-level load reports the scheme origin instead, which is why
+            // the earlier version of this test passed while views stayed blank.
+            check(
+              "mcp app: ...reporting the opaque origin 'null'",
+              ready?.origin === 'null',
+              String(ready?.origin)
+            )
+            // Round trip: host -> proxy -> view -> host. Fails if targetOrigin
+            // is wrong, since the reply is dropped and the view never speaks.
+            check('mcp app: the host reply reaches the view', probe.delivered === true)
           } catch (e) {
-            check('mcp app: the sandbox origin actually loads', false, String(e))
+            check(
+              'mcp app: the proxy announces itself from inside a sandboxed frame',
+              false,
+              String(e)
+            )
           } finally {
             win.destroy()
           }

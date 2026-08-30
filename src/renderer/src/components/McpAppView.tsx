@@ -2,7 +2,12 @@ import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Globe, Maximize2, Minimize2, ShieldAlert, X } from 'lucide-react'
 import type { McpAppLaunch } from '@shared/api'
-import { APP_HEIGHT, clampAppHeight, SANDBOX_ORIGIN_HINT } from '@shared/mcp-apps'
+import {
+  APP_HEIGHT,
+  clampAppHeight,
+  SANDBOX_ORIGIN_HINT,
+  SANDBOX_POST_TARGET
+} from '@shared/mcp-apps'
 import { api } from '../lib/api'
 import { cn } from '../lib/cn'
 
@@ -92,7 +97,7 @@ export function McpAppView({
 
     const post = (msg: unknown): void => {
       // Explicit target origin, never '*'.
-      frame.contentWindow?.postMessage(msg, SANDBOX_ORIGIN_HINT)
+      frame.contentWindow?.postMessage(msg, SANDBOX_POST_TARGET)
     }
 
     /** Hand the view its tool input + result, once it says it is listening. */
