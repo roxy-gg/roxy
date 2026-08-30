@@ -35,7 +35,7 @@
  * this origin maps to, and pointing it at one would give the view a filesystem
  * root to probe.
  */
-import { protocol, net } from 'electron'
+import { app, protocol, session } from 'electron'
 import { SANDBOX_METHOD_PREFIX } from '../../shared/mcp-apps'
 
 /** Scheme owned by the sandbox. Nothing else in Roxy serves it. */
@@ -78,8 +78,43 @@ export function registerSandboxScheme(): void {
   ])
 }
 
+/** The tile host used by the official map MCP App. */
+export const OPENSTREETMAP_TILE_PATTERN = 'https://tile.openstreetmap.org/*'
+
+/**
+ * Identify Roxy to OSM when a native MCP App requests its standard tiles.
+ *
+ * A custom-scheme frame cannot send the HTTPS page referrer OSM expects from a
+ * web host. Chromium instead sends a generic Electron user agent and no
+ * referrer, which OSM answers with an "Access blocked" PNG (still status 200).
+ * Their native-client policy accepts a stable, contactable application user
+ * agent. This changes only the exact official tile host; every other app request
+ * remains untouched and still has to pass its resource-declared CSP.
+ */
+export function identifyOpenStreetMapRequest(
+  requestHeaders: Record<string, string>,
+  version: string
+): Record<string, string> {
+  const headers = { ...requestHeaders }
+  for (const key of Object.keys(headers)) {
+    if (key.toLowerCase() === 'user-agent') delete headers[key]
+  }
+  const safeVersion = /^[a-z0-9.+_-]+$/i.test(version) ? version : 'unknown'
+  headers['User-Agent'] = `Roxy/${safeVersion} (+https://roxy.gg)`
+  return headers
+}
+
 /** Serve the proxy document. Called once, after the app is ready. */
 export function serveSandbox(): void {
+  session.defaultSession.webRequest.onBeforeSendHeaders(
+    { urls: [OPENSTREETMAP_TILE_PATTERN] },
+    (details, callback) => {
+      callback({
+        requestHeaders: identifyOpenStreetMapRequest(details.requestHeaders, app.getVersion())
+      })
+    }
+  )
+
   protocol.handle(SANDBOX_SCHEME, async (request) => {
     const url = new URL(request.url)
     // One document, one path. Anything else 404s rather than being treated as a
@@ -102,7 +137,6 @@ export function serveSandbox(): void {
       }
     })
   })
-  void net
 }
 
 /**

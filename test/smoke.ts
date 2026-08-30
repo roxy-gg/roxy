@@ -110,6 +110,8 @@ import {
 import {
   SANDBOX_SCHEME,
   SANDBOX_URL,
+  OPENSTREETMAP_TILE_PATTERN,
+  identifyOpenStreetMapRequest,
   registerSandboxScheme,
   serveSandbox
 } from '../src/main/services/mcp-app-sandbox'
@@ -3356,6 +3358,32 @@ async function main(): Promise<void> {
           SANDBOX_ORIGIN_HINT.startsWith(SANDBOX_SCHEME + '://') &&
             SANDBOX_URL.startsWith(SANDBOX_ORIGIN_HINT)
         )
+        // The official map runs from a custom scheme, so it has no HTTPS
+        // referrer. OSM requires native clients to identify themselves and
+        // otherwise returns a policy-block PNG with HTTP 200.
+        {
+          const headers = identifyOpenStreetMapRequest(
+            {
+              'User-Agent': 'Electron/33.4.11',
+              Accept: 'image/*',
+              'X-Unrelated': 'kept'
+            },
+            '0.0.93'
+          )
+          check(
+            'mcp map: OSM requests use a stable Roxy identity',
+            headers['User-Agent'] === 'Roxy/0.0.93 (+https://roxy.gg)'
+          )
+          check(
+            'mcp map: replacing the user agent preserves unrelated headers',
+            headers.Accept === 'image/*' && headers['X-Unrelated'] === 'kept'
+          )
+          check(
+            'mcp map: the interception is scoped to the official tile host',
+            OPENSTREETMAP_TILE_PATTERN === 'https://tile.openstreetmap.org/*'
+          )
+        }
+
         // ---- the sandbox origin, for real ----------------------------------
         // Everything above tests the BROKER. None of it proves the custom
         // scheme actually serves, and that is the one layer whose failure mode
