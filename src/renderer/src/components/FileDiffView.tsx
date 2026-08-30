@@ -3,6 +3,27 @@ import { MultiFileDiff } from '@pierre/diffs/react'
 import type { ToolDiff } from '@shared/types'
 
 /**
+ * The diff renders inside a shadow root, so the app's global scrollbar rules in
+ * `main.css` never reach it and @pierre/diffs' own handle stays transparent
+ * until the diff is hovered — on a narrow pane that reads as "no scrollbar".
+ * This restores the app's scrollbar look inside the shadow root using the same
+ * tokens, so themes stay defined in one place. Only the handle is restyled; the
+ * track sizing is the library's.
+ */
+const SCROLLBAR_CSS = `
+  [data-code]::-webkit-scrollbar-thumb {
+    background: var(--color-border-strong);
+    border-radius: 9999px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+  }
+  [data-code]::-webkit-scrollbar-thumb:hover {
+    background: var(--color-text-subtle);
+    background-clip: content-box;
+  }
+`
+
+/**
  * Before/after file diff for a write/edit tool card, rendered with
  * @pierre/diffs (Shiki syntax highlighting, isolated in shadow DOM). This is a
  * default export so it can be lazy-loaded — Shiki only ships when a diff card
@@ -29,6 +50,9 @@ function FileDiffView({ path, before, after }: ToolDiff): JSX.Element {
           diffIndicators: 'bars',
           // The tool card already shows the file name — drop the diff's own header.
           disableFileHeader: true,
+          // Long lines scroll sideways instead of wrapping, so line numbers and
+          // +/- indicators stay aligned in a narrow pane.
+          overflow: 'scroll',
           // Performance for large files: render only the changed hunks (+ a few
           // context lines) instead of every unchanged line, and bound how much
           // Shiki tokenizes (huge / minified files degrade to plain text
@@ -36,7 +60,8 @@ function FileDiffView({ path, before, after }: ToolDiff): JSX.Element {
           expandUnchanged: false,
           collapsedContextThreshold: 3,
           tokenizeMaxLineLength: 2000,
-          tokenizeMaxLength: 200_000
+          tokenizeMaxLength: 200_000,
+          unsafeCSS: SCROLLBAR_CSS
         }}
       />
     </div>

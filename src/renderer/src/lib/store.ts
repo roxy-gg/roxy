@@ -89,6 +89,10 @@ interface RoxyStore {
   hiddenModels: Set<string>
   chats: Chat[]
   activeChatId: string | null
+  reviewPaneOpen: boolean
+  setReviewPaneOpen: (open: boolean) => void
+  reviewPaneWidth: number
+  setReviewPaneWidth: (width: number) => void
   messages: Message[]
   /**
    * Which chat `messages` actually holds, or `null` while a load is in flight.
@@ -949,6 +953,10 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
   hiddenModels: new Set<string>(),
   chats: [],
   activeChatId: null,
+  reviewPaneOpen: false,
+  setReviewPaneOpen: (open) => set({ reviewPaneOpen: open }),
+  reviewPaneWidth: 420,
+  setReviewPaneWidth: (width) => set({ reviewPaneWidth: width }),
   messages: [],
   messagesChatId: null,
   messagesError: false,

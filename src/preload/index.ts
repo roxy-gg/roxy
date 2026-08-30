@@ -274,6 +274,15 @@ const roxy: RoxyApi = {
     renameBranch: (sessionId, to) => ipcRenderer.invoke(CHANNELS.gitRenameBranch, sessionId, to),
     pruneWorktrees: (cwd, dryRun) => ipcRenderer.invoke(CHANNELS.gitPruneWorktrees, cwd, dryRun)
   },
+  review: {
+    files: (target) => ipcRenderer.invoke(CHANNELS.reviewFiles, target),
+    diff: (target, file) => ipcRenderer.invoke(CHANNELS.reviewDiff, target, file),
+    commits: (sessionId, repo, limit) =>
+      ipcRenderer.invoke(CHANNELS.reviewCommits, sessionId, repo, limit),
+    stage: (target, files) => ipcRenderer.invoke(CHANNELS.reviewStage, target, files),
+    unstage: (target, files) => ipcRenderer.invoke(CHANNELS.reviewUnstage, target, files),
+    revert: (target, files) => ipcRenderer.invoke(CHANNELS.reviewRevert, target, files)
+  },
   forge: {
     status: (cwd, force) => ipcRenderer.invoke(CHANNELS.forgeStatus, cwd, force),
     push: (cwd) => ipcRenderer.invoke(CHANNELS.forgePush, cwd),

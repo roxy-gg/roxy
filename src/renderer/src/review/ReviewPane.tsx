@@ -1,0 +1,252 @@
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { FileDiff, Loader2, RefreshCw } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
+import { REVIEW_COMMITS } from '@shared/api'
+import type { GitReviewScope, ReviewCommit, ReviewFile, ReviewTarget } from '@shared/api'
+import { api } from '../lib/api'
+import { cn } from '../lib/cn'
+import { GIT_POLL_MS } from '../lib/polling'
+import { ReviewFileRow } from './ReviewFileRow'
+
+/** Scopes in the order the picker lists them. */
+const SCOPES: GitReviewScope[] = ['unstaged', 'staged', 'branch', 'commit']
+
+/**
+ * A store-free review surface for the browser window's separate renderer.
+ * Everything it needs is session-keyed and arrives through `api.review.*`.
+ */
+export function ReviewPane({
+  sessionId,
+  className,
+  action
+}: {
+  /** Whose changes to show. Null renders the "no session" state. */
+  sessionId: string | null
+  className?: string
+  /** A close button (or anything else) for the pane's header. */
+  action?: ReactNode
+}): JSX.Element {
+  const { t } = useTranslation()
+  const [scope, setScope] = useState<GitReviewScope>('unstaged')
+  const [commitKey, setCommitKey] = useState('')
+  const [files, setFiles] = useState<ReviewFile[] | null>(null)
+  const [commits, setCommits] = useState<ReviewCommit[] | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const loadSeq = useRef(0)
+
+  const selectedCommit = useMemo(
+    () => commits?.find((candidate) => commitKeyOf(candidate) === commitKey),
+    [commits, commitKey]
+  )
+
+  const target: ReviewTarget | null = useMemo(
+    () =>
+      sessionId
+        ? {
+            sessionId,
+            scope,
+            commit: selectedCommit?.sha,
+            repo: scope === 'commit' ? selectedCommit?.repo : undefined
+          }
+        : null,
+    [sessionId, scope, selectedCommit]
+  )
+
+  const load = useCallback(async (): Promise<void> => {
+    const seq = ++loadSeq.current
+    if (!target) return setFiles([])
+    if (target.scope === 'commit' && !target.commit) return setFiles([])
+
+    try {
+      const next = await api.review.files(target)
+      if (seq === loadSeq.current) setFiles(next)
+    } catch {
+      // Keep the last list through a transient failure; the poll retries.
+      if (seq === loadSeq.current) {
+        setError(t('review.loadFailed'))
+        setFiles((current) => current ?? [])
+      }
+    }
+  }, [target])
+
+  useEffect(() => {
+    setFiles(null)
+    void load()
+    const timer = setInterval(() => void load(), GIT_POLL_MS)
+    return () => clearInterval(timer)
+  }, [load])
+
+  // `git log` is only needed when the commit picker is visible.
+  useEffect(() => {
+    if (scope !== 'commit' || commits || !sessionId) return
+    let alive = true
+    void api.review
+      .commits(sessionId, undefined, REVIEW_COMMITS)
+      .then((next) => alive && setCommits(next))
+      .catch(() => alive && setCommits([]))
+    return () => {
+      alive = false
+    }
+  }, [scope, commits, sessionId])
+
+  useEffect(() => {
+    setCommits(null)
+    setCommitKey('')
+  }, [sessionId])
+
+  const bulk = async (
+    fn: (t: ReviewTarget, files: string[]) => Promise<{ ok: boolean; error?: string }>
+  ): Promise<void> => {
+    if (!target) return
+    setBusy(true)
+    setError(null)
+    try {
+      // An empty list means everything: one Git call per repository.
+      const result = await fn(target, [])
+      if (!result.ok) setError(result.error ?? t('review.failed'))
+      await load()
+    } catch {
+      setError(t('review.updateFailed'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const additions = files?.reduce((n, file) => n + file.additions, 0) ?? 0
+  const deletions = files?.reduce((n, file) => n + file.deletions, 0) ?? 0
+
+  return (
+    <div className={cn('flex min-h-0 flex-col bg-surface text-text', className)}>
+      <div className="flex shrink-0 items-center gap-1 border-b border-border px-2.5 py-2">
+        {SCOPES.map((id) => (
+          <button
+            key={id}
+            type="button"
+            onClick={() => {
+              if (id === scope) return
+              // Never show one scope's files under another scope's heading.
+              setFiles(null)
+              setScope(id)
+              setError(null)
+            }}
+            title={t(`review.scope.${id}Hint`)}
+            className={cn(
+              'press-scale rounded-md px-2 py-1 text-xs transition',
+              scope === id
+                ? 'bg-surface-2 text-text'
+                : 'text-text-muted hover:bg-surface-2/60 hover:text-text'
+            )}
+          >
+            {t(`review.scope.${id}`)}
+          </button>
+        ))}
+
+        <span className="ml-2 flex items-center gap-1.5 text-xs tabular-nums">
+          {additions > 0 && <span className="text-success">+{additions}</span>}
+          {deletions > 0 && <span className="text-danger">-{deletions}</span>}
+          {!!files?.length && (
+            <span className="text-text-subtle">{t('review.files', { count: files.length })}</span>
+          )}
+        </span>
+
+        <div className="ml-auto flex items-center gap-1">
+          {(scope === 'unstaged' || scope === 'staged') && !!files?.length && (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => void bulk(scope === 'staged' ? api.review.unstage : api.review.stage)}
+              className="press-scale rounded-md px-2 py-1 text-xs text-text-muted transition hover:bg-surface-2 hover:text-text disabled:opacity-40"
+            >
+              {t(scope === 'staged' ? 'review.unstageAll' : 'review.stageAll')}
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => void load()}
+            title={t('review.refresh')}
+            className="press-scale flex h-7 w-7 items-center justify-center sq sq-lg rounded-lg text-text-muted transition hover:bg-surface-2 hover:text-text"
+          >
+            <RefreshCw className="h-3.5 w-3.5" />
+          </button>
+          {action}
+        </div>
+      </div>
+
+      {scope === 'commit' && (
+        <div className="shrink-0 border-b border-border px-2.5 py-2">
+          <select
+            value={commitKey}
+            onChange={(event) => {
+              if (event.target.value === commitKey) return
+              setFiles(null)
+              setCommitKey(event.target.value)
+            }}
+            className="w-full rounded-md border border-border bg-surface-2 px-2 py-1 text-xs text-text outline-none"
+          >
+            <option value="">{t('review.pickCommitPlaceholder')}</option>
+            {commits?.map((commit) => (
+              <option key={commitKeyOf(commit)} value={commitKeyOf(commit)}>
+                {commit.repo ? `${commit.repo} · ` : ''}
+                {commit.sha.slice(0, 7)} · {commit.subject}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+
+      {error && (
+        <p className="shrink-0 border-b border-border bg-danger/10 px-3 py-1.5 text-xs text-danger">
+          {error}
+        </p>
+      )}
+
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        {!sessionId ? (
+          <Empty>
+            <FileDiff className="h-4 w-4" /> {t('review.noSession')}
+          </Empty>
+        ) : !files ? (
+          <Empty>
+            <Loader2 className="h-4 w-4 animate-spin" /> {t('review.reading')}
+          </Empty>
+        ) : !files.length ? (
+          <Empty>
+            <FileDiff className="h-4 w-4" /> {t(emptyKey(scope, selectedCommit?.sha))}
+          </Empty>
+        ) : (
+          files.map((file) => (
+            <ReviewFileRow
+              key={`${scope}:${selectedCommit?.sha ?? ''}:${file.repo ?? ''}:${file.path}`}
+              file={file}
+              scope={scope}
+              target={target}
+              onChanged={load}
+            />
+          ))
+        )}
+      </div>
+    </div>
+  )
+}
+
+/** Why the list is empty depends on the scope, not just on the count. */
+function emptyKey(scope: GitReviewScope, commit: string | undefined) {
+  if (scope === 'commit')
+    return commit ? ('review.emptyCommit' as const) : ('review.pickCommit' as const)
+  if (scope === 'staged') return 'review.emptyStaged' as const
+  if (scope === 'branch') return 'review.emptyBranch' as const
+  return 'review.emptyUnstaged' as const
+}
+
+function commitKeyOf(commit: ReviewCommit): string {
+  return `${commit.repo ?? ''}:${commit.sha}`
+}
+
+function Empty({ children }: { children: ReactNode }): JSX.Element {
+  return (
+    <div className="flex items-center justify-center gap-2 px-4 py-12 text-xs text-text-subtle">
+      {children}
+    </div>
+  )
+}

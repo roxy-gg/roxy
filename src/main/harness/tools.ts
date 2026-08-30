@@ -10,6 +10,7 @@ import path from 'node:path'
 import { glob } from 'tinyglobby'
 import type { ToolDiff, ToolResult, SessionTask } from '../../shared/types'
 import type { WebFetchFormat } from '../../shared/web'
+import type { GitReviewScope } from '../../shared/api'
 import {
   BROWSER_UA,
   WEBFETCH_MAX_BYTES,
@@ -24,6 +25,7 @@ import {
   normalizeFetchUrl
 } from '../../shared/web'
 import * as browser from '../services/browser'
+import * as git from '../services/git'
 import * as lsp from '../services/lsp'
 import * as repo from '../db/repo'
 import { isManagedToolOutputPath } from '../services/tool-output-store'
@@ -129,6 +131,8 @@ const MAX_DIFF_SIDE = 100_000
 const MAX_IMAGE_BYTES = 3_000_000
 const MAX_BG_OUTPUT = 200_000
 const FG_TIMEOUT_MAX = 600_000
+/** A review patch is read by the model, so it is capped well below MAX_OUTPUT. */
+const MAX_REVIEW_PATCH = 50_000
 /**
  * How long to keep draining stdout after the command's own process has exited.
  *
@@ -194,6 +198,8 @@ export async function runTool(
         return runBashOutput(str(input.id ?? input.process), owningSessionId(ctx))
       case 'bash_kill':
         return runBashKill(str(input.id ?? input.process), owningSessionId(ctx))
+      case 'code_review':
+        return await runCodeReview(str(input.scope), ctx.cwd, ctx.signal)
       case 'read':
         return await runRead(str(input.path ?? input.file), ctx.cwd)
       case 'write':
@@ -351,9 +357,18 @@ function cap(text: string): string {
 
 /** Build a before/after diff for the UI, skipping no-ops and oversized files. */
 function toolDiff(path: string, before: string, after: string): ToolDiff | undefined {
-  if (before === after) return undefined
-  if (before.length > MAX_DIFF_SIDE || after.length > MAX_DIFF_SIDE) return undefined
-  return { path, before, after }
+  // Same normalization as reviewDiff: otherwise Windows/autocrlf makes every
+  // write/edit card look like a whole-file rewrite because the old side came
+  // from a CRLF worktree while the model's replacement is LF.
+  const b = normalizeDiffEol(before)
+  const a = normalizeDiffEol(after)
+  if (b === a) return undefined
+  if (b.length > MAX_DIFF_SIDE || a.length > MAX_DIFF_SIDE) return undefined
+  return { path, before: b, after: a }
+}
+
+function normalizeDiffEol(text: string): string {
+  return text.includes('\r') ? text.replace(/\r\n?/g, '\n') : text
 }
 
 /** Image file extensions we render inline instead of dumping raw bytes as text. */
@@ -1659,4 +1674,37 @@ async function runSetSessionMetadata(
   }
 
   return { ok: true, output: `Updated session metadata (${bits.join(', ')}).` }
+}
+
+async function runCodeReview(
+  scope: string,
+  cwd: string,
+  signal?: AbortSignal
+): Promise<ToolResult> {
+  if (!cwd || !(await git.isGitAvailable())) {
+    return { ok: false, output: 'Git is not available in this workspace.' }
+  }
+
+  const resolvedScope = (scope || 'unstaged') as GitReviewScope
+  const revs = await git.revsForScope(cwd, resolvedScope)
+  if (!revs) return { ok: false, output: 'No valid commit range found for this scope.' }
+
+  const range = git.diffRange(revs)
+
+  return untilAborted(signal, async () => {
+    const r = await git.git(['diff', '--patch', '--find-renames', ...range], cwd)
+    if (!r.ok) return { ok: false, output: 'Failed to generate diff.' }
+
+    if (!r.stdout.trim()) return { ok: true, output: 'No changes found.' }
+
+    // Truncate rather than blow up the context window on a huge diff.
+    const diff = r.stdout
+    return {
+      ok: true,
+      output:
+        diff.length > MAX_REVIEW_PATCH
+          ? diff.slice(0, MAX_REVIEW_PATCH) + '\n... (diff truncated due to length)'
+          : diff
+    }
+  })
 }

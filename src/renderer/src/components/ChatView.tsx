@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { ChangesChip } from './ChangesChip'
 import {
   Check,
   ChevronRight,
@@ -416,6 +417,7 @@ export function ChatView(): JSX.Element {
               <Settings className="h-3.5 w-3.5" /> {t('chat.settings')}
             </button>
           )}
+          {hasSessionInfo && <ChangesChip />}
           <UsageMeter />
         </div>
       </header>

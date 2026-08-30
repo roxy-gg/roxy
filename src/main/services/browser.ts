@@ -28,14 +28,13 @@ import {
 import { resolveThemeById } from './themes'
 import { getSettings } from '../db/repo'
 import { CHANNELS } from '../../shared/ipc'
+import { BROWSER_CHROME_H } from '../../shared/browser'
 import type { BrowserState, BrowserTab } from '../../shared/api'
 import { attachNativeContextMenu } from './context-menu'
 
 /** Persisted session â†’ cookies, localStorage and logins survive app restarts. */
 export const PARTITION = 'persist:roxy-browser'
 const MAX_CONSOLE = 500
-/** Height of the chrome overlaid at the top: tab strip + URL-bar toolbar. */
-const CHROME_H = 80
 /** Where a blank/new tab lands â€” a homepage, like a normal browser. */
 const HOME_URL = 'https://www.google.com'
 /** The shared window used by the manual "Open browser" button and keyless callers. */
@@ -61,7 +60,8 @@ export interface ConsoleEntry {
  *  window; the rest sit at zero size (still alive, so their pages are kept). */
 interface Tab {
   id: string
-  view: BrowserView
+  kind: 'page'
+  view: BrowserView | null
 }
 
 /** One isolated browser â€” a window + its tabs + console, owned by a session key. */
@@ -72,6 +72,8 @@ interface Session {
   win: BrowserWindow | null
   tabs: Tab[]
   activeTabId: string | null
+  /** The page tab that was last in front, so re-focusing after a reload lands on the right one. */
+  lastPageId?: string
   consoleLog: ConsoleEntry[]
   tabSeq: number
   /**
@@ -102,16 +104,26 @@ function peek(key: string): Session | undefined {
   return sessions.get(key)
 }
 
-/** The active tab's view for a session, or null when there's no usable tab. */
+/** The active tab's page view, or null if destroyed. */
 function activeView(s: Session): BrowserView | null {
   const t = s.tabs.find((x) => x.id === s.activeTabId)
-  return t && !t.view.webContents.isDestroyed() ? t.view : null
+  return t?.view && !t.view.webContents.isDestroyed() ? t.view : null
+}
+
+/** A live page tab: the one last in front, else any. Null when none exist. */
+function pageTab(s: Session): Tab | null {
+  const live = (t: Tab | undefined): Tab | null =>
+    t?.view && !t.view.webContents.isDestroyed() ? t : null
+  return (
+    live(s.tabs.find((t) => t.id === s.lastPageId)) ??
+    s.tabs.reduce<Tab | null>((found, t) => found ?? live(t), null)
+  )
 }
 
 /** The active page's contents for `key` â€” what every browser_* tool drives. */
 function pageContents(key: string): Electron.WebContents {
   const s = peek(key)
-  const v = s ? activeView(s) : null
+  const v = s ? (activeView(s) ?? pageTab(s)?.view ?? null) : null
   if (!v) throw new Error('No browser is open. Use browser_open first.')
   return v.webContents
 }
@@ -123,7 +135,7 @@ function windowTitle(s: Session): string {
 
 function ensureWindow(s: Session): BrowserWindow {
   if (s.win && !s.win.isDestroyed()) {
-    if (!activeView(s)) createTab(s)
+    if (!s.tabs.length) createTab(s)
     return s.win
   }
   s.consoleLog = []
@@ -195,9 +207,9 @@ function ensureWindow(s: Session): BrowserWindow {
 function layout(s: Session): void {
   if (!s.win || s.win.isDestroyed()) return
   const { width, height } = s.win.getContentBounds()
-  const top = s.chromeH ?? CHROME_H
+  const top = s.chromeH ?? BROWSER_CHROME_H
   for (const t of s.tabs) {
-    if (t.view.webContents.isDestroyed()) continue
+    if (!t.view || t.view.webContents.isDestroyed()) continue
     t.view.setBounds(
       t.id === s.activeTabId
         ? { x: 0, y: top, width, height: Math.max(0, height - top) }
@@ -217,7 +229,7 @@ export function setChromeHeight(height: number, key: string = DEFAULT_KEY): void
   const s = peek(key)
   if (!s || !s.win || s.win.isDestroyed()) return
   const max = s.win.getContentBounds().height
-  s.chromeH = height > CHROME_H ? Math.min(height, max) : undefined
+  s.chromeH = height > BROWSER_CHROME_H ? Math.min(height, max) : undefined
   layout(s)
 }
 
@@ -233,8 +245,9 @@ function createTab(s: Session, rawUrl?: string): string {
     }
   })
   const id = `tab-${++s.tabSeq}`
-  const tab: Tab = { id, view }
+  const tab: Tab = { id, kind: 'page', view }
   s.tabs.push(tab)
+  s.lastPageId = id
   s.win.addBrowserView(view)
   wireTab(s, tab)
   s.activeTabId = id
@@ -246,6 +259,7 @@ function createTab(s: Session, rawUrl?: string): string {
 
 /** Console + navigation listeners for a tab's page. */
 function wireTab(s: Session, tab: Tab): void {
+  if (!tab.view) return
   const wc = tab.view.webContents
   // Real websites in a BrowserView have no React tree of ours to portal a
   // themed menu into, so these pages get the NATIVE right-click editing menu.
@@ -276,15 +290,15 @@ function wireTab(s: Session, tab: Tab): void {
 
 /** Send a session's active-tab navigation state to its toolbar. */
 function pushState(s: Session): void {
+  if (!s.win || s.win.isDestroyed() || s.win.webContents.isDestroyed()) return
   const v = activeView(s)
-  if (!v || !s.win || s.win.isDestroyed() || s.win.webContents.isDestroyed()) return
-  const wc = v.webContents
+  const wc = v?.webContents
   const state: BrowserState = {
-    url: wc.getURL(),
-    title: wc.getTitle(),
-    canGoBack: wc.navigationHistory.canGoBack(),
-    canGoForward: wc.navigationHistory.canGoForward(),
-    loading: wc.isLoadingMainFrame()
+    url: wc?.getURL() ?? '',
+    title: wc?.getTitle() ?? '',
+    canGoBack: wc?.navigationHistory.canGoBack() ?? false,
+    canGoForward: wc?.navigationHistory.canGoForward() ?? false,
+    loading: wc?.isLoadingMainFrame() ?? false
   }
   s.win.webContents.send(CHANNELS.browserState, state)
 }
@@ -292,11 +306,12 @@ function pushState(s: Session): void {
 /** The open tabs for a session (id, title, url, active). */
 function tabsOf(s: Session): BrowserTab[] {
   return s.tabs.map((t) => {
-    const dead = t.view.webContents.isDestroyed()
+    const wc = t.view && !t.view.webContents.isDestroyed() ? t.view.webContents : null
     return {
       id: t.id,
-      title: dead ? '' : t.view.webContents.getTitle() || 'New tab',
-      url: dead ? '' : t.view.webContents.getURL(),
+      kind: t.kind,
+      title: wc ? wc.getTitle() || 'New tab' : '',
+      url: wc ? wc.getURL() : '',
       active: t.id === s.activeTabId
     }
   })
@@ -312,6 +327,17 @@ export function listTabs(key: string = DEFAULT_KEY): BrowserTab[] {
 function pushTabs(s: Session): void {
   if (!s.win || s.win.isDestroyed() || s.win.webContents.isDestroyed()) return
   s.win.webContents.send(CHANNELS.browserTabs, tabsOf(s))
+}
+
+/**
+ * Make sure a PAGE tab is the active one, so a navigation has somewhere to
+ * land (e.g. after the active tab's view was destroyed).
+ */
+function focusPage(s: Session, key: string): void {
+  if (activeView(s)) return
+  const page = pageTab(s)
+  if (page) activateTab(page.id, key)
+  else createTab(s)
 }
 
 /** Add a scheme when the user/agent passes a bare host like "github.com". */
@@ -344,6 +370,7 @@ export async function open(
 ): Promise<{ url: string; title: string; error?: string }> {
   const s = getSession(key)
   ensureWindow(s)
+  focusPage(s, key)
   const wc = pageContents(key)
   const url = normalizeUrl(rawUrl)
   // Show the window so you can watch the agent browse, but DON'T steal focus
@@ -442,8 +469,10 @@ export function newTab(rawUrl?: string, key: string = DEFAULT_KEY): void {
 /** Switch the visible tab. */
 export function activateTab(id: string, key: string = DEFAULT_KEY): void {
   const s = peek(key)
-  if (!s || !s.tabs.some((t) => t.id === id)) return
+  const tab = s?.tabs.find((t) => t.id === id)
+  if (!s || !tab) return
   s.activeTabId = id
+  if (tab.kind === 'page') s.lastPageId = id
   layout(s)
   pushState(s)
   pushTabs(s)
@@ -469,11 +498,13 @@ export function closeTab(id: string, key: string = DEFAULT_KEY): void {
   const idx = s.tabs.findIndex((t) => t.id === id)
   if (idx === -1) return
   const [tab] = s.tabs.splice(idx, 1)
-  if (s.win && !s.win.isDestroyed()) s.win.removeBrowserView(tab.view)
-  try {
-    tab.view.webContents.close()
-  } catch {
-    // a removed view will be garbage-collected
+  if (tab.view) {
+    if (s.win && !s.win.isDestroyed()) s.win.removeBrowserView(tab.view)
+    try {
+      tab.view.webContents.close()
+    } catch {
+      // a removed view will be garbage-collected
+    }
   }
   if (s.activeTabId === id) {
     const next = s.tabs[idx] ?? s.tabs[idx - 1] ?? null
@@ -502,6 +533,7 @@ export function openWindow(key: string = DEFAULT_KEY): void {
 export async function navigate(rawUrl: string, key: string = DEFAULT_KEY): Promise<void> {
   const s = getSession(key)
   ensureWindow(s)
+  focusPage(s, key)
   try {
     await pageContents(key).loadURL(normalizeUrl(rawUrl))
   } catch {

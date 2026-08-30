@@ -323,6 +323,77 @@ export interface MultiSyncOutcome {
   error?: string
 }
 
+/**
+ * Which set of Git changes the review pane is showing.
+ *
+ * These are four genuinely different questions, not four skins on one query;
+ * see `reviewFiles` in main/services/git.ts for what each maps to.
+ */
+export type GitReviewScope = 'unstaged' | 'staged' | 'branch' | 'commit'
+
+/** How many commits the commit-scope picker lists, and the most main will return. */
+export const REVIEW_COMMITS = 30
+export const REVIEW_COMMITS_MAX = 100
+
+/** How a file came to be in the review. */
+export type ReviewFileStatus = 'added' | 'modified' | 'deleted' | 'renamed' | 'copied' | 'untracked'
+
+/** One changed file, as listed in the review pane. */
+export interface ReviewFile {
+  /** Repo-relative path, forward-slashed (git's own spelling). */
+  path: string
+  /** Previous path, set only for renames and copies. */
+  oldPath?: string
+  status: ReviewFileStatus
+  additions: number
+  deletions: number
+  /** Git classified the file as binary, so it is counted but never diffed. */
+  binary: boolean
+  /**
+   * Which repo this file belongs to, for a multi-repo session.
+   *
+   * Undefined for the single-repo case, which is the overwhelming majority -
+   * the pane hides its repo column entirely when nothing carries this.
+   */
+  repo?: string
+}
+
+/** Both sides of one file, ready for the before/after diff view. */
+export interface ReviewDiff {
+  path: string
+  /** `''` when the file was added - there is genuinely no previous version. */
+  before: string
+  /** `''` when the file was deleted. */
+  after: string
+  /** True when we refused to render it; `before`/`after` are then empty. */
+  binary: boolean
+}
+
+/** A commit, as offered in the review pane's commit picker. */
+export interface ReviewCommit {
+  sha: string
+  subject: string
+  author: string
+  /** ISO 8601, so the renderer formats it however it likes. */
+  date: string
+  /** Set when commits from a multi-repo session are listed together. */
+  repo?: string
+}
+
+/** Which repo of a session to act on, and what to look at. */
+export interface ReviewTarget {
+  sessionId: string
+  scope: GitReviewScope
+  /**
+   * The repo to inspect, for a multi-repo session. Its name as recorded in the
+   * session's `repos` links. Omitted means every linked repo for list/bulk
+   * operations, or the session's own cwd for a single-repo session.
+   */
+  repo?: string
+  /** Required by the `commit` scope, ignored by every other one. */
+  commit?: string
+}
+
 export interface PruneWorktreesResult {
   ok: boolean
   candidates: { path: string; branch: string | null }[]
@@ -558,6 +629,7 @@ export interface BrowserState {
 /** One open tab in the Roxy browser, for the toolbar's tab strip. */
 export interface BrowserTab {
   id: string
+  kind: 'page'
   title: string
   url: string
   active: boolean
@@ -1028,6 +1100,7 @@ export interface RoxyApi {
     stop(): Promise<void>
     /** Open a new tab (optionally at a URL) and make it active. */
     newTab(url?: string): Promise<void>
+
     closeTab(id: string): Promise<void>
     activateTab(id: string): Promise<void>
     /** Reorder a tab to a new index in the strip (drag-to-reorder). */
@@ -1171,6 +1244,32 @@ export interface RoxyApi {
      * `dryRun:false` to actually delete them.
      */
     pruneWorktrees(cwd: string, dryRun?: boolean): Promise<PruneWorktreesResult>
+  }
+  /**
+   * Reading and shaping a session's changes - what the Changes chip above the
+   * composer opens onto.
+   *
+   * Every call takes a SESSION id rather than a path, for the same reason
+   * `git.statusMulti` does: a multi-repo session's composite root is not a
+   * repository, so there is nothing at that path to inspect. The session's
+   * `repos` links are the only record of where its checkouts actually are.
+   */
+  review: {
+    /** Changed files for a scope. `[]` when the target isn't a repo. */
+    files(target: ReviewTarget): Promise<ReviewFile[]>
+    /** Both sides of one file, for the diff view. Null when unavailable. */
+    diff(target: ReviewTarget, file: string): Promise<ReviewDiff | null>
+    /** Recent commits, newest first, for the commit scope's picker. */
+    commits(sessionId: string, repo?: string, limit?: number): Promise<ReviewCommit[]>
+    /** Stage paths; an empty list stages everything. */
+    stage(target: ReviewTarget, files: string[]): Promise<{ ok: boolean; error?: string }>
+    /** Unstage paths, leaving the working tree untouched. */
+    unstage(target: ReviewTarget, files: string[]): Promise<{ ok: boolean; error?: string }>
+    /**
+     * Throw away changes to paths. DESTRUCTIVE and not recoverable through
+     * git - untracked files are deleted outright. Confirm before calling.
+     */
+    revert(target: ReviewTarget, files: string[]): Promise<{ ok: boolean; error?: string }>
   }
   remote: {
     /** Mint a room on roxy.gg + open the host relay socket for a session. */

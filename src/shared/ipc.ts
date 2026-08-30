@@ -252,6 +252,20 @@ export const CHANNELS = {
   gitPruneWorktrees: 'git:prune-worktrees',
   gitRenameBranch: 'git:rename-branch',
 
+  /**
+   * Reviewing changes - the diff pane behind the composer's Changes chip.
+   *
+   * Separate from the `git:*` block above because these answer a different
+   * question: that one is "where does this work land?", these are "what
+   * exactly changed?".
+   */
+  reviewFiles: 'review:files',
+  reviewDiff: 'review:diff',
+  reviewCommits: 'review:commits',
+  reviewStage: 'review:stage',
+  reviewUnstage: 'review:unstage',
+  reviewRevert: 'review:revert',
+
   /** Forge = the git host (GitHub/Azure DevOps/GitLab/Bitbucket) behind `origin`. */
   forgeStatus: 'forge:status',
   forgePush: 'forge:push',
