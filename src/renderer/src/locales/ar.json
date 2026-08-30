@@ -212,6 +212,7 @@
     "title": "خوادم MCP"
   },
   "models": {
+    "allHidden": "Every model is hidden. Bring some back in <settings>Settings → Models</settings>.",
     "loadFailed": "تعذر تحميل النماذج من models.dev — لا يزال بإمكانك الإرسال بالنموذج الحالي.",
     "loading": "جارٍ تحميل النماذج…",
     "noMatch": "لا توجد نماذج تطابق \"{{query}}\".",
@@ -371,6 +372,23 @@
     },
     "mcp": {
       "heading": "خوادم MCP"
+    },
+    "models": {
+      "allShown_one": "{{count}} model · all shown",
+      "allShown_other": "{{count}} models · all shown",
+      "connectProvider": "Connect a provider first — its models show up here.",
+      "heading": "Models",
+      "hide": "Hide",
+      "hideAll": "Hide all",
+      "hideCount": "Hide {{count}}",
+      "loading": "Loading models…",
+      "noneAvailable": "No models available",
+      "searchAria": "Search {{provider}} models",
+      "searchPlaceholder": "Search {{count}} models…",
+      "showAll": "Show all",
+      "showCount": "Show {{count}}",
+      "someHidden": "{{shown}} of {{total}} shown · {{hidden}} hidden",
+      "unhide": "Unhide"
     },
     "privacy": {
       "description": "العدد والتوقيتات — تشغيل التطبيق، الأدوار المكتملة، عدد الخطوات والأدوات التي استغرقها الدور، عدد الرموز المميزة التي استخدمها وما يقرب من تكلفتها — مرتبطة بمعرف عشوائي تم إنشاؤه على هذا الجهاز. لا يتم تضمين مطالباتك، أو التعليمات البرمجية الخاصة بك، أو مسارات الملفات، أو أسماء المستودعات، أو أي نص خطأ.",

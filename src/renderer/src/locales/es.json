@@ -212,6 +212,7 @@
     "title": "Servidores MCP"
   },
   "models": {
+    "allHidden": "Every model is hidden. Bring some back in <settings>Settings → Models</settings>.",
     "loadFailed": "No se pudieron cargar los modelos de models.dev; aún puedes enviar con el modelo actual.",
     "loading": "Cargando los modelos…",
     "noMatch": "Ningún modelo coincide con «{{query}}».",
@@ -371,6 +372,23 @@
     },
     "mcp": {
       "heading": "Servidores MCP"
+    },
+    "models": {
+      "allShown_one": "{{count}} model · all shown",
+      "allShown_other": "{{count}} models · all shown",
+      "connectProvider": "Connect a provider first — its models show up here.",
+      "heading": "Models",
+      "hide": "Hide",
+      "hideAll": "Hide all",
+      "hideCount": "Hide {{count}}",
+      "loading": "Loading models…",
+      "noneAvailable": "No models available",
+      "searchAria": "Search {{provider}} models",
+      "searchPlaceholder": "Search {{count}} models…",
+      "showAll": "Show all",
+      "showCount": "Show {{count}}",
+      "someHidden": "{{shown}} of {{total}} shown · {{hidden}} hidden",
+      "unhide": "Unhide"
     },
     "privacy": {
       "description": "Recuentos y tiempos —arranques de la aplicación, turnos completados, cuántos pasos y herramientas necesitó un turno, cuántos tokens consumió y aproximadamente cuánto costó— asociados a un identificador aleatorio generado en este equipo. Nunca tus prompts, tu código, rutas de archivos, nombres de repositorios ni texto de errores.",

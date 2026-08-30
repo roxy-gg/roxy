@@ -855,6 +855,16 @@ export function registerIpc(): void {
       repo.setModelPinned(providerId, model, pinned)
   )
 
+  ipcMain.handle(CHANNELS.modelsHidden, () => repo.listHiddenModels())
+  ipcMain.handle(
+    CHANNELS.modelsSetHidden,
+    (_e, providerId: string, model: string, hidden: boolean) =>
+      repo.setModelHidden(providerId, model, hidden)
+  )
+  ipcMain.handle(CHANNELS.modelsSetProviderHidden, (_e, providerId: string, models: string[]) =>
+    repo.setProviderHiddenModels(providerId, models)
+  )
+
   // ---- context (compaction) ----
   ipcMain.handle(
     CHANNELS.contextCompact,

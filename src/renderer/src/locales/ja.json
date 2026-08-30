@@ -212,6 +212,7 @@
     "title": "MCP サーバー"
   },
   "models": {
+    "allHidden": "Every model is hidden. Bring some back in <settings>Settings → Models</settings>.",
     "loadFailed": "models.dev からモデルを読み込めませんでした — 現在のモデルで送信することはできます。",
     "loading": "モデルを読み込み中…",
     "noMatch": "「{{query}}」に一致するモデルはありません。",
@@ -371,6 +372,23 @@
     },
     "mcp": {
       "heading": "MCPサーバー"
+    },
+    "models": {
+      "allShown_one": "{{count}} model · all shown",
+      "allShown_other": "{{count}} models · all shown",
+      "connectProvider": "Connect a provider first — its models show up here.",
+      "heading": "Models",
+      "hide": "Hide",
+      "hideAll": "Hide all",
+      "hideCount": "Hide {{count}}",
+      "loading": "Loading models…",
+      "noneAvailable": "No models available",
+      "searchAria": "Search {{provider}} models",
+      "searchPlaceholder": "Search {{count}} models…",
+      "showAll": "Show all",
+      "showCount": "Show {{count}}",
+      "someHidden": "{{shown}} of {{total}} shown · {{hidden}} hidden",
+      "unhide": "Unhide"
     },
     "privacy": {
       "description": "アプリの起動、完了したターン、ターンにかかったステップとツールの数、使用されたトークンの数、おおよそのコストなど、このマシンで生成されたランダムなIDに関連付けられたカウントとタイミング。プロンプト、コード、ファイルパス、リポジトリ名、エラーテキストは決して含まれません。",

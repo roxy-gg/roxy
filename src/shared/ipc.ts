@@ -182,6 +182,9 @@ export const CHANNELS = {
   modelsRecent: 'models:recent',
   modelsPinned: 'models:pinned',
   modelsSetPinned: 'models:setPinned',
+  modelsHidden: 'models:hidden',
+  modelsSetHidden: 'models:setHidden',
+  modelsSetProviderHidden: 'models:setProviderHidden',
 
   contextCompact: 'context:compact',
   /** Load project instruction files (AGENTS.md/CLAUDE.md/CONTEXT.md) for a cwd. */

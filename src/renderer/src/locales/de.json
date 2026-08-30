@@ -212,6 +212,7 @@
     "title": "MCP-Server"
   },
   "models": {
+    "allHidden": "Every model is hidden. Bring some back in <settings>Settings → Models</settings>.",
     "loadFailed": "Modelle konnten nicht von models.dev geladen werden – Sie können weiterhin mit dem aktuellen Modell senden.",
     "loading": "Modelle werden geladen…",
     "noMatch": "Keine Modelle stimmen mit „{{query}}“ überein.",
@@ -371,6 +372,23 @@
     },
     "mcp": {
       "heading": "MCP-Server"
+    },
+    "models": {
+      "allShown_one": "{{count}} model · all shown",
+      "allShown_other": "{{count}} models · all shown",
+      "connectProvider": "Connect a provider first — its models show up here.",
+      "heading": "Models",
+      "hide": "Hide",
+      "hideAll": "Hide all",
+      "hideCount": "Hide {{count}}",
+      "loading": "Loading models…",
+      "noneAvailable": "No models available",
+      "searchAria": "Search {{provider}} models",
+      "searchPlaceholder": "Search {{count}} models…",
+      "showAll": "Show all",
+      "showCount": "Show {{count}}",
+      "someHidden": "{{shown}} of {{total}} shown · {{hidden}} hidden",
+      "unhide": "Unhide"
     },
     "privacy": {
       "description": "Zählungen und Zeitangaben – App-Starts, abgeschlossene Züge, wie viele Schritte und Tools ein Zug benötigte, wie viele Token er verbrauchte und was er ungefähr kostete – verknüpft mit einer zufälligen ID, die auf diesem Gerät generiert wurde. Niemals Ihre Prompts, Ihr Code, Dateipfade, Repo-Namen oder Fehlermeldungen.",

@@ -212,6 +212,7 @@
     "title": "MCP सर्वर"
   },
   "models": {
+    "allHidden": "Every model is hidden. Bring some back in <settings>Settings → Models</settings>.",
     "loadFailed": "models.dev से मॉडल लोड नहीं हो सके — आप अभी भी वर्तमान मॉडल के साथ भेज सकते हैं।",
     "loading": "मॉडल लोड हो रहे हैं…",
     "noMatch": "“{{query}}” से कोई मॉडल मेल नहीं खाता।",
@@ -371,6 +372,23 @@
     },
     "mcp": {
       "heading": "MCP सर्वर"
+    },
+    "models": {
+      "allShown_one": "{{count}} model · all shown",
+      "allShown_other": "{{count}} models · all shown",
+      "connectProvider": "Connect a provider first — its models show up here.",
+      "heading": "Models",
+      "hide": "Hide",
+      "hideAll": "Hide all",
+      "hideCount": "Hide {{count}}",
+      "loading": "Loading models…",
+      "noneAvailable": "No models available",
+      "searchAria": "Search {{provider}} models",
+      "searchPlaceholder": "Search {{count}} models…",
+      "showAll": "Show all",
+      "showCount": "Show {{count}}",
+      "someHidden": "{{shown}} of {{total}} shown · {{hidden}} hidden",
+      "unhide": "Unhide"
     },
     "privacy": {
       "description": "गणना और समय — ऐप लॉन्च, समाप्त मोड़, एक मोड़ में कितने कदम और उपकरण लगे, इसने कितने टोकन का उपयोग किया और मोटे तौर पर इसकी लागत कितनी थी — इस मशीन पर उत्पन्न एक यादृच्छिक आईडी से जुड़ा हुआ। कभी भी आपके प्रॉम्प्ट, आपका कोड, फ़ाइल पथ, रेपो नाम, या कोई त्रुटि पाठ नहीं।",

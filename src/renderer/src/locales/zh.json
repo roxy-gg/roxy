@@ -212,6 +212,7 @@
     "title": "MCP 服务器"
   },
   "models": {
+    "allHidden": "Every model is hidden. Bring some back in <settings>Settings → Models</settings>.",
     "loadFailed": "无法从 models.dev 加载模型 — 您仍然可以使用当前模型发送。",
     "loading": "正在加载模型…",
     "noMatch": "没有模型与“{{query}}”匹配。",
@@ -371,6 +372,23 @@
     },
     "mcp": {
       "heading": "MCP 服务器"
+    },
+    "models": {
+      "allShown_one": "{{count}} model · all shown",
+      "allShown_other": "{{count}} models · all shown",
+      "connectProvider": "Connect a provider first — its models show up here.",
+      "heading": "Models",
+      "hide": "Hide",
+      "hideAll": "Hide all",
+      "hideCount": "Hide {{count}}",
+      "loading": "Loading models…",
+      "noneAvailable": "No models available",
+      "searchAria": "Search {{provider}} models",
+      "searchPlaceholder": "Search {{count}} models…",
+      "showAll": "Show all",
+      "showCount": "Show {{count}}",
+      "someHidden": "{{shown}} of {{total}} shown · {{hidden}} hidden",
+      "unhide": "Unhide"
     },
     "privacy": {
       "description": "计数和时间 — 应用程序启动、完成的回合、一个回合所需的步骤和工具数量、使用的令牌数量以及大致成本 — 与此机器上生成的随机 ID 绑定。绝不包含您的提示、代码、文件路径、仓库名称或任何错误文本。",

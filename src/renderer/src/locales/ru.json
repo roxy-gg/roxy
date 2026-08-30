@@ -212,6 +212,7 @@
     "title": "MCP-серверы"
   },
   "models": {
+    "allHidden": "Every model is hidden. Bring some back in <settings>Settings → Models</settings>.",
     "loadFailed": "Не удалось загрузить модели с models.dev — вы все еще можете отправлять запросы с текущей моделью.",
     "loading": "Загрузка моделей…",
     "noMatch": "Нет моделей, соответствующих «{{query}}».",
@@ -371,6 +372,23 @@
     },
     "mcp": {
       "heading": "Серверы MCP"
+    },
+    "models": {
+      "allShown_one": "{{count}} model · all shown",
+      "allShown_other": "{{count}} models · all shown",
+      "connectProvider": "Connect a provider first — its models show up here.",
+      "heading": "Models",
+      "hide": "Hide",
+      "hideAll": "Hide all",
+      "hideCount": "Hide {{count}}",
+      "loading": "Loading models…",
+      "noneAvailable": "No models available",
+      "searchAria": "Search {{provider}} models",
+      "searchPlaceholder": "Search {{count}} models…",
+      "showAll": "Show all",
+      "showCount": "Show {{count}}",
+      "someHidden": "{{shown}} of {{total}} shown · {{hidden}} hidden",
+      "unhide": "Unhide"
     },
     "privacy": {
       "description": "Количество и время — запуски приложений, завершенные ходы, сколько шагов и инструментов занял ход, сколько токенов он использовал и примерно сколько это стоило — привязаны к случайному идентификатору, сгенерированному на этой машине. Никогда не ваши запросы, ваш код, пути к файлам, имена репозиториев или любой текст ошибки.",

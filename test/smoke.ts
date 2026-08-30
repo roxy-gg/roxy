@@ -230,6 +230,37 @@ async function main(): Promise<void> {
   check('a regional tag folds to its base language', repo.getSettings().language === 'es')
   repo.setLanguage('en')
 
+  // ---- hidden models (v22: the picker deny-list) ----
+  // Against the real DB because the behaviour lives in SQL: hiding unpins.
+  repo.setModelPinned('openai', 'gpt-5', true)
+  repo.setModelHidden('openai', 'gpt-5', true)
+  check(
+    'setModelHidden records the model',
+    repo.listHiddenModels().some((h) => h.providerId === 'openai' && h.model === 'gpt-5')
+  )
+  check(
+    'hiding a model also unpins it',
+    !repo.listPinnedModels().some((p) => p.providerId === 'openai' && p.model === 'gpt-5')
+  )
+  repo.setModelHidden('openai', 'gpt-5', true)
+  check('hiding twice does not duplicate the row', repo.listHiddenModels().length === 1)
+  repo.setModelHidden('openai', 'gpt-5', false)
+  check('unhiding removes the model', repo.listHiddenModels().length === 0)
+  // Bulk replace is scoped per provider.
+  repo.setProviderHiddenModels('openai', ['a', 'b', 'c'])
+  repo.setProviderHiddenModels('anthropic', ['claude-x'])
+  repo.setProviderHiddenModels('openai', ['a'])
+  const bulkHidden = repo.listHiddenModels()
+  check(
+    'setProviderHiddenModels replaces only its own provider',
+    bulkHidden.length === 2 &&
+      bulkHidden.some((h) => h.providerId === 'openai' && h.model === 'a') &&
+      bulkHidden.some((h) => h.providerId === 'anthropic' && h.model === 'claude-x')
+  )
+  repo.setProviderHiddenModels('openai', [])
+  repo.setProviderHiddenModels('anthropic', [])
+  check('setProviderHiddenModels([]) clears a provider', repo.listHiddenModels().length === 0)
+
   // ---- per-session inference config ----
   //
   // The two behaviours users expect at once: a NEW session starts from what you
@@ -1349,7 +1380,13 @@ async function main(): Promise<void> {
     {
       const db = new Database(path.join(healDir, 'v22.db'))
       // Stop one rung short, at v21 — the last release that still had the box.
-      const priorSteps = MIGRATIONS.slice(0, MIGRATIONS.length - 1)
+      // Located by what the step DOES, not by its position: later migrations
+      // land on top of it and "the last rung" stops meaning the Exa one.
+      const exaStep = MIGRATIONS.findIndex(
+        (m) => typeof m === 'string' && m.includes('web_search_api_key')
+      )
+      check('migration v22: the Exa cleanup step is still in the ladder', exaStep !== -1)
+      const priorSteps = MIGRATIONS.slice(0, exaStep)
       for (const step of priorSteps) {
         if (typeof step === 'string') db.exec(step)
         else step(db)

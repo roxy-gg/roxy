@@ -221,7 +221,8 @@
     "noMatch": "No models match “{{query}}”.",
     "loadFailed": "Couldn't load models from models.dev — you can still send with the current model.",
     "sectionPinned": "Pinned",
-    "sectionLatest": "Latest · {{provider}}"
+    "sectionLatest": "Latest · {{provider}}",
+    "allHidden": "Every model is hidden. Bring some back in <settings>Settings → Models</settings>."
   },
   "onboarding": {
     "welcomeTagline": "This might be a complete disaster. It might also be the best thing you use all year!",
@@ -327,6 +328,23 @@
       "signedInLocally": "signed in locally",
       "keyStored": "key stored",
       "noCredential": "no credential"
+    },
+    "models": {
+      "heading": "Models",
+      "connectProvider": "Connect a provider first — its models show up here.",
+      "noneAvailable": "No models available",
+      "loading": "Loading models…",
+      "allShown_one": "{{count}} model · all shown",
+      "allShown_other": "{{count}} models · all shown",
+      "someHidden": "{{shown}} of {{total}} shown · {{hidden}} hidden",
+      "searchPlaceholder": "Search {{count}} models…",
+      "searchAria": "Search {{provider}} models",
+      "hideAll": "Hide all",
+      "showAll": "Show all",
+      "hideCount": "Hide {{count}}",
+      "showCount": "Show {{count}}",
+      "hide": "Hide",
+      "unhide": "Unhide"
     },
     "language": {
       "heading": "Language",

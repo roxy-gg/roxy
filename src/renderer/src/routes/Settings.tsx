@@ -24,6 +24,7 @@ import { ConfigBackup } from '../components/ConfigBackup'
 import { ActivitySection } from '../components/ActivitySection'
 import { ProviderLogo } from '../lib/providerLogos'
 import { SubscriptionAccounts } from '../components/SubscriptionSetup'
+import { ModelVisibility } from '../components/ModelVisibility'
 import { useRoxyStore } from '../lib/store'
 
 /** The section heading repeated down the page. */
@@ -193,6 +194,12 @@ export default function Settings(): JSX.Element {
             <Plus className="h-4 w-4" /> {t('settings.providers.add')}
           </button>
         </div>
+      </section>
+
+      {/* Under Providers: same list, minus what you never use. */}
+      <section className="mb-8">
+        <h2 className={SECTION_HEADING}>{t('settings.models.heading')}</h2>
+        <ModelVisibility />
       </section>
 
       {/* A native <select> on purpose. The picker is read once and then never

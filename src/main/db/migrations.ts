@@ -95,6 +95,12 @@ const REPAIR_SCHEMA_SQL = /* sql */ `
         pinned_at   INTEGER NOT NULL,
         PRIMARY KEY (provider_id, model)
       );
+  CREATE TABLE IF NOT EXISTS hidden_models (
+        provider_id TEXT NOT NULL,
+        model       TEXT NOT NULL,
+        hidden_at   INTEGER NOT NULL,
+        PRIMARY KEY (provider_id, model)
+      );
   CREATE TABLE IF NOT EXISTS projects (
         path       TEXT PRIMARY KEY,
         sort_order INTEGER NOT NULL,
@@ -474,6 +480,19 @@ export const MIGRATIONS: Migration[] = [
   // deliberately structure-only and runs on every open). One DELETE, once.
   /* sql */ `
     DELETE FROM settings WHERE key = 'web_search_api_key';
+  `,
+
+  // ---- v23: hidden models ----
+  // A gateway reports 300-600 models; a pin promotes one, a row here drops it
+  // from the picker. A deny-list rather than an allow-list, so models a
+  // provider adds later still reach the picker instead of waiting to be ticked.
+  /* sql */ `
+    CREATE TABLE IF NOT EXISTS hidden_models (
+      provider_id TEXT NOT NULL,
+      model       TEXT NOT NULL,
+      hidden_at   INTEGER NOT NULL,
+      PRIMARY KEY (provider_id, model)
+    );
   `
 ]
 
