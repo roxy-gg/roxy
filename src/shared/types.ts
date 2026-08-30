@@ -223,6 +223,14 @@ export type MessagePart =
       callId?: string
       /** The arguments the model passed to the tool — rebuilds `tool_calls[].function.arguments`. */
       input?: Record<string, unknown>
+      /**
+       * The MCP App this tool declared, if any.
+       *
+       * Resolved in main at tool-call time (from the tool’s `_meta`) and
+       * carried on the part so the card can mount a view without the
+       * renderer having to know anything about MCP metadata.
+       */
+      mcpApp?: { serverId: string; resourceUri: string }
       /** One-line summary shown on the tool card (e.g. the command run). */
       title?: string
       /**

@@ -120,6 +120,19 @@ export function MessageParts({
               output={part.output}
               image={part.image}
               diff={part.diff}
+              // A server-supplied UI for this result, when the tool declared
+              // one. Absent for every non-MCP tool, so the card renders as
+              // usual.
+              app={
+                part.mcpApp
+                  ? {
+                      serverId: part.mcpApp.serverId,
+                      resourceUri: part.mcpApp.resourceUri,
+                      toolInput: part.input,
+                      toolResult: part.output
+                    }
+                  : undefined
+              }
               onCancel={cancel}
               nested={part.children}
               // A subagent's transcript renders through this same component, so a
