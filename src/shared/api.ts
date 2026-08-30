@@ -75,8 +75,12 @@ export interface McpAppLaunch {
   sessionId: string
   /** The view's HTML, read from its `ui://` resource. */
   html: string
-  /** CSP applied to the inner frame. */
+  /** Sandbox proxy URL carrying this app's response-header CSP. */
+  sandboxUrl: string
+  /** CSP applied to the sandbox response and inherited by the view. */
   csp: string
+  /** Complete bounded MCP tool result delivered after initialization. */
+  toolResult?: unknown
   /** `allow` attribute for declared device permissions. */
   allow: string
   /** External origins the view declared, for disclosure on the card. */

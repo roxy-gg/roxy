@@ -74,39 +74,21 @@ export const UI_SCHEME = 'ui://'
 export const SANDBOX_ORIGIN_HINT = 'roxy-mcp-app://view'
 
 /**
- * `targetOrigin` for host -> proxy `postMessage`. Necessarily `'*'`.
+ * `targetOrigin` for host -> proxy `postMessage`.
  *
- * This looks like the sloppy choice and is in fact the only legal one, so the
- * reasoning is written down rather than left to be rediscovered:
+ * The sandbox is a real, addressable origin, so this is explicit rather than
+ * a wildcard. That is only possible because the proxy frame carries
+ * `allow-same-origin`: an opaque frame has NO addressable origin at all -
+ * posting to the scheme URL is silently dropped, and the literal `'null'` is
+ * rejected outright by the browser.
  *
- *  1. The proxy frame is `sandbox="allow-scripts"` WITHOUT `allow-same-origin`.
- *     That is deliberate - it is what makes the document opaque, so it cannot
- *     touch Roxy's storage or cookies.
- *  2. An opaque document's origin is not its URL. Posting to
- *     `roxy-mcp-app://view` matches nothing and the browser drops the message
- *     silently: the proxy waits forever for a resource that WAS sent, and the
- *     user sees a blank frame with no error on any channel.
- *  3. The obvious repair - posting to the literal `'null'` - is rejected by the
- *     browser outright: "Invalid target origin 'null' in a call to
- *     'postMessage'". There is no origin string that addresses an opaque frame.
- *
- * So `'*'` is forced. What matters is that it costs nothing here, because the
- * targetOrigin was never the control doing the work:
- *
- *  - Confidentiality is bounded by WHO can receive. The only reader is the frame
- *    we created and hold a handle to; it cannot navigate itself elsewhere
- *    (`allow-top-navigation` is off, and it has no `allow-same-origin` to
- *    re-enter our origin with), so there is no third party for a wildcard to
- *    leak to.
- *  - Authenticity is enforced on the RECEIVING side, which is where it belongs:
- *    the host checks `event.source === frame.contentWindow` (exact window
- *    identity, not a shared origin string), and the proxy pins the host's real
- *    origin from the first inbound message and rejects everything else.
- *
- * A comparable host (`ext-apps`'s own reference proxy) reaches the same
- * conclusion for the same reason.
+ * Opacity was never what isolated the view. `roxy-mcp-app://view` is a
+ * throwaway origin with no cookies, no storage and no access to the
+ * renderer's origin, which is the property the spec actually requires (host
+ * and sandbox MUST differ). `allow-same-origin` here means "same as that
+ * throwaway", not "same as Roxy".
  */
-export const SANDBOX_POST_TARGET = '*'
+export const SANDBOX_POST_TARGET = SANDBOX_ORIGIN_HINT
 
 /** Protocol revision this implementation speaks. */
 export const APPS_PROTOCOL_VERSION = '2026-01-26'
@@ -237,11 +219,10 @@ export function sanitizeDomains(list: string[] | undefined): string[] {
 /**
  * Build the CSP the sandbox applies to a view.
  *
- * Follows the construction in SEP-1865 §"Content Security Policy Enforcement".
- * `default-src 'none'` is the floor: everything a view can reach has to be named
- * by a directive below it, so a resource that declares nothing gets a document
- * that can run its own inline script and nothing else — no network, no frames,
- * no plugins.
+ * Mirrors the construction in the official ext-apps basic host.
+ * Same-origin bundled code is the floor; every external origin must be named
+ * by a directive below it. A resource that declares nothing can run its own
+ * single-file bundle but gets no external network, frames, or plugins.
  *
  * `'unsafe-inline'` for script and style is in the spec and unavoidable: these
  * views are single HTML files with inline `<script>`. It is survivable precisely
@@ -253,17 +234,25 @@ export function buildCsp(csp: McpUiCsp | undefined): string {
   const connect = sanitizeDomains(csp?.connectDomains).join(' ')
   const frames = sanitizeDomains(csp?.frameDomains).join(' ')
   const baseUri = sanitizeDomains(csp?.baseUriDomains).join(' ')
+  // `blob:` appears in several directives on purpose. Graphics and mapping
+  // libraries (CesiumJS being the one that exposed this) build workers, shaders
+  // and textures from Blob URLs at runtime; without it they throw during
+  // startup and render a white box, which reads as "the app is broken" rather
+  // than "the host blocked it". A blob URL is same-origin content the document
+  // created itself, so allowing it grants no new reach.
   return [
-    "default-src 'none'",
-    `script-src 'self' 'unsafe-inline'${resources ? ' ' + resources : ''}`,
-    `style-src 'self' 'unsafe-inline'${resources ? ' ' + resources : ''}`,
+    "default-src 'self' 'unsafe-inline'",
+    `script-src 'self' 'unsafe-inline' 'unsafe-eval' blob: data:${resources ? ' ' + resources : ''}`,
+    `style-src 'self' 'unsafe-inline' blob: data:${resources ? ' ' + resources : ''}`,
     `connect-src 'self'${connect ? ' ' + connect : ''}`,
-    `img-src 'self' data:${resources ? ' ' + resources : ''}`,
-    `font-src 'self'${resources ? ' ' + resources : ''}`,
-    `media-src 'self' data:${resources ? ' ' + resources : ''}`,
+    `img-src 'self' data: blob:${resources ? ' ' + resources : ''}`,
+    `font-src 'self' data: blob:${resources ? ' ' + resources : ''}`,
+    `media-src 'self' data: blob:${resources ? ' ' + resources : ''}`,
+    // Workers are how WebGL-heavy views decode tiles off the main thread.
+    `worker-src 'self' blob:${resources ? ' ' + resources : ''}`,
     `frame-src ${frames || "'none'"}`,
     "object-src 'none'",
-    `base-uri ${baseUri || "'self'"}`
+    `base-uri ${baseUri || "'none'"}`
   ].join('; ')
 }
 
@@ -406,19 +395,24 @@ export interface McpUiInitializeResult {
   hostInfo: { name: string; version: string }
   hostCapabilities: {
     /** The view may call its own server's tools (subject to approval). */
-    tools?: Record<string, never>
+    serverTools?: { listChanged?: boolean }
     /** The view may read its own server's resources. */
-    resources?: Record<string, never>
+    serverResources?: { listChanged?: boolean }
     /** `ui/open-link` is available. */
-    openLink?: Record<string, never>
-    /** `ui/message` is available. */
-    message?: Record<string, never>
+    openLinks?: Record<string, never>
     /** `ui/update-model-context` is available. */
-    updateModelContext?: Record<string, never>
+    updateModelContext?: { text?: Record<string, never> }
   }
-  /** Display modes this host can actually honour. */
-  availableDisplayModes: McpUiDisplayMode[]
-  theme: McpUiTheme
+  /** Rich host context. The official App SDK expects these fields nested here. */
+  hostContext: {
+    theme?: 'light' | 'dark'
+    styles?: { variables?: Record<string, string> }
+    displayMode?: McpUiDisplayMode
+    availableDisplayModes?: McpUiDisplayMode[]
+    containerDimensions?: { maxHeight?: number; maxWidth?: number }
+    platform?: 'desktop'
+    userAgent?: string
+  }
 }
 
 /**

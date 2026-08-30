@@ -601,13 +601,20 @@ export async function listMcpResources(serverId: string): Promise<McpResourceInf
   if (!conn || conn.status !== 'connected' || !conn.client || !conn.hasResources) return []
   try {
     const res = await conn.client.listResources(undefined, { timeout: conn.requestTimeout })
-    return (res.resources ?? []).map((r) => ({
-      uri: r.uri,
-      name: r.name,
-      title: r.title,
-      description: r.description,
-      mimeType: r.mimeType
-    }))
+    return (res.resources ?? []).map((r) => {
+      const raw = r as typeof r & { meta?: Record<string, unknown> }
+      return {
+        uri: r.uri,
+        name: r.name,
+        title: r.title,
+        description: r.description,
+        mimeType: r.mimeType,
+        // Listing-level metadata is the spec fallback when resources/read omits
+        // it. `_meta` is canonical; `meta` is emitted by some Python SDKs and is
+        // accepted by the official reference host too.
+        _meta: r._meta ?? raw.meta
+      }
+    })
   } catch {
     return []
   }

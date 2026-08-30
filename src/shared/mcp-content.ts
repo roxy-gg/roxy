@@ -44,8 +44,17 @@ import type { ToolResult } from './types'
  * only thing here that can realistically exhaust a session).
  */
 export const MCP_LIMITS = {
-  /** Per text-ish block, in chars. */
+  /** Per model-facing text block, in chars. */
   textChars: 200_000,
+  /**
+   * Per MCP App HTML resource, in chars.
+   *
+   * Apps are Vite-style single-file bundles rather than prose. The official map
+   * app is ~343k, so applying the model-text cap here truncated JavaScript in
+   * the middle of the bundle and left a blank document. Keep a separate, still
+   * bounded ceiling for executable app resources.
+   */
+  appHtmlChars: 4_000_000,
   /** Per inline binary payload (image/audio/blob), in base64 chars (~3MB decoded). */
   binaryChars: 4_000_000,
   /** Blocks kept per result; beyond this we count and drop. */
@@ -290,6 +299,8 @@ export interface McpResourceInfo {
   title?: string
   description?: string
   mimeType?: string
+  /** Listing-level extension metadata, used as fallback by MCP Apps. */
+  _meta?: Record<string, unknown>
 }
 
 /**
@@ -307,7 +318,9 @@ export interface McpResourceContents {
   text?: string
   /** base64 payload, when it is binary. */
   blob?: string
-  /** True when `text` was cut to `MCP_LIMITS.textChars`. */
+  /** Content-level extension metadata. MCP Apps CSP lives here. */
+  _meta?: Record<string, unknown>
+  /** True when `text` was cut to its applicable resource limit. */
   truncated?: boolean
   /** True when a payload was dropped for exceeding `MCP_LIMITS.binaryChars`. */
   omitted?: boolean
@@ -325,19 +338,112 @@ export interface McpResourceContents {
 export function parseResourceContents(uri: string, contents: unknown): McpResourceContents {
   const first = Array.isArray(contents) ? contents[0] : undefined
   if (!isRecord(first)) return { uri }
+  const mimeType = str(first.mimeType)
+  // MCP App views are executable single-file bundles, not model-facing prose.
+  // The official map bundle is ~343k, so applying the 200k text-block cap cut
+  // its JavaScript in half. Keep the app-specific ceiling bounded but complete.
+  const textLimit = mimeType?.toLowerCase().includes('profile=mcp-app')
+    ? MCP_LIMITS.appHtmlChars
+    : MCP_LIMITS.textChars
+  // `_meta` is the spec spelling. Some SDKs serialize the same field as `meta`;
+  // the official reference host accepts both, so Roxy does too.
+  const meta = bag(first._meta) ?? bag(first.meta)
   const out: McpResourceContents = {
     uri: str(first.uri) ?? uri,
-    mimeType: str(first.mimeType)
+    mimeType,
+    ...(meta ? { _meta: meta } : {})
   }
   if (typeof first.text === 'string') {
-    const { text, truncated } = clampText(first.text)
-    out.text = text
-    if (truncated) out.truncated = true
+    out.text = first.text.length <= textLimit ? first.text : first.text.slice(0, textLimit)
+    if (first.text.length > textLimit) out.truncated = true
   } else if (typeof first.blob === 'string') {
     if (first.blob.length > MCP_LIMITS.binaryChars) out.omitted = true
     else out.blob = first.blob
   }
   return out
+}
+
+/**
+ * Convert the bounded internal result back to the standard MCP CallToolResult
+ * wire shape expected by MCP Apps.
+ *
+ * The internal model uses `kind` rather than the wire's `type`, so passing it
+ * directly to `ui/notifications/tool-result` fails the official App SDK's
+ * schema validation. This is a projection, not a second source of truth.
+ */
+export function toMcpCallResult(
+  result: McpCallResult | undefined
+): Record<string, unknown> | undefined {
+  if (!result) return undefined
+  const content: Record<string, unknown>[] = []
+  for (const block of result.content) {
+    switch (block.kind) {
+      case 'text':
+        content.push({
+          type: 'text',
+          text: block.text,
+          ...(block.annotations ? { annotations: block.annotations } : {}),
+          ...(block._meta ? { _meta: block._meta } : {})
+        })
+        break
+      case 'image':
+      case 'audio':
+        if (!block.data) break
+        content.push({
+          type: block.kind,
+          data: block.data,
+          mimeType: block.mimeType,
+          ...(block.annotations ? { annotations: block.annotations } : {}),
+          ...(block._meta ? { _meta: block._meta } : {})
+        })
+        break
+      case 'resource_link':
+        content.push({
+          type: 'resource_link',
+          uri: block.uri,
+          ...(block.name ? { name: block.name } : {}),
+          ...(block.title ? { title: block.title } : {}),
+          ...(block.description ? { description: block.description } : {}),
+          ...(block.mimeType ? { mimeType: block.mimeType } : {}),
+          ...(block.annotations ? { annotations: block.annotations } : {}),
+          ...(block._meta ? { _meta: block._meta } : {})
+        })
+        break
+      case 'resource':
+        content.push({
+          type: 'resource',
+          resource: {
+            uri: block.uri,
+            ...(block.mimeType ? { mimeType: block.mimeType } : {}),
+            ...(block.text !== undefined ? { text: block.text } : {}),
+            ...(block.blob !== undefined ? { blob: block.blob } : {})
+          },
+          ...(block.annotations ? { annotations: block.annotations } : {}),
+          ...(block._meta ? { _meta: block._meta } : {})
+        })
+        break
+      case 'unknown': {
+        // Unknown blocks were retained as bounded JSON precisely so a newer
+        // consumer can still receive them. Parse defensively; malformed raw
+        // data is omitted rather than making the whole result invalid.
+        try {
+          const raw = block.raw ? JSON.parse(block.raw) : undefined
+          if (isRecord(raw)) content.push(raw)
+        } catch {
+          /* omit one malformed unknown block */
+        }
+        break
+      }
+    }
+  }
+  return {
+    content,
+    ...(result.structuredContent !== undefined
+      ? { structuredContent: result.structuredContent }
+      : {}),
+    ...(result.isError ? { isError: true } : {}),
+    ...(result._meta ? { _meta: result._meta } : {})
+  }
 }
 
 /**

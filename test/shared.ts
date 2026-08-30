@@ -2526,17 +2526,33 @@ check(
 {
   const base = buildCsp(undefined)
   check(
-    'mcp apps: a view declaring nothing gets default-src none',
-    base.includes("default-src 'none'")
+    'mcp apps: bundled app code is allowed on the sandbox origin',
+    base.includes("default-src 'self' 'unsafe-inline'")
   )
-  check('mcp apps: ...cannot open network connections', base.includes("connect-src 'self';"))
+  // The property is "no EXTERNAL reach", not a literal directive string.
+  // `self`, `data:` and `blob:` are all content the document already has - a
+  // blob URL is something it created itself - so they grant nothing new, while
+  // being required for WebGL/mapping views to start at all.
+  const connectDirective = base.split('; ').find((d) => d.startsWith('connect-src'))!
+  check(
+    'mcp apps: ...cannot reach any external origin',
+    !/https?:/.test(connectDirective),
+    connectDirective
+  )
+  check('mcp apps: ...and workers stay same-origin', base.includes("worker-src 'self' blob:"))
   check('mcp apps: ...cannot frame anything', base.includes("frame-src 'none'"))
   check('mcp apps: ...cannot load plugins', base.includes("object-src 'none'"))
-  check('mcp apps: ...cannot retarget relative URLs', base.includes("base-uri 'self'"))
+  check('mcp apps: ...cannot retarget relative URLs', base.includes("base-uri 'none'"))
 }
 {
   const declared = buildCsp({ connectDomains: ['https://api.example.com'] })
   check('mcp apps: a declared domain is allowed', declared.includes('https://api.example.com'))
+  check(
+    'mcp apps: resource domains are also allowed for workers',
+    buildCsp({ resourceDomains: ['https://*.cesium.com'] }).includes(
+      "worker-src 'self' blob: https://*.cesium.com"
+    )
+  )
   check(
     'mcp apps: ...only in the directive that named it',
     !declared.includes("img-src 'self' data: https://api")
@@ -2652,6 +2668,34 @@ check(
   ])
   check('mcp resource: text contents parse', r.text === '<h1>hi</h1>' && r.blob === undefined)
   check('mcp resource: the mime profile survives', r.mimeType === 'text/html;profile=mcp-app')
+}
+{
+  const appMeta = {
+    ui: {
+      csp: {
+        resourceDomains: ['https://cesium.com'],
+        connectDomains: ['https://*.openstreetmap.org']
+      }
+    }
+  }
+  const html = '<script>' + 'x'.repeat(MCP_LIMITS.textChars + 100) + '</script>'
+  const r = parseResourceContents('ui://map/app.html', [
+    {
+      uri: 'ui://map/app.html',
+      mimeType: 'text/html;profile=mcp-app',
+      text: html,
+      _meta: appMeta
+    }
+  ])
+  check(
+    'mcp resource: an app bundle may exceed the model-text cap intact',
+    r.text === html && !r.truncated
+  )
+  check(
+    'mcp resource: content-level app metadata survives',
+    (r._meta?.ui as { csp?: { resourceDomains?: string[] } })?.csp?.resourceDomains?.[0] ===
+      'https://cesium.com'
+  )
 }
 {
   const r = parseResourceContents('file://x.png', [{ uri: 'file://x.png', blob: 'AAA' }])

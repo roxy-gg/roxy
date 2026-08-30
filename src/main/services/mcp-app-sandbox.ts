@@ -17,14 +17,14 @@
  *
  * A custom `roxy-mcp-app://` protocol, registered as a standard scheme, serves
  * exactly one document: the sandbox proxy. Because it is a distinct scheme with
- * its own opaque origin, the same-origin policy does the enforcement for us —
+ * its own dedicated origin, the same-origin policy does the enforcement for us —
  * the proxy cannot touch Roxy's window, storage, or preload even if it tries.
  *
  * Inside it, the proxy writes the view's HTML into a NESTED iframe with the
  * resource's CSP applied. That is the "double iframe" SEP-1865 requires:
  *
- *   Roxy renderer  →  <iframe src="roxy-mcp-app://…">   (separate origin)
- *                        └─ <iframe srcdoc="…view…">    (CSP-restricted)
+ *   Roxy renderer  -> <iframe src="roxy-mcp-app://..."> (separate origin)
+ *                         -> <iframe> + document.write    (CSP-restricted)
  *
  * The outer frame exists purely to be a different origin and to relay
  * `postMessage`. The inner frame holds the untrusted document. Neither can see
@@ -43,6 +43,21 @@ export const SANDBOX_SCHEME = 'roxy-mcp-app'
 
 /** The single URL the scheme serves. */
 export const SANDBOX_URL = `${SANDBOX_SCHEME}://view/index.html`
+
+/**
+ * Build a sandbox URL carrying the app policy for the protocol handler.
+ *
+ * The official host serves one CSP header per app frame. A meta policy inside
+ * the nested document is not equivalent: it can only make the proxy's header
+ * stricter, never loosen `default-src 'none'` to permit declared Cesium/OSM
+ * domains. The query is internal to this custom scheme and never reaches a
+ * network server.
+ */
+export function sandboxUrlForCsp(csp: string): string {
+  const url = new URL(SANDBOX_URL)
+  url.searchParams.set('csp', csp)
+  return url.toString()
+}
 
 /**
  * Register the scheme's privileges.
@@ -72,15 +87,18 @@ export function serveSandbox(): void {
     if (url.pathname !== '/index.html') {
       return new Response('Not found', { status: 404 })
     }
+    const viewCsp = url.searchParams.get('csp')
     return new Response(PROXY_HTML, {
       status: 200,
       headers: {
         'content-type': 'text/html; charset=utf-8',
-        // The proxy itself is ours and runs one inline script. It never loads
-        // anything remote; the VIEW's policy is applied separately, on the inner
-        // frame, from the resource's own declaration.
+        'cache-control': 'no-cache, no-store, must-revalidate',
+        // One tamper-proof policy per app frame, matching the official host.
+        // The proxy script itself is inline, so script-src must retain
+        // unsafe-inline even if a malformed internal URL arrives.
         'content-security-policy':
-          "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; frame-src *"
+          viewCsp ||
+          "default-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; frame-src 'self'"
       }
     })
   })
@@ -138,23 +156,46 @@ const PROXY_HTML = /* html */ `<!doctype html>
       if (data && data.method === SANDBOX_PREFIX + 'resource-ready') {
         var p = data.params || {}
         var frame = document.createElement('iframe')
-        // The inner frame gets scripts but NOT allow-same-origin: its document
-        // is therefore opaque-origin, so it cannot read this proxy's DOM even
-        // though the proxy created it. Forms and popups stay off; a view that
-        // wants to navigate somewhere must ask via ui/open-link, where the host
-        // can vet the URL.
-        frame.setAttribute('sandbox', 'allow-scripts')
+        // 'allow-same-origin' is present deliberately, and it is NOT a hole:
+        // the inner frame's origin is this PROXY's origin, which is already a
+        // throwaway custom scheme with no storage, no cookies and no access to
+        // Roxy's renderer. Same-origin here means "same as the sandbox", not
+        // "same as the app".
+        //
+        // Without it, real views simply do not run. An opaque document cannot
+        // use 'localStorage', 'indexedDB', 'SharedWorker', WebGL context
+        // creation in some engines, or 'document.cookie' - and libraries like
+        // CesiumJS touch several of those during startup, fail, and render a
+        // white box. That is the blank map.
+        //
+        // 'allow-forms' matches the reference host so ordinary form controls
+        // behave. Navigation is still withheld: no 'allow-top-navigation', no
+        // 'allow-popups', so a view that wants to go somewhere must ask via
+        // 'ui/open-link' where the host can vet the URL.
+        frame.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-forms')
         if (p.allow) frame.setAttribute('allow', p.allow)
-        // The CSP travels INSIDE the document as a meta tag, because srcdoc
-        // content inherits no headers of its own.
-        var meta = p.csp
-          ? '<meta http-equiv="Content-Security-Policy" content="' +
-            String(p.csp).replace(/"/g, '&quot;') +
-            '">'
-          : ''
-        frame.srcdoc = meta + String(p.html || '')
-        document.body.appendChild(frame)
+        // Assign before document.write: inline app scripts can call app.connect()
+        // synchronously while write() is still running. If 'view' is null then,
+        // the proxy drops ui/initialize and the app waits forever.
         view = frame
+        document.body.appendChild(frame)
+        // 'document.write', not 'srcdoc'. srcdoc documents are treated as
+        // opaque/inherited-origin in ways that break scripts which resolve URLs
+        // against 'document.baseURI' or construct workers - CesiumJS being the
+        // canonical example, which is why the reference host does the same.
+        // The frame must be in the DOM first for 'contentDocument' to exist.
+        var doc = frame.contentDocument || (frame.contentWindow && frame.contentWindow.document)
+        if (doc) {
+          doc.open()
+          // CSP is already a tamper-proof response header on this proxy and is
+          // inherited by the about:blank child. Adding a meta policy here would
+          // intersect with it and can only make the app stricter.
+          doc.write(String(p.html || ''))
+          doc.close()
+        } else {
+          // Only reachable if the frame was blocked from initialising at all.
+          frame.srcdoc = String(p.html || '')
+        }
         return
       }
 
@@ -171,6 +212,10 @@ const PROXY_HTML = /* html */ `<!doctype html>
     // Only the frame we created may speak. Anything else posting into this
     // window is not part of the conversation.
     if (view && event.source === view.contentWindow) {
+      // Window identity survives a self-navigation. Check origin too, otherwise
+      // a view that navigated itself to an external page would keep the same
+      // contentWindow handle and that page could speak through this broker.
+      if (event.origin !== window.location.origin) return
       if (data && typeof data.method === 'string' && data.method.indexOf(SANDBOX_PREFIX) === 0) {
         return
       }

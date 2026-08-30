@@ -25,6 +25,21 @@ const PROTOCOL_VERSION = '2026-07-28'
 
 let buf = ''
 
+// Larger than Roxy's normal 200k model-text cap, matching the published map
+// app (~343k). If app HTML is treated as prose this is truncated mid-bundle.
+const MOCK_APP_HTML =
+  '<!doctype html><html><body><h1>hi</h1><script>window.__complete=true</script>' +
+  'x'.repeat(342000) +
+  '<!--app-complete--></body></html>'
+const MOCK_APP_META = {
+  ui: {
+    csp: {
+      connectDomains: ['https://*.openstreetmap.org', 'https://cesium.com', 'https://*.cesium.com'],
+      resourceDomains: ['https://*.openstreetmap.org', 'https://cesium.com', 'https://*.cesium.com']
+    }
+  }
+}
+
 process.stdin.setEncoding('utf8')
 process.stdin.on('data', (chunk) => {
   buf += chunk
@@ -174,7 +189,10 @@ function handle(msg) {
             {
               uri,
               mimeType: 'text/html;profile=mcp-app',
-              text: '<!doctype html><h1>hi</h1>'
+              text: MOCK_APP_HTML,
+              // Content-level metadata is where the official map server puts
+              // its Cesium/OpenStreetMap CSP.
+              _meta: MOCK_APP_META
             }
           ],
           ttlMs: 0,
@@ -244,7 +262,8 @@ function handle(msg) {
       if (name === 'structured') {
         sendResult(msg.id, {
           content: [],
-          structuredContent: { total: 61.5, currency: 'EUR' }
+          structuredContent: { total: 61.5, currency: 'EUR' },
+          _meta: { viewUUID: 'mock-view-uuid' }
         })
         return
       }

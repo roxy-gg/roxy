@@ -18,7 +18,7 @@
  *    renderer that guesses one gets nothing.
  */
 import { randomUUID } from 'node:crypto'
-import { shell } from 'electron'
+import { app, shell } from 'electron'
 import {
   BRIDGE_ERROR,
   isOpenableUrl,
@@ -34,7 +34,15 @@ import {
   type McpUiInitializeResult,
   type McpUiTheme
 } from '../../shared/mcp-apps'
-import { callMcpTool, readMcpResource, mcpToolDefinition } from './mcp'
+import {
+  callMcpTool,
+  readMcpResource,
+  listMcpResources,
+  mcpToolDefinition,
+  lastMcpCallResult
+} from './mcp'
+import { toMcpCallResult } from '../../shared/mcp-content'
+import { sandboxUrlForCsp } from './mcp-app-sandbox'
 import { qualifyToolName } from '../../shared/mcp'
 
 /** One live app view. Created when a UI-bearing tool call renders. */
@@ -70,8 +78,12 @@ export interface McpAppLaunch {
   sessionId: string
   /** The view's HTML, read from its `ui://` resource. */
   html: string
-  /** CSP to apply to the inner frame. */
+  /** Sandbox proxy URL carrying this app's response-header CSP. */
+  sandboxUrl: string
+  /** CSP applied to the sandbox response and inherited by the view. */
   csp: string
+  /** Complete bounded MCP tool result delivered after initialization. */
+  toolResult?: unknown
   /** `allow` attribute for declared device permissions. */
   allow: string
   /** External origins this view declared, for disclosure. */
@@ -92,15 +104,23 @@ export async function launchMcpApp(
   qualifiedToolName: string,
   resourceUri: string
 ): Promise<McpAppLaunch | null> {
-  const contents = await readMcpResource(serverId, resourceUri)
+  // Fetch the listing too: per the Apps spec, content-level metadata from
+  // resources/read wins, and resources/list is the fallback. The official map
+  // declares its Cesium/OpenStreetMap CSP on the content item; several servers
+  // put it only on the listing, so both paths are required for interop.
+  const [contents, resources] = await Promise.all([
+    readMcpResource(serverId, resourceUri),
+    listMcpResources(serverId)
+  ])
   if ('error' in contents) return null
   // Must be HTML declaring the MCP Apps profile. A server pointing `ui://` at a
   // PNG or a JSON blob is not offering a view, and rendering whatever came back
   // as a document would be exactly the confusion this check exists to stop.
   if (!contents.mimeType?.startsWith('text/html')) return null
-  if (!contents.text) return null
+  if (!contents.text || contents.truncated) return null
 
-  const meta = uiResourceMeta((contents as { _meta?: Record<string, unknown> })._meta ?? undefined)
+  const listing = resources.find((r) => r.uri === resourceUri)
+  const meta = uiResourceMeta(contents._meta) ?? uiResourceMeta(listing?._meta)
 
   evictOldest()
   const session: AppSession = {
@@ -113,10 +133,17 @@ export async function launchMcpApp(
   }
   sessions.set(session.id, session)
 
+  const csp = buildCsp(meta?.csp)
   return {
     sessionId: session.id,
     html: contents.text,
-    csp: buildCsp(meta?.csp),
+    // The CSP must be on the proxy response, like the official host. Injecting a
+    // second policy as a meta tag cannot loosen the proxy's own `default-src
+    // 'none'`: browser CSPs intersect, so Cesium remains blocked even when the
+    // app declared its domains correctly.
+    sandboxUrl: sandboxUrlForCsp(csp),
+    csp,
+    toolResult: toMcpCallResult(lastMcpCallResult(qualifiedToolName)),
     allow: buildAllow(meta?.permissions),
     externalDomains: externalDomains(meta),
     displayModes: (meta?.availableDisplayModes ?? SUPPORTED_DISPLAY_MODES).filter((m) =>
@@ -236,16 +263,25 @@ async function handleHostMethod(
     case 'ui/initialize': {
       const result: McpUiInitializeResult = {
         protocolVersion: APPS_PROTOCOL_VERSION,
-        hostInfo: { name: 'Roxy', version: process.env.npm_package_version ?? '0.0.0' },
+        hostInfo: { name: 'Roxy', version: app.getVersion() },
         hostCapabilities: {
-          tools: {},
-          resources: {},
-          openLink: {},
-          message: {},
-          updateModelContext: {}
+          serverTools: {},
+          serverResources: {},
+          openLinks: {},
+          // Do not advertise `message`: Roxy does not yet feed ui/message into
+          // the composer, and claiming a no-op capability breaks feature
+          // detection in conforming apps.
+          updateModelContext: { text: {} }
         },
-        availableDisplayModes: SUPPORTED_DISPLAY_MODES,
-        theme: currentTheme
+        hostContext: {
+          theme: currentTheme.mode,
+          styles: { variables: currentTheme.variables },
+          displayMode: 'inline',
+          availableDisplayModes: SUPPORTED_DISPLAY_MODES,
+          containerDimensions: { maxHeight: 1200 },
+          platform: 'desktop',
+          userAgent: `Roxy/${app.getVersion()}`
+        }
       }
       return { result }
     }
@@ -337,11 +373,18 @@ async function handleForwarded(
   }
 
   const result = await callMcpTool(qualified, args)
+  // A view expects the standard CallToolResult, not Roxy's flattened card
+  // projection. Preserve structuredContent, all content blocks and result-level
+  // `_meta`; only fall back to text if a malformed server produced no retained
+  // result at all.
+  const full = toMcpCallResult(lastMcpCallResult(qualified))
   return {
-    result: {
-      content: [{ type: 'text', text: result.output }],
-      ...(result.ok ? {} : { isError: true })
-    }
+    result:
+      full ??
+      ({
+        content: [{ type: 'text', text: result.output }],
+        ...(result.ok ? {} : { isError: true })
+      } as Record<string, unknown>)
   }
 }
 

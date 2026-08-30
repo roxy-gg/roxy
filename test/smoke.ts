@@ -3194,6 +3194,15 @@ async function main(): Promise<void> {
         )
 
         // ---- MCP Apps: the broker end to end -------------------------------
+        // An app launch belongs to one completed tool call. The earlier
+        // disconnect test intentionally cleared retained results, so make the
+        // producing call again immediately before mounting its view, matching
+        // the product lifecycle.
+        await withTimeout(
+          callMcpTool('mcp__modernmcp__structured', {}),
+          15_000,
+          'mcp app producing call'
+        )
         // Loads a real `ui://` resource over the real client, then exercises the
         // boundary the whole feature rests on.
         const launched = await withTimeout(
@@ -3203,15 +3212,25 @@ async function main(): Promise<void> {
         )
         check(
           'mcp app: a ui:// view loads',
-          !!launched && launched.html.includes('<h1>hi</h1>'),
+          !!launched &&
+            launched.html.includes('<h1>hi</h1>') &&
+            launched.html.includes('<!--app-complete-->') &&
+            launched.html.length > 300_000,
           JSON.stringify(launched)?.slice(0, 120)
         )
         check(
-          'mcp app: it arrives with a restrictive CSP',
-          !!launched?.csp.includes("default-src 'none'")
+          'mcp app: it carries the resource-declared CSP domains',
+          !!launched?.csp.includes('https://cesium.com') &&
+            launched.csp.includes('https://*.openstreetmap.org') &&
+            launched.sandboxUrl.includes('csp=')
         )
 
         if (launched) {
+          check(
+            'mcp app: the complete tool result reaches the launch payload',
+            (launched.toolResult as { _meta?: { viewUUID?: string } })?._meta?.viewUUID ===
+              'mock-view-uuid'
+          )
           // A view names an UNQUALIFIED tool; the broker qualifies it against the
           // session's own server. There is no code path that reads a server id
           // from the view, which is what makes cross-server calls impossible
@@ -3307,14 +3326,10 @@ async function main(): Promise<void> {
         {
           const win = new BrowserWindow({ show: false })
           try {
-            // Load the proxy the way the product does: inside a
-            // `sandbox="allow-scripts"` iframe, on a page that then drives the
-            // real handshake. Loading SANDBOX_URL top-level (the previous
-            // version of this test) proves the scheme serves, but reports an
-            // origin the product NEVER sees - a sandboxed document without
-            // `allow-same-origin` is opaque, and its origin is the string
-            // 'null'. That gap is exactly how a targetOrigin bug shipped while
-            // this test was green.
+            // Load the proxy inside the same sandbox attributes as the product,
+            // then drive a real host -> proxy -> view -> host round trip. A
+            // top-level load only proves the custom scheme serves; it does not
+            // prove that the inner document receives host messages.
             // Parent must be a REAL origin, as Roxy's renderer is; a `data:` parent
             // is itself opaque and would test a situation the product never
             // creates. The proxy is served on its own scheme, so loading it
@@ -3342,7 +3357,14 @@ async function main(): Promise<void> {
                          jsonrpc: '2.0',
                          method: "ui/notifications/sandbox-resource-ready",
                          params: {
-                           html: '<script>parent.postMessage({jsonrpc:"2.0",method:"ui/notifications/initialized"},"*")<\/script>',
+                           // No literal </script>: build the element instead,
+                           // so nothing depends on escaping surviving three
+                           // levels of nesting.
+                           html:
+                             '<body><script>' +
+                             'parent.postMessage({jsonrpc:"2.0",method:"ui/notifications/initialized"},"*")' +
+                             String.fromCharCode(60) + '/script' + String.fromCharCode(62) +
+                             '</body>',
                            csp: "default-src 'none'; script-src 'unsafe-inline'"
                          }
                        },
@@ -3368,7 +3390,7 @@ async function main(): Promise<void> {
                    }
                  })
                  const f = document.createElement('iframe')
-                 f.setAttribute('sandbox', 'allow-scripts')
+                 f.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-forms')
                  f.src = window.location.href
                  document.body.appendChild(f)
                  setTimeout(() => resolve({ seen, delivered, postError }), 4000)
@@ -3384,12 +3406,11 @@ async function main(): Promise<void> {
               !!ready,
               JSON.stringify(probe.seen)
             )
-            // The observable fact the product must encode as its targetOrigin.
-            // A top-level load reports the scheme origin instead, which is why
-            // the earlier version of this test passed while views stayed blank.
+            // The proxy must have a real, addressable sandbox origin. If it
+            // becomes opaque, explicit host messages are silently dropped.
             check(
-              "mcp app: ...reporting the opaque origin 'null'",
-              ready?.origin === 'null',
+              'mcp app: ...from the sandbox origin, not an opaque one',
+              ready?.origin === SANDBOX_ORIGIN_HINT,
               String(ready?.origin)
             )
             // Round trip: host -> proxy -> view -> host. Fails if targetOrigin
@@ -3399,13 +3420,11 @@ async function main(): Promise<void> {
               probe.delivered === true,
               probe.postError ?? undefined
             )
-            // An opaque frame has no addressable origin: posting to the scheme
-            // URL is silently dropped, and the literal 'null' is rejected
-            // outright ("Invalid target origin 'null'"). '*' is the only value
-            // that works, so pin it rather than let it drift back.
+            // Match the official host: the dedicated sandbox origin is explicit
+            // rather than a wildcard, while frame identity is also checked.
             check(
-              'mcp app: the host posts with a target origin the browser accepts',
-              SANDBOX_POST_TARGET === '*',
+              'mcp app: the host posts to the dedicated sandbox origin',
+              SANDBOX_POST_TARGET === SANDBOX_ORIGIN_HINT,
               SANDBOX_POST_TARGET
             )
           } catch (e) {

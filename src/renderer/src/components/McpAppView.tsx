@@ -2,12 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Globe, Maximize2, Minimize2, ShieldAlert, X } from 'lucide-react'
 import type { McpAppLaunch } from '@shared/api'
-import {
-  APP_HEIGHT,
-  clampAppHeight,
-  SANDBOX_ORIGIN_HINT,
-  SANDBOX_POST_TARGET
-} from '@shared/mcp-apps'
+import { APP_HEIGHT, clampAppHeight, SANDBOX_POST_TARGET } from '@shared/mcp-apps'
 import { api } from '../lib/api'
 import { cn } from '../lib/cn'
 
@@ -104,10 +99,22 @@ export function McpAppView({
     const sendOpeningData = (): void => {
       if (!viewReady) return
       if (toolInput !== undefined) {
-        post({ jsonrpc: '2.0', method: 'ui/notifications/tool-input', params: toolInput })
+        // The official App SDK validates this envelope. Sending the arguments
+        // object directly (the old behavior) makes `ontoolinput` receive no
+        // arguments, so the map ignores the requested bounds and stays at its
+        // default location.
+        post({
+          jsonrpc: '2.0',
+          method: 'ui/notifications/tool-input',
+          params: { arguments: toolInput }
+        })
       }
-      if (toolResult !== undefined) {
-        post({ jsonrpc: '2.0', method: 'ui/notifications/tool-result', params: toolResult })
+      const result = launch.toolResult ?? toolResult
+      if (result !== undefined) {
+        // Standard MCP CallToolResult, including result-level `_meta` such as
+        // the map server's viewUUID. Never send the card's flattened string
+        // when the bounded structured result is available.
+        post({ jsonrpc: '2.0', method: 'ui/notifications/tool-result', params: result })
       }
     }
 
@@ -255,12 +262,15 @@ export function McpAppView({
         </div>
         <iframe
           ref={frameRef}
-          src={SANDBOX_ORIGIN_HINT + '/index.html'}
+          // Per-app URL: the custom-scheme handler serves the CSP declared by
+          // this resource as a response header. A static URL always gets the
+          // fallback policy and blocks Cesium's CDN/OSM tiles.
+          src={launch.sandboxUrl}
           title={t('mcpApp.frameTitle', { server: serverId })}
-          // `allow-scripts` only. NOT `allow-same-origin`: without it the proxy
-          // document is opaque-origin, so even the outer frame cannot reach
-          // Roxy's storage. Forms, popups and top-level navigation stay off.
-          sandbox="allow-scripts"
+          // Matches the official host. `allow-same-origin` means same as the
+          // dedicated roxy-mcp-app:// sandbox, never same as Roxy's renderer;
+          // popups and top-level navigation remain withheld.
+          sandbox="allow-scripts allow-same-origin allow-forms"
           allow={launch.allow || undefined}
           style={{ height: fullscreen ? '100%' : `${height}px` }}
           className="w-full border-0 bg-transparent"
