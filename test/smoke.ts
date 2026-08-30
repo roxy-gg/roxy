@@ -112,7 +112,7 @@ import {
   registerSandboxScheme,
   serveSandbox
 } from '../src/main/services/mcp-app-sandbox'
-import { SANDBOX_ORIGIN_HINT, uiResourceUri } from '../src/shared/mcp-apps'
+import { SANDBOX_ORIGIN_HINT, SANDBOX_POST_TARGET, uiResourceUri } from '../src/shared/mcp-apps'
 import { _resetTrustForTests } from '../src/main/services/mcp-trust'
 import type { McpServerRecord } from '../src/shared/mcp'
 import {
@@ -3325,6 +3325,7 @@ async function main(): Promise<void> {
                  document.body.innerHTML = ''
                  const seen = []
                  let delivered = false
+                 let postError = null
                  // Listener BEFORE the frame exists: the proxy announces itself
                  // the moment its script runs, and registering afterwards loses
                  // the very message under test.
@@ -3335,7 +3336,8 @@ async function main(): Promise<void> {
                      // Reply with the SAME target origin McpAppView uses, so a
                      // mismatch fails here rather than as a blank frame in the
                      // product.
-                     f.contentWindow.postMessage(
+                     try {
+                       f.contentWindow.postMessage(
                        {
                          jsonrpc: '2.0',
                          method: "ui/notifications/sandbox-resource-ready",
@@ -3344,24 +3346,38 @@ async function main(): Promise<void> {
                            csp: "default-src 'none'; script-src 'unsafe-inline'"
                          }
                        },
-                       "*"
-                     )
+                       // The PRODUCT's constant, injected - not a literal. A
+                       // hardcoded '*' here would pass no matter what
+                       // McpAppView actually posts, which is exactly the gap
+                       // that let a broken targetOrigin ship green.
+                         ${JSON.stringify(SANDBOX_POST_TARGET)}
+                       )
+                     } catch (err) {
+                       // e.g. "Invalid target origin 'null'" - the browser
+                       // refusing the value outright.
+                       postError = String(err && err.message ? err.message : err)
+                       resolve({ seen, delivered, postError })
+                     }
                    }
                    // The inner view only speaks if the reply above arrived and
                    // the proxy built its frame - end-to-end delivery, not a
                    // guess about it.
                    if (e.data && e.data.method === "ui/notifications/initialized") {
                      delivered = true
-                     resolve({ seen, delivered })
+                     resolve({ seen, delivered, postError })
                    }
                  })
                  const f = document.createElement('iframe')
                  f.setAttribute('sandbox', 'allow-scripts')
                  f.src = window.location.href
                  document.body.appendChild(f)
-                 setTimeout(() => resolve({ seen, delivered }), 4000)
+                 setTimeout(() => resolve({ seen, delivered, postError }), 4000)
                })`
-            )) as { seen: { method?: string; origin: string }[]; delivered: boolean }
+            )) as {
+              seen: { method?: string; origin: string }[]
+              delivered: boolean
+              postError: string | null
+            }
             const ready = probe.seen.find((m) => m.method?.endsWith('proxy-ready'))
             check(
               'mcp app: the proxy announces itself from inside a sandboxed frame',
@@ -3378,7 +3394,20 @@ async function main(): Promise<void> {
             )
             // Round trip: host -> proxy -> view -> host. Fails if targetOrigin
             // is wrong, since the reply is dropped and the view never speaks.
-            check('mcp app: the host reply reaches the view', probe.delivered === true)
+            check(
+              'mcp app: the host reply reaches the view',
+              probe.delivered === true,
+              probe.postError ?? undefined
+            )
+            // An opaque frame has no addressable origin: posting to the scheme
+            // URL is silently dropped, and the literal 'null' is rejected
+            // outright ("Invalid target origin 'null'"). '*' is the only value
+            // that works, so pin it rather than let it drift back.
+            check(
+              'mcp app: the host posts with a target origin the browser accepts',
+              SANDBOX_POST_TARGET === '*',
+              SANDBOX_POST_TARGET
+            )
           } catch (e) {
             check(
               'mcp app: the proxy announces itself from inside a sandboxed frame',
