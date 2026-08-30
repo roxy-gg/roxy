@@ -56,7 +56,7 @@
     "@electron-toolkit/utils": "^3.0.0",
     "@fontsource-variable/geist": "^5.2.9",
     "@fontsource-variable/geist-mono": "^5.2.8",
-    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@modelcontextprotocol/client": "^2.0.0",
     "@pierre/diffs": "^1.2.11",
     "ai": "^5.0.210",
     "better-sqlite3": "^12.11.1",

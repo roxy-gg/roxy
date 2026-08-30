@@ -1,7 +1,7 @@
 /**
  * Pure MCP (Model Context Protocol) primitives — no Node/SDK imports, so this is
  * fully testable in smoke:shared. The transport + client lifecycle (built on the
- * official `@modelcontextprotocol/sdk`) lives in `src/main/services/mcp.ts`.
+ * official `@modelcontextprotocol/client`) lives in `src/main/services/mcp.ts`.
  *
  * What lives here:
  *  - Server config types + a defensive normalizer (parses untrusted JSON from the
@@ -14,6 +14,7 @@
  */
 
 import type { ToolResult } from './types'
+import { parseCallResult, toToolResult } from './mcp-content'
 
 // ---------------------------------------------------------------------------
 // Config types
@@ -42,11 +43,55 @@ export interface McpRemoteConfig {
 
 export type McpServerConfig = McpLocalConfig | McpRemoteConfig
 
+/**
+ * Which protocol era a connection negotiated.
+ *
+ * `legacy` is the `initialize` handshake (revisions `2024-10-07` through
+ * `2025-11-25`); `modern` is `2026-07-28`+, which replaced the handshake with a
+ * `server/discover` advertisement and a per-request `_meta` envelope. Mirrors
+ * the SDK's own `ProtocolEra`, re-declared here so this isomorphic module stays
+ * free of SDK imports.
+ */
+export type McpProtocolEra = 'legacy' | 'modern'
+
+/**
+ * A tool exactly as the server described it.
+ *
+ * Deliberately loose: Roxy stores the definition verbatim and reads specific
+ * keys (`_meta`, `outputSchema`) where it understands them, rather than
+ * modelling a spec that is still gaining fields. Narrow at the point of use.
+ */
+export interface McpToolDefinition {
+  name: string
+  title?: string
+  description?: string
+  inputSchema?: unknown
+  outputSchema?: unknown
+  annotations?: Record<string, unknown>
+  icons?: unknown
+  /** Extension data - where MCP Apps puts `io.modelcontextprotocol/ui`. */
+  _meta?: Record<string, unknown>
+}
+
 /** A configured server as persisted (DB row / workspace-file entry). */
 export interface McpServerRecord {
   id: string
   config: McpServerConfig
   enabled: boolean
+  /**
+   * Who put this row in the database.
+   *
+   * Persisted because it is a SECURITY fact, not UI trivia: a row the user typed
+   * in Settings is self-consenting, while one the `mcp` tool added came from the
+   * model (which reads web pages, issues and READMEs) and must clear the consent
+   * gate before it can run. Without this column an agent-added command would be
+   * indistinguishable from a user-added one the moment it was written, laundering
+   * itself into "the user configured this".
+   *
+   * Absent on rows written before this existed, and on workspace-file entries
+   * (whose provenance comes from the file they were read out of, not the DB).
+   */
+  origin?: 'user' | 'agent'
 }
 
 // ---------------------------------------------------------------------------
@@ -329,49 +374,25 @@ function sanitizeJsonSchema(schema: unknown): Record<string, unknown> {
 // Result rendering (MCP CallTool content blocks → roxy ToolResult)
 // ---------------------------------------------------------------------------
 
-interface McpContentBlock {
-  type?: string
-  text?: string
-  data?: string
-  mimeType?: string
-  resource?: { uri?: string; text?: string; mimeType?: string }
-}
-
 /**
- * Flatten an MCP `tools/call` result into a roxy `ToolResult`. Text blocks are
- * joined; the first image block becomes the inline `image` (data URL); resources
- * contribute their inline text or a URI pointer. `isError` maps to `ok:false`.
+ * Flatten an MCP `tools/call` result into a roxy `ToolResult`.
+ *
+ * A thin projection over the lossless model in `./mcp-content`: parse the raw
+ * result into typed blocks (keeping resource URIs, `_meta`, every image, and
+ * anything this version doesn't recognise), then lower THAT to a string for the
+ * model. The parse is the source of truth; this is one of its consumers.
+ *
+ * Kept as a function because callers that only want the flat form shouldn't have
+ * to know about the two-step. Callers that want the structure - MCP Apps needs
+ * `_meta`, resource links need their URI - should call `parseCallResult`
+ * directly and read the result, rather than re-deriving anything from this text.
  */
-export function renderMcpContent(content: unknown, isError: boolean | undefined): ToolResult {
-  const blocks = Array.isArray(content) ? (content as McpContentBlock[]) : []
-  const parts: string[] = []
-  let image: string | undefined
-
-  for (const b of blocks) {
-    if (!b || typeof b !== 'object') continue
-    if (b.type === 'text' && typeof b.text === 'string') {
-      parts.push(b.text)
-    } else if (b.type === 'image' && typeof b.data === 'string') {
-      const mime = typeof b.mimeType === 'string' && b.mimeType ? b.mimeType : 'image/png'
-      if (!image) image = `data:${mime};base64,${b.data}`
-      parts.push(`[image: ${mime}]`)
-    } else if (b.type === 'audio' && typeof b.data === 'string') {
-      parts.push(`[audio: ${b.mimeType || 'audio'}]`)
-    } else if (b.type === 'resource' && b.resource && typeof b.resource === 'object') {
-      const r = b.resource
-      if (typeof r.text === 'string' && r.text) parts.push(r.text)
-      else if (typeof r.uri === 'string' && r.uri) parts.push(`[resource: ${r.uri}]`)
-    } else if (typeof b.text === 'string') {
-      parts.push(b.text)
-    }
-  }
-
-  const joined = parts.join('\n').trim()
-  const output =
-    joined || (isError ? 'The MCP tool reported an error with no message.' : '(no output)')
-  const result: ToolResult = { ok: !isError, output }
-  if (image) result.image = image
-  return result
+export function renderMcpContent(
+  content: unknown,
+  isError: boolean | undefined,
+  structuredContent?: unknown
+): ToolResult {
+  return toToolResult(parseCallResult({ content, isError, structuredContent }))
 }
 
 // ---------------------------------------------------------------------------
@@ -384,6 +405,11 @@ export interface McpServerSummary {
   /** Unqualified tool display names exposed by the server. */
   tools: string[]
   error?: string
+  /**
+   * Protocol era this server negotiated, once connected. Undefined for servers
+   * that never connected (and, harmlessly, for any that predate the field).
+   */
+  era?: McpProtocolEra
 }
 
 /**

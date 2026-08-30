@@ -1,4 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
+import { randomUUID } from 'node:crypto'
 import { CHANNELS } from '../../shared/ipc'
 import type { Language } from '../../shared/i18n'
 import type { SessionConfigPatch } from '../../shared/session-config'
@@ -70,7 +71,30 @@ import {
   cancelSubagentRunsFor
 } from '../services/subagent-stream'
 import { cancelToolCall, cancelToolCallsFor } from '../services/tool-runs'
-import { mcpServerSummaries, reconnectMcpServer, disposeConnection } from '../services/mcp'
+import {
+  mcpServerSummaries,
+  reconnectMcpServer,
+  disposeConnection,
+  signInMcpServer,
+  signOutMcpServer,
+  isMcpSignedIn
+} from '../services/mcp'
+import {
+  ensureTrusted as ensureMcpTrusted,
+  discloseConnected as discloseMcpConnected,
+  resolveConsent as resolveMcpConsent,
+  setConfirmBeforeRun as setMcpConfirmBeforeRun,
+  trustPolicy as mcpTrustPolicy
+} from '../services/mcp-trust'
+import type { McpConsentResponse, McpProvenance } from '../../shared/mcp-trust'
+import {
+  launchMcpApp,
+  handleMcpAppRequest,
+  closeMcpApp,
+  setMcpAppTheme,
+  setMcpAppApprover,
+  type BridgeRequest
+} from '../services/mcp-apps'
 import {
   listSkills,
   refreshSkills,
@@ -148,6 +172,46 @@ function abortSession(sessionId: string): void {
   for (const controller of sessionControllers.get(sessionId) ?? []) controller.abort()
 }
 
+// ---- MCP App tool-call approvals -----------------------------------------
+// A view is untrusted code, so it does not get to invoke tools silently just
+// because the model invoked one. The broker asks; this relays the question to
+// the renderer and the answer back.
+const appApprovals = new Map<string, (allowed: boolean) => void>()
+
+/** Answer one pending approval (from the renderer). */
+function resolveAppApproval(res: { requestId: string; allowed: boolean }): void {
+  const resolve = appApprovals.get(res.requestId)
+  if (!resolve) return
+  appApprovals.delete(res.requestId)
+  resolve(res.allowed)
+}
+
+/** Ask the user; denies when there is no window to ask, or after two minutes. */
+function requestAppApproval(req: {
+  sessionId: string
+  serverId: string
+  toolName: string
+  args: unknown
+}): Promise<boolean> {
+  const win = BrowserWindow.getAllWindows().find((w) => !w.isDestroyed())
+  if (!win) return Promise.resolve(false)
+  const requestId = randomUUID()
+  return new Promise<boolean>((resolve) => {
+    const timer = setTimeout(() => {
+      appApprovals.delete(requestId)
+      // Unanswered is denied: a prompt that expires into a yes is one an
+      // attacker wins by waiting.
+      resolve(false)
+    }, 120_000)
+    timer.unref?.()
+    appApprovals.set(requestId, (allowed) => {
+      clearTimeout(timer)
+      resolve(allowed)
+    })
+    win.webContents.send(CHANNELS.mcpAppApprovalRequest, { requestId, ...req })
+  })
+}
+
 /** Merge persisted MCP server rows with their live connection status for the UI. */
 function listMcpServersWithStatus(): McpServerView[] {
   const statusById = new Map(mcpServerSummaries().map((s) => [s.id, s]))
@@ -159,7 +223,10 @@ function listMcpServersWithStatus(): McpServerView[] {
       enabled: rec.enabled,
       status: live?.status ?? 'disabled',
       tools: live?.tools ?? [],
-      error: live?.error
+      error: live?.error,
+      era: live?.era,
+      // Only meaningful for remote servers; local ones do not authenticate.
+      signedIn: rec.config.type === 'remote' ? isMcpSignedIn(rec.id) : undefined
     }
   })
 }
@@ -354,7 +421,10 @@ export function registerIpc(): void {
   // ---- MCP servers (Phase 13) ----
   ipcMain.handle(CHANNELS.mcpList, () => listMcpServersWithStatus())
   ipcMain.handle(CHANNELS.mcpUpsert, (_e, input: UpsertMcpServerInput) => {
-    repo.upsertMcpServer(input)
+    // This channel is only reachable from Settings / the MCP page, i.e. a human
+    // typing a config. That IS the consent, so the row is marked 'user' and the
+    // gate will not re-ask for it.
+    repo.upsertMcpServer({ ...input, origin: 'user' })
     return listMcpServersWithStatus()
   })
   ipcMain.handle(CHANNELS.mcpRemove, async (_e, id: string) => {
@@ -371,8 +441,71 @@ export function registerIpc(): void {
   })
   ipcMain.handle(CHANNELS.mcpReconnect, async (_e, id: string) => {
     const rec = repo.listMcpServers().find((r) => r.id === id)
-    if (rec) await reconnectMcpServer(rec, app.getPath('home'))
+    if (rec) {
+      const candidate = {
+        record: rec,
+        provenance: (rec.origin === 'agent' ? 'agent' : 'user') as McpProvenance,
+        workspace: null
+      }
+      const { allowed, disclose } = await ensureMcpTrusted(candidate)
+      if (allowed) {
+        const summary = await reconnectMcpServer(rec, app.getPath('home'))
+        // Reconnecting a server the user has never been shown is still worth a
+        // receipt - it is the first time its tools become knowable.
+        if (disclose) discloseMcpConnected(candidate, summary.tools, summary.error)
+      }
+    }
     return listMcpServersWithStatus()
+  })
+
+  ipcMain.handle(CHANNELS.mcpSignIn, async (_e, id: string) => {
+    const rec = repo.listMcpServers().find((r) => r.id === id)
+    if (rec) await signInMcpServer(rec, app.getPath('home'))
+    return listMcpServersWithStatus()
+  })
+  ipcMain.handle(CHANNELS.mcpSignOut, async (_e, id: string) => {
+    await signOutMcpServer(id)
+    return listMcpServersWithStatus()
+  })
+
+  // ---- MCP Apps (server-supplied UI in a sandboxed frame) ----
+  // The renderer is a courier: it relays JSON-RPC frames from a view and
+  // mounts what comes back. It never holds an MCP client, so a compromised
+  // view (or renderer) still cannot reach a server directly.
+  setMcpAppApprover(requestAppApproval)
+  ipcMain.handle(
+    CHANNELS.mcpAppLaunch,
+    (_e, input: { serverId: string; toolName: string; resourceUri: string }) =>
+      launchMcpApp(input.serverId, input.toolName, input.resourceUri)
+  )
+  ipcMain.handle(CHANNELS.mcpAppRequest, (_e, req: BridgeRequest) => handleMcpAppRequest(req))
+  ipcMain.handle(CHANNELS.mcpAppClose, (_e, sessionId: string) => closeMcpApp(sessionId))
+  ipcMain.on(CHANNELS.mcpAppTheme, (_e, theme: unknown) => setMcpAppTheme(theme))
+  ipcMain.on(CHANNELS.mcpAppApprovalRespond, (_e, res: { requestId: string; allowed: boolean }) =>
+    resolveAppApproval(res)
+  )
+
+  // ---- MCP trust (consent before Roxy spawns a server) ----
+  ipcMain.on(CHANNELS.mcpConsentRespond, (_e, response: McpConsentResponse) => {
+    resolveMcpConsent(response)
+  })
+  ipcMain.handle(CHANNELS.mcpTrustList, () => {
+    const store = repo.getMcpTrustStore()
+    return { entries: store.entries, workspaces: store.workspaces, policy: mcpTrustPolicy() }
+  })
+  ipcMain.handle(
+    CHANNELS.mcpTrustRevoke,
+    (_e, target: { kind: 'server'; id: string } | { kind: 'workspace'; path: string }) => {
+      if (target.kind === 'workspace') repo.untrustMcpWorkspace(target.path)
+      else repo.revokeMcpTrust(target.id)
+      const store = repo.getMcpTrustStore()
+      return { entries: store.entries, workspaces: store.workspaces, policy: mcpTrustPolicy() }
+    }
+  )
+  ipcMain.handle(CHANNELS.mcpTrustGetPolicy, () => mcpTrustPolicy())
+  ipcMain.handle(CHANNELS.mcpTrustSetPolicy, (_e, confirmBeforeRun: boolean) => {
+    setMcpConfirmBeforeRun(confirmBeforeRun)
+    return mcpTrustPolicy()
   })
 
   // ---- skills (SKILL.md discovery) ----

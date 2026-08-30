@@ -14,6 +14,8 @@ import type {
   UpdateState
 } from '../shared/api'
 import type { CliProxyState } from '../shared/cliproxy'
+import type { McpConsentRequest, McpInstallNotice } from '../shared/mcp-trust'
+import type { McpAppApprovalRequest } from '../shared/api'
 import type { ResolvedTheme } from '../shared/theme'
 
 /**
@@ -74,7 +76,44 @@ const roxy: RoxyApi = {
     upsert: (input) => ipcRenderer.invoke(CHANNELS.mcpUpsert, input),
     remove: (id) => ipcRenderer.invoke(CHANNELS.mcpRemove, id),
     setEnabled: (id, enabled) => ipcRenderer.invoke(CHANNELS.mcpSetEnabled, id, enabled),
-    reconnect: (id) => ipcRenderer.invoke(CHANNELS.mcpReconnect, id)
+    reconnect: (id) => ipcRenderer.invoke(CHANNELS.mcpReconnect, id),
+    signIn: (id) => ipcRenderer.invoke(CHANNELS.mcpSignIn, id),
+    signOut: (id) => ipcRenderer.invoke(CHANNELS.mcpSignOut, id),
+    app: {
+      launch: (input) => ipcRenderer.invoke(CHANNELS.mcpAppLaunch, input),
+      request: (req) => ipcRenderer.invoke(CHANNELS.mcpAppRequest, req),
+      close: (sessionId) => ipcRenderer.invoke(CHANNELS.mcpAppClose, sessionId),
+      setTheme: (theme) => ipcRenderer.send(CHANNELS.mcpAppTheme, theme),
+      onApprovalRequest: (callback) => {
+        const handler = (_e: Electron.IpcRendererEvent, r: McpAppApprovalRequest): void =>
+          callback(r)
+        ipcRenderer.on(CHANNELS.mcpAppApprovalRequest, handler)
+        return () => ipcRenderer.removeListener(CHANNELS.mcpAppApprovalRequest, handler)
+      },
+      respondApproval: (res) => ipcRenderer.send(CHANNELS.mcpAppApprovalRespond, res)
+    },
+    trust: {
+      list: () => ipcRenderer.invoke(CHANNELS.mcpTrustList),
+      revoke: (target) => ipcRenderer.invoke(CHANNELS.mcpTrustRevoke, target),
+      getPolicy: () => ipcRenderer.invoke(CHANNELS.mcpTrustGetPolicy),
+      setPolicy: (confirmBeforeRun) =>
+        ipcRenderer.invoke(CHANNELS.mcpTrustSetPolicy, confirmBeforeRun),
+      onInstall: (callback) => {
+        const handler = (_e: Electron.IpcRendererEvent, notice: McpInstallNotice): void =>
+          callback(notice)
+        ipcRenderer.on(CHANNELS.mcpInstallNotice, handler)
+        return () => ipcRenderer.removeListener(CHANNELS.mcpInstallNotice, handler)
+      },
+      onRequest: (callback) => {
+        const handler = (_e: Electron.IpcRendererEvent, request: McpConsentRequest): void =>
+          callback(request)
+        ipcRenderer.on(CHANNELS.mcpConsentRequest, handler)
+        return () => ipcRenderer.removeListener(CHANNELS.mcpConsentRequest, handler)
+      },
+      // `send`, not `invoke`: the answer resolves a promise the main process is
+      // already awaiting, and the renderer has nothing to wait for in return.
+      respond: (response) => ipcRenderer.send(CHANNELS.mcpConsentRespond, response)
+    }
   },
   skills: {
     list: (cwd) => ipcRenderer.invoke(CHANNELS.skillsList, cwd),

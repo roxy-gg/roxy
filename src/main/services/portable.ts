@@ -77,7 +77,11 @@ export async function applyImport(text: string): Promise<ImportResult> {
   const existingIds = new Set(repo.listMcpServers().map((r) => r.id))
   for (const s of bundle.mcpServers) {
     try {
-      repo.upsertMcpServer({ id: s.id, config: s.config, enabled: s.enabled })
+      // Imported, not authored: the user consented to reading a FILE, which is
+      // not the same as approving each command inside it (a bundle is a
+      // share-a-link vector). Left as agent-origin so the consent gate still
+      // discloses each server before it is ever spawned.
+      repo.upsertMcpServer({ id: s.id, config: s.config, enabled: s.enabled, origin: 'agent' })
       mcpServers.push({ id: s.id, replaced: existingIds.has(s.id) })
     } catch (e) {
       skillRes.skipped.push({ name: s.id, reason: (e as Error).message })

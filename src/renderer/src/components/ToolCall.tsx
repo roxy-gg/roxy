@@ -24,6 +24,9 @@ import { cn } from '../lib/cn'
 import { TerminalOutput } from './TerminalOutput'
 import { BrailleSpinner } from './ThinkingIndicator'
 
+// Lazy: the app view pulls in the bridge and is only needed by the small
+// minority of tool calls that actually carry a UI.
+const McpAppView = lazy(() => import('./McpAppView').then((m) => ({ default: m.McpAppView })))
 const FileDiffView = lazy(() => import('./FileDiffView'))
 const FileView = lazy(() => import('./FileView'))
 
@@ -174,7 +177,8 @@ export const ToolCall = memo(function ToolCall({
   diff,
   nested: nestedParts,
   renderNested,
-  onCancel
+  onCancel,
+  app
 }: {
   tool: string
   state: 'running' | 'done' | 'error'
@@ -198,6 +202,16 @@ export const ToolCall = memo(function ToolCall({
    * change identity on every delta and defeat this component's memo).
    */
   renderNested?: (parts: MessagePart[], live: boolean) => ReactNode
+  /**
+   * The MCP App this tool declared, if any. Present only for MCP tools whose
+   * `_meta` names a `ui://` resource; every other card ignores it.
+   */
+  app?: {
+    serverId: string
+    resourceUri: string
+    toolInput?: unknown
+    toolResult?: unknown
+  }
 }): JSX.Element {
   const [open, setOpen] = useState(false)
   const Icon = TOOL_ICON[tool] ?? Wrench
@@ -361,6 +375,22 @@ export const ToolCall = memo(function ToolCall({
           {body || (state === 'running' ? 'Running…' : '(no output)')}
         </pre>
       ) : null}
+      {/* A server-supplied UI for this result. Rendered only once the call
+          is done: the view is handed the tool result at initialize, and
+          mounting it mid-flight would show it an answer that does not exist
+          yet. It sits BELOW the text output, which stays as the fallback for
+          anything the view cannot express. */}
+      {app && state === 'done' && (
+        <Suspense fallback={null}>
+          <McpAppView
+            serverId={app.serverId}
+            toolName={tool}
+            resourceUri={app.resourceUri}
+            toolInput={app.toolInput}
+            toolResult={app.toolResult}
+          />
+        </Suspense>
+      )}
       {image && (
         <div className="border-t border-border bg-surface p-2">
           <img

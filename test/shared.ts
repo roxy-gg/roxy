@@ -271,6 +271,37 @@ import {
   type McpServerSummary
 } from '../src/shared/mcp'
 import {
+  MCP_LIMITS,
+  parseCallResult,
+  parseResourceContents,
+  toModelText,
+  toToolResult
+} from '../src/shared/mcp-content'
+import {
+  APP_HEIGHT,
+  SUPPORTED_DISPLAY_MODES,
+  buildAllow,
+  buildCsp,
+  clampAppHeight,
+  externalDomains,
+  isAppOnlyTool,
+  isOpenableUrl,
+  negotiateDisplayMode,
+  routeBridgeMethod,
+  sanitizeDomains,
+  sanitizeMcpAppHostTheme,
+  uiResourceUri
+} from '../src/shared/mcp-apps'
+import {
+  DEFAULT_TRUST_POLICY,
+  decideTrust,
+  describeConfig,
+  fingerprintConfig,
+  sourceOf,
+  summarizeConfig,
+  type McpTrustStore
+} from '../src/shared/mcp-trust'
+import {
   SKILL_TOOL_NAME,
   SKILL_TOOL_DESCRIPTION,
   SKILL_FILE_SAMPLE_LIMIT,
@@ -2312,6 +2343,536 @@ check('mcp render: isError → ok:false', !rErr.ok && rErr.output === 'bad')
 check(
   'mcp render: empty content → placeholder',
   renderMcpContent([], false).output === '(no output)' && renderMcpContent([], false).ok
+)
+
+// structuredContent: a modern result may carry typed output and NO text blocks.
+// Reporting that as "(no output)" would describe a successful, data-returning
+// call as empty - so the structured half is serialized when nothing else spoke.
+check(
+  'mcp render: structured-only result is serialized, not dropped',
+  (() => {
+    const r = renderMcpContent([], false, { total: 61.5, currency: 'EUR' })
+    return r.ok && r.output.includes('61.5') && r.output.includes('EUR')
+  })()
+)
+// ...but when the tool also returned prose, the text is the model's view, and
+// appending the JSON would pay twice in context for one answer.
+check(
+  'mcp render: text wins over structured when both are present',
+  renderMcpContent([{ type: 'text', text: 'done' }], false, { total: 1 }).output === 'done'
+)
+// ---- MCP content: lossless in, projected out --------------------------------
+// The property under test is that parsing DOESN'T destroy anything. The old
+// renderer flattened on arrival, so a resource URI, a second image, and every
+// byte of `_meta` were gone before any consumer could look. Each case below is
+// something MCP Apps (or a future extension) needs to still be there.
+
+// A resource link is an ADDRESS. Flattening it to prose is the canonical loss.
+{
+  const r = parseCallResult({
+    content: [
+      {
+        type: 'resource_link',
+        uri: 'file:///repo/report.pdf',
+        name: 'report.pdf',
+        mimeType: 'application/pdf'
+      }
+    ]
+  })
+  const link = r.content[0]
+  check(
+    'mcp content: a resource link keeps its URI',
+    link.kind === 'resource_link' && link.uri === 'file:///repo/report.pdf'
+  )
+  check(
+    'mcp content: ...and its name and mime type',
+    link.kind === 'resource_link' &&
+      link.name === 'report.pdf' &&
+      link.mimeType === 'application/pdf'
+  )
+  // The model still needs to be able to refer to it.
+  check(
+    'mcp content: the URI survives into the model text',
+    toModelText(r).includes('file:///repo/report.pdf')
+  )
+}
+
+// Result-level `_meta` is where MCP Apps identifies the view a result belongs to.
+{
+  const r = parseCallResult({
+    content: [{ type: 'text', text: 'ok' }],
+    _meta: { 'io.modelcontextprotocol/ui': { resourceUri: 'ui://srv/app.html' } }
+  })
+  const ui = r._meta?.['io.modelcontextprotocol/ui'] as { resourceUri?: string } | undefined
+  check('mcp content: result _meta survives', ui?.resourceUri === 'ui://srv/app.html')
+  // ...but it is metadata, not prose: it must not leak into the model's view.
+  check(
+    'mcp content: _meta stays out of the model text',
+    !toModelText(r).includes('ui://srv/app.html')
+  )
+}
+
+// Every image is kept, not just the one the flat form can render.
+{
+  const r = parseCallResult({
+    content: [
+      { type: 'image', data: 'AAA', mimeType: 'image/png' },
+      { type: 'image', data: 'BBB', mimeType: 'image/jpeg' }
+    ]
+  })
+  check('mcp content: every image block is kept', r.content.length === 2)
+  const flat = toToolResult(r)
+  check(
+    'mcp content: the flat form previews the first image',
+    flat.image === 'data:image/png;base64,AAA'
+  )
+}
+
+// Block ORDER is meaning: interleaved text and images are a narrative.
+{
+  const r = parseCallResult({
+    content: [
+      { type: 'text', text: 'before' },
+      { type: 'image', data: 'AAA', mimeType: 'image/png' },
+      { type: 'text', text: 'after' }
+    ]
+  })
+  check(
+    'mcp content: block order is preserved',
+    r.content.map((b) => b.kind).join(',') === 'text,image,text'
+  )
+  const text = toModelText(r)
+  check(
+    'mcp content: ...and reflected in the model text',
+    text.indexOf('before') < text.indexOf('after')
+  )
+}
+
+// A block type this version doesn't model must stay recoverable, not vanish.
+{
+  const r = parseCallResult({ content: [{ type: 'video', src: 'x.mp4' }] })
+  const b = r.content[0]
+  check(
+    'mcp content: an unknown block is kept as unknown',
+    b.kind === 'unknown' && b.type === 'video'
+  )
+  check(
+    'mcp content: ...with its raw JSON retained',
+    b.kind === 'unknown' && !!b.raw && b.raw.includes('x.mp4')
+  )
+  check('mcp content: ...and is announced, not silently empty', toModelText(r).includes('video'))
+}
+
+// An embedded resource keeps its URI even when it also has inline text.
+{
+  const r = parseCallResult({
+    content: [
+      { type: 'resource', resource: { uri: 'file://a.txt', text: 'body', mimeType: 'text/plain' } }
+    ]
+  })
+  const b = r.content[0]
+  check(
+    'mcp content: an embedded resource keeps uri AND text',
+    b.kind === 'resource' && b.uri === 'file://a.txt' && b.text === 'body'
+  )
+  check('mcp content: its text is what the model reads', toModelText(r) === 'body')
+}
+
+// Annotations (audience, priority) are how a server says who a block is for.
+{
+  const r = parseCallResult({
+    content: [{ type: 'text', text: 'hi', annotations: { audience: ['user'], priority: 0.9 } }]
+  })
+  const b = r.content[0]
+  check(
+    'mcp content: block annotations survive',
+    b.kind === 'text' && (b.annotations?.audience as string[])?.[0] === 'user'
+  )
+}
+
+// ---- MCP Apps: the rules that keep untrusted HTML contained ----------------
+// Every check here is a containment property. The HTML is written by whoever
+// wrote the MCP server; these are the invariants that make running it survivable.
+
+check(
+  'mcp apps: a ui:// resource is found on tool _meta',
+  uiResourceUri({ 'io.modelcontextprotocol/ui': { resourceUri: 'ui://s/app.html' } }) ===
+    'ui://s/app.html'
+)
+check(
+  'mcp apps: a non-ui:// resourceUri is ignored',
+  uiResourceUri({
+    'io.modelcontextprotocol/ui': { resourceUri: 'https://evil.example/a.html' }
+  }) === undefined
+)
+check('mcp apps: a tool without ui meta has no view', uiResourceUri({}) === undefined)
+check('mcp apps: a tool with no meta at all is safe', uiResourceUri(undefined) === undefined)
+
+// visibility:["app"] means the server said this tool is NOT for the model.
+// Getting it backwards hands the model tools it was never offered.
+check(
+  'mcp apps: an app-only tool is hidden from the model',
+  isAppOnlyTool({ 'io.modelcontextprotocol/ui': { visibility: ['app'] } }) === true
+)
+check(
+  'mcp apps: an explicitly model-visible tool stays visible',
+  isAppOnlyTool({ 'io.modelcontextprotocol/ui': { visibility: ['model', 'app'] } }) === false
+)
+check(
+  'mcp apps: absent visibility means model-visible',
+  isAppOnlyTool({ 'io.modelcontextprotocol/ui': { resourceUri: 'ui://s/a.html' } }) === false
+)
+
+// ---- CSP: deny by default, and un-escapable -------------------------------
+{
+  const base = buildCsp(undefined)
+  check(
+    'mcp apps: bundled app code is allowed on the sandbox origin',
+    base.includes("default-src 'self' 'unsafe-inline'")
+  )
+  // The property is "no EXTERNAL reach", not a literal directive string.
+  // `self`, `data:` and `blob:` are all content the document already has - a
+  // blob URL is something it created itself - so they grant nothing new, while
+  // being required for WebGL/mapping views to start at all.
+  const connectDirective = base.split('; ').find((d) => d.startsWith('connect-src'))!
+  check(
+    'mcp apps: ...cannot reach any external origin',
+    !/https?:/.test(connectDirective),
+    connectDirective
+  )
+  check('mcp apps: ...and workers stay same-origin', base.includes("worker-src 'self' blob:"))
+  check('mcp apps: ...cannot frame anything', base.includes("frame-src 'none'"))
+  check('mcp apps: ...cannot load plugins', base.includes("object-src 'none'"))
+  check('mcp apps: ...cannot retarget relative URLs', base.includes("base-uri 'none'"))
+}
+{
+  const declared = buildCsp({ connectDomains: ['https://api.example.com'] })
+  check('mcp apps: a declared domain is allowed', declared.includes('https://api.example.com'))
+  check(
+    'mcp apps: resource domains are also allowed for workers',
+    buildCsp({ resourceDomains: ['https://*.cesium.com'] }).includes(
+      "worker-src 'self' blob: https://*.cesium.com"
+    )
+  )
+  check(
+    'mcp apps: ...only in the directive that named it',
+    !declared.includes("img-src 'self' data: https://api")
+  )
+}
+
+// CSP header injection: the declaration comes from the same untrusted place as
+// the HTML, so one entry must not be able to rewrite the whole policy.
+{
+  const attack = buildCsp({
+    connectDomains: ['*; script-src *', 'https://ok.example.com', 'javascript:alert(1)']
+  })
+  check('mcp apps: a domain cannot inject a new directive', !attack.includes('script-src *'))
+  check('mcp apps: a javascript: domain is dropped', !attack.includes('javascript:'))
+  check('mcp apps: the legitimate domain still survives', attack.includes('https://ok.example.com'))
+}
+check(
+  'mcp apps: http:// domains are rejected (no downgrade)',
+  sanitizeDomains(['http://x.example.com']).length === 0
+)
+check(
+  'mcp apps: wss:// is allowed for live views',
+  sanitizeDomains(['wss://x.example.com']).length === 1
+)
+
+// Theme styling is optional. The official SDK validates a closed set of CSS
+// variable names, so an old or malformed renderer payload must be filtered
+// rather than making `ui/initialize` fail.
+{
+  const theme = sanitizeMcpAppHostTheme({
+    mode: 'light',
+    variables: {
+      '--color-background-primary': '#fff',
+      '--font-sans': 'system-ui',
+      '--mcp-ui-background': '#000',
+      '--unknown': 'bad'
+    }
+  })
+  check('mcp apps: a valid host theme mode survives', theme.mode === 'light')
+  check(
+    'mcp apps: official host style variables survive IPC sanitizing',
+    theme.variables['--color-background-primary'] === '#fff' &&
+      theme.variables['--font-sans'] === 'system-ui'
+  )
+  check(
+    'mcp apps: unknown host style variables cannot break initialization',
+    !Object.keys(theme.variables).some((key) => key.startsWith('--mcp-ui-') || key === '--unknown')
+  )
+}
+
+// ---- permissions: off unless asked ----------------------------------------
+check('mcp apps: no permissions means an empty allow attribute', buildAllow(undefined) === '')
+check('mcp apps: only requested permissions are granted', buildAllow({ camera: true }) === 'camera')
+check(
+  'mcp apps: several permissions compose',
+  buildAllow({ camera: true, geolocation: true }) === 'camera; geolocation'
+)
+
+// ---- the bridge: deny by default ------------------------------------------
+check(
+  'mcp apps: ui/initialize is handled by the host',
+  routeBridgeMethod('ui/initialize').kind === 'host'
+)
+check(
+  'mcp apps: tools/call is forwarded to the server',
+  routeBridgeMethod('tools/call').kind === 'forward'
+)
+check(
+  'mcp apps: resources/read is forwarded',
+  routeBridgeMethod('resources/read').kind === 'forward'
+)
+// The reserved namespace belongs to the proxy; it must reach neither the host
+// handlers nor the server.
+check(
+  'mcp apps: reserved sandbox methods are rejected',
+  routeBridgeMethod('ui/notifications/sandbox-resource-ready').kind === 'reject'
+)
+// An allowlist, not a prefix check: a future protocol method must not start
+// flowing to the server the day a server starts sending it.
+check('mcp apps: an unknown method is rejected', routeBridgeMethod('roots/list').kind === 'reject')
+check(
+  'mcp apps: sampling is not reachable from a view',
+  routeBridgeMethod('sampling/createMessage').kind === 'reject'
+)
+check('mcp apps: a missing method is rejected', routeBridgeMethod(undefined).kind === 'reject')
+check('mcp apps: a non-string method is rejected', routeBridgeMethod({}).kind === 'reject')
+
+// ---- open-link: no scheme laundering --------------------------------------
+// A view asking the host to open file:// or a third-party app scheme is asking
+// it to do something the view itself could not: a sandbox escape by proxy.
+check('mcp apps: https links may be opened', isOpenableUrl('https://example.com'))
+check('mcp apps: http links may be opened', isOpenableUrl('http://example.com'))
+check('mcp apps: file:// is refused', !isOpenableUrl('file:///etc/passwd'))
+check('mcp apps: javascript: is refused', !isOpenableUrl('javascript:alert(1)'))
+check('mcp apps: a foreign app scheme is refused', !isOpenableUrl('slack://open'))
+check('mcp apps: garbage is refused', !isOpenableUrl('not a url'))
+
+// ---- display modes + sizing -----------------------------------------------
+// Never advertise a mode the host cannot honour: a view would render itself for
+// a window that never appears.
+check('mcp apps: pip is not offered', !SUPPORTED_DISPLAY_MODES.includes('pip'))
+check(
+  'mcp apps: an unsupported mode falls back to inline',
+  negotiateDisplayMode('pip') === 'inline'
+)
+check('mcp apps: fullscreen is honoured', negotiateDisplayMode('fullscreen') === 'fullscreen')
+// A view reports its own height; unbounded, that is a denial of service on the
+// transcript.
+check('mcp apps: an absurd height is clamped', clampAppHeight(900000) === APP_HEIGHT.max)
+check('mcp apps: a zero height keeps the view visible', clampAppHeight(0) === APP_HEIGHT.min)
+check('mcp apps: a non-numeric height falls back', clampAppHeight('tall') === APP_HEIGHT.initial)
+
+// ---- disclosure ------------------------------------------------------------
+// "This UI talks to api.example.com" is the one fact a user cannot discover by
+// looking at the rendered view.
+{
+  const domains = externalDomains({
+    csp: {
+      connectDomains: ['https://api.example.com', "'self'"],
+      resourceDomains: ['https://cdn.example.com']
+    }
+  })
+  check('mcp apps: external domains are surfaced', domains.length === 2)
+  check('mcp apps: self is not reported as external', !domains.includes("'self'"))
+}
+check(
+  'mcp apps: a view with no declarations reports nothing',
+  externalDomains(undefined).length === 0
+)
+
+// ---- resources: text and binary must stay distinguishable -------------------
+// An MCP App's HTML is text to render; a PNG is bytes to embed. A consumer that
+// has to guess which it got is one `atob` away from rendering base64 into a
+// document, so the parser keeps them in separate fields.
+{
+  const r = parseResourceContents('ui://srv/app.html', [
+    { uri: 'ui://srv/app.html', mimeType: 'text/html;profile=mcp-app', text: '<h1>hi</h1>' }
+  ])
+  check('mcp resource: text contents parse', r.text === '<h1>hi</h1>' && r.blob === undefined)
+  check('mcp resource: the mime profile survives', r.mimeType === 'text/html;profile=mcp-app')
+}
+{
+  const appMeta = {
+    ui: {
+      csp: {
+        resourceDomains: ['https://cesium.com'],
+        connectDomains: ['https://*.openstreetmap.org']
+      }
+    }
+  }
+  const html = '<script>' + 'x'.repeat(MCP_LIMITS.textChars + 100) + '</script>'
+  const r = parseResourceContents('ui://map/app.html', [
+    {
+      uri: 'ui://map/app.html',
+      mimeType: 'text/html;profile=mcp-app',
+      text: html,
+      _meta: appMeta
+    }
+  ])
+  check(
+    'mcp resource: an app bundle may exceed the model-text cap intact',
+    r.text === html && !r.truncated
+  )
+  check(
+    'mcp resource: content-level app metadata survives',
+    (r._meta?.ui as { csp?: { resourceDomains?: string[] } })?.csp?.resourceDomains?.[0] ===
+      'https://cesium.com'
+  )
+}
+{
+  const r = parseResourceContents('file://x.png', [{ uri: 'file://x.png', blob: 'AAA' }])
+  check('mcp resource: binary contents parse as blob', r.blob === 'AAA' && r.text === undefined)
+}
+// One URI can expand to several parts; Roxy reads one addressable resource, so
+// the first is the answer rather than a silent concatenation.
+{
+  const r = parseResourceContents('file://a', [
+    { uri: 'file://a', text: 'first' },
+    { uri: 'file://a', text: 'second' }
+  ])
+  check('mcp resource: the first part is the answer', r.text === 'first')
+}
+// The requested URI is the fallback identity when a server omits it.
+check(
+  'mcp resource: a missing uri falls back to the requested one',
+  parseResourceContents('file://asked', [{ text: 'body' }]).uri === 'file://asked'
+)
+check(
+  'mcp resource: empty contents degrade to a bare uri',
+  parseResourceContents('file://a', []).uri === 'file://a'
+)
+check(
+  'mcp resource: malformed contents never throw',
+  parseResourceContents('file://a', 'nope').uri === 'file://a'
+)
+// Same bounding discipline as content blocks.
+{
+  const big = 'x'.repeat(MCP_LIMITS.textChars + 100)
+  const r = parseResourceContents('file://a', [{ uri: 'file://a', text: big }])
+  check(
+    'mcp resource: oversized text is capped and flagged',
+    r.text?.length === MCP_LIMITS.textChars && r.truncated === true
+  )
+}
+{
+  const blob = 'A'.repeat(MCP_LIMITS.binaryChars + 10)
+  const r = parseResourceContents('file://a', [{ uri: 'file://a', blob }])
+  check(
+    'mcp resource: an oversized blob is dropped, not held',
+    r.blob === undefined && r.omitted === true
+  )
+}
+
+// ---- MCP Apps: the shape REAL servers actually emit -------------------------
+// The spec reserves `io.modelcontextprotocol/ui`, but the official SDK's
+// `registerAppTool` writes the short `_meta.ui` - and that is what every
+// published example server carries. Reading only the qualified key renders
+// nothing for the entire ecosystem while looking correct against the prose, so
+// both spellings are pinned here against the literal shape from
+// ext-apps/examples/quickstart/server.ts.
+check(
+  'mcp apps interop: the SDK short key (_meta.ui) is read',
+  uiResourceUri({ ui: { resourceUri: 'ui://get-time/mcp-app.html' } }) ===
+    'ui://get-time/mcp-app.html'
+)
+check(
+  'mcp apps interop: the reserved namespaced key still works',
+  uiResourceUri({ 'io.modelcontextprotocol/ui': { resourceUri: 'ui://a/b.html' } }) ===
+    'ui://a/b.html'
+)
+check(
+  'mcp apps interop: the namespaced key wins when both are present',
+  uiResourceUri({
+    'io.modelcontextprotocol/ui': { resourceUri: 'ui://qualified/x.html' },
+    ui: { resourceUri: 'ui://short/y.html' }
+  }) === 'ui://qualified/x.html'
+)
+check(
+  'mcp apps interop: app-only visibility is read under the short key too',
+  isAppOnlyTool({ ui: { visibility: ['app'] } })
+)
+// A bare `ui` that isn't a UI block must not be mistaken for one.
+check(
+  'mcp apps interop: a non-object ui field is ignored',
+  uiResourceUri({ ui: 'not-a-block' }) === undefined
+)
+check('mcp apps interop: absent metadata is undefined', uiResourceUri(undefined) === undefined)
+
+// ---- bounded, and honest about it ------------------------------------------
+// "Lossless" cannot mean "hold whatever arrives": these connections are warm and
+// long-lived. What matters is that a cap is RECORDED, so a consumer can tell
+// "empty" from "too big to keep".
+{
+  const huge = 'x'.repeat(MCP_LIMITS.textChars + 5_000)
+  const r = parseCallResult({ content: [{ type: 'text', text: huge }] })
+  const b = r.content[0]
+  check(
+    'mcp bounds: oversized text is capped',
+    b.kind === 'text' && b.text.length === MCP_LIMITS.textChars
+  )
+  check('mcp bounds: ...and says so', b.kind === 'text' && b.truncated === true)
+  check('mcp bounds: the model text marks the cut', toModelText(r).includes('[truncated]'))
+}
+{
+  const blob = 'A'.repeat(MCP_LIMITS.binaryChars + 10)
+  const r = parseCallResult({ content: [{ type: 'image', data: blob, mimeType: 'image/png' }] })
+  const b = r.content[0]
+  check(
+    'mcp bounds: an oversized payload is dropped, not held',
+    b.kind === 'image' && b.data === undefined && b.omitted === true
+  )
+  // Distinguishable from "there was no image".
+  check('mcp bounds: ...and the omission is stated', toModelText(r).includes('too large'))
+  check('mcp bounds: no data URL is fabricated', toToolResult(r).image === undefined)
+}
+{
+  const many = Array.from({ length: MCP_LIMITS.blocks + 25 }, (_, i) => ({
+    type: 'text',
+    text: 'b' + i
+  }))
+  const r = parseCallResult({ content: many })
+  check('mcp bounds: block count is capped', r.content.length === MCP_LIMITS.blocks)
+  check('mcp bounds: the overflow is counted', r.droppedBlocks === 25)
+  check('mcp bounds: ...and reported to the model', toModelText(r).includes('25 further block'))
+}
+
+// ---- malformed input must not take down a turn ------------------------------
+check(
+  'mcp content: a non-array content is survivable',
+  parseCallResult({ content: 'nope' }).content.length === 0
+)
+check(
+  'mcp content: null content is survivable',
+  parseCallResult({ content: null }).content.length === 0
+)
+check(
+  'mcp content: a null block becomes unknown, not a crash',
+  parseCallResult({ content: [null] }).content[0].kind === 'unknown'
+)
+check(
+  'mcp content: isError maps to ok:false',
+  !toToolResult(parseCallResult({ content: [{ type: 'text', text: 'bad' }], isError: true })).ok
+)
+{
+  // A cyclic _meta cannot be serialized; it is dropped rather than thrown on.
+  const cyclic: Record<string, unknown> = {}
+  cyclic.self = cyclic
+  const r = parseCallResult({ content: [{ type: 'text', text: 'x' }], _meta: cyclic })
+  check('mcp content: an unserializable _meta is dropped quietly', r._meta === undefined)
+}
+
+check(
+  'mcp render: an unserializable structured value degrades quietly',
+  (() => {
+    const cyclic: Record<string, unknown> = {}
+    cyclic.self = cyclic
+    const r = renderMcpContent([], false, cyclic)
+    return r.ok && r.output === '(no output)'
+  })()
 )
 check(
   'mcp render: empty error → error placeholder',
@@ -6169,6 +6730,263 @@ async function main(): Promise<void> {
     !resolveFontStack('SF Mono', 'mono', 'win32')!.match(/'SF Mono'.*'SF Mono'/),
     String(resolveFontStack('SF Mono', 'mono', 'win32'))
   )
+
+  // ---- MCP trust: run by default, disclose what happened -------------------
+  // The stance under test: installing a server IS the decision, so servers run
+  // and the user is told what they exposed. Only a SUBSTITUTION - a trusted
+  // name now running a different command - is worth interrupting for.
+  {
+    const local = (command: string[], extra: Record<string, unknown> = {}): McpServerConfig =>
+      ({ type: 'local', command, ...extra }) as McpServerConfig
+    const remote = (url: string, extra: Record<string, unknown> = {}): McpServerConfig =>
+      ({ type: 'remote', url, ...extra }) as McpServerConfig
+    const empty: McpTrustStore = { entries: [], workspaces: [] }
+    const WS = '/home/u/project'
+
+    // -- fingerprint: identity is WHAT RUNS, not what it is called.
+    check(
+      'mcp trust: renaming a server keeps its identity',
+      fingerprintConfig(local(['npx', 'srv'])) === fingerprintConfig(local(['npx', 'srv']))
+    )
+    check(
+      'mcp trust: changing argv changes identity',
+      fingerprintConfig(local(['npx', 'srv'])) !== fingerprintConfig(local(['npx', 'evil']))
+    )
+    check(
+      'mcp trust: changing cwd changes identity',
+      fingerprintConfig(local(['npx', 'srv'])) !==
+        fingerprintConfig(local(['npx', 'srv'], { cwd: 'sub' }))
+    )
+    // A rotated token must not re-surface; a NEW variable must.
+    check(
+      'mcp trust: an env VALUE change is not a new identity',
+      fingerprintConfig(local(['x'], { environment: { TOKEN: 'a' } })) ===
+        fingerprintConfig(local(['x'], { environment: { TOKEN: 'b' } }))
+    )
+    check(
+      'mcp trust: gaining an env var IS a new identity',
+      fingerprintConfig(local(['x'], { environment: { TOKEN: 'a' } })) !==
+        fingerprintConfig(local(['x'], { environment: { TOKEN: 'a', AWS_SECRET: 'b' } }))
+    )
+    check(
+      'mcp trust: env var order does not matter',
+      fingerprintConfig(local(['x'], { environment: { A: '1', B: '2' } })) ===
+        fingerprintConfig(local(['x'], { environment: { B: '2', A: '1' } }))
+    )
+    check(
+      'mcp trust: cosmetic URL differences are the same server',
+      fingerprintConfig(remote('https://Example.com:443/mcp/')) ===
+        fingerprintConfig(remote('https://example.com/mcp'))
+    )
+    check(
+      'mcp trust: a different host is a different server',
+      fingerprintConfig(remote('https://example.com/mcp')) !==
+        fingerprintConfig(remote('https://evil.com/mcp'))
+    )
+    check(
+      'mcp trust: query string is part of identity',
+      fingerprintConfig(remote('https://e.com/mcp?tenant=a')) !==
+        fingerprintConfig(remote('https://e.com/mcp?tenant=b'))
+    )
+
+    // -- the default: run it, then say what it was.
+    check('mcp trust: the gate is OFF by default', !DEFAULT_TRUST_POLICY.confirmBeforeRun)
+    const firstRun = decideTrust({
+      id: 's',
+      config: local(['npx', 'srv']),
+      provenance: 'workspace',
+      workspace: WS,
+      store: empty
+    })
+    check('mcp trust: a new server runs without asking', firstRun.allowed && !firstRun.needsPrompt)
+    check('mcp trust: ...but the user is told about it', firstRun.needsDisclosure)
+    const agentRun = decideTrust({
+      id: 's',
+      config: local(['x']),
+      provenance: 'agent',
+      store: empty
+    })
+    check(
+      'mcp trust: an agent-added server runs and is disclosed',
+      agentRun.allowed && agentRun.needsDisclosure && !agentRun.needsPrompt
+    )
+    const userRun = decideTrust({
+      id: 's',
+      config: local(['x']),
+      provenance: 'user',
+      store: empty
+    })
+    check(
+      'mcp trust: a server you configured needs no notice',
+      userRun.allowed && !userRun.needsDisclosure
+    )
+
+    // -- remembering: the notice is shown once, not every turn.
+    const known: McpTrustStore = {
+      entries: [
+        {
+          id: 's',
+          fingerprint: fingerprintConfig(local(['npx', 'srv'])),
+          provenance: 'workspace',
+          scope: WS,
+          decision: 'allow',
+          decidedAt: 1
+        }
+      ],
+      workspaces: []
+    }
+    const second = decideTrust({
+      id: 's',
+      config: local(['npx', 'srv']),
+      provenance: 'workspace',
+      workspace: WS,
+      store: known
+    })
+    check(
+      'mcp trust: a known server is silent on later runs',
+      second.allowed && !second.needsDisclosure && !second.needsPrompt
+    )
+
+    // -- THE case worth interrupting for: a trusted name, a different command.
+    const swapped = decideTrust({
+      id: 's',
+      config: local(['curl', 'evil.sh']),
+      provenance: 'workspace',
+      workspace: WS,
+      store: known
+    })
+    check(
+      'mcp trust: swapping a known command asks first',
+      !swapped.allowed && swapped.needsPrompt && swapped.reason === 'changed'
+    )
+    // A swap must resurface even where the user trusted the whole project.
+    const trustedWsWithPrior: McpTrustStore = {
+      entries: known.entries,
+      workspaces: [{ path: WS, trustedAt: 2 }]
+    }
+    check(
+      'mcp trust: a swap asks even in a trusted project',
+      decideTrust({
+        id: 's',
+        config: local(['curl', 'evil.sh']),
+        provenance: 'workspace',
+        workspace: WS,
+        store: trustedWsWithPrior
+      }).reason === 'changed'
+    )
+    // Identity is per-project, so another repo's `s` is a first run, not a swap.
+    const elsewhere = decideTrust({
+      id: 's',
+      config: local(['other']),
+      provenance: 'workspace',
+      workspace: '/home/u/other',
+      store: known
+    })
+    check(
+      'mcp trust: a same-named server elsewhere is a first run',
+      elsewhere.allowed && elsewhere.reason === 'first-run'
+    )
+
+    // -- a block stays blocked, without re-asking.
+    const blocked: McpTrustStore = {
+      entries: [
+        {
+          id: 's',
+          fingerprint: fingerprintConfig(local(['x'])),
+          provenance: 'workspace',
+          scope: WS,
+          decision: 'deny',
+          decidedAt: 1
+        }
+      ],
+      workspaces: [{ path: WS, trustedAt: 2 }]
+    }
+    const stillBlocked = decideTrust({
+      id: 's',
+      config: local(['x']),
+      provenance: 'workspace',
+      workspace: WS,
+      store: blocked
+    })
+    check(
+      'mcp trust: a blocked server stays blocked silently',
+      !stillBlocked.allowed && !stillBlocked.needsPrompt
+    )
+
+    // -- the opt-in stricter posture.
+    const strict = decideTrust({
+      id: 's',
+      config: local(['x']),
+      provenance: 'workspace',
+      workspace: WS,
+      store: empty,
+      policy: { confirmBeforeRun: true }
+    })
+    check(
+      'mcp trust: opting in asks before a new server runs',
+      !strict.allowed && strict.needsPrompt && strict.reason === 'confirm-first-run'
+    )
+    check(
+      'mcp trust: opting in still never asks about your own servers',
+      decideTrust({
+        id: 's',
+        config: local(['x']),
+        provenance: 'user',
+        store: empty,
+        policy: { confirmBeforeRun: true }
+      }).allowed
+    )
+
+    // -- source: the thing actually worth trusting.
+    check(
+      'mcp trust: source is the package, not the runner',
+      sourceOf(local(['npx', '-y', '@modelcontextprotocol/server-github'])) ===
+        '@modelcontextprotocol/server-github'
+    )
+    check(
+      'mcp trust: source unwraps uvx too',
+      sourceOf(local(['uvx', 'mcp-server-git'])) === 'mcp-server-git'
+    )
+    check(
+      'mcp trust: a plain binary is its own source',
+      sourceOf(local(['/usr/local/bin/my-server', '--stdio'])) === 'my-server'
+    )
+    check(
+      'mcp trust: a remote source is its host',
+      sourceOf(remote('https://api.acme.com/mcp?x=1')) === 'api.acme.com'
+    )
+
+    // -- disclosure: enough to check, never the secrets themselves.
+    const disc = describeConfig(
+      local(['npx', '-y', 'srv'], { cwd: 'sub', environment: { GITHUB_TOKEN: 'ghp_secret' } })
+    )
+    check(
+      'mcp trust: disclosure names the executable and args',
+      disc.executable === 'npx' && disc.args?.join(' ') === '-y srv'
+    )
+    check(
+      'mcp trust: disclosure lists env NAMES only',
+      disc.envNames?.join(',') === 'GITHUB_TOKEN' && !JSON.stringify(disc).includes('ghp_secret')
+    )
+    check('mcp trust: a credential-shaped var is flagged', disc.injectsSecrets)
+    check(
+      'mcp trust: a plain var is not flagged as a secret',
+      !describeConfig(local(['x'], { environment: { LOG_LEVEL: 'debug' } })).injectsSecrets
+    )
+    check(
+      'mcp trust: an Authorization header counts as a secret',
+      describeConfig(remote('https://e.com', { headers: { Authorization: 'Bearer x' } }))
+        .injectsSecrets
+    )
+    check(
+      'mcp trust: summary renders a runnable command line',
+      summarizeConfig(local(['npx', '-y', 'srv'])) === 'npx -y srv'
+    )
+    check(
+      'mcp trust: summary shows the host for a remote server',
+      summarizeConfig(remote('https://example.com/mcp')) === 'example.com'
+    )
+  }
 
   if (fails.length) {
     console.error(`\nSHARED FAILED \u2014 ${fails.length} failing: ${fails.join(', ')}`)

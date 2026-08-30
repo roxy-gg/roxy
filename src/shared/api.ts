@@ -25,7 +25,16 @@ import type {
   UsageStats,
   WorktreeIntent
 } from './types'
-import type { McpServerConfig } from './mcp'
+import type { McpProtocolEra, McpServerConfig } from './mcp'
+import type { McpAppHostTheme } from './mcp-apps'
+import type {
+  McpConsentRequest,
+  McpConsentResponse,
+  McpInstallNotice,
+  McpTrustEntry,
+  McpTrustPolicy,
+  McpWorkspaceTrust
+} from './mcp-trust'
 import type { CliProxyLoginResult, CliProxyState } from './cliproxy'
 import type { ForgeStatusView, ForgeHostView, ForgeKind } from './forge'
 import type { RepoLayout } from './repos'
@@ -42,14 +51,79 @@ export interface McpServerView {
   /** Unqualified tool names exposed by the server when connected. */
   tools: string[]
   error?: string
+  /**
+   * Protocol era negotiated with this server, once connected: `modern` for the
+   * 2026-07-28 revision, `legacy` for the 2025 `initialize` handshake.
+   */
+  era?: McpProtocolEra
 }
 
-/** Payload to create/replace an MCP server entry. */
+/**
+ * Payload to create/replace an MCP server entry.
+ *
+ * No `origin` field: this crosses the IPC boundary, and provenance is decided by
+ * WHICH channel handled the call, never by what the caller claims. See
+ * McpServerRecord.origin.
+ */
 export interface UpsertMcpServerInput {
   id: string
   config: McpServerConfig
   enabled?: boolean
 }
+
+/** Everything the renderer needs to mount one MCP App view. */
+export interface McpAppLaunch {
+  sessionId: string
+  /** The view's HTML, read from its `ui://` resource. */
+  html: string
+  /** Sandbox proxy URL carrying this app's response-header CSP. */
+  sandboxUrl: string
+  /** CSP applied to the sandbox response and inherited by the view. */
+  csp: string
+  /** Complete bounded MCP tool result delivered after initialization. */
+  toolResult?: unknown
+  /** `allow` attribute for declared device permissions. */
+  allow: string
+  /** External origins the view declared, for disclosure on the card. */
+  externalDomains: string[]
+  /** Display modes both the view and this host support. */
+  displayModes: string[]
+}
+
+/** A view asking to call one of its own server’s tools. */
+export interface McpAppApprovalRequest {
+  requestId: string
+  sessionId: string
+  serverId: string
+  toolName: string
+  args: unknown
+}
+
+/** One JSON-RPC frame relayed from a view to the host. */
+export interface McpAppBridgeRequest {
+  sessionId: string
+  id?: string | number | null
+  method?: unknown
+  params?: Record<string, unknown>
+}
+
+/** The host’s answer to one relayed frame. */
+export interface McpAppBridgeReply {
+  result?: unknown
+  error?: { code: number; message: string }
+}
+
+/** Stored MCP trust state plus the current policy, for the Settings UI. */
+export interface McpTrustView {
+  entries: McpTrustEntry[]
+  workspaces: McpWorkspaceTrust[]
+  policy: McpTrustPolicy
+}
+
+/** What to forget when revoking trust. */
+export type McpTrustRevokeTarget =
+  | { kind: 'server'; id: string }
+  | { kind: 'workspace'; path: string }
 
 /** A skill discovered on disk (metadata only â€” the body is loaded on demand by the tool). */
 export interface SkillView {
@@ -425,6 +499,12 @@ export type LlmEvent =
       ok: boolean
       image?: string
       diff?: ToolDiff
+      /**
+       * A server-supplied UI for this result, when the tool declared one.
+       * Resolved in main from the tool’s `_meta`, so the renderer never has
+       * to reason about MCP metadata - it is told where the view lives.
+       */
+      mcpApp?: { serverId: string; resourceUri: string }
     }
   /**
    * One step of a SUBAGENT's turn, addressed to the `task` card that spawned it.
@@ -782,6 +862,67 @@ export interface RoxyApi {
     setEnabled(id: string, enabled: boolean): Promise<McpServerView[]>
     /** Force a fresh connection attempt (to validate config); returns updated list. */
     reconnect(id: string): Promise<McpServerView[]>
+    /**
+     * Sign in to a remote, OAuth-protected server. Opens the system browser
+     * and resolves once the flow completes (or fails).
+     */
+    signIn(id: string): Promise<McpServerView[]>
+    /** Forget a remote server's OAuth credentials and disconnect it. */
+    signOut(id: string): Promise<McpServerView[]>
+    /**
+     * MCP Apps: a server-supplied UI rendered in a sandboxed frame.
+     *
+     * The renderer only ever relays JSON-RPC frames; the authenticated MCP
+     * connection stays in the main process, so a compromised view cannot
+     * reach a server even if it escaped its frame.
+     */
+    app: {
+      /** Read a UI-bearing tool’s view; null when it has none. */
+      launch(input: {
+        serverId: string
+        toolName: string
+        resourceUri: string
+      }): Promise<McpAppLaunch | null>
+      /** Relay one frame from a view and return the host’s reply. */
+      request(req: McpAppBridgeRequest): Promise<McpAppBridgeReply>
+      /** Drop a view’s session (its card unmounted). */
+      close(sessionId: string): Promise<void>
+      /** Publish the host theme so views can match it. */
+      setTheme(theme: McpAppHostTheme): void
+      /** Subscribe to view-initiated tool-call approvals. */
+      onApprovalRequest(callback: (req: McpAppApprovalRequest) => void): () => void
+      /** Answer one approval request. */
+      respondApproval(res: { requestId: string; allowed: boolean }): void
+    }
+    /**
+     * Consent to RUN a server. A local MCP server is an arbitrary command, and
+     * definitions that did not come from the user (a cloned repo's
+     * `.roxy/mcp.json`, or the model calling the `mcp` tool) must be approved
+     * before Roxy spawns them. See shared/mcp-trust.ts.
+     */
+    trust: {
+      /** Stored decisions + trusted workspaces + the current policy. */
+      list(): Promise<McpTrustView>
+      /** Forget a stored decision (a server everywhere, or one workspace). */
+      revoke(target: McpTrustRevokeTarget): Promise<McpTrustView>
+      /** Read the "confirm before running a new server" policy. */
+      getPolicy(): Promise<McpTrustPolicy>
+      /** Opt into (true) or out of (false) confirming each new server first. */
+      setPolicy(confirmBeforeRun: boolean): Promise<McpTrustPolicy>
+      /**
+       * Subscribe to install notices - "here's what just connected", with the
+       * server's tools and source. This is the NORMAL path. Returns an
+       * unsubscribe fn.
+       */
+      onInstall(callback: (notice: McpInstallNotice) => void): () => void
+      /**
+       * Subscribe to the rare blocking question (a trusted server's command
+       * changed, or the user opted into confirming). Answer with `respond`.
+       */
+      onRequest(callback: (request: McpConsentRequest) => void): () => void
+      /** Send the user's answer back, correlated by `requestId`. */
+      respond(response: McpConsentResponse): void
+    }
   }
   skills: {
     /** Discovered SKILL.md skills (workspace when a cwd is given, else the user's global skills). */

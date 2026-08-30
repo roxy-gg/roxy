@@ -14,6 +14,9 @@ import { cleanupToolOutputs } from './services/tool-output-store'
 import { cancelAllBackgroundJobs } from './services/background-tasks'
 import { shutdownAllLsp } from './services/lsp'
 import { shutdownAllMcp } from './services/mcp'
+import { cancelAllConsent } from './services/mcp-trust'
+import { registerSandboxScheme, serveSandbox } from './services/mcp-app-sandbox'
+import { closeAllMcpApps } from './services/mcp-apps'
 import { shutdownRemote } from './services/remote'
 import { shutdownCliProxy } from './services/cliproxy'
 import { initAutoUpdater } from './services/updater'
@@ -97,6 +100,11 @@ async function warmCatalogThenBackfill(): Promise<void> {
   backfillUsageFromHistory()
 }
 
+// Custom scheme for MCP App views. MUST be registered before the app is ready:
+// privileges are locked in at that moment, and a view loaded on a non-standard
+// origin would not get the same-origin isolation the sandbox depends on.
+registerSandboxScheme()
+
 app.whenReady().then(() => {
   electronApp.setAppUserModelId('com.roxy.app')
   // Give the agent's browser window the Roxy icon too (no asset import in the
@@ -133,6 +141,7 @@ app.whenReady().then(() => {
   // backfilled rows can be priced (else they'd all cost $0). Best-effort + async.
   void warmCatalogThenBackfill()
 
+  serveSandbox()
   const mainWindow = createWindow()
   initAutoUpdater(mainWindow)
 
@@ -162,6 +171,10 @@ app.on('will-quit', () => {
   cancelAllBackgroundJobs()
   closeAllBrowsers()
   shutdownAllLsp()
+  // Resolve any open consent prompt as a DENY before the window goes away, so
+  // an awaiting connect unwinds instead of hanging until its timeout.
+  closeAllMcpApps()
+  cancelAllConsent()
   void shutdownAllMcp()
   shutdownRemote()
   // The Codex sidecar holds the user's subscription tokens - never leave it
