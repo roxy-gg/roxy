@@ -7,6 +7,7 @@ import Chat from './routes/Chat'
 import Integrations from './routes/Integrations'
 import Skills from './routes/Skills'
 import Mcp from './routes/Mcp'
+import Themes from './routes/Themes'
 import Settings from './routes/Settings'
 
 function Splash(): JSX.Element {
@@ -42,6 +43,7 @@ export default function App(): JSX.Element {
         <Route path="/integrations" element={<Integrations />} />
         <Route path="/skills" element={<Skills />} />
         <Route path="/mcp" element={<Mcp />} />
+        <Route path="/themes" element={<Themes />} />
         <Route path="/settings" element={<Settings />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

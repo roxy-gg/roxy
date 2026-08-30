@@ -43,7 +43,7 @@ export function Button({
   return (
     <button
       className={cn(
-        'press-scale sq sq-lg inline-flex items-center justify-center rounded-lg font-medium focus:outline-none disabled:cursor-not-allowed disabled:opacity-40',
+        'press-scale sq sq-lg inline-flex items-center justify-center whitespace-nowrap rounded-lg font-medium focus:outline-none disabled:cursor-not-allowed disabled:opacity-40',
         BUTTON_VARIANTS[variant],
         BUTTON_SIZES[size],
         className

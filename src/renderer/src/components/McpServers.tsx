@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useTranslation, Trans } from 'react-i18next'
 import { Braces, Plug, Plus, RefreshCw, Trash2 } from 'lucide-react'
 import type { McpServerView } from '@shared/api'
 import {
@@ -34,6 +35,7 @@ const JSON_PLACEHOLDER = `{
 
 /** List/add/toggle/reconnect/remove external MCP tool servers. Shared by Settings + the MCP page. */
 export function McpServers({ showBackup = false }: { showBackup?: boolean } = {}): JSX.Element {
+  const { t } = useTranslation()
   const [servers, setServers] = useState<McpServerView[]>([])
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState<string | null>(null)
@@ -95,7 +97,7 @@ export function McpServers({ showBackup = false }: { showBackup?: boolean } = {}
     const nextId = parsed.id?.trim() || server.id
     const enabled = parsed.enabled ?? server.enabled
     if (nextId !== server.id && servers.some((s) => s.id === nextId)) {
-      return `Renaming to "${nextId}" would overwrite another server. Pick a different name.`
+      return t('mcp.errRenameCollision', { name: nextId })
     }
     setBusy(server.id)
     try {
@@ -110,7 +112,7 @@ export function McpServers({ showBackup = false }: { showBackup?: boolean } = {}
       // A rejected upsert (the main process refusing the config) has to surface
       // here rather than vanish; showing failures is this editor's whole job.
       await reload()
-      return e instanceof Error ? e.message : 'Failed to save the config.'
+      return e instanceof Error ? e.message : t('mcp.errSaveFailed')
     } finally {
       setBusy(null)
     }
@@ -132,25 +134,25 @@ export function McpServers({ showBackup = false }: { showBackup?: boolean } = {}
       config = parsed.value.config
       enabled = parsed.value.enabled ?? true
       if (!id) {
-        setFormErr('Enter a name — the pasted JSON is a bare config, so it has none.')
+        setFormErr(t('mcp.errNameRequiredJson'))
         return
       }
     } else {
       if (!id) {
-        setFormErr('Enter a name')
+        setFormErr(t('mcp.errNameRequired'))
         return
       }
       if (kind === 'remote') {
         const url = value.trim()
         if (!/^https?:\/\//i.test(url)) {
-          setFormErr('Enter a valid http(s) URL')
+          setFormErr(t('mcp.errInvalidUrl'))
           return
         }
         config = { type: 'remote', url }
       } else {
         const argv = value.trim().split(/\s+/).filter(Boolean)
         if (!argv.length) {
-          setFormErr('Enter a command')
+          setFormErr(t('mcp.errCommandRequired'))
           return
         }
         config = { type: 'local', command: argv }
@@ -158,7 +160,7 @@ export function McpServers({ showBackup = false }: { showBackup?: boolean } = {}
     }
 
     if (servers.some((s) => s.id === id)) {
-      setFormErr('A server with that name already exists')
+      setFormErr(t('mcp.errDuplicateName'))
       return
     }
     setBusy('__add__')
@@ -173,7 +175,7 @@ export function McpServers({ showBackup = false }: { showBackup?: boolean } = {}
       setJson('')
       setKind('local')
     } catch (e) {
-      setFormErr(e instanceof Error ? e.message : 'Failed to add the server.')
+      setFormErr(e instanceof Error ? e.message : t('mcp.errAddFailed'))
     } finally {
       setBusy(null)
     }
@@ -182,12 +184,10 @@ export function McpServers({ showBackup = false }: { showBackup?: boolean } = {}
   return (
     <div className="flex flex-col gap-2">
       {loading ? (
-        <p className="text-xs text-text-subtle">Loading…</p>
+        <p className="text-xs text-text-subtle">{t('common.loading')}</p>
       ) : servers.length === 0 && !showAdd ? (
         <p className="text-xs text-text-muted">
-          No MCP servers configured. Connect external tool servers (filesystem, GitHub, databases,
-          …) to expand what the agent can do. Servers are also read from a workspace{' '}
-          <code>.roxy/mcp.json</code>.
+          <Trans i18nKey="mcp.emptyState" />
         </p>
       ) : (
         servers.map((s) => (
@@ -204,8 +204,10 @@ export function McpServers({ showBackup = false }: { showBackup?: boolean } = {}
                   <span className="truncate text-sm font-medium text-text">{s.id}</span>
                   <Badge className={MCP_STATUS_STYLES[s.status]}>
                     {s.status === 'connected'
-                      ? `${s.tools.length} tool${s.tools.length === 1 ? '' : 's'}`
-                      : s.status}
+                      ? t('mcp.toolCount', { count: s.tools.length })
+                      : s.status === 'error'
+                        ? t('mcp.statusError')
+                        : t('mcp.statusDisabled')}
                   </Badge>
                 </div>
                 <p
@@ -230,7 +232,7 @@ export function McpServers({ showBackup = false }: { showBackup?: boolean } = {}
                 variant="ghost"
                 disabled={busy === s.id}
                 onClick={() => setEditing((cur) => (cur === s.id ? null : s.id))}
-                title="Edit raw JSON"
+                title={t('mcp.editRawJson')}
                 aria-expanded={editing === s.id}
                 className={editing === s.id ? 'text-text' : undefined}
               >
@@ -241,7 +243,7 @@ export function McpServers({ showBackup = false }: { showBackup?: boolean } = {}
                 variant="ghost"
                 disabled={busy === s.id || !s.enabled}
                 onClick={() => void reconnect(s.id)}
-                title="Reconnect"
+                title={t('mcp.reconnect')}
               >
                 <RefreshCw className="h-3.5 w-3.5" />
               </Button>
@@ -250,7 +252,7 @@ export function McpServers({ showBackup = false }: { showBackup?: boolean } = {}
                 variant="ghost"
                 disabled={busy === s.id}
                 onClick={() => void remove(s.id)}
-                title="Remove"
+                title={t('common.remove')}
               >
                 <Trash2 className="h-3.5 w-3.5" />
               </Button>
@@ -277,7 +279,7 @@ export function McpServers({ showBackup = false }: { showBackup?: boolean } = {}
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder={
-                kind === 'json' ? 'name (optional if in JSON)' : 'name (e.g. filesystem)'
+                kind === 'json' ? t('mcp.namePlaceholderJson') : t('mcp.namePlaceholder')
               }
               className="sm:w-48"
               spellCheck={false}
@@ -291,9 +293,9 @@ export function McpServers({ showBackup = false }: { showBackup?: boolean } = {}
               }}
               className="h-9 sq sq-lg sq-ring rounded-lg border border-border bg-surface-2 px-2 text-sm text-text outline-none"
             >
-              <option value="local">local (stdio)</option>
-              <option value="remote">remote (http)</option>
-              <option value="json">raw JSON</option>
+              <option value="local">{t('mcp.kindLocal')}</option>
+              <option value="remote">{t('mcp.kindRemote')}</option>
+              <option value="json">{t('mcp.kindJson')}</option>
             </select>
           </div>
           {kind === 'json' ? (
@@ -325,7 +327,7 @@ export function McpServers({ showBackup = false }: { showBackup?: boolean } = {}
           {formErr && <p className="text-xs text-danger">{formErr}</p>}
           <div className="flex items-center gap-2">
             <Button variant="primary" disabled={busy === '__add__'} onClick={() => void submit()}>
-              {busy === '__add__' ? 'Connecting…' : 'Add & connect'}
+              {busy === '__add__' ? t('mcp.connecting') : t('mcp.addAndConnect')}
             </Button>
             <Button
               variant="ghost"
@@ -334,12 +336,10 @@ export function McpServers({ showBackup = false }: { showBackup?: boolean } = {}
                 setFormErr('')
               }}
             >
-              Cancel
+              {t('common.cancel')}
             </Button>
             <span className="ml-auto text-[11px] text-text-subtle">
-              {kind === 'json'
-                ? 'Takes a bare config or an mcpServers / servers wrapper.'
-                : 'Advanced (env, headers, cwd): pick raw JSON.'}
+              {kind === 'json' ? t('mcp.jsonHint') : t('mcp.advancedHint')}
             </span>
           </div>
         </div>
@@ -348,7 +348,7 @@ export function McpServers({ showBackup = false }: { showBackup?: boolean } = {}
           onClick={() => setShowAdd(true)}
           className="press-scale flex items-center justify-center gap-2 sq sq-xl sq-ring sq-dashed rounded-xl border border-dashed border-border bg-surface/40 p-3.5 text-sm text-text-muted hover:border-border-strong hover:[--sq-ring:var(--color-border-strong)] hover:bg-surface hover:text-text"
         >
-          <Plus className="h-4 w-4" /> Add MCP server
+          <Plus className="h-4 w-4" /> {t('mcp.addServer')}
         </button>
       )}
       {showBackup && (
@@ -378,6 +378,7 @@ function RawConfigEditor({
   onCancel: () => void
   onSave: (parsed: ParsedMcpJson) => Promise<string | null>
 }): JSX.Element {
+  const { t } = useTranslation()
   const stored = serializeServerConfig(server.config)
   const [text, setText] = useState(stored)
   const [err, setErr] = useState('')
@@ -407,7 +408,7 @@ function RawConfigEditor({
         className="font-mono text-xs leading-relaxed"
         spellCheck={false}
         autoComplete="off"
-        aria-label={`Raw JSON config for ${server.id}`}
+        aria-label={t('mcp.rawConfigAriaLabel', { name: server.id })}
         onKeyDown={(e) => {
           // Cmd/Ctrl+Enter saves; a bare Enter has to stay a newline inside JSON.
           if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
@@ -424,25 +425,29 @@ function RawConfigEditor({
         <p className="text-xs text-warning">{parsed.error}</p>
       ) : renameTo ? (
         <p className="text-xs text-text-muted">
-          Saving renames this server to <span className="font-mono text-text">{renameTo}</span>.
+          <Trans
+            i18nKey="mcp.renameNotice"
+            values={{ name: renameTo }}
+            components={{ span: <span className="font-mono text-text" /> }}
+          />
         </p>
       ) : null}
       {server.status === 'error' && server.error && (
         <p className="text-xs text-danger">
-          Last error: <span className="font-mono">{server.error}</span>
+          {t('mcp.lastErrorLabel')} <span className="font-mono">{server.error}</span>
         </p>
       )}
       {server.status === 'connected' && (
         <p className="text-xs text-text-subtle">
-          Tools:{' '}
+          {t('mcp.toolsLabel')}{' '}
           <span className="font-mono text-text-muted">
-            {server.tools.length ? server.tools.join(', ') : '(none exposed)'}
+            {server.tools.length ? server.tools.join(', ') : t('mcp.noToolsExposed')}
           </span>
         </p>
       )}
       <div className="flex items-center gap-2">
         <Button size="sm" variant="primary" disabled={busy || !dirty} onClick={() => void save()}>
-          {busy ? 'Saving…' : server.enabled ? 'Save & reconnect' : 'Save'}
+          {busy ? t('mcp.saving') : server.enabled ? t('mcp.saveAndReconnect') : t('common.save')}
         </Button>
         <Button
           size="sm"
@@ -453,10 +458,10 @@ function RawConfigEditor({
             setErr('')
           }}
         >
-          Reset
+          {t('mcp.reset')}
         </Button>
         <Button size="sm" variant="ghost" disabled={busy} onClick={onCancel}>
-          Close
+          {t('common.close')}
         </Button>
       </div>
     </div>

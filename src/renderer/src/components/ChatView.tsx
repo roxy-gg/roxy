@@ -14,6 +14,7 @@ import {
 } from 'lucide-react'
 import type { Chat } from '@shared/types'
 import { useRoxyStore } from '../lib/store'
+import { useTranslation, Trans } from 'react-i18next'
 import { formatInterval } from '@shared/format'
 import { cn } from '../lib/cn'
 import { MessageBubble } from './MessageBubble'
@@ -53,6 +54,7 @@ const VISIBLE_MESSAGES = 30
 const PAGE = 30
 
 export function ChatView(): JSX.Element {
+  const { t } = useTranslation()
   const messages = useRoxyStore((s) => s.messages)
   const messagesChatId = useRoxyStore((s) => s.messagesChatId)
   const messagesError = useRoxyStore((s) => s.messagesError)
@@ -289,12 +291,10 @@ export function ChatView(): JSX.Element {
             alt="Roxy"
             className="h-16 w-16 rounded-2xl object-cover shadow-lg ring-1 ring-border"
           />
-          <h1 className="mt-5 text-xl font-semibold">Open a workspace</h1>
-          <p className="mt-1.5 max-w-xs text-sm text-text-muted">
-            Pick a folder to start an agent session.
-          </p>
+          <h1 className="mt-5 text-xl font-semibold">{t('chat.emptyTitle')}</h1>
+          <p className="mt-1.5 max-w-xs text-sm text-text-muted">{t('chat.emptyBody')}</p>
           <Button variant="primary" className="mt-5" onClick={newSession}>
-            <FolderOpen className="h-4 w-4" /> Open folder
+            <FolderOpen className="h-4 w-4" /> {t('chat.openFolder')}
           </Button>
         </div>
       </div>
@@ -309,8 +309,8 @@ export function ChatView(): JSX.Element {
             <Repeat className="h-4 w-4 shrink-0 text-text-muted" />
             <span className="shrink-0 text-sm font-medium">{activeChat.title}</span>
             <span className="truncate text-xs text-text-subtle">
-              every {formatInterval(activeLoop.intervalMinutes)} ·{' '}
-              {activeLoop.enabled ? 'running' : 'paused'}
+              {t('chat.loopEvery', { interval: formatInterval(activeLoop.intervalMinutes) })}
+              {activeLoop.enabled ? t('chat.loopRunning') : t('chat.loopPaused')}
             </span>
           </div>
         ) : (
@@ -327,7 +327,7 @@ export function ChatView(): JSX.Element {
               parentChat && (
                 <button
                   onClick={() => void selectChat(parentChat.id)}
-                  title={`Back to ${parentChat.title}`}
+                  title={t('chat.backTo', { title: parentChat.title })}
                   className="flex min-w-0 items-center gap-1 truncate text-xs text-text-subtle transition-colors hover:text-text"
                 >
                   <CornerUpLeft className="h-3 w-3 shrink-0" />
@@ -345,19 +345,19 @@ export function ChatView(): JSX.Element {
               // simply uninterruptible from its own view.
               <button
                 onClick={() => void cancelSubagent(activeChatId)}
-                title="Cancel this subagent"
+                title={t('chat.cancelSubagent')}
                 className="press-scale group flex shrink-0 items-center gap-1 sq sq-md rounded-md bg-accent/10 px-1.5 py-0.5 text-[11px] text-accent transition-colors hover:bg-accent/20"
               >
                 <Loader2 className="h-3 w-3 animate-spin group-hover:hidden" />
                 <Square className="hidden h-2.5 w-2.5 fill-current group-hover:block" />
-                <span className="group-hover:hidden">working</span>
-                <span className="hidden group-hover:inline">cancel</span>
+                <span className="group-hover:hidden">{t('chat.working')}</span>
+                <span className="hidden group-hover:inline">{t('chat.cancel')}</span>
               </button>
             )}
             {hasSessionInfo && (
               <button
                 onClick={() => setInfoOpen((o) => !o)}
-                title="Description & tasks"
+                title={t('chat.descriptionAndTasks')}
                 className={cn(
                   'flex shrink-0 items-center gap-1 sq sq-md rounded-md px-1.5 py-0.5 text-[11px] transition-colors',
                   infoOpen
@@ -391,9 +391,7 @@ export function ChatView(): JSX.Element {
                     void cancelBackgroundTask(activeChatId, t.jobId)
                   }
                 }}
-                title={`Cancel ${backgroundTaskCount} background subagent${
-                  backgroundTaskCount === 1 ? '' : 's'
-                }`}
+                title={t('chat.cancelBackground', { count: backgroundTaskCount })}
                 className="press-scale group flex shrink-0 items-center gap-1 sq sq-md rounded-md bg-accent/10 px-1.5 py-0.5 text-[11px] text-accent transition-colors hover:bg-accent/20"
               >
                 <Loader2 className="h-3 w-3 animate-spin group-hover:hidden" />
@@ -407,7 +405,7 @@ export function ChatView(): JSX.Element {
           {activeLoop && (
             <button
               onClick={() => setLoopPaneOpen((o) => !o)}
-              title="Loop settings"
+              title={t('chat.loopSettings')}
               className={cn(
                 'press-scale flex h-7 shrink-0 items-center gap-1.5 sq sq-lg rounded-lg px-2 text-xs',
                 loopPaneOpen
@@ -415,7 +413,7 @@ export function ChatView(): JSX.Element {
                   : 'text-text-muted hover:bg-white/5 hover:text-text'
               )}
             >
-              <Settings className="h-3.5 w-3.5" /> Settings
+              <Settings className="h-3.5 w-3.5" /> {t('chat.settings')}
             </button>
           )}
           <UsageMeter />
@@ -439,11 +437,9 @@ export function ChatView(): JSX.Element {
           // silent, blank, and with no way back other than clicking away and
           // returning. Name it and make it recoverable.
           <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
-            <p className="max-w-xs text-sm text-text-muted">
-              Couldn&apos;t load this session&apos;s messages.
-            </p>
+            <p className="max-w-xs text-sm text-text-muted">{t('chat.loadFailed')}</p>
             <Button variant="ghost" onClick={() => void selectChat(activeChat.id)}>
-              <RotateCw className="h-4 w-4" /> Retry
+              <RotateCw className="h-4 w-4" /> {t('common.retry')}
             </Button>
           </div>
         ) : loading ? (
@@ -457,9 +453,14 @@ export function ChatView(): JSX.Element {
           <div className="flex h-full flex-col items-center justify-center px-6 text-center">
             {activeLoop ? (
               <p className="max-w-xs text-sm text-text-muted">
-                Loop <span className="font-medium text-text">{activeChat.title}</span> runs every{' '}
-                {formatInterval(activeLoop.intervalMinutes)}. First heartbeat soon — or type to
-                intervene.
+                <Trans
+                  i18nKey="chat.loopEmpty"
+                  values={{
+                    title: activeChat.title,
+                    interval: formatInterval(activeLoop.intervalMinutes)
+                  }}
+                  components={{ strong: <span className="font-medium text-text" /> }}
+                />
               </p>
             ) : (
               <p className="text-sm text-text-muted"></p>
@@ -525,13 +526,13 @@ export function ChatView(): JSX.Element {
               <QueueSection defaultOpen>
                 <QueueSectionTrigger>
                   <QueueSectionLabel
-                    label="Queued"
+                    label={t('chat.queued')}
                     count={queue.length}
                     icon={<ListTree className="h-3.5 w-3.5 text-text-subtle" />}
                   />
                   {sending && (
                     <span className="ml-auto text-[10px] text-text-subtle">
-                      runs after this reply
+                      {t('chat.runsAfterReply')}
                     </span>
                   )}
                 </QueueSectionTrigger>
@@ -587,6 +588,7 @@ export function ChatView(): JSX.Element {
  * is fiddly, so the whole thing is one click.
  */
 function WorkspacePath({ chat }: { chat: Chat }): JSX.Element | null {
+  const { t } = useTranslation()
   const path = chat.worktreePath ?? chat.workspacePath
   const [copied, setCopied] = useState(0)
 
@@ -616,13 +618,14 @@ function WorkspacePath({ chat }: { chat: Chat }): JSX.Element | null {
   // the tooltip has to say so - on its own it names a directory that contains
   // none of the code directly and is not even a git repository.
   const repos = chat.repos ?? []
-  const detail = repos.length > 1 ? `\nContains: ${repos.map((r) => r.name).join(', ')}` : ''
+  const detail =
+    repos.length > 1 ? t('chat.pathContains', { names: repos.map((r) => r.name).join(', ') }) : ''
 
   return (
     <button
       onClick={() => void copy()}
       // The label is truncated, so the tooltip carries the full path.
-      title={`${path}${detail}\nClick to copy`}
+      title={t('chat.pathTooltip', { path, detail })}
       className="press-scale relative flex min-w-0 items-center sq sq-md rounded-md px-1 py-0.5 text-xs text-text-subtle hover:bg-white/5 hover:text-text-muted"
     >
       {/* The path fades rather than unmounting, so the button keeps its width
@@ -647,7 +650,7 @@ function WorkspacePath({ chat }: { chat: Chat }): JSX.Element | null {
         )}
       >
         <Check className="h-3 w-3 shrink-0" />
-        Copied
+        {t('chat.copied')}
       </span>
     </button>
   )

@@ -9,6 +9,7 @@
  * it. Windowed, since an expanded provider is ~600 rows.
  */
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { ChevronRight, Eye, EyeOff, Search } from 'lucide-react'
 import type { ModelInfo } from '@shared/api'
 import { modelLabel } from '@shared/models'
@@ -23,6 +24,7 @@ const ROW_H = 28
 const LIST_H = 320
 
 export function ModelVisibility(): JSX.Element {
+  const { t } = useTranslation()
   const providers = useRoxyStore((s) => s.providers)
   const ensureModels = useRoxyStore((s) => s.ensureModels)
   const ensureHiddenModels = useRoxyStore((s) => s.ensureHiddenModels)
@@ -33,9 +35,7 @@ export function ModelVisibility(): JSX.Element {
   }, [providers, ensureModels, ensureHiddenModels])
 
   if (providers.length === 0) {
-    return (
-      <p className="text-xs text-text-muted">Connect a provider first — its models show up here.</p>
-    )
+    return <p className="text-xs text-text-muted">{t('settings.models.connectProvider')}</p>
   }
 
   return (
@@ -54,6 +54,7 @@ function ProviderModels({
   providerId: string
   providerName: string
 }): JSX.Element {
+  const { t } = useTranslation()
   const catalog = useRoxyStore((s) => s.modelCatalog[providerId])
   const tried = useRoxyStore((s) => s.modelsTried[providerId])
   const hiddenModels = useRoxyStore((s) => s.hiddenModels)
@@ -137,11 +138,15 @@ function ProviderModels({
           <p className="mt-0.5 text-xs text-text-subtle">
             {models.length === 0
               ? tried
-                ? 'No models available'
-                : 'Loading models…'
+                ? t('settings.models.noneAvailable')
+                : t('settings.models.loading')
               : hiddenCount === 0
-                ? `${models.length} models · all shown`
-                : `${shown} of ${models.length} shown · ${hiddenCount} hidden`}
+                ? t('settings.models.allShown', { count: models.length })
+                : t('settings.models.someHidden', {
+                    shown,
+                    total: models.length,
+                    hidden: hiddenCount
+                  })}
           </p>
         </div>
       </button>
@@ -158,17 +163,21 @@ function ProviderModels({
                 if (listRef.current) listRef.current.scrollTop = 0
                 setScrollTop(0)
               }}
-              placeholder={`Search ${models.length} models…`}
-              aria-label={`Search ${providerName} models`}
+              placeholder={t('settings.models.searchPlaceholder', { count: models.length })}
+              aria-label={t('settings.models.searchAria', { provider: providerName })}
               className="min-w-0 flex-1 bg-transparent text-xs text-text outline-none placeholder:text-text-subtle"
             />
             {/* The label states its scope, because the action is scoped to the
                 search and "Hide all" over 14 matches would read as 600. */}
             <Button size="sm" variant="ghost" onClick={() => toggleAll(true)}>
-              {q ? `Hide ${visible.length}` : 'Hide all'}
+              {q
+                ? t('settings.models.hideCount', { count: visible.length })
+                : t('settings.models.hideAll')}
             </Button>
             <Button size="sm" variant="ghost" onClick={() => toggleAll(false)}>
-              {q ? `Show ${visible.length}` : 'Show all'}
+              {q
+                ? t('settings.models.showCount', { count: visible.length })
+                : t('settings.models.showAll')}
             </Button>
           </div>
 
@@ -179,7 +188,9 @@ function ProviderModels({
             className="overflow-y-auto"
           >
             {visible.length === 0 ? (
-              <div className="px-3 py-3 text-xs text-text-subtle">No models match “{query}”.</div>
+              <div className="px-3 py-3 text-xs text-text-subtle">
+                {t('models.noMatch', { query })}
+              </div>
             ) : (
               <>
                 <div style={{ height: offsets[first] }} />
@@ -213,6 +224,7 @@ function ModelToggle({
   hidden: boolean
   onToggle: (hidden: boolean) => void
 }): JSX.Element {
+  const { t } = useTranslation()
   return (
     <button
       type="button"
@@ -233,7 +245,7 @@ function ModelToggle({
           !hidden && 'opacity-0 group-hover:opacity-100'
         )}
       >
-        {hidden ? 'Unhide' : 'Hide'}
+        {hidden ? t('settings.models.unhide') : t('settings.models.hide')}
       </span>
       {/* Only the acted-on state is accent: 600 accent eyes would read as the
           exception being the rule. */}

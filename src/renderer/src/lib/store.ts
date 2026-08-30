@@ -1,5 +1,7 @@
 import { create } from 'zustand'
 import { DEFAULT_AGENT_ID, getAgent } from '@shared/agents'
+import type { Language } from '@shared/i18n'
+import { applyLanguage } from '../i18n'
 import type {
   AppSettings,
   Chat,
@@ -216,10 +218,10 @@ interface RoxyStore {
   setProviderHiddenModels: (providerId: string, models: string[]) => Promise<void>
   setReasoningEffort: (level: ReasoningEffort) => Promise<void>
   setContextLimit: (limit: number | null) => Promise<void>
-  setWebSearchApiKey: (key: string | null) => Promise<void>
   setAutoWorkstream: (enabled: boolean) => Promise<void>
   setTelemetryEnabled: (enabled: boolean) => Promise<void>
   setBranchPrefix: (prefix: string) => Promise<void>
+  setLanguage: (language: Language) => Promise<void>
   selectChat: (id: string) => Promise<void>
   clearActive: () => void
   newSession: () => Promise<void>
@@ -986,6 +988,10 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
     // deny-list the database no longer has.
     pinnedModelsLoaded = false
     hiddenModelsLoaded = false
+    // Before `ready` flips: the splash is still up, so switching the catalog
+    // here means the first painted frame is already in the right language
+    // rather than flashing English and re-rendering.
+    await applyLanguage(settings.language)
     set({
       settings,
       providers,
@@ -1550,13 +1556,17 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
     set({ telemetryEnabled: next })
   },
 
-  setBranchPrefix: async (prefix) => {
-    const settings = await api.settings.setBranchPrefix(prefix)
+  setLanguage: async (language) => {
+    // Apply FIRST, persist second. The click already told us what the user
+    // wants; making the UI wait on a database round trip just makes the picker
+    // feel broken. A failed write is a stale row, not a stuck interface.
+    await applyLanguage(language)
+    const settings = await api.settings.setLanguage(language)
     set({ settings })
   },
 
-  setWebSearchApiKey: async (key) => {
-    const settings = await api.settings.setWebSearchApiKey(key)
+  setBranchPrefix: async (prefix) => {
+    const settings = await api.settings.setBranchPrefix(prefix)
     set({ settings })
   },
 

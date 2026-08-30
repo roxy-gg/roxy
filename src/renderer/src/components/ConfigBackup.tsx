@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Download, Upload } from 'lucide-react'
 import type { ConfigImportResult } from '@shared/api'
 import { api } from '../lib/api'
@@ -20,6 +21,7 @@ export function ConfigBackup({
   onImported?: (result: ConfigImportResult) => void
   className?: string
 }): JSX.Element {
+  const { t } = useTranslation()
   const [busy, setBusy] = useState<'export' | 'import' | null>(null)
   const [status, setStatus] = useState<{ tone: 'ok' | 'err'; text: string } | null>(null)
 
@@ -29,15 +31,18 @@ export function ConfigBackup({
     try {
       const res = await api.config.export()
       if (res.error) {
-        setStatus({ tone: 'err', text: `Export failed: ${res.error}` })
+        setStatus({ tone: 'err', text: t('configBackup.exportFailedWith', { error: res.error }) })
       } else if (!res.ok) {
         // Cancelled the save dialog — say nothing loud.
         setStatus(null)
       } else {
-        setStatus({ tone: 'ok', text: `Exported ${res.summary}.` })
+        setStatus({ tone: 'ok', text: t('configBackup.exported', { summary: res.summary }) })
       }
     } catch (e) {
-      setStatus({ tone: 'err', text: e instanceof Error ? e.message : 'Export failed.' })
+      setStatus({
+        tone: 'err',
+        text: e instanceof Error ? e.message : t('configBackup.exportFailed')
+      })
     } finally {
       setBusy(null)
     }
@@ -51,14 +56,19 @@ export function ConfigBackup({
       if (res.cancelled) {
         setStatus(null)
       } else if (!res.ok) {
-        setStatus({ tone: 'err', text: res.error ?? 'Nothing was imported.' })
+        setStatus({ tone: 'err', text: res.error ?? t('configBackup.nothingImported') })
       } else {
-        const skipNote = res.skipped.length ? ` (${res.skipped.length} skipped)` : ''
+        const skipNote = res.skipped.length
+          ? ` ${t('configBackup.skippedNote', { count: res.skipped.length })}`
+          : ''
         setStatus({ tone: 'ok', text: `${res.summary}${skipNote}` })
         onImported?.(res)
       }
     } catch (e) {
-      setStatus({ tone: 'err', text: e instanceof Error ? e.message : 'Import failed.' })
+      setStatus({
+        tone: 'err',
+        text: e instanceof Error ? e.message : t('configBackup.importFailed')
+      })
     } finally {
       setBusy(null)
     }
@@ -73,7 +83,8 @@ export function ConfigBackup({
           disabled={busy !== null}
           onClick={() => void doExport()}
         >
-          <Download className="h-3.5 w-3.5" /> {busy === 'export' ? 'Exporting…' : 'Export'}
+          <Download className="h-3.5 w-3.5" />{' '}
+          {busy === 'export' ? t('configBackup.exporting') : t('configBackup.export')}
         </Button>
         <Button
           variant="secondary"
@@ -81,7 +92,8 @@ export function ConfigBackup({
           disabled={busy !== null}
           onClick={() => void doImport()}
         >
-          <Upload className="h-3.5 w-3.5" /> {busy === 'import' ? 'Importing…' : 'Import'}
+          <Upload className="h-3.5 w-3.5" />{' '}
+          {busy === 'import' ? t('configBackup.importing') : t('configBackup.import')}
         </Button>
         {status && (
           <span className={`text-xs ${status.tone === 'ok' ? 'text-success' : 'text-danger'}`}>

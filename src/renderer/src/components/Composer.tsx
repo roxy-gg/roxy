@@ -1,4 +1,5 @@
 import { useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent } from 'react'
+import { useTranslation } from 'react-i18next'
 import { ArrowUp, Plus, Square, X } from 'lucide-react'
 import { ModelPicker } from './ModelPicker'
 import { ContextMeter, ContextPicker, ThinkingPicker, AgentPicker } from './InferenceControls'
@@ -14,6 +15,7 @@ export function Composer({
   sending?: boolean
   onStop?: () => void
 }): JSX.Element {
+  const { t } = useTranslation()
   const [value, setValue] = useState('')
   const [images, setImages] = useState<ComposerImage[]>([])
   const [dragging, setDragging] = useState(false)
@@ -128,7 +130,7 @@ export function Composer({
                 <button
                   type="button"
                   onClick={() => removeImage(img.id)}
-                  title="Remove image"
+                  title={t('composer.removeImage')}
                   className="press-scale absolute right-0.5 top-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-black/70 text-white opacity-0 transition-opacity group-hover:opacity-100"
                 >
                   <X className="h-2.5 w-2.5" />
@@ -167,7 +169,7 @@ export function Composer({
             <button
               type="button"
               onClick={() => fileRef.current?.click()}
-              title="Attach images"
+              title={t('composer.attachImages')}
               className="press-scale flex h-6 shrink-0 items-center justify-center sq sq-md rounded-md px-1.5 text-text-muted hover:bg-white/5 hover:text-text"
             >
               <Plus className="h-3.5 w-3.5" />
@@ -181,7 +183,7 @@ export function Composer({
           {showStop ? (
             <button
               onClick={onStop}
-              title="Stop (Esc)"
+              title={t('composer.stop')}
               className="press-scale flex h-8 w-8 shrink-0 items-center justify-center sq sq-lg rounded-lg bg-white text-black hover:bg-white/90"
             >
               <Square className="h-3 w-3 fill-current" />

@@ -43,6 +43,23 @@ import {
 } from '../src/shared/cliproxy'
 import { modelLabel, pickDefaultModel } from '../src/shared/models'
 import {
+  BUILT_IN_THEMES,
+  DEFAULT_THEME_ID,
+  MAX_CUSTOM_VARS,
+  THEME_COLOR_TOKENS,
+  buildThemePrompt,
+  getBuiltInTheme,
+  isSafeCssValue,
+  isValidThemeId,
+  parseTheme,
+  resolveFontStack,
+  resolveTheme,
+  sanitizeThemeId,
+  serializeTheme,
+  starterTheme,
+  type ThemeFile
+} from '../src/shared/theme'
+import {
   ACTIVATION_MILESTONES,
   FEATURE_IDS,
   bucketCount,
@@ -123,14 +140,19 @@ import {
   decodeEntities,
   htmlToText,
   htmlToMarkdown,
-  convertWebContent,
-  buildExaRequestBody,
-  clampResults,
-  parseExaResponse,
-  WEBSEARCH_MAX_RESULTS,
-  WEBSEARCH_DEFAULT_RESULTS
+  convertWebContent
 } from '../src/shared/web'
 import { resolveWorktreeCwd } from '../src/shared/workspace'
+import {
+  DEFAULT_LANGUAGE,
+  LANGUAGES,
+  LANGUAGE_CODES,
+  SOURCE_LANGUAGE,
+  isLanguage,
+  languageDir,
+  languageOption,
+  normalizeLanguage
+} from '../src/shared/i18n'
 import {
   aggregateLifecycle,
   aggregateRepoStatus,
@@ -361,9 +383,7 @@ check(
 )
 check(
   'the long-blocking tools are cancellable',
-  ['bash', 'webfetch', 'websearch', 'grep', 'glob', 'lsp', 'browser_open'].every((id) =>
-    isInterruptibleTool(id)
-  )
+  ['bash', 'webfetch', 'grep', 'glob', 'lsp', 'browser_open'].every((id) => isInterruptibleTool(id))
 )
 check(
   'instant local tools offer no cancel button',
@@ -1178,7 +1198,7 @@ check(
   )
 )
 
-// ---- web helpers (Phase 6: webfetch + websearch) ----
+// ---- web helpers (Phase 6: webfetch) ----
 check(
   'normalizeFetchUrl upgrades http→https',
   normalizeFetchUrl('http://example.com/x') === 'https://example.com/x'
@@ -1271,43 +1291,6 @@ check(
 check(
   'convertWebContent html format returns raw html',
   convertWebContent('<p>hi</p>', 'text/html', 'html') === '<p>hi</p>'
-)
-check(
-  'clampResults default when invalid',
-  clampResults('abc') === WEBSEARCH_DEFAULT_RESULTS && clampResults(0) === WEBSEARCH_DEFAULT_RESULTS
-)
-check('clampResults caps at max', clampResults(999) === WEBSEARCH_MAX_RESULTS)
-check('clampResults passes valid through', clampResults(5) === 5)
-check(
-  'buildExaRequestBody is valid JSON-RPC tools/call',
-  (() => {
-    const body = JSON.parse(buildExaRequestBody('roxy harness', 8)) as {
-      jsonrpc: string
-      method: string
-      params: { name: string; arguments: { query: string; numResults: number } }
-    }
-    return (
-      body.jsonrpc === '2.0' &&
-      body.method === 'tools/call' &&
-      body.params.name === 'web_search_exa' &&
-      body.params.arguments.query === 'roxy harness' &&
-      body.params.arguments.numResults === 8
-    )
-  })()
-)
-check(
-  'parseExaResponse reads a direct JSON body',
-  parseExaResponse('{"result":{"content":[{"type":"text","text":"result A"}]}}') === 'result A'
-)
-check(
-  'parseExaResponse reads an SSE data: stream',
-  parseExaResponse(
-    'event: message\ndata: {"result":{"content":[{"type":"text","text":"streamed B"}]}}\n\n'
-  ) === 'streamed B'
-)
-check(
-  'parseExaResponse returns undefined on empty/garbage',
-  parseExaResponse('not json') === undefined
 )
 
 // ---- context management (Phase 9) ----
@@ -4827,8 +4810,7 @@ async function main(): Promise<void> {
     activeModel: 'claude-opus-5',
     activeAgentId: 'plan',
     reasoningEffort: 'max' as const,
-    contextLimit: 1_000_000,
-    webSearchApiKey: null
+    contextLimit: 1_000_000
   }
   const bare = {
     providerId: null,
@@ -5866,6 +5848,383 @@ async function main(): Promise<void> {
   check(
     'responses: unknown events are ignored',
     !applyResponsesEvent({ type: 'response.in_progress' }, { onText: () => {} })
+  )
+
+  // ---- i18n ----------------------------------------------------------------
+
+  check('i18n: English is the source language', SOURCE_LANGUAGE === 'en')
+  check('i18n: the default is the source language', DEFAULT_LANGUAGE === SOURCE_LANGUAGE)
+  check('i18n: the source language ships a catalog', LANGUAGE_CODES.includes(SOURCE_LANGUAGE))
+  check('i18n: Spanish is offered', LANGUAGE_CODES.includes('es'))
+  check(
+    'i18n: the top-10 set is offered',
+    ['en', 'zh', 'hi', 'es', 'ar', 'fr', 'pt', 'ru', 'de', 'ja'].every((c) =>
+      (LANGUAGE_CODES as readonly string[]).includes(c)
+    )
+  )
+  // Arabic is the only RTL language today; the check is by data, not by code.
+  check('i18n: Arabic is marked rtl', LANGUAGES.find((l) => l.code === 'ar')?.rtl === true)
+  check('i18n: English is ltr', languageDir('en') === 'ltr')
+  check('i18n: Arabic is rtl', languageDir('ar') === 'rtl')
+  check(
+    'i18n: every language has a name and a native name',
+    LANGUAGES.every((l) => !!l.code && !!l.name && !!l.nativeName)
+  )
+  check('i18n: language codes are unique', new Set(LANGUAGE_CODES).size === LANGUAGE_CODES.length)
+  check('i18n: a known code is a language', isLanguage('es'))
+  check('i18n: an unknown code is not', !isLanguage('kl') && !isLanguage('') && !isLanguage(null))
+  check('i18n: normalize keeps a known code', normalizeLanguage('es') === 'es')
+  // Regional tags must resolve, or a Mexican install silently renders English.
+  check('i18n: normalize folds a region tag', normalizeLanguage('es-MX') === 'es')
+  check('i18n: normalize folds es-419', normalizeLanguage('es-419') === 'es')
+  check('i18n: normalize folds an underscore tag', normalizeLanguage('es_ES') === 'es')
+  check('i18n: normalize is case-insensitive', normalizeLanguage('ES') === 'es')
+  check('i18n: normalize trims', normalizeLanguage('  es  ') === 'es')
+  // A bad settings row must never be able to stop the UI from rendering.
+  check('i18n: an unknown language falls back', normalizeLanguage('kl') === DEFAULT_LANGUAGE)
+  check('i18n: null falls back', normalizeLanguage(null) === DEFAULT_LANGUAGE)
+  check('i18n: undefined falls back', normalizeLanguage(undefined) === DEFAULT_LANGUAGE)
+  check('i18n: a non-string falls back', normalizeLanguage(42) === DEFAULT_LANGUAGE)
+  check('i18n: an explicit fallback is honoured', normalizeLanguage('kl', 'es') === 'es')
+  check('i18n: languageOption resolves a code', languageOption('es').code === 'es')
+  check(
+    'i18n: languageOption never returns undefined',
+    LANGUAGE_CODES.every((c) => !!languageOption(c).nativeName)
+  )
+
+  // ---- themes (config-driven theming) ----
+  //
+  // The whole feature rests on one fact about Tailwind v4, so it is asserted
+  // here rather than assumed: a `@theme` token compiles to a runtime `var()`
+  // reference, which is what lets a theme repaint the app without a rebuild.
+  // These tests cover the three things that would actually hurt in the wild:
+  // a malicious value reaching CSS, a theme half-applying, and the macOS
+  // system font being clobbered by a theme that never mentioned fonts.
+  console.log('\nthemes\n')
+
+  // -- validation: what a theme file may contain
+  check(
+    'theme: a well-formed file parses',
+    parseTheme('{"id":"x","name":"X","colors":{"bg":"#000"}}').ok
+  )
+  check('theme: malformed JSON is rejected, not thrown', !parseTheme('{nope').ok)
+  check('theme: a non-object is rejected', !parseTheme('[]').ok && !parseTheme('"x"').ok)
+  check('theme: a missing id is rejected', !parseTheme('{"name":"X"}').ok)
+  check(
+    'theme: an id that is not a slug is rejected',
+    !parseTheme('{"id":"../../etc","name":"X"}').ok &&
+      !parseTheme('{"id":"Has Spaces","name":"X"}').ok
+  )
+  {
+    // A typo must cost the author one token, not the whole theme.
+    const res = parseTheme('{"id":"x","name":"X","colors":{"bakground":"#000","bg":"#111"}}')
+    check(
+      'theme: an unknown color is dropped and reported, not fatal',
+      res.ok && res.theme.colors?.bg === '#111' && !('bakground' in (res.theme.colors ?? {})),
+      JSON.stringify(res)
+    )
+    check(
+      'theme: the dropped token is named in a warning',
+      res.ok && res.warnings.some((w) => w.includes('bakground')),
+      res.ok ? res.warnings.join('|') : ''
+    )
+  }
+
+  // -- the security boundary. A theme is a file people SHARE, so a hostile one
+  //    is a realistic threat, and `url()` in a custom property is a real
+  //    exfiltration vector the moment anything references it.
+  check(
+    'theme: url() is refused (exfiltration / local file read)',
+    !isSafeCssValue('url(https://evil.example/pixel)') &&
+      !isSafeCssValue('URL("file:///etc/passwd")') &&
+      !isSafeCssValue('image-set(url(x.png))')
+  )
+  check(
+    'theme: declaration break-out is refused',
+    !isSafeCssValue('red; background: url(x)') && !isSafeCssValue('red} body{display:none')
+  )
+  check(
+    'theme: javascript:/data: payloads are refused',
+    !isSafeCssValue('javascript:alert(1)') && !isSafeCssValue('data:text/html,<script>')
+  )
+  check(
+    'theme: comment smuggling and at-rules are refused',
+    !isSafeCssValue('red/*x*/') && !isSafeCssValue('@import "evil.css"')
+  )
+  check('theme: an unreasonably long value is refused', !isSafeCssValue('#' + 'a'.repeat(600)))
+  check(
+    'theme: ordinary CSS colors are allowed',
+    isSafeCssValue('#0a0a0a') &&
+      isSafeCssValue('rgb(10 10 10 / 50%)') &&
+      isSafeCssValue('oklch(0.72 0.19 305)') &&
+      isSafeCssValue('color-mix(in srgb, #fff 5%, transparent)')
+  )
+  {
+    const res = parseTheme('{"id":"x","name":"X","colors":{"bg":"url(https://evil.example)"}}')
+    check(
+      'theme: an unsafe value never survives parsing',
+      res.ok && Object.keys(res.theme.colors ?? {}).length === 0,
+      JSON.stringify(res)
+    )
+  }
+  check(
+    'theme: vars are limited to an allowlist',
+    (() => {
+      const res = parseTheme('{"id":"x","name":"X","vars":{"--evil":"1","--sq-scale":"2"}}')
+      return res.ok && res.theme.vars?.['--sq-scale'] === '2' && !res.theme.vars?.['--evil']
+    })()
+  )
+
+  // -- resolution: a theme id becomes the exact set of properties to apply
+  {
+    const dark = resolveTheme(getBuiltInTheme(DEFAULT_THEME_ID)!, 'win32')
+    check(
+      'theme: the default resolves to the palette compiled into main.css',
+      dark.vars['--color-bg'] === '#0a0a0a' && dark.vars['--color-text'] === '#ededed',
+      JSON.stringify(dark.vars['--color-bg'])
+    )
+    check(
+      'theme: token keys map to the CSS properties Tailwind emits',
+      THEME_COLOR_TOKENS.every((t) => t.cssVar === `--color-${t.key}`),
+      THEME_COLOR_TOKENS.filter((t) => t.cssVar !== `--color-${t.key}`)
+        .map((t) => t.key)
+        .join(',')
+    )
+  }
+  {
+    // The reason a light theme works at all without touching components: the
+    // ~75 `bg-white/5` hovers resolve through --color-white.
+    const light = resolveTheme(getBuiltInTheme('roxy-light')!, 'win32')
+    check(
+      'theme: a light theme inverts the contrast pair',
+      light.vars['--color-white'] === '#18181b' && light.vars['--color-black'] === '#ffffff',
+      `${light.vars['--color-white']} / ${light.vars['--color-black']}`
+    )
+    check('theme: appearance drives color-scheme', light.appearance === 'light')
+  }
+  {
+    // A three-line theme must still produce a coherent UI.
+    const partial = parseTheme('{"id":"tiny","name":"Tiny","colors":{"accent":"#f0f"}}')
+    const resolved = partial.ok ? resolveTheme(partial.theme, 'win32') : null
+    check(
+      'theme: unspecified tokens inherit from the default (no half-applied UI)',
+      !!resolved &&
+        resolved.vars['--color-accent'] === '#f0f' &&
+        resolved.vars['--color-bg'] === '#0a0a0a',
+      JSON.stringify(resolved?.vars['--color-bg'])
+    )
+  }
+  {
+    const child = parseTheme(
+      '{"id":"c","name":"C","extends":"roxy-light","colors":{"accent":"#0f0"}}'
+    )
+    const resolved = child.ok ? resolveTheme(child.theme, 'win32') : null
+    check(
+      'theme: extends layers onto the named base',
+      !!resolved &&
+        resolved.vars['--color-accent'] === '#0f0' &&
+        resolved.vars['--color-bg'] === '#ffffff',
+      JSON.stringify(resolved?.vars)
+    )
+    check(
+      'theme: extends inherits the base appearance, not the default',
+      resolved?.appearance === 'light',
+      String(resolved?.appearance)
+    )
+  }
+  check(
+    'theme: an extends cycle terminates instead of hanging',
+    (() => {
+      const a: ThemeFile = { id: 'a', name: 'A', extends: 'b', colors: { accent: '#111' } }
+      const b: ThemeFile = { id: 'b', name: 'B', extends: 'a', colors: { accent: '#222' } }
+      const lookup = (id: string): ThemeFile | undefined =>
+        id === 'a' ? a : id === 'b' ? b : undefined
+      return resolveTheme(a, 'win32', lookup).vars['--color-accent'] === '#111'
+    })()
+  )
+
+  // -- fonts. The subtle one: main.css overrides --font-sans under
+  //    [data-platform='darwin'] to get San Francisco, and lib/theme.ts applies
+  //    theme vars as INLINE styles, which beat any selector. So a theme that
+  //    says nothing about fonts must emit NO font property at all, or every
+  //    macOS user silently loses the system font.
+  {
+    const quiet = resolveTheme(getBuiltInTheme(DEFAULT_THEME_ID)!, 'darwin')
+    check(
+      'theme: a theme with no fonts emits no font vars (keeps the macOS system font)',
+      !('--font-sans' in quiet.vars) && !('--font-mono' in quiet.vars),
+      JSON.stringify(Object.keys(quiet.vars).filter((k) => k.startsWith('--font')))
+    )
+  }
+  check(
+    'theme: "system" expands to the platform stack, per platform',
+    resolveFontStack('system', 'sans', 'darwin')!.includes('-apple-system') &&
+      resolveFontStack('system', 'sans', 'win32')!.includes('Segoe UI') &&
+      resolveFontStack('system', 'mono', 'win32')!.includes('Cascadia')
+  )
+  check(
+    'theme: a named family keeps fallbacks, so a missing font degrades sanely',
+    resolveFontStack('Berkeley Mono', 'mono', 'win32') ===
+      "'Berkeley Mono', ui-monospace, 'SF Mono', 'JetBrains Mono', monospace",
+    String(resolveFontStack('Berkeley Mono', 'mono', 'win32'))
+  )
+  check(
+    'theme: a family needing quotes gets them; a bare ident does not',
+    resolveFontStack('Berkeley Mono', 'mono', 'win32')!.startsWith("'Berkeley Mono'") &&
+      resolveFontStack('Menlo', 'mono', 'win32')!.startsWith('Menlo,')
+  )
+  check(
+    'theme: generic families are never quoted (quoting breaks them)',
+    resolveFontStack('monospace', 'mono', 'win32')!.startsWith('monospace,'),
+    String(resolveFontStack('monospace', 'mono', 'win32'))
+  )
+  check(
+    'theme: an array builds a stack in order',
+    resolveFontStack(['Berkeley Mono', 'Menlo'], 'mono', 'win32')!.startsWith(
+      "'Berkeley Mono', Menlo,"
+    ),
+    String(resolveFontStack(['Berkeley Mono', 'Menlo'], 'mono', 'win32'))
+  )
+  check(
+    'theme: the code font is separately configurable from the UI font',
+    (() => {
+      const res = parseTheme('{"id":"x","name":"X","fonts":{"mono":"Fira Code"}}')
+      if (!res.ok) return false
+      const vars = resolveTheme(res.theme, 'win32').vars
+      return vars['--font-mono']?.includes('Fira Code') === true && !('--font-sans' in vars)
+    })()
+  )
+
+  // -- ids and round-tripping
+  check(
+    'theme: sanitizeThemeId produces a usable folder name',
+    sanitizeThemeId('My Cool Theme!') === 'my-cool-theme' &&
+      sanitizeThemeId('  ') === 'theme' &&
+      isValidThemeId(sanitizeThemeId('../../etc/passwd'))
+  )
+  check(
+    'theme: serialize -> parse round-trips',
+    (() => {
+      const original = getBuiltInTheme('roxy-light')!
+      const again = parseTheme(serializeTheme(original))
+      return again.ok && again.theme.colors?.bg === original.colors?.bg
+    })()
+  )
+  check(
+    'theme: every built-in is internally valid',
+    BUILT_IN_THEMES.every((t) => parseTheme(serializeTheme(t)).ok),
+    BUILT_IN_THEMES.filter((t) => !parseTheme(serializeTheme(t)).ok)
+      .map((t) => t.id)
+      .join(',')
+  )
+  check(
+    'theme: every built-in defines the full palette (no inherited gaps)',
+    BUILT_IN_THEMES.every((t) =>
+      THEME_COLOR_TOKENS.every((tok) => typeof t.colors?.[tok.key] === 'string')
+    ),
+    BUILT_IN_THEMES.map(
+      (t) =>
+        `${t.id}:${THEME_COLOR_TOKENS.filter((tok) => !t.colors?.[tok.key])
+          .map((tok) => tok.key)
+          .join('/')}`
+    )
+      .filter((s) => !s.endsWith(':'))
+      .join(' ')
+  )
+  check(
+    'theme: the starter theme a user gets is valid',
+    parseTheme(serializeTheme(starterTheme('mine', 'Mine'))).ok
+  )
+
+  // -- the authoring prompt. Its whole value is being GENERATED from the token
+  //    registry: a hand-written spec would drift the first time a token was
+  //    added, and confidently-wrong docs make a model emit fields that then get
+  //    dropped. These tests are what stop that drift.
+  {
+    const prompt = buildThemePrompt()
+
+    // Every token must be documented, and nothing may be documented that isn't
+    // real. Both directions matter -- the second is how docs invent fields.
+    const documented = [...prompt.matchAll(/^ {2}"([a-z0-9-]+)" \u2014 /gm)].map((m) => m[1])
+    const real = THEME_COLOR_TOKENS.map((t) => t.key)
+    check(
+      'prompt: documents every color token',
+      real.every((k) => documented.includes(k)),
+      real.filter((k) => !documented.includes(k)).join(',')
+    )
+    check(
+      'prompt: documents no token that does not exist',
+      documented.every((k) => real.includes(k)),
+      documented.filter((k) => !real.includes(k)).join(',')
+    )
+    check(
+      'prompt: carries each token\u2019s real hint, not a paraphrase',
+      THEME_COLOR_TOKENS.every((t) => prompt.includes(t.hint)),
+      THEME_COLOR_TOKENS.filter((t) => !prompt.includes(t.hint))
+        .map((t) => t.key)
+        .join(',')
+    )
+
+    // The example is the part a model is most likely to copy verbatim, so it
+    // has to survive the real validator with no warnings at all.
+    const start = prompt.indexOf('EXAMPLE (a complete, valid theme)')
+    const example = prompt.slice(
+      prompt.indexOf('{', start),
+      prompt.lastIndexOf('}\n\nNow output') + 1
+    )
+    const parsed = parseTheme(example)
+    check('prompt: its worked example parses', parsed.ok, parsed.ok ? '' : parsed.error)
+    check(
+      'prompt: its worked example produces zero warnings',
+      parsed.ok && parsed.warnings.length === 0,
+      parsed.ok ? parsed.warnings.join('|') : ''
+    )
+    check(
+      'prompt: its example sets every token (a model copying it gets a full theme)',
+      parsed.ok && real.every((k) => typeof parsed.theme.colors?.[k] === 'string'),
+      parsed.ok ? real.filter((k) => !parsed.theme.colors?.[k]).join(',') : ''
+    )
+
+    // The limits it quotes must be the limits actually enforced.
+    check(
+      'prompt: quotes the real value-length and vars limits',
+      prompt.includes(String(MAX_CUSTOM_VARS)) && prompt.includes('512'),
+      prompt.includes(String(MAX_CUSTOM_VARS)) + '/' + prompt.includes('512')
+    )
+    check(
+      'prompt: names the real built-ins for extends',
+      prompt.includes(DEFAULT_THEME_ID) && prompt.includes('roxy-light')
+    )
+    // The polarity trap is the single most common way to get a light theme
+    // wrong, so the prompt must spell out the inversion explicitly.
+    check(
+      'prompt: explains the inverted contrast pair',
+      prompt.includes('"white": "#18181b"') && prompt.includes('NOT literally white')
+    )
+    check(
+      'prompt: states the output contract (one JSON object, no prose)',
+      /ONE JSON object/.test(prompt) && /no markdown fence/i.test(prompt)
+    )
+    check(
+      'prompt: a custom goal is threaded through',
+      buildThemePrompt({ goal: 'a nord-inspired theme' }).includes('a nord-inspired theme')
+    )
+  }
+
+  // -- font stack dedupe: naming a font that is already in the fallback list
+  //    used to emit it twice, which reads as a bug in devtools.
+  check(
+    'theme: a named font is not repeated by the fallback stack',
+    (() => {
+      const stack = resolveFontStack('JetBrains Mono', 'mono', 'win32')!
+      return stack.split(',').filter((n) => /jetbrains/i.test(n)).length === 1
+    })(),
+    String(resolveFontStack('JetBrains Mono', 'mono', 'win32'))
+  )
+  check(
+    'theme: dedupe ignores quoting differences',
+    !resolveFontStack('SF Mono', 'mono', 'win32')!.match(/'SF Mono'.*'SF Mono'/),
+    String(resolveFontStack('SF Mono', 'mono', 'win32'))
   )
 
   if (fails.length) {

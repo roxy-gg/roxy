@@ -2,6 +2,8 @@ import { randomUUID } from 'node:crypto'
 import { resolveSeed } from '../../shared/providers'
 import { normalizeServerConfig, type McpServerConfig, type McpServerRecord } from '../../shared/mcp'
 import { DEFAULT_BRANCH_PREFIX, normalizeBranchPrefix } from '../../shared/branch'
+import { DEFAULT_LANGUAGE, normalizeLanguage } from '../../shared/i18n'
+import type { Language } from '../../shared/i18n'
 import type {
   AddMessageInput,
   AppSettings,
@@ -112,14 +114,18 @@ export function getSettings(): AppSettings {
         : 'high'
     })(),
     contextLimit: map.get('context_limit') ? Number(map.get('context_limit')) : null,
-    webSearchApiKey: map.get('web_search_api_key') ?? null,
     // Defaults ON, so the absence of a row means enabled. Written only when
     // someone turns it OFF ('0'), which keeps existing installs opted in
     // without a migration.
     autoWorkstream: map.get('auto_workstream') !== '0',
     // `?? DEFAULT` and not `|| DEFAULT`: an EMPTY string is a deliberate
     // "no prefix", and must survive a round trip through settings.
-    branchPrefix: map.get('branch_prefix') ?? DEFAULT_BRANCH_PREFIX
+    branchPrefix: map.get('branch_prefix') ?? DEFAULT_BRANCH_PREFIX,
+    // Normalised on the way OUT as well as in: a row written by an older build
+    // (or a language later dropped from the app) must degrade to English rather
+    // than leave the UI rendering raw keys.
+    language: normalizeLanguage(map.get('language')),
+    activeThemeId: map.get('active_theme_id') ?? null
   }
 }
 
@@ -207,15 +213,22 @@ export function setBranchPrefix(prefix: string): AppSettings {
   return getSettings()
 }
 
-export function setAutoWorkstream(enabled: boolean): AppSettings {
-  // Store only the OFF state; see getSettings for why.
-  setSetting('auto_workstream', enabled ? null : '0')
+export function setLanguage(language: Language): AppSettings {
+  const lang = normalizeLanguage(language)
+  // English is the default, so it clears the row instead of writing one - the
+  // absence of a row and an explicit 'en' must not drift apart.
+  setSetting('language', lang === DEFAULT_LANGUAGE ? null : lang)
   return getSettings()
 }
 
-export function setWebSearchApiKey(key: string | null): AppSettings {
-  const trimmed = key?.trim()
-  setSetting('web_search_api_key', trimmed ? trimmed : null)
+export function setActiveThemeId(id: string | null): AppSettings {
+  setSetting('active_theme_id', id)
+  return getSettings()
+}
+
+export function setAutoWorkstream(enabled: boolean): AppSettings {
+  // Store only the OFF state; see getSettings for why.
+  setSetting('auto_workstream', enabled ? null : '0')
   return getSettings()
 }
 
