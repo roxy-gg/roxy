@@ -1380,7 +1380,13 @@ async function main(): Promise<void> {
     {
       const db = new Database(path.join(healDir, 'v22.db'))
       // Stop one rung short, at v21 — the last release that still had the box.
-      const priorSteps = MIGRATIONS.slice(0, MIGRATIONS.length - 1)
+      // Located by what the step DOES, not by its position: later migrations
+      // land on top of it and "the last rung" stops meaning the Exa one.
+      const exaStep = MIGRATIONS.findIndex(
+        (m) => typeof m === 'string' && m.includes('web_search_api_key')
+      )
+      check('migration v22: the Exa cleanup step is still in the ladder', exaStep !== -1)
+      const priorSteps = MIGRATIONS.slice(0, exaStep)
       for (const step of priorSteps) {
         if (typeof step === 'string') db.exec(step)
         else step(db)
