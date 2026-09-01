@@ -26,14 +26,24 @@ export const APP_USER_MODEL_ID = 'com.roxy.app'
 const isWindows = process.platform === 'win32'
 
 /**
- * Toasts still awaiting a click.
+ * Toasts still awaiting a click, newest last.
  *
  * A shown `Notification` that nothing references can be garbage collected, and
  * with it the `click` handler - while the toast is still sitting in the Windows
- * Action Center, clickable. Holding it here until it is clicked or dismissed is
- * what makes "click the toast, land on that session" work minutes later.
+ * Action Center, clickable. Holding it here is what makes "click the toast,
+ * land on that session" work minutes later.
+ *
+ * Bounded, because `close` cannot be trusted to arrive: a Windows toast that
+ * times out into the Action Center and is dismissed from there often never
+ * fires it, and macOS is no better. Left uncapped this would retain one
+ * Notification per completed turn for the life of the process.
+ *
+ * Dropping the OLDEST is the right eviction: Windows itself keeps only about
+ * 20 toasts per app in the Action Center, so anything past the cap is already
+ * gone from the UI and can no longer be clicked.
  */
 const live = new Set<Notification>()
+const MAX_LIVE = 20
 
 /** Roxy's icon, injected from main so this module needs no `?asset` import. */
 let iconPath: string | undefined
@@ -119,6 +129,7 @@ export function showTurnToast(title: string, body: string, chatId: string): void
       : {})
   })
   live.add(notification)
+  if (live.size > MAX_LIVE) live.delete(live.values().next().value as Notification)
   notification.on('close', () => live.delete(notification))
   notification.on('click', () => {
     live.delete(notification)
