@@ -9,7 +9,6 @@
  * provider. Cost is priced from the models.dev catalog at record time.
  */
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { BarChart3, LayoutGrid } from 'lucide-react'
 import type { ProviderUsage, UsageDay, UsageStats } from '@shared/types'
 import { useTranslation, Trans } from 'react-i18next'
 import type { TFunction } from 'i18next'
@@ -272,36 +271,33 @@ export function UsageMeter(): JSX.Element | null {
         onClick={() => setOpen(!open)}
         title={pillTitle}
         className={cn(
-          'press-scale flex h-7 items-center gap-1.5 sq sq-lg sq-ring rounded-lg border px-2 text-xs tabular-nums transition-colors',
+          // No leading icon and so no `gap`: the value is already a currency
+          // amount, so the `$` says what it is. A chart glyph beside it was
+          // decoration competing with the number for the same job.
+          'press-scale flex h-7 items-center sq sq-lg sq-ring edge rounded-lg border px-2 text-xs tabular-nums transition-colors',
           open
-            ? 'border-border-strong [--sq-ring:var(--color-border-strong)] bg-elevated text-text'
-            : 'border-border bg-surface text-text-muted hover:border-border-strong hover:[--sq-ring:var(--color-border-strong)] hover:text-text'
+            ? 'border-border-strong [--sq-ring:var(--edge-strong)] bg-elevated text-text'
+            : 'border-border bg-surface text-text-muted hover:border-border-strong hover:[--sq-ring:var(--edge-strong)] hover:text-text'
         )}
       >
-        <BarChart3 className="h-3.5 w-3.5" />
         <span>{formatUsd(pillCost)}</span>
       </button>
 
       {open && (
-        <div className="animate-pop-in absolute right-0 top-full z-50 mt-2 w-80 origin-top-right overflow-hidden sq-frame sq-xl sq-fill-elevated sq-ring rounded-xl border border-border bg-elevated shadow-2xl">
-          {/* Tabs */}
-          <div className="flex items-center gap-1 overflow-x-auto border-b border-border p-1.5">
-            {tabs.map((t) => (
-              <button
-                key={t.id}
-                type="button"
-                onClick={() => setTab(t.id)}
-                className={cn(
-                  'flex shrink-0 items-center gap-1.5 sq sq-lg rounded-lg px-2.5 py-1 text-xs font-medium transition-colors',
-                  tab === t.id
-                    ? 'bg-accent text-white'
-                    : 'text-text-muted hover:bg-white/5 hover:text-text'
-                )}
-              >
-                {t.id === 'overview' && <LayoutGrid className="h-3.5 w-3.5" />}
-                {t.label}
-              </button>
-            ))}
+        <div className="animate-pop-in absolute right-0 top-full z-50 mt-2 w-80 origin-top-right overflow-hidden sq-frame sq-xl sq-fill-elevated sq-ring edge edge-strong edge-panel rounded-xl border border-border bg-elevated shadow-float">
+          <div className="border-b border-border p-2">
+            <select
+              value={tab}
+              onChange={(e) => setTab(e.target.value)}
+              aria-label="Usage provider"
+              className="h-8 w-full cursor-pointer sq sq-lg sq-ring edge [--sq-bevel:transparent] rounded-lg border border-border bg-surface-2 px-2.5 text-xs font-medium text-text outline-none focus:[--sq-ring:var(--edge-strong)]"
+            >
+              {tabs.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
           </div>
           {tab === 'overview'
             ? overviewPanel(usageStats, t)

@@ -312,7 +312,7 @@ function UnknownHostChip({ host }: { host: string }): JSX.Element {
     <div className="relative" ref={ref}>
       {open && (
         <div className="absolute bottom-full z-50 flex flex-col pb-1.5" style={anchor}>
-          <div className="flex min-h-0 flex-col overflow-y-auto sq-frame sq-xl sq-fill-elevated sq-ring rounded-xl border border-border bg-elevated py-1 shadow-2xl">
+          <div className="flex min-h-0 flex-col overflow-y-auto sq-frame sq-xl sq-fill-elevated sq-ring edge edge-strong edge-panel rounded-xl border border-border bg-elevated py-1 shadow-float">
             <div className="px-3 py-1.5 text-[11px] text-text-subtle">
               What does <span className="text-text-muted">{host}</span> run?
             </div>
@@ -555,7 +555,7 @@ function ForgePanel({
 
   return (
     <div className="absolute bottom-full z-50 flex flex-col pb-1.5" style={style}>
-      <div className="flex max-h-full min-h-0 flex-col overflow-hidden sq-frame sq-xl sq-fill-elevated sq-ring rounded-xl border border-border bg-elevated shadow-2xl">
+      <div className="flex max-h-full min-h-0 flex-col overflow-hidden sq-frame sq-xl sq-fill-elevated sq-ring edge edge-strong edge-panel rounded-xl border border-border bg-elevated shadow-float">
         <div className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-2">
           <span className="min-w-0 flex-1 truncate text-xs text-text-muted">
             {view?.remote ? view.remote.slug : t('workstream.noRemote')}
@@ -1069,7 +1069,7 @@ function BranchSegment({
         {error && (
           <span
             role="alert"
-            className="absolute bottom-full left-0 mb-1 whitespace-nowrap sq-frame sq-md sq-fill-elevated sq-ring sq-ring-danger rounded-md border border-danger/40 bg-elevated px-2 py-1 text-[11px] text-danger shadow-lg"
+            className="absolute bottom-full left-0 mb-1 whitespace-nowrap sq-frame sq-md sq-fill-elevated sq-ring edge sq-ring-danger rounded-md border border-danger/40 bg-elevated px-2 py-1 text-[11px] text-danger shadow-float"
           >
             {error}
           </span>
@@ -1300,7 +1300,7 @@ function WorkstreamMenu({
       {/* The whole menu scrolls, not just the branch list: a project with a
           dozen sessions makes the workstream list itself taller than the window,
           and `maxHeight` without `overflow` would only clip it differently. */}
-      <div className="flex min-h-0 flex-col overflow-y-auto sq-frame sq-xl sq-fill-elevated sq-ring rounded-xl border border-border bg-elevated py-1 shadow-2xl">
+      <div className="flex min-h-0 flex-col overflow-y-auto sq-frame sq-xl sq-fill-elevated sq-ring edge edge-strong edge-panel rounded-xl border border-border bg-elevated py-1 shadow-float">
         <MenuLabel>{t('workstream.menuWorkstreams')}</MenuLabel>
 
         {/* The default workstream is the project folder itself — always present,

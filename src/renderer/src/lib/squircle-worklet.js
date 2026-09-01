@@ -115,6 +115,35 @@ function color(styleMap, name) {
   return value ? String(value).trim() : 'transparent'
 }
 
+/**
+ * True when a color would actually put ink on the canvas.
+ *
+ * `transparent` computes to `rgba(0, 0, 0, 0)`, but a `color-mix()` landing on
+ * zero alpha serializes as `color(srgb 0 0 0 / 0)` instead, so comparing against
+ * the two spellings of "transparent" misses it and we pay for a stroke that
+ * paints nothing. Match the alpha component instead of the whole string.
+ */
+function opaque(value) {
+  if (!value || value === 'transparent' || value === 'none') return false
+  return !/(?:\/|,)\s*0(?:\.0*)?\s*\)$/.test(value)
+}
+
+/**
+ * Blend two colors without parsing either.
+ *
+ * Canvas has no color API, but it accepts any CSS color *string*, and
+ * `color-mix()` is a CSS color. So the arithmetic can be handed to the engine,
+ * which also means it works for every form the Typed OM produces (`rgba()`,
+ * `color(srgb ...)`, `oklch()`) rather than just the ones a hand-written parser
+ * would cover. Chromium shipped `color-mix()` in 111; this app runs on 130.
+ *
+ * `srgb` specifically, not `oklab`: this mixes a translucent highlight into a
+ * translucent hairline, and sRGB is what the CSS tokens were authored against.
+ */
+function mix(a, b, percent) {
+  return `color-mix(in srgb, ${a} ${percent}%, ${b})`
+}
+
 /* `registerPaint` throws on a duplicate name, which happens when the dev server
    hot-reloads (the worklet scope outlives the page's JS). Swallowing it stops HMR
    from turning into an unhandled rejection that silently kills squircles. */
@@ -145,7 +174,15 @@ register(
   'squircle-box',
   class {
     static get inputProperties() {
-      return ['--sq-r', '--sq-fill', '--sq-ring', '--sq-dash', 'border-top-width']
+      return [
+        '--sq-r',
+        '--sq-fill',
+        '--sq-ring',
+        '--sq-dash',
+        '--sq-bevel',
+        '--sq-bevel-span',
+        'border-top-width'
+      ]
     }
     paint(ctx, size, styleMap) {
       const r = px(styleMap, '--sq-r', 12)
@@ -153,7 +190,7 @@ register(
       // Skipped when `--sq-fill` is left at its `transparent` default, i.e. the
       // element is keeping its own `bg-*` and only wants the hairline.
       const fill = color(styleMap, '--sq-fill')
-      if (fill !== 'transparent' && fill !== 'rgba(0, 0, 0, 0)') {
+      if (opaque(fill)) {
         squirclePath(ctx, size.width, size.height, r, 0)
         ctx.fillStyle = fill
         ctx.fill()
@@ -166,12 +203,65 @@ register(
       // lose its outer half and render at half opacity.
       squirclePath(ctx, size.width, size.height, r, w / 2)
       ctx.lineWidth = w
-      ctx.strokeStyle = color(styleMap, '--sq-ring')
       // `border-style: dashed` is painted by the UA along the *rectangle*, so its
       // dashes get sliced by the shape at every corner. `--sq-dash` re-creates it
       // along the squircle path instead. 0 (the default) means a solid stroke.
       const dash = px(styleMap, '--sq-dash', 0)
       if (dash > 0) ctx.setLineDash([dash, dash])
+
+      /* The edge is painted with exactly ONE stroke, and that is the whole
+       * trick.
+       *
+       * The obvious way to add a top-lit bevel is a second stroke over the same
+       * path. It looks right in the middle of a straight edge and wrong
+       * everywhere else, because the two strokes' anti-aliased coverage
+       * COMPOSITES: a boundary pixel the rasteriser gives 50% coverage gets
+       * painted twice and ends up far more opaque than either color asked for.
+       * On straight runs every pixel is either fully in or fully out, so nothing
+       * shows; around a corner almost every pixel is partial, so the corner
+       * silently darkens and the curve reads as chunky and stair-stepped.
+       * Measured on an `sq-lg` corner: peak alpha 26 -> 44, i.e. 69% brighter
+       * than the tokens specify, and the pixel-to-pixel roughness along the arc
+       * rose from 36 to 55.
+       *
+       * Blending the two colors FIRST and stroking once fixes it exactly:
+       * coverage is applied a single time, so anti-aliasing works as designed
+       * and the painted color is the one the CSS actually names.
+       *
+       * The gradient therefore runs from bevel-over-ring at the top edge to the
+       * plain ring by `--sq-bevel-span`, rather than from bevel to transparent.
+       * `--sq-bevel` is pre-mixed over `--sq-ring` at its own alpha so the top
+       * still reads as "ring plus highlight", which is what the two-stroke
+       * version was approximating before it over-applied it.
+       *
+       * The span is a length, not a percentage, on purpose: the highlight should
+       * die out over roughly the same physical distance on a 32px button as on a
+       * 300px card, the way real light does. A percentage would stretch it and
+       * make tall panels look uniformly frosted. */
+      const ring = color(styleMap, '--sq-ring')
+      const bevel = color(styleMap, '--sq-bevel')
+      const ringVisible = opaque(ring)
+      const bevelVisible = opaque(bevel)
+      if (!ringVisible && !bevelVisible) return
+
+      const span = px(styleMap, '--sq-bevel-span', 0)
+      // 0 means "no explicit span" -> fade across the whole element.
+      const end = span > 0 ? Math.min(span, size.height) : size.height
+
+      if (!bevelVisible || end <= 0) {
+        // No highlight (a recessed control, or a light theme): a plain hairline.
+        ctx.strokeStyle = ring
+      } else {
+        const base = ringVisible ? ring : `rgb(from ${bevel} r g b / 0)`
+        const ramp = ctx.createLinearGradient(0, 0, 0, end)
+        // 60/40 rather than a flat over-composite: the highlight is strongest
+        // right at the lit edge and most of it is gone within the span, which is
+        // how a real surface falls off. Ending ON the ring color (not on
+        // transparent) is what keeps this a single stroke.
+        ramp.addColorStop(0, mix(bevel, base, 60))
+        ramp.addColorStop(1, base)
+        ctx.strokeStyle = ramp
+      }
       ctx.stroke()
     }
   }

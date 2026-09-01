@@ -24,6 +24,30 @@
   --color-warning: #d9a441;
   --color-danger: #f0556a;
 
+  /* Elevation. Stacked short shadows rather than one big blur: a real contact
+     shadow is tight and dark where the object meets the page and diffuses fast,
+     whereas a single `0 4px 12px` reads as a grey rectangle sitting behind the
+     element. `raised` is for things resting ON the page (buttons, cards);
+     `float` is for things detached from it (menus, modals), so it keeps the
+     tight contact layers and adds a longer throw.
+
+     Declared in `@theme` rather than `:root` because that is what makes Tailwind
+     emit `shadow-raised` / `shadow-float` utilities; a plain custom property
+     would be readable but not usable as a class.
+
+     Each is one level of INDIRECTION rather than a literal value, and that is
+     load-bearing. Tailwind resolves a `@theme` token at BUILD time and inlines
+     it into the utility, so `--shadow-raised: 0 1px ...` would compile to a
+     `box-shadow` with the numbers baked in -- unreachable by the light-theme
+     override below and by a theme file, both of which act at runtime. Pointing
+     the token at `var(--elevation-*)` keeps a live reference in the compiled
+     rule, so whatever `:root` says at runtime is what paints. (Verified against
+     the compiler: the utility emits `--tw-shadow: var(--elevation-raised)`.)
+
+     The real values live in `:root`, below, next to the edge tokens. */
+  --shadow-raised: var(--elevation-raised);
+  --shadow-float: var(--elevation-float);
+
   /* Motion — the built-in CSS easings are too weak to feel intentional, so we
      register stronger custom curves as `ease-*` utilities (and :root vars). */
   --ease-out-quart: cubic-bezier(0.23, 1, 0.32, 1); /* entrances: fast start, soft land */
@@ -264,6 +288,83 @@
   --sq-r: calc(var(--radius-2xl) * var(--sq-scale));
 }
 
+/* --- Edge lighting -------------------------------------------------------
+ *
+ * A hairline of one flat color is the honest way to draw a box, and it is why
+ * a dense dark UI can look correct and still feel cheap: every edge in it
+ * reflects light the same amount, which nothing in the physical world does.
+ *
+ * Two changes fix that, and they work together:
+ *
+ * 1. TRANSLUCENT, not opaque. `--color-border` is a fixed `#232326`, so it
+ *    reads as a drawn line and it is wrong the moment the surface under it
+ *    changes -- the same grey is too heavy on `bg` and too faint on `elevated`.
+ *    A white at low alpha is a *sheen*: it takes on whatever it sits over, so
+ *    one token is right on every surface, and it survives a light theme because
+ *    `--color-white` is the polarity token (see shared/theme.ts), not literally
+ *    white.
+ *
+ * 2. LIT FROM ABOVE. The top edge of a raised control catches more light than
+ *    the bottom. `--sq-bevel` is that highlight, fading out over
+ *    `--sq-bevel-span` (the worklet paints it as a second stroke over the ring).
+ *    It is the cue that makes a button read as a physical object; without it a
+ *    translucent hairline is just a fainter drawn line.
+ *
+ * The alphas are deliberately small. At these values you should not be able to
+ * point at the effect -- if the highlight is visible AS a highlight it has gone
+ * too far and the control starts to look embossed. */
+:root {
+  /* The resting hairline: a sheen over whatever surface it sits on.
+
+     These alphas are low on purpose. An edge's job is to separate a control from
+     its background, and the moment you can point at it and call it "a border" it
+     has stopped doing that job and started competing with the content. The test
+     is that the shape stays legible while the line itself is not what you
+     notice. */
+  --edge: color-mix(in srgb, var(--color-white) 5%, transparent);
+  /* Hover / focus, and the edge of anything that floats (menus, modals). */
+  --edge-strong: color-mix(in srgb, var(--color-white) 9%, transparent);
+  /* The top-lit highlight for raised controls. Kept close to `--edge`: a hint of
+     direction, not a visible gleam. */
+  --edge-lit: color-mix(in srgb, var(--color-white) 7%, transparent);
+
+  /* Elevation, as the `shadow-raised` / `shadow-float` utilities read it.
+
+     LITERAL black, deliberately not `var(--color-black)`. That token is half of
+     the polarity pair (see shared/theme.ts): it means "the color that sits ON
+     the primary button", and a light theme sets it to near-WHITE. Building a
+     shadow from it makes every light theme cast a white glow instead of a
+     shadow. Shadow is the absence of light -- it is dark in every theme, and
+     only its strength changes.
+
+     Deliberately CONTACT shadows only -- tight, close and weak. A wide ambient
+     shadow is what makes a dark UI look like light-mockup cards pasted onto it:
+     against a near-black page the spread has nothing left to darken, so it reads
+     as a grey halo around the element rather than as depth. What actually sells
+     elevation here is the top-lit edge; the shadow only needs to anchor the
+     bottom. So `raised` is a single 1px contact line and `float` keeps just a
+     short throw for things genuinely detached from the page. */
+  --elevation-raised: 0 1px 2px rgb(0 0 0 / 0.06);
+  --elevation-float: 0 1px 2px rgb(0 0 0 / 0.07), 0 4px 12px rgb(0 0 0 / 0.09);
+}
+
+/* A light theme inverts the polarity tokens, so `--color-white` becomes
+ * near-black and the sheen above turns into a dark line -- correct in kind, but
+ * a *lit* top edge is a dark-UI idea: on paper the convincing cue is a soft
+ * shadow, not a highlight. So the bevel is dropped, the hairline is dialled back
+ * to something closer to a rule, and the shadows carry the depth instead.
+ *
+ * They are also softened: the same alpha that reads as a subtle contact shadow
+ * against a near-black page reads as dirt against white. */
+:root[data-appearance='light'] {
+  --edge: color-mix(in srgb, var(--color-white) 8%, transparent);
+  --edge-strong: color-mix(in srgb, var(--color-white) 14%, transparent);
+  --edge-lit: transparent;
+
+  --elevation-raised: 0 1px 2px rgb(0 0 0 / 0.05);
+  --elevation-float: 0 1px 2px rgb(0 0 0 / 0.06), 0 4px 12px rgb(0 0 0 / 0.07);
+}
+
 /* The element keeps a real `border-radius`, just a different number.
 
    Zeroing it would be wrong in three ways: `box-shadow` follows `border-radius`,
@@ -312,10 +413,27 @@
   background-clip: border-box;
 }
 
-/* The border still occupies layout -- only its painting moves to the worklet. */
+/* The border still occupies layout -- only its painting moves to the worklet.
+ *
+ * The default `--sq-ring` lives in the `base` LAYER while the rest of this rule
+ * stays unlayered, and that split is load-bearing.
+ *
+ * Unlayered CSS beats every `@layer`, which is exactly what we want for
+ * `border-color` (it must defeat the `border-border` utility) and exactly what
+ * we do NOT want for the fallback color: as one unlayered declaration it also
+ * beat `.sq-ring-strong` and every `hover:[--sq-ring:...]` in the app, so ~24
+ * intended hover/focus/danger borders silently painted the default grey. The
+ * classes were written, compiled and shipped, and simply never applied.
+ *
+ * Splitting them lets each land where it belongs: `border-color` unlayered and
+ * unbeatable, the fallback in `base` where any utility can override it. */
 [data-squircle] .sq-ring {
   border-color: transparent;
-  --sq-ring: var(--color-border);
+}
+@layer base {
+  [data-squircle] .sq-ring {
+    --sq-ring: var(--color-border);
+  }
 }
 
 /* The fill moves into the painted background, so the real one has to go or it
@@ -355,16 +473,57 @@
   border-style: solid;
 }
 
-/* Ring colors for the minority of elements whose border isn't `--color-border`.
-   (Anything more exotic can set `[--sq-ring:...]` inline.) */
-.sq-ring-strong {
-  --sq-ring: var(--color-border-strong);
-}
-.sq-ring-accent {
-  --sq-ring: color-mix(in srgb, var(--color-accent) 35%, transparent);
-}
-.sq-ring-danger {
-  --sq-ring: color-mix(in srgb, var(--color-danger) 40%, transparent);
+@layer components {
+  /* --- The edge treatment, as three classes -------------------------------
+   *
+   * `.edge` is the whole effect: translucent hairline + top-lit bevel. It is
+   * an add-on to `.sq-ring`/`.sq-frame`, never a replacement -- those own the
+   * geometry, this only re-colors it.
+   *
+   * The span is set per size class rather than globally because the highlight
+   * has to die out over a fixed physical distance: ~1.5x the control's height
+   * keeps a 32px button lit across its whole face while a 300px card gets a lip
+   * along the top and stays flat below it. */
+  .edge {
+    --sq-ring: var(--edge);
+    --sq-bevel: var(--edge-lit);
+    --sq-bevel-span: 48px;
+  }
+  /* Hover/active, and anything floating above the page. */
+  .edge-strong {
+    --sq-ring: var(--edge-strong);
+  }
+  /* Panels: a lip along the top rather than a lit face. */
+  .edge-panel {
+    --sq-bevel-span: 120px;
+  }
+
+  /* Ring colors for the minority of elements whose border isn't `--color-border`.
+     (Anything more exotic can set `[--sq-ring:...]` inline.)
+
+     These are MEANING, not decoration: a danger border is red because the thing
+     is destructive, and no amount of visual polish may quietly turn it grey. So
+     they are declared AFTER `.edge` deliberately. Both sit in the same layer at
+     the same specificity, which makes source order the tie-break, and an element
+     carrying `.edge` for its bevel plus `.sq-ring-danger` for its color has to
+     resolve to red -- otherwise adding the generic treatment to a popover
+     silently strips the semantic it was relying on.
+
+     They stay in `components` (not unlayered) so a Tailwind utility in
+     `utilities` still wins: an element may carry `.sq-ring-danger` at rest and a
+     `hover:[--sq-ring:...]` on top, and the hover must take over. */
+  .sq-ring-strong {
+    --sq-ring: var(--color-border-strong);
+  }
+  .sq-ring-accent {
+    --sq-ring: color-mix(in srgb, var(--color-accent) 35%, transparent);
+  }
+  .sq-ring-danger {
+    --sq-ring: color-mix(in srgb, var(--color-danger) 40%, transparent);
+  }
+  .sq-ring-success {
+    --sq-ring: color-mix(in srgb, var(--color-success) 40%, transparent);
+  }
 }
 
 /* Tailwind v4 borders default to currentColor — pin a sane default. */

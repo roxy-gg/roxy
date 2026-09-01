@@ -111,7 +111,7 @@ export const triggerClass =
  * tall list into a scrolling one instead of one that runs off the top.
  */
 const popoverClass =
-  'animate-pop-in absolute bottom-full z-50 mb-2 flex flex-col overflow-y-auto sq-frame sq-xl sq-fill-elevated sq-ring rounded-xl border border-border bg-elevated shadow-2xl origin-bottom-left'
+  'animate-pop-in absolute bottom-full z-50 mb-2 flex flex-col overflow-y-auto sq-frame sq-xl sq-fill-elevated sq-ring edge edge-strong edge-panel rounded-xl border border-border bg-elevated shadow-float origin-bottom-left'
 /** Menu widths in px, matching what each picker renders. */
 const POPOVER_W = 288
 /** Just wide enough for "Build"/"Plan" + the check, now that blurbs are gone. */
@@ -470,7 +470,7 @@ export function ContextMeter(): JSX.Element {
     >
       {open && (
         <div className="absolute bottom-full z-50 flex flex-col pb-1.5" style={anchor}>
-          <div className="animate-pop-in min-h-0 origin-bottom-left overflow-y-auto sq-frame sq-xl sq-fill-elevated sq-ring rounded-xl border border-border bg-elevated p-3 shadow-2xl">
+          <div className="animate-pop-in min-h-0 origin-bottom-left overflow-y-auto sq-frame sq-xl sq-fill-elevated sq-ring edge edge-strong edge-panel rounded-xl border border-border bg-elevated p-3 shadow-float">
             <div className="mb-1.5 text-xs font-medium text-text">{t('inference.meterTitle')}</div>
             <div className="mb-1 flex items-baseline justify-between text-[11px] text-text-subtle">
               <span className="tabular-nums">
