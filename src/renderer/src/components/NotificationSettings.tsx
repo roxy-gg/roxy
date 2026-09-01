@@ -15,7 +15,11 @@ import { playNotificationSound } from '../lib/notify'
  * feature should always do, so it lives in `shouldNotify`.
  *
  * The play button stays: it is the only way to know what you signed up for, and
- * the click doubles as the gesture that unlocks Chromium's autoplay policy.
+ * the click doubles as the gesture that unlocks Chromium's autoplay policy -- an
+ * app that has never been clicked in cannot play audio, so without it the first
+ * chime is swallowed. That is also why the button is never disabled: the person
+ * who just switched notifications ON and touched nothing else is exactly the one
+ * who needs to make that gesture.
  */
 export function NotificationSettings(): JSX.Element {
   const { t } = useTranslation()
@@ -36,7 +40,6 @@ export function NotificationSettings(): JSX.Element {
       <div className="flex shrink-0 items-center gap-3">
         <Button
           size="sm"
-          disabled={!enabled}
           aria-label={t('settings.notifications.preview')}
           onClick={() => void playNotificationSound()}
         >
