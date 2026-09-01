@@ -8,6 +8,10 @@ export const CHANNELS = {
   settingsSetAutoWorkstream: 'settings:setAutoWorkstream',
   settingsSetBranchPrefix: 'settings:setBranchPrefix',
   settingsSetLanguage: 'settings:setLanguage',
+  settingsSetNotifyCondition: 'settings:setNotifyCondition',
+  settingsSetNotifySound: 'settings:setNotifySound',
+  settingsSetNotifyVolume: 'settings:setNotifyVolume',
+  settingsSetNotifySystemToast: 'settings:setNotifySystemToast',
   settingsCompleteOnboarding: 'settings:completeOnboarding',
   settingsReset: 'settings:reset',
   // Anonymous usage tracking. Its own pair of channels rather than a field on
@@ -15,6 +19,16 @@ export const CHANNELS = {
   // survives a factory reset (which wipes the settings table).
   settingsGetTelemetry: 'settings:getTelemetry',
   settingsSetTelemetry: 'settings:setTelemetry',
+
+  /**
+   * Turn-completion notifications. The toast is posted from main (only it can
+   * focus the window on click); the SOUND is played in the renderer, which asks
+   * for the custom file's bytes because main has no audio output.
+   */
+  notifyToast: 'notify:toast',
+  notifyPickSound: 'notify:pickSound',
+  notifyClearSound: 'notify:clearSound',
+  notifyReadSound: 'notify:readSound',
 
   providersList: 'providers:listConnected',
   providersConnect: 'providers:connect',

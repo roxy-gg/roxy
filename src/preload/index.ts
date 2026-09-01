@@ -30,11 +30,23 @@ const roxy: RoxyApi = {
     setContextLimit: (limit) => ipcRenderer.invoke(CHANNELS.settingsSetContextLimit, limit),
     setAutoWorkstream: (enabled) => ipcRenderer.invoke(CHANNELS.settingsSetAutoWorkstream, enabled),
     setBranchPrefix: (prefix) => ipcRenderer.invoke(CHANNELS.settingsSetBranchPrefix, prefix),
+    setNotifyCondition: (condition) =>
+      ipcRenderer.invoke(CHANNELS.settingsSetNotifyCondition, condition),
+    setNotifySound: (enabled) => ipcRenderer.invoke(CHANNELS.settingsSetNotifySound, enabled),
+    setNotifyVolume: (volume) => ipcRenderer.invoke(CHANNELS.settingsSetNotifyVolume, volume),
+    setNotifySystemToast: (enabled) =>
+      ipcRenderer.invoke(CHANNELS.settingsSetNotifySystemToast, enabled),
     setLanguage: (language) => ipcRenderer.invoke(CHANNELS.settingsSetLanguage, language),
     completeOnboarding: () => ipcRenderer.invoke(CHANNELS.settingsCompleteOnboarding),
     reset: () => ipcRenderer.invoke(CHANNELS.settingsReset),
     getTelemetry: () => ipcRenderer.invoke(CHANNELS.settingsGetTelemetry),
     setTelemetry: (enabled) => ipcRenderer.invoke(CHANNELS.settingsSetTelemetry, enabled)
+  },
+  notifications: {
+    toast: (title, body) => ipcRenderer.invoke(CHANNELS.notifyToast, title, body),
+    pickSound: () => ipcRenderer.invoke(CHANNELS.notifyPickSound),
+    clearSound: () => ipcRenderer.invoke(CHANNELS.notifyClearSound),
+    readSound: () => ipcRenderer.invoke(CHANNELS.notifyReadSound)
   },
   providers: {
     listConnected: () => ipcRenderer.invoke(CHANNELS.providersList),

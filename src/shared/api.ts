@@ -7,6 +7,8 @@ import type {
   AddMessageInput,
   AppSettings,
   AppVersions,
+  NotifyCondition,
+  NotifySoundFile,
   ActivityStats,
   Chat,
   ConnectedProvider,
@@ -717,6 +719,12 @@ export interface RoxyApi {
     setContextLimit(limit: number | null): Promise<AppSettings>
     setAutoWorkstream(enabled: boolean): Promise<AppSettings>
     setBranchPrefix(prefix: string): Promise<AppSettings>
+    /** When a finished turn may notify: never / only when unfocused / always. */
+    setNotifyCondition(condition: NotifyCondition): Promise<AppSettings>
+    setNotifySound(enabled: boolean): Promise<AppSettings>
+    /** Notification volume, 0..1. Clamped in main. */
+    setNotifyVolume(volume: number): Promise<AppSettings>
+    setNotifySystemToast(enabled: boolean): Promise<AppSettings>
     /** Set the UI language. An unknown code falls back to English. */
     setLanguage(language: Language): Promise<AppSettings>
     completeOnboarding(): Promise<AppSettings>
@@ -728,6 +736,29 @@ export interface RoxyApi {
      */
     getTelemetry(): Promise<boolean>
     setTelemetry(enabled: boolean): Promise<boolean>
+  }
+  notifications: {
+    /**
+     * Post a native OS toast. Both strings arrive already translated: main has
+     * no i18next instance, so the renderer resolves them before calling.
+     */
+    toast(title: string, body: string): Promise<void>
+    /**
+     * Open a file picker and copy the chosen sound into the app's own storage.
+     * Returns the updated settings, plus why nothing changed when it didn't —
+     * 'cancelled' is a normal outcome and not an error to surface.
+     */
+    pickSound(): Promise<{
+      settings: AppSettings
+      error: 'cancelled' | 'type' | 'size' | 'read' | null
+    }>
+    /** Go back to the bundled default sound, deleting the custom file. */
+    clearSound(): Promise<AppSettings>
+    /**
+     * Read the current custom sound's bytes. Null when there is none, or the
+     * file went missing — the renderer then plays the bundled default.
+     */
+    readSound(): Promise<NotifySoundFile | null>
   }
   providers: {
     listConnected(): Promise<ConnectedProvider[]>

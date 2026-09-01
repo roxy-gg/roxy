@@ -25,6 +25,7 @@ import { ActivitySection } from '../components/ActivitySection'
 import { ProviderLogo } from '../lib/providerLogos'
 import { SubscriptionAccounts } from '../components/SubscriptionSetup'
 import { ModelVisibility } from '../components/ModelVisibility'
+import { NotificationSettings } from '../components/NotificationSettings'
 import { useRoxyStore } from '../lib/store'
 
 /** The section heading repeated down the page. */
@@ -231,6 +232,11 @@ export default function Settings(): JSX.Element {
             ))}
           </select>
         </div>
+      </section>
+
+      <section className="mb-8">
+        <h2 className={SECTION_HEADING}>{t('settings.notifications.heading')}</h2>
+        <NotificationSettings />
       </section>
 
       <section className="mb-8">

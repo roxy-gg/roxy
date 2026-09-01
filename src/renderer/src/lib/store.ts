@@ -6,6 +6,7 @@ import type {
   AppSettings,
   Chat,
   ConnectedProvider,
+  NotifyCondition,
   Loop,
   Message,
   MessagePart,
@@ -41,6 +42,7 @@ import {
 import { uniqueSlug } from '@shared/slugs'
 import { shouldAutoWorkstream, statusKeyForSession } from '@shared/workstream'
 import { api } from './api'
+import { notifyTurnComplete, playNotificationSound } from './notify'
 import type { ComposerImage } from './images'
 import type {
   GitStatusView,
@@ -221,6 +223,19 @@ interface RoxyStore {
   setAutoWorkstream: (enabled: boolean) => Promise<void>
   setTelemetryEnabled: (enabled: boolean) => Promise<void>
   setBranchPrefix: (prefix: string) => Promise<void>
+  setNotifyCondition: (condition: NotifyCondition) => Promise<void>
+  setNotifySound: (enabled: boolean) => Promise<void>
+  setNotifyVolume: (volume: number) => Promise<void>
+  setNotifySystemToast: (enabled: boolean) => Promise<void>
+  /**
+   * Pick a custom notification sound. Resolves to the reason nothing changed,
+   * or null on success - 'cancelled' included, so the caller can stay quiet
+   * about a dialog the user simply closed.
+   */
+  pickNotifySound: () => Promise<'cancelled' | 'type' | 'size' | 'read' | null>
+  clearNotifySound: () => Promise<void>
+  /** Play the current notification sound once, for the Settings preview. */
+  previewNotifySound: () => Promise<void>
   setLanguage: (language: Language) => Promise<void>
   selectChat: (id: string) => Promise<void>
   clearActive: () => void
@@ -1570,6 +1585,40 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
     set({ settings })
   },
 
+  setNotifyCondition: async (condition) => {
+    set({ settings: await api.settings.setNotifyCondition(condition) })
+  },
+
+  setNotifySound: async (enabled) => {
+    set({ settings: await api.settings.setNotifySound(enabled) })
+  },
+
+  setNotifyVolume: async (volume) => {
+    set({ settings: await api.settings.setNotifyVolume(volume) })
+  },
+
+  setNotifySystemToast: async (enabled) => {
+    set({ settings: await api.settings.setNotifySystemToast(enabled) })
+  },
+
+  pickNotifySound: async () => {
+    const { settings, error } = await api.notifications.pickSound()
+    set({ settings })
+    // Play what was just chosen. Picking a sound you can't hear until the next
+    // turn ends is how people end up with one they dislike.
+    if (!error) void playNotificationSound(settings)
+    return error
+  },
+
+  clearNotifySound: async () => {
+    set({ settings: await api.notifications.clearSound() })
+  },
+
+  previewNotifySound: async () => {
+    const { settings } = get()
+    if (settings) await playNotificationSound(settings)
+  },
+
   selectChat: async (id) => {
     // Per-chat send state survives switching — just swap which chat is shown.
     // Clear messages/queue first so the previous chat's content never flashes.
@@ -1910,7 +1959,24 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
         await get().selectChat(chatId)
       }
       // Don't auto-run the next queued prompt when the user stopped this turn.
-      if (!wasStopped) await get().drainQueue(chatId)
+      //
+      // The notification is decided BEFORE draining: `drainQueue` awaits the
+      // whole chain it starts, so anything placed after that await runs once
+      // per queued prompt as the recursion unwinds - a queue of five would fire
+      // five notifications, all at the end. Checking the queue first means only
+      // the turn that leaves the session genuinely idle announces itself.
+      //
+      // A stopped turn stays silent either way: the user is already here, they
+      // just pressed the button.
+      if (!wasStopped) {
+        const pending = await api.queue.list(chatId)
+        const notifySettings = get().settings
+        if (pending.length === 0 && notifySettings) {
+          const title = get().chats.find((c) => c.id === chatId)?.title
+          notifyTurnComplete(notifySettings, title ?? '')
+        }
+        await get().drainQueue(chatId)
+      }
     }
 
     clearStop()

@@ -227,6 +227,10 @@
     "selectModel": "选择模型",
     "unpin": "取消固定模型"
   },
+  "notifications": {
+    "turnCompleteBody": "{{session}} is ready for you.",
+    "turnCompleteTitle": "Roxy finished"
+  },
   "onboarding": {
     "apiKey": "API 密钥",
     "back": "返回",
@@ -392,6 +396,29 @@
       "showCount": "Show {{count}}",
       "someHidden": "{{shown}} of {{total}} shown · {{hidden}} hidden",
       "unhide": "Unhide"
+    },
+    "notifications": {
+      "choose": "Choose file",
+      "conditionAlways": "Always",
+      "conditionNever": "Never",
+      "conditionUnfocused": "Only when Roxy isn't focused",
+      "errorRead": "Couldn't read that file.",
+      "errorSize": "That file is too large. Notification sounds are capped at 2 MB.",
+      "errorType": "That file type isn't supported. Pick a WAV, MP3, OGG, M4A or FLAC file.",
+      "heading": "Notifications",
+      "preview": "Play",
+      "reset": "Use default",
+      "soundDescription": "Roxy's own chime, not your system alert sound.",
+      "soundFileDefault": "Built-in chime",
+      "soundFileDescription": "Use your own audio file instead of the built-in chime. WAV, MP3, OGG, M4A or FLAC, up to 2 MB. The file is copied into Roxy, so moving or deleting the original won't break it.",
+      "soundFileTitle": "Notification sound",
+      "soundTitle": "Play a sound",
+      "toastDescription": "A native notification from your operating system. Clicking it brings Roxy to the front.",
+      "toastTitle": "Show a desktop notification",
+      "volumeLabel": "Volume",
+      "whenDescription": "Roxy can tell you when the agent has finished and is waiting on you. Turns you stop yourself never notify, and a session working through a queue only notifies once it's done with all of it.",
+      "whenLabel": "When to notify",
+      "whenTitle": "Notify when a turn finishes"
     },
     "privacy": {
       "description": "计数和时间 — 应用程序启动、完成的回合、一个回合所需的步骤和工具数量、使用的令牌数量以及大致成本 — 与此机器上生成的随机 ID 绑定。绝不包含您的提示、代码、文件路径、仓库名称或任何错误文本。",
