@@ -493,24 +493,6 @@ export const MIGRATIONS: Migration[] = [
       hidden_at   INTEGER NOT NULL,
       PRIMARY KEY (provider_id, model)
     );
-  `,
-
-  // ---- v24: one notification switch ----
-  // Sound, desktop toast and a never/unfocused/always picker collapsed into a
-  // single `notify_on_complete`. Carry the old intent across rather than
-  // silently re-enabling notifications for someone who had turned them off:
-  // 'never', or sound and toast both off, means off.
-  //
-  // Data, not structure, so it belongs here and not in `repairSchema`.
-  /* sql */ `
-    INSERT OR REPLACE INTO settings(key, value)
-      SELECT 'notify_on_complete', '0'
-      WHERE (SELECT value FROM settings WHERE key = 'notify_condition') = 'never'
-         OR ((SELECT value FROM settings WHERE key = 'notify_sound') = '0'
-             AND (SELECT value FROM settings WHERE key = 'notify_system_toast') = '0');
-
-    DELETE FROM settings
-      WHERE key IN ('notify_condition', 'notify_sound', 'notify_system_toast', 'notify_volume');
   `
 ]
 
