@@ -1,130 +1,114 @@
 /**
- * Turn-completion notifications — the main-process half.
+ * Turn-completion notifications - the main-process half.
  *
- * Two jobs, both of which have to live here rather than in the renderer:
+ * One job, and it has to live here rather than in the renderer: the native OS
+ * toast. The renderer's Web `Notification` also reaches the OS, but it gives no
+ * way to focus the window when the toast is clicked, which is the entire point
+ * of the notification.
  *
- *  - The native OS toast. The renderer's Web `Notification` also reaches the OS,
- *    but it gives no way to focus the window when the toast is clicked, which is
- *    the entire point of the notification.
- *  - Custom sound files. The chosen file is COPIED into `<userData>/sounds/`
- *    and thereafter read back by name, so moving or deleting the original can't
- *    silently break the sound, and the renderer never touches an arbitrary path.
+ * The SOUND is not here at all. It is a bundled asset played by the renderer,
+ * which is the only side with audio output.
  *
- * The sound itself is PLAYED in the renderer (Electron's main process has no
- * audio output at all), so this file only ever hands over bytes.
- *
- * Deliberately says nothing about WHEN to notify: the `notifyCondition` /
- * `notifySound` decision is the renderer's, because only it knows whether the
- * turn was stopped, whether a queue is still draining, and what the strings say.
+ * Deliberately says nothing about WHEN to notify: that decision is the
+ * renderer's, because only it knows whether the turn was stopped, whether a
+ * queue is still draining, whether the window is focused, and what the strings
+ * say.
  */
-import { promises as fs } from 'node:fs'
-import path from 'node:path'
-import { app, BrowserWindow, Notification } from 'electron'
-import {
-  NOTIFY_SOUND_EXTENSIONS,
-  NOTIFY_SOUND_MAX_BYTES,
-  type NotifySoundFile
-} from '../../shared/types'
+import { BrowserWindow, Notification, nativeImage } from 'electron'
+import { CHANNELS } from '../../shared/ipc'
 
-/** Where custom notification sounds are kept. */
-function soundsDir(): string {
-  return path.join(app.getPath('userData'), 'sounds')
+/**
+ * The app's identity for Windows toasts. Windows renders this string as the
+ * toast's header, so it must be the stable id and never a filesystem path.
+ */
+export const APP_USER_MODEL_ID = 'com.roxy.app'
+
+const isWindows = process.platform === 'win32'
+
+/**
+ * Toasts still awaiting a click.
+ *
+ * A shown `Notification` that nothing references can be garbage collected, and
+ * with it the `click` handler - while the toast is still sitting in the Windows
+ * Action Center, clickable. Holding it here until it is clicked or dismissed is
+ * what makes "click the toast, land on that session" work minutes later.
+ */
+const live = new Set<Notification>()
+
+/** Roxy's icon, injected from main so this module needs no `?asset` import. */
+let iconPath: string | undefined
+export function setToastIcon(p: string): void {
+  iconPath = p
 }
 
 /**
- * Resolve a stored sound NAME to a path inside the sounds directory, or null if
- * it escapes it.
- *
- * The name comes back out of the settings table, which a determined user can
- * edit by hand — `../../../etc/passwd` must not become a readable file. Compare
- * the resolved path rather than scanning for `..`, so encodings and symlinked
- * separators can't sneak past a substring check.
+ * A `file:///` URI Windows will actually load. `encodeURI` matters: the app can
+ * sit under a path with spaces (a user folder like "Jair Escamilla" is the
+ * common case) and an unencoded space silently drops the image, leaving the
+ * generic placeholder that this template exists to replace.
  */
-function resolveSoundPath(name: string): string | null {
-  const dir = soundsDir()
-  const full = path.resolve(dir, name)
-  if (path.dirname(full) !== path.resolve(dir)) return null
-  return full
+function fileUri(p: string): string {
+  return 'file:///' + encodeURI(p.replace(/\\/g, '/'))
+}
+
+/** XML-escape text before it goes into a Windows toast template. */
+function esc(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;')
 }
 
 /**
- * Copy a user-chosen audio file into the sounds directory and return its new
- * name, or an error the UI can show.
+ * Post a native OS toast for the session `chatId`.
  *
- * Only ONE custom sound exists at a time: the copy always lands on
- * `custom.<ext>` and older ones are removed, so picking a new sound can't leave
- * a directory of abandoned files behind. The extension is kept because that is
- * what tells the renderer's `<audio>` how to decode the blob.
- */
-export async function importSound(
-  sourcePath: string
-): Promise<{ ok: true; name: string } | { ok: false; error: 'type' | 'size' | 'read' }> {
-  const ext = path.extname(sourcePath).slice(1).toLowerCase()
-  if (!(NOTIFY_SOUND_EXTENSIONS as readonly string[]).includes(ext))
-    return { ok: false, error: 'type' }
-
-  try {
-    const stat = await fs.stat(sourcePath)
-    if (stat.size > NOTIFY_SOUND_MAX_BYTES) return { ok: false, error: 'size' }
-
-    const dir = soundsDir()
-    await fs.mkdir(dir, { recursive: true })
-    await clearSounds()
-    const name = `custom.${ext}`
-    await fs.copyFile(sourcePath, path.join(dir, name))
-    return { ok: true, name }
-  } catch {
-    return { ok: false, error: 'read' }
-  }
-}
-
-/** Delete every stored custom sound. A missing directory is already the goal. */
-export async function clearSounds(): Promise<void> {
-  const dir = soundsDir()
-  try {
-    const entries = await fs.readdir(dir)
-    await Promise.all(entries.map((e) => fs.rm(path.join(dir, e), { force: true })))
-  } catch {
-    // Nothing to clear.
-  }
-}
-
-/**
- * Read a stored sound back for playback. Null when it is missing — the caller
- * falls back to the bundled default rather than going silent, since a sound the
- * user can't hear is indistinguishable from a broken feature.
- */
-export async function readSound(name: string): Promise<NotifySoundFile | null> {
-  const full = resolveSoundPath(name)
-  if (!full) return null
-  try {
-    const buf = await fs.readFile(full)
-    // Copy out of the pooled Buffer: `buf.buffer` is a shared arena, and sending
-    // it whole would ship unrelated memory across IPC.
-    const data = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer
-    return { name, data }
-  } catch {
-    return null
-  }
-}
-
-/**
- * Post a native OS toast. Clicking it brings the window to the front, which is
- * the only reason this isn't the renderer's Web Notification API.
+ * Clicking it focuses the window AND asks the renderer to open that session -
+ * which is the whole point of a per-session toast, and the reason this isn't the
+ * renderer's Web Notification API: only main can raise the window.
  *
- * `silent: true` always: Roxy plays its own sound, and letting the OS add its
- * default alert on top produces two noises for one event — the exact thing the
- * custom-sound setting exists to avoid.
+ * `silent: true` always: Roxy plays its own chime, and letting the OS add its
+ * default alert on top produces two noises for one event.
  */
-export function showTurnToast(title: string, body: string): void {
+export function showTurnToast(title: string, body: string, chatId: string): void {
   if (!Notification.isSupported()) return
-  const notification = new Notification({ title, body, silent: true })
+  const icon = iconPath ? nativeImage.createFromPath(iconPath) : undefined
+  const notification = new Notification({
+    title,
+    body,
+    silent: true,
+    ...(icon && !icon.isEmpty() ? { icon } : {}),
+    // Windows ignores `icon` for the large circular avatar, so ask for the
+    // template explicitly. `ToastGeneric` + a `appLogoOverride` crop gives the
+    // rounded app icon at the top-left instead of the generic placeholder.
+    ...(isWindows && iconPath
+      ? {
+          toastXml: `<toast activationType="foreground">
+  <visual>
+    <binding template="ToastGeneric">
+      <image placement="appLogoOverride" hint-crop="circle" src="${esc(fileUri(iconPath))}"/>
+      <text hint-maxLines="1">${esc(title)}</text>
+      <text>${esc(body)}</text>
+    </binding>
+  </visual>
+  <audio silent="true"/>
+</toast>`
+        }
+      : {})
+  })
+  live.add(notification)
+  notification.on('close', () => live.delete(notification))
   notification.on('click', () => {
+    live.delete(notification)
     const win = BrowserWindow.getAllWindows()[0]
     if (!win) return
     if (win.isMinimized()) win.restore()
     win.show()
     win.focus()
+    // Raising the window is not enough: it comes back on whatever session was
+    // last open, which is exactly the one you did NOT get notified about.
+    win.webContents.send(CHANNELS.notifyActivated, chatId)
   })
   notification.show()
 }

@@ -4,7 +4,6 @@ import { normalizeServerConfig, type McpServerConfig, type McpServerRecord } fro
 import { DEFAULT_BRANCH_PREFIX, normalizeBranchPrefix } from '../../shared/branch'
 import { DEFAULT_LANGUAGE, normalizeLanguage } from '../../shared/i18n'
 import type { Language } from '../../shared/i18n'
-import { DEFAULT_NOTIFY_VOLUME } from '../../shared/types'
 import type {
   AddMessageInput,
   AppSettings,
@@ -16,7 +15,6 @@ import type {
   Message,
   MessagePart,
   MessageRole,
-  NotifyCondition,
   ProviderAuth,
   ProviderWire,
   QueueImage,
@@ -128,29 +126,10 @@ export function getSettings(): AppSettings {
     // than leave the UI rendering raw keys.
     language: normalizeLanguage(map.get('language')),
     activeThemeId: map.get('active_theme_id') ?? null,
-    // Only 'never' and 'always' are ever written; anything else (no row, or a
-    // value from a build that spelled it differently) means the default.
-    notifyCondition: ((): NotifyCondition => {
-      const v = map.get('notify_condition')
-      return v === 'never' || v === 'always' ? v : 'unfocused'
-    })(),
     // Defaults ON, so the absence of a row means enabled - same convention as
     // auto_workstream above, and for the same reason: no migration needed.
-    notifySound: map.get('notify_sound') !== '0',
-    notifySoundName: map.get('notify_sound_name') ?? null,
-    notifyVolume: clampVolume(Number(map.get('notify_volume'))),
-    notifySystemToast: map.get('notify_system_toast') !== '0'
+    notifyOnComplete: map.get('notify_on_complete') !== '0'
   }
-}
-
-/**
- * Volume is read back through this rather than trusted, because it also runs on
- * `Number(undefined)` -> NaN for a fresh install. NaN would sail through a bare
- * range check and reach `audio.volume`, which throws on it.
- */
-function clampVolume(v: number): number {
-  if (!Number.isFinite(v)) return DEFAULT_NOTIFY_VOLUME
-  return Math.min(1, Math.max(0, v))
 }
 
 function setSetting(key: string, value: string | null): void {
@@ -256,30 +235,9 @@ export function setAutoWorkstream(enabled: boolean): AppSettings {
   return getSettings()
 }
 
-export function setNotifyCondition(condition: NotifyCondition): AppSettings {
-  // 'unfocused' is the default, so it clears the row rather than writing one.
-  setSetting('notify_condition', condition === 'unfocused' ? null : condition)
-  return getSettings()
-}
-
-export function setNotifySound(enabled: boolean): AppSettings {
-  setSetting('notify_sound', enabled ? null : '0')
-  return getSettings()
-}
-
-/** Point at a sound already copied into `<userData>/sounds/`; null = the default. */
-export function setNotifySoundName(name: string | null): AppSettings {
-  setSetting('notify_sound_name', name)
-  return getSettings()
-}
-
-export function setNotifyVolume(volume: number): AppSettings {
-  setSetting('notify_volume', String(clampVolume(volume)))
-  return getSettings()
-}
-
-export function setNotifySystemToast(enabled: boolean): AppSettings {
-  setSetting('notify_system_toast', enabled ? null : '0')
+export function setNotifyOnComplete(enabled: boolean): AppSettings {
+  // Store only the OFF state; see getSettings for why.
+  setSetting('notify_on_complete', enabled ? null : '0')
   return getSettings()
 }
 

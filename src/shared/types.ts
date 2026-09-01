@@ -436,53 +436,32 @@ export interface AppSettings {
    */
   activeThemeId: string | null
   /**
-   * When a finished turn is allowed to interrupt you.
+   * Notify when a turn finishes: chime and OS toast together, or nothing.
    *
-   * `unfocused` is the default because the notification exists for the case
-   * where you walked away — firing one for a turn you just watched finish is
-   * pure noise. `always` is for people who keep Roxy on a second monitor and
-   * genuinely want the ping regardless.
+   * One switch, not three. Separate sound / toast / when controls were three
+   * ways of asking the same question, and their combinations (toast but no
+   * sound, sound only when unfocused) are noise next to "tell me when it's
+   * done". Staying quiet while you are already watching is not a preference
+   * either - it is what the feature should always do, so it lives in
+   * `shouldNotify` rather than in settings.
    */
-  notifyCondition: NotifyCondition
-  /** Play a sound when a turn finishes (subject to `notifyCondition`). */
-  notifySound: boolean
-  /**
-   * File NAME (not a path) of a user-supplied sound inside `<userData>/sounds/`,
-   * or null for the bundled default.
-   *
-   * A name and not an absolute path on purpose: the file is COPIED into userData
-   * when chosen, so moving or deleting the original cannot silently break the
-   * sound later, and nothing outside that one directory is ever read back.
-   */
-  notifySoundName: string | null
-  /** Playback volume for the notification sound, 0..1. */
-  notifyVolume: number
-  /** Post a native OS notification when a turn finishes. */
-  notifySystemToast: boolean
+  notifyOnComplete: boolean
 }
-
-/** When a finished turn is allowed to notify. */
-export type NotifyCondition = 'never' | 'unfocused' | 'always'
-
-/** File types accepted for a custom notification sound. */
-export const NOTIFY_SOUND_EXTENSIONS = ['wav', 'mp3', 'ogg', 'm4a', 'flac'] as const
 
 /**
- * Cap on a custom sound, in bytes. A notification chime lasts a fraction of a
- * second; anything near this is someone picking a whole song by mistake, and it
- * would be read into memory on every turn.
+ * Playback level for the notification chime, 0..1.
+ *
+ * Fixed rather than user-adjustable: the chime is mastered at -6 dBFS, so this
+ * lands it at about -9 dBFS - audible over an editor without being startling.
+ * 0.7 matches VS Code's `accessibility.signalOptions.volume` default of 70,
+ * which is the closest comparable (an editor's own completion chime, played
+ * through the same HTMLAudioElement path).
+ *
+ * Per-app volume belongs to the OS on Windows (the Volume Mixer). macOS has no
+ * such control, so if this ever proves wrong for people the fix is to change
+ * the number here, not to hand everyone a slider to solve it themselves.
  */
-export const NOTIFY_SOUND_MAX_BYTES = 2 * 1024 * 1024
-
-/** Default playback volume, used when no row has been written yet. */
-export const DEFAULT_NOTIFY_VOLUME = 0.6
-
-/** A custom sound read back from disk for playback. */
-export interface NotifySoundFile {
-  name: string
-  /** Raw file bytes — the renderer wraps these in a Blob to play them. */
-  data: ArrayBuffer
-}
+export const NOTIFY_VOLUME = 0.7
 
 export interface AppVersions {
   app: string

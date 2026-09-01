@@ -6,7 +6,6 @@ import type {
   AppSettings,
   Chat,
   ConnectedProvider,
-  NotifyCondition,
   Loop,
   Message,
   MessagePart,
@@ -42,7 +41,7 @@ import {
 import { uniqueSlug } from '@shared/slugs'
 import { shouldAutoWorkstream, statusKeyForSession } from '@shared/workstream'
 import { api } from './api'
-import { notifyTurnComplete, playNotificationSound } from './notify'
+import { notifyTurnComplete } from './notify'
 import type { ComposerImage } from './images'
 import type {
   GitStatusView,
@@ -223,19 +222,7 @@ interface RoxyStore {
   setAutoWorkstream: (enabled: boolean) => Promise<void>
   setTelemetryEnabled: (enabled: boolean) => Promise<void>
   setBranchPrefix: (prefix: string) => Promise<void>
-  setNotifyCondition: (condition: NotifyCondition) => Promise<void>
-  setNotifySound: (enabled: boolean) => Promise<void>
-  setNotifyVolume: (volume: number) => Promise<void>
-  setNotifySystemToast: (enabled: boolean) => Promise<void>
-  /**
-   * Pick a custom notification sound. Resolves to the reason nothing changed,
-   * or null on success - 'cancelled' included, so the caller can stay quiet
-   * about a dialog the user simply closed.
-   */
-  pickNotifySound: () => Promise<'cancelled' | 'type' | 'size' | 'read' | null>
-  clearNotifySound: () => Promise<void>
-  /** Play the current notification sound once, for the Settings preview. */
-  previewNotifySound: () => Promise<void>
+  setNotifyOnComplete: (enabled: boolean) => Promise<void>
   setLanguage: (language: Language) => Promise<void>
   selectChat: (id: string) => Promise<void>
   clearActive: () => void
@@ -381,6 +368,7 @@ const asChatId = (value: unknown): string | undefined =>
   typeof value === 'string' ? value : undefined
 
 let loopTickSubscribed = false
+let notifyActivatedSubscribed = false
 let llmDeltaSubscribed = false
 let taskUpdateSubscribed = false
 let remoteStateSubscribed = false
@@ -1021,6 +1009,17 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
     // Warm the usage/cost dashboard for the titlebar pill (best-effort, async).
     void get().refreshUsage()
 
+    if (!notifyActivatedSubscribed) {
+      notifyActivatedSubscribed = true
+      api.notifications.onActivated(async (chatId) => {
+        // The session may have been deleted between the toast and the click, and
+        // selectChat on a missing id would blank the view for no reason.
+        if (!get().chats.some((c) => c.id === chatId)) await get().refreshChats()
+        if (!get().chats.some((c) => c.id === chatId)) return
+        await get().selectChat(chatId)
+      })
+    }
+
     if (!loopTickSubscribed) {
       loopTickSubscribed = true
       api.loops.onTick(async (loopId) => {
@@ -1585,38 +1584,8 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
     set({ settings })
   },
 
-  setNotifyCondition: async (condition) => {
-    set({ settings: await api.settings.setNotifyCondition(condition) })
-  },
-
-  setNotifySound: async (enabled) => {
-    set({ settings: await api.settings.setNotifySound(enabled) })
-  },
-
-  setNotifyVolume: async (volume) => {
-    set({ settings: await api.settings.setNotifyVolume(volume) })
-  },
-
-  setNotifySystemToast: async (enabled) => {
-    set({ settings: await api.settings.setNotifySystemToast(enabled) })
-  },
-
-  pickNotifySound: async () => {
-    const { settings, error } = await api.notifications.pickSound()
-    set({ settings })
-    // Play what was just chosen. Picking a sound you can't hear until the next
-    // turn ends is how people end up with one they dislike.
-    if (!error) void playNotificationSound(settings)
-    return error
-  },
-
-  clearNotifySound: async () => {
-    set({ settings: await api.notifications.clearSound() })
-  },
-
-  previewNotifySound: async () => {
-    const { settings } = get()
-    if (settings) await playNotificationSound(settings)
+  setNotifyOnComplete: async (enabled) => {
+    set({ settings: await api.settings.setNotifyOnComplete(enabled) })
   },
 
   selectChat: async (id) => {
@@ -1973,7 +1942,7 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
         const notifySettings = get().settings
         if (pending.length === 0 && notifySettings) {
           const title = get().chats.find((c) => c.id === chatId)?.title
-          notifyTurnComplete(notifySettings, title ?? '')
+          notifyTurnComplete(notifySettings, title ?? '', chatId)
         }
         await get().drainQueue(chatId)
       }

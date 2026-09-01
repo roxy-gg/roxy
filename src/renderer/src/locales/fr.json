@@ -228,8 +228,9 @@
     "unpin": "Désépingler le modèle"
   },
   "notifications": {
-    "turnCompleteBody": "{{session}} is ready for you.",
-    "turnCompleteTitle": "Roxy finished"
+    "turnCompleteBody": "Ready for you.",
+    "turnCompleteTitle": "Roxy finished",
+    "turnCompleteUntitled": "Untitled session"
   },
   "onboarding": {
     "apiKey": "Clé API",
@@ -398,27 +399,10 @@
       "unhide": "Unhide"
     },
     "notifications": {
-      "choose": "Choose file",
-      "conditionAlways": "Always",
-      "conditionNever": "Never",
-      "conditionUnfocused": "Only when Roxy isn't focused",
-      "errorRead": "Couldn't read that file.",
-      "errorSize": "That file is too large. Notification sounds are capped at 2 MB.",
-      "errorType": "That file type isn't supported. Pick a WAV, MP3, OGG, M4A or FLAC file.",
+      "completeDescription": "Get a notification when Roxy has finished a response. Useful for long-running tasks. Only fires when Roxy isn't focused; click it to jump to that session.",
+      "completeTitle": "Response completions",
       "heading": "Notifications",
-      "preview": "Play",
-      "reset": "Use default",
-      "soundDescription": "Roxy's own chime, not your system alert sound.",
-      "soundFileDefault": "Built-in chime",
-      "soundFileDescription": "Use your own audio file instead of the built-in chime. WAV, MP3, OGG, M4A or FLAC, up to 2 MB. The file is copied into Roxy, so moving or deleting the original won't break it.",
-      "soundFileTitle": "Notification sound",
-      "soundTitle": "Play a sound",
-      "toastDescription": "A native notification from your operating system. Clicking it brings Roxy to the front.",
-      "toastTitle": "Show a desktop notification",
-      "volumeLabel": "Volume",
-      "whenDescription": "Roxy can tell you when the agent has finished and is waiting on you. Turns you stop yourself never notify, and a session working through a queue only notifies once it's done with all of it.",
-      "whenLabel": "When to notify",
-      "whenTitle": "Notify when a turn finishes"
+      "preview": "Play"
     },
     "privacy": {
       "description": "Comptes et chronométrages — lancements d'applications, tours terminés, nombre d'étapes et d'outils qu'un tour a pris, nombre de jetons utilisés et coût approximatif — liés à un identifiant aléatoire généré sur cette machine. Jamais vos invites, votre code, les chemins de fichiers, les noms de dépôts ou tout texte d'erreur.",

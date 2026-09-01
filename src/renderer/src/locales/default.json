@@ -229,7 +229,8 @@
   },
   "notifications": {
     "turnCompleteTitle": "Roxy finished",
-    "turnCompleteBody": "{{session}} is ready for you."
+    "turnCompleteBody": "Ready for you.",
+    "turnCompleteUntitled": "Untitled session"
   },
   "onboarding": {
     "welcomeTagline": "This might be a complete disaster. It might also be the best thing you use all year!",
@@ -362,26 +363,9 @@
     },
     "notifications": {
       "heading": "Notifications",
-      "whenTitle": "Notify when a turn finishes",
-      "whenDescription": "Roxy can tell you when the agent has finished and is waiting on you. Turns you stop yourself never notify, and a session working through a queue only notifies once it's done with all of it.",
-      "whenLabel": "When to notify",
-      "conditionNever": "Never",
-      "conditionUnfocused": "Only when Roxy isn't focused",
-      "conditionAlways": "Always",
-      "soundTitle": "Play a sound",
-      "soundDescription": "Roxy's own chime, not your system alert sound.",
-      "toastTitle": "Show a desktop notification",
-      "toastDescription": "A native notification from your operating system. Clicking it brings Roxy to the front.",
-      "volumeLabel": "Volume",
-      "soundFileTitle": "Notification sound",
-      "soundFileDescription": "Use your own audio file instead of the built-in chime. WAV, MP3, OGG, M4A or FLAC, up to 2 MB. The file is copied into Roxy, so moving or deleting the original won't break it.",
-      "soundFileDefault": "Built-in chime",
-      "choose": "Choose file",
-      "preview": "Play",
-      "reset": "Use default",
-      "errorType": "That file type isn't supported. Pick a WAV, MP3, OGG, M4A or FLAC file.",
-      "errorSize": "That file is too large. Notification sounds are capped at 2 MB.",
-      "errorRead": "Couldn't read that file."
+      "completeTitle": "Response completions",
+      "completeDescription": "Get a notification when Roxy has finished a response. Useful for long-running tasks. Only fires when Roxy isn't focused; click it to jump to that session.",
+      "preview": "Play"
     },
     "workstreams": {
       "heading": "Workstreams",

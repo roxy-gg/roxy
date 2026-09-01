@@ -23,11 +23,9 @@ import type {
   SyncOutcome,
   UpsertMcpServerInput
 } from '../../shared/api'
-import { NOTIFY_SOUND_EXTENSIONS } from '../../shared/types'
 import type {
   AddMessageInput,
   ConnectProviderInput,
-  NotifyCondition,
   QueueImage,
   ReasoningEffort
 } from '../../shared/types'
@@ -213,17 +211,8 @@ export function registerIpc(): void {
   ipcMain.handle(CHANNELS.settingsSetBranchPrefix, (_e, prefix: string) =>
     repo.setBranchPrefix(prefix)
   )
-  ipcMain.handle(CHANNELS.settingsSetNotifyCondition, (_e, condition: NotifyCondition) =>
-    repo.setNotifyCondition(condition)
-  )
-  ipcMain.handle(CHANNELS.settingsSetNotifySound, (_e, enabled: boolean) =>
-    repo.setNotifySound(enabled)
-  )
-  ipcMain.handle(CHANNELS.settingsSetNotifyVolume, (_e, volume: number) =>
-    repo.setNotifyVolume(volume)
-  )
-  ipcMain.handle(CHANNELS.settingsSetNotifySystemToast, (_e, enabled: boolean) =>
-    repo.setNotifySystemToast(enabled)
+  ipcMain.handle(CHANNELS.settingsSetNotifyOnComplete, (_e, enabled: boolean) =>
+    repo.setNotifyOnComplete(enabled)
   )
   ipcMain.handle(CHANNELS.settingsCompleteOnboarding, () => repo.completeOnboarding())
   ipcMain.handle(CHANNELS.settingsReset, async () => {
@@ -247,36 +236,8 @@ export function registerIpc(): void {
 
   // ---- notifications ----
   // Both strings arrive translated - see the note on the api type.
-  ipcMain.handle(CHANNELS.notifyToast, (_e, title: string, body: string) => {
-    notifications.showTurnToast(title, body)
-  })
-  ipcMain.handle(CHANNELS.notifyPickSound, async (event) => {
-    const win = BrowserWindow.fromWebContents(event.sender)
-    const options = {
-      title: 'Choose a notification sound',
-      properties: ['openFile'] as const,
-      filters: [{ name: 'Audio', extensions: [...NOTIFY_SOUND_EXTENSIONS] }]
-    }
-    const result = win
-      ? await dialog.showOpenDialog(win, { ...options, properties: [...options.properties] })
-      : await dialog.showOpenDialog({ ...options, properties: [...options.properties] })
-    if (result.canceled || result.filePaths.length === 0) {
-      return { settings: repo.getSettings(), error: 'cancelled' as const }
-    }
-    const imported = await notifications.importSound(result.filePaths[0])
-    if (!imported.ok) return { settings: repo.getSettings(), error: imported.error }
-    return { settings: repo.setNotifySoundName(imported.name), error: null }
-  })
-  ipcMain.handle(CHANNELS.notifyClearSound, async () => {
-    await notifications.clearSounds()
-    return repo.setNotifySoundName(null)
-  })
-  ipcMain.handle(CHANNELS.notifyReadSound, async () => {
-    // Read the name here rather than trusting one from the renderer: this
-    // handler turns a name into file bytes, so it stays the sole authority on
-    // which file that may be.
-    const name = repo.getSettings().notifySoundName
-    return name ? notifications.readSound(name) : null
+  ipcMain.handle(CHANNELS.notifyToast, (_e, title: string, body: string, chatId: string) => {
+    notifications.showTurnToast(title, body, chatId)
   })
 
   // ---- providers ----

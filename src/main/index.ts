@@ -1,6 +1,6 @@
 import { app, shell, BrowserWindow } from 'electron'
 import { join } from 'path'
-import { electronApp, optimizer, is } from '@electron-toolkit/utils'
+import { optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import macDockIcon from '../../resources/icon-mac.png?asset'
 import { registerIpc } from './ipc'
@@ -10,6 +10,7 @@ import { listModels } from './services/models'
 import { backfillUsageFromHistory } from './services/usage'
 import { listConnectedProviders } from './db/repo'
 import { setAppIcon, closeAll as closeAllBrowsers } from './services/browser'
+import { APP_USER_MODEL_ID, setToastIcon } from './services/notifications'
 import { cleanupToolOutputs } from './services/tool-output-store'
 import { cancelAllBackgroundJobs } from './services/background-tasks'
 import { shutdownAllLsp } from './services/lsp'
@@ -98,10 +99,16 @@ async function warmCatalogThenBackfill(): Promise<void> {
 }
 
 app.whenReady().then(() => {
-  electronApp.setAppUserModelId('com.roxy.app')
+  // NOT electronApp.setAppUserModelId from @electron-toolkit/utils: in dev it
+  // substitutes `process.execPath`, and Windows prints the AUMID verbatim as
+  // the toast's header - which is how a full C:\Users\... path ended up above
+  // every notification. The id is constant so dev matches what ships.
+  app.setAppUserModelId(APP_USER_MODEL_ID)
   // Give the agent's browser window the Roxy icon too (no asset import in the
   // browser service so the smoke's esbuild bundle stays happy).
   setAppIcon(icon)
+  // Same icon on the toast; see the note in services/notifications.ts.
+  setToastIcon(icon)
   // Inject the tuned per-model + per-agent prompt text into the harness (imported
   // via `?raw` here in the Vite-built entry, so the esbuild smoke bundle never
   // sees it).

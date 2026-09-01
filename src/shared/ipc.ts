@@ -8,10 +8,7 @@ export const CHANNELS = {
   settingsSetAutoWorkstream: 'settings:setAutoWorkstream',
   settingsSetBranchPrefix: 'settings:setBranchPrefix',
   settingsSetLanguage: 'settings:setLanguage',
-  settingsSetNotifyCondition: 'settings:setNotifyCondition',
-  settingsSetNotifySound: 'settings:setNotifySound',
-  settingsSetNotifyVolume: 'settings:setNotifyVolume',
-  settingsSetNotifySystemToast: 'settings:setNotifySystemToast',
+  settingsSetNotifyOnComplete: 'settings:setNotifyOnComplete',
   settingsCompleteOnboarding: 'settings:completeOnboarding',
   settingsReset: 'settings:reset',
   // Anonymous usage tracking. Its own pair of channels rather than a field on
@@ -21,14 +18,13 @@ export const CHANNELS = {
   settingsSetTelemetry: 'settings:setTelemetry',
 
   /**
-   * Turn-completion notifications. The toast is posted from main (only it can
-   * focus the window on click); the SOUND is played in the renderer, which asks
-   * for the custom file's bytes because main has no audio output.
+   * Turn-completion notifications. Only the toast crosses IPC: main posts it
+   * because main alone can focus the window when it is clicked. The sound is
+   * played wholly in the renderer, which is where the audio output is.
    */
   notifyToast: 'notify:toast',
-  notifyPickSound: 'notify:pickSound',
-  notifyClearSound: 'notify:clearSound',
-  notifyReadSound: 'notify:readSound',
+  /** Main -> renderer: the toast for this session id was clicked. */
+  notifyActivated: 'notify:activated',
 
   providersList: 'providers:listConnected',
   providersConnect: 'providers:connect',
