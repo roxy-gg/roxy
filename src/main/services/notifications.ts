@@ -42,6 +42,27 @@ export function setToastIcon(p: string): void {
 }
 
 /**
+ * The window a clicked toast should raise.
+ *
+ * Not `getAllWindows()[0]`: the agent browser (services/browser.ts) opens its
+ * own BrowserWindow with the same preload, so the first entry can be that one -
+ * the click would raise a browser window and send `notifyActivated` to a
+ * renderer with no handler for it, leaving the toast apparently dead. The rest
+ * of main broadcasts to every window instead, which is right for a data push
+ * and wrong here: this one FOCUSES whatever it sends to.
+ *
+ * Re-registered by `createWindow`, so the reference survives the window being
+ * closed and recreated on macOS `activate`.
+ */
+let toastWindow: BrowserWindow | null = null
+export function setToastWindow(win: BrowserWindow): void {
+  toastWindow = win
+  win.on('closed', () => {
+    if (toastWindow === win) toastWindow = null
+  })
+}
+
+/**
  * A `file:///` URI Windows will actually load. `encodeURI` matters: the app can
  * sit under a path with spaces (a user folder like "Jair Escamilla" is the
  * common case) and an unencoded space silently drops the image, leaving the
@@ -101,8 +122,8 @@ export function showTurnToast(title: string, body: string, chatId: string): void
   notification.on('close', () => live.delete(notification))
   notification.on('click', () => {
     live.delete(notification)
-    const win = BrowserWindow.getAllWindows()[0]
-    if (!win) return
+    const win = toastWindow
+    if (!win || win.isDestroyed()) return
     if (win.isMinimized()) win.restore()
     win.show()
     win.focus()

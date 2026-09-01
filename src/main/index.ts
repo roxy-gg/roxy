@@ -10,7 +10,7 @@ import { listModels } from './services/models'
 import { backfillUsageFromHistory } from './services/usage'
 import { listConnectedProviders } from './db/repo'
 import { setAppIcon, closeAll as closeAllBrowsers } from './services/browser'
-import { APP_USER_MODEL_ID, setToastIcon } from './services/notifications'
+import { APP_USER_MODEL_ID, setToastIcon, setToastWindow } from './services/notifications'
 import { cleanupToolOutputs } from './services/tool-output-store'
 import { cancelAllBackgroundJobs } from './services/background-tasks'
 import { shutdownAllLsp } from './services/lsp'
@@ -77,6 +77,10 @@ function createWindow(): BrowserWindow {
   } else {
     mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
   }
+
+  // Clicking a completion toast has to raise THIS window, not whichever one
+  // happens to be first in getAllWindows() (the agent browser opens its own).
+  setToastWindow(mainWindow)
 
   return mainWindow
 }
