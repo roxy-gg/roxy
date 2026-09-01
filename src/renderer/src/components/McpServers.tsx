@@ -16,9 +16,12 @@ function configSummary(config: McpServerConfig): string {
   return config.type === 'remote' ? config.url : config.command.join(' ')
 }
 
+/* Badge's visible worklet hairline comes from `sq-ring-*`; the matching
+   `border-*` is still required as the graceful fallback when Paint Worklet is
+   unavailable or has not loaded yet. */
 const MCP_STATUS_STYLES: Record<McpServerView['status'], string> = {
-  connected: 'border-success/30 bg-success/15 text-success',
-  error: 'border-danger/30 bg-danger/15 text-danger',
+  connected: 'border-success/30 sq-ring-success bg-success/15 text-success',
+  error: 'border-danger/30 sq-ring-danger bg-danger/15 text-danger',
   disabled: 'text-text-muted'
 }
 

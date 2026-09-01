@@ -15,13 +15,28 @@ type ButtonSize = 'sm' | 'md'
 // corners off a real border, so its hairline is repainted inside the shape.
 // `--sq-ring` has to state the color because a paint worklet can't read the
 // element's own `border-color`.
+//
+// `secondary` adds `.edge`, which swaps that flat hairline for a translucent one
+// plus a top-lit bevel. Buttons deliberately carry no outer shadow: `.sq` masks
+// the control to its squircle, which clips any box-shadow outside that shape.
+//
+// It keeps `border-border` as the pre-worklet fallback -- if the paint worklet
+// never loads there is no bevel to speak of, and an opaque hairline is the right
+// thing to degrade to.
 
 const BUTTON_VARIANTS: Record<ButtonVariant, string> = {
   primary: 'bg-white text-black hover:bg-white/90',
-  secondary: 'bg-surface-2 text-text border border-border hover:bg-elevated sq-ring',
+  secondary:
+    'bg-surface-2 text-text border border-border hover:bg-elevated sq-ring edge hover:[--sq-ring:var(--edge-strong)]',
   ghost: 'text-text-muted hover:text-text hover:bg-white/5',
+  // `danger` gets the same edge treatment as `secondary` -- it is the same KIND
+  // of control and should read as one, with only its color saying that it
+  // destroys something. `sq-ring-danger` is listed after `edge` on purpose: both
+  // live in `@layer components` at equal specificity, so source order decides,
+  // and main.css declares the semantic ring colors last precisely so the red
+  // survives the generic treatment.
   danger:
-    'bg-danger/10 text-danger border border-danger/30 hover:bg-danger/20 sq-ring [--sq-ring:color-mix(in_srgb,var(--color-danger)_30%,transparent)]'
+    'bg-danger/10 text-danger border border-danger/30 hover:bg-danger/20 sq-ring edge sq-ring-danger'
 }
 
 const BUTTON_SIZES: Record<ButtonSize, string> = {
@@ -64,7 +79,13 @@ export const Input = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputE
           // glow would be erased. An inset ring sits in the border box and the
           // mask simply rounds it. `--sq-ring` is a registered property, so it
           // animates like the `border-color` it stands in for.
-          'sq sq-lg sq-ring h-9 w-full rounded-lg border border-border bg-surface-2 px-3 text-sm text-text outline-none transition-[border-color,box-shadow,--sq-ring] placeholder:text-text-subtle focus:border-accent/70 focus:inset-ring-2 focus:inset-ring-accent/20 focus:[--sq-ring:color-mix(in_srgb,var(--color-accent)_70%,transparent)]',
+          //
+          // An input is recessed, not raised, so it takes the translucent edge
+          // WITHOUT the bevel: a lit top lip is the cue for something standing
+          // proud of the page, and putting it on a well makes the depth
+          // ambiguous. `--sq-bevel-span:0` would still fade across the element,
+          // so the bevel is switched off by color.
+          'sq sq-lg sq-ring edge [--sq-bevel:transparent] h-9 w-full rounded-lg border border-border bg-surface-2 px-3 text-sm text-text outline-none transition-[border-color,box-shadow,--sq-ring] placeholder:text-text-subtle focus:border-accent/70 focus:inset-ring-2 focus:inset-ring-accent/20 focus:[--sq-ring:color-mix(in_srgb,var(--color-accent)_70%,transparent)]',
           className
         )}
         {...props}
@@ -81,7 +102,8 @@ export const Textarea = forwardRef<
     <textarea
       ref={ref}
       className={cn(
-        'sq sq-lg sq-ring w-full rounded-lg border border-border bg-surface-2 px-3 py-2 text-sm text-text outline-none transition-[border-color,box-shadow,--sq-ring] placeholder:text-text-subtle focus:border-accent/70 focus:inset-ring-2 focus:inset-ring-accent/20 focus:[--sq-ring:color-mix(in_srgb,var(--color-accent)_70%,transparent)]',
+        // Recessed like Input above -- edge without the bevel.
+        'sq sq-lg sq-ring edge [--sq-bevel:transparent] w-full rounded-lg border border-border bg-surface-2 px-3 py-2 text-sm text-text outline-none transition-[border-color,box-shadow,--sq-ring] placeholder:text-text-subtle focus:border-accent/70 focus:inset-ring-2 focus:inset-ring-accent/20 focus:[--sq-ring:color-mix(in_srgb,var(--color-accent)_70%,transparent)]',
         className
       )}
       {...props}
@@ -93,10 +115,13 @@ export function Card({ className, ...props }: HTMLAttributes<HTMLDivElement>): J
   // `sq-frame`, not `sq`: a card is a container, and the mask `sq` applies clips
   // descendants the way `overflow-hidden` does. Painting the fill as this
   // element's own background instead leaves children (and any shadow) alone.
+  //
+  // `edge-panel` widens the bevel's falloff to 120px: on a tall panel the point
+  // is a lit lip along the top edge, not a gradient washing down the whole face.
   return (
     <div
       className={cn(
-        'sq-frame sq-ring sq-xl sq-fill-surface rounded-xl border border-border bg-surface',
+        'sq-frame sq-ring sq-xl sq-fill-surface edge edge-panel shadow-raised rounded-xl border border-border bg-surface',
         className
       )}
       {...props}
@@ -114,9 +139,19 @@ export function Badge({
   return (
     <span
       className={cn(
-        // Pills stay circular: at `rounded-full` the corner is a semicircle with
-        // no straight edge to blend into, so there is no curvature break to fix.
-        'inline-flex items-center rounded-full border border-border px-2 py-0.5 text-[11px] font-medium text-text-muted',
+        // A squircle chip, not a `rounded-full` pill.
+        //
+        // A capsule is a different shape language from everything around it:
+        // buttons, inputs and cards all share one continuous corner curve, and a
+        // pill sitting among them reads as borrowed from another design system
+        // rather than as a smaller member of the same family. Matching
+        // `rounded-md` puts it on the same curve at a smaller radius, which is
+        // what "a small label" should be.
+        //
+        // Going through `sq-ring` also means it gets the painted, translucent
+        // hairline like every other bordered control, instead of an opaque grey
+        // one that no longer matches anything.
+        'sq sq-md sq-ring edge inline-flex items-center rounded-md border border-border px-2 py-0.5 text-[11px] font-medium text-text-muted',
         className
       )}
     >

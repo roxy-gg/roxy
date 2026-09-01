@@ -107,10 +107,20 @@ export function Composer({
         // `sq-ring` repaints the border inside the squircle, so the color has to
         // travel as `--sq-ring` alongside each `border-*`. The drag ring is an
         // inset one so it follows the curve rather than boxing the corners.
-        className={`mx-auto max-w-3xl sq-frame sq-2xl sq-ring sq-fill-surface-2 rounded-2xl border bg-surface-2 transition ${
+        //
+        // `edge` gives it the translucent, top-lit border, and `shadow-raised`
+        // -- not `float` -- because the composer is anchored to the bottom of
+        // the pane, not hovering over it. A float-weight shadow on a full-width
+        // element that never moves reads as a permanent dark band under the box
+        // rather than as depth. The edge already separates it from the
+        // conversation; the shadow only has to sit it down.
+        //
+        // On focus the hairline brightens rather than changing hue: the box is
+        // already the focus of the screen, so a colored ring on it is noise.
+        className={`mx-auto max-w-3xl sq-frame sq-2xl sq-ring sq-fill-surface-2 edge edge-panel shadow-raised rounded-2xl border bg-surface-2 transition ${
           dragging
             ? 'border-accent [--sq-ring:var(--color-accent)] inset-ring-1 inset-ring-accent/40'
-            : 'border-border focus-within:border-border-strong focus-within:[--sq-ring:var(--color-border-strong)]'
+            : 'border-border focus-within:border-border-strong focus-within:[--sq-ring:var(--edge-strong)]'
         }`}
       >
         {images.length > 0 && (
@@ -147,9 +157,9 @@ export function Composer({
           placeholder={
             sending
               ? onStop
-                ? 'Queue a follow-up… (Esc to stop)'
-                : 'Queue a follow-up…'
-              : 'Ask Roxy anything… (paste or drop images)'
+                ? t('composer.queuePlaceholderStop')
+                : t('composer.queuePlaceholder')
+              : t('composer.placeholder')
           }
           onChange={(e) => {
             setValue(e.target.value)

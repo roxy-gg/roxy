@@ -200,7 +200,7 @@ function ServicesMenu({
     // fixed `left-0` on a trigger this far right sends the menu off the window,
     // and there is no scroll container to rescue it.
     <div className="absolute bottom-full z-50 flex flex-col pb-1.5" style={style}>
-      <div className="flex min-h-0 flex-col overflow-hidden sq-frame sq-xl sq-fill-elevated sq-ring rounded-xl border border-border bg-elevated py-1 shadow-2xl">
+      <div className="flex min-h-0 flex-col overflow-hidden sq-frame sq-xl sq-fill-elevated sq-ring edge edge-strong edge-panel rounded-xl border border-border bg-elevated py-1 shadow-float">
         <div className="shrink-0 px-3 py-1 text-[11px] font-medium text-text-muted">
           {t('services.menuHeader')}
         </div>

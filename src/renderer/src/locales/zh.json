@@ -69,6 +69,9 @@
   },
   "composer": {
     "attachImages": "附加图片",
+    "placeholder": "问 Roxy 任何问题…（粘贴或拖放图片）",
+    "queuePlaceholder": "将后续消息加入队列…",
+    "queuePlaceholderStop": "将后续消息加入队列…（按 Esc 停止）",
     "removeImage": "移除图片",
     "stop": "停止 (Esc)"
   },

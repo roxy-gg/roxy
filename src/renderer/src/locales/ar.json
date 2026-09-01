@@ -69,6 +69,9 @@
   },
   "composer": {
     "attachImages": "إرفاق الصور",
+    "placeholder": "اسأل Roxy عن أي شيء… (الصق الصور أو أفلتها)",
+    "queuePlaceholder": "ضع متابعة في قائمة الانتظار…",
+    "queuePlaceholderStop": "ضع متابعة في قائمة الانتظار… (Esc للإيقاف)",
     "removeImage": "إزالة الصورة",
     "stop": "إيقاف (Esc)"
   },

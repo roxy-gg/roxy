@@ -69,6 +69,9 @@
   },
   "composer": {
     "attachImages": "Anexar imagens",
+    "placeholder": "Pergunte qualquer coisa à Roxy… (cole ou solte imagens)",
+    "queuePlaceholder": "Adicione uma continuação à fila…",
+    "queuePlaceholderStop": "Adicione uma continuação à fila… (Esc para parar)",
     "removeImage": "Remover imagem",
     "stop": "Parar (Esc)"
   },

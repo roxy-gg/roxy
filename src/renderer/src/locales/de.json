@@ -69,6 +69,9 @@
   },
   "composer": {
     "attachImages": "Bilder anhängen",
+    "placeholder": "Frag Roxy alles… (Bilder einfügen oder ablegen)",
+    "queuePlaceholder": "Eine Folgeanfrage einreihen…",
+    "queuePlaceholderStop": "Eine Folgeanfrage einreihen… (Esc zum Stoppen)",
     "removeImage": "Bild entfernen",
     "stop": "Stopp (Esc)"
   },

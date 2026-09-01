@@ -70,6 +70,9 @@
   "composer": {
     "removeImage": "Remove image",
     "attachImages": "Attach images",
+    "placeholder": "Ask Roxy anything… (paste or drop images)",
+    "queuePlaceholder": "Queue a follow-up…",
+    "queuePlaceholderStop": "Queue a follow-up… (Esc to stop)",
     "stop": "Stop (Esc)"
   },
   "configBackup": {

@@ -379,7 +379,7 @@ export function ContributionGraph({ data }: { data: ActivityStats }): JSX.Elemen
           />
           {hover && (
             <div
-              className="animate-fade-in pointer-events-none absolute z-10 -translate-x-1/2 -translate-y-full whitespace-nowrap sq-frame sq-lg sq-fill-elevated sq-ring rounded-lg border border-border bg-elevated px-2 py-1 text-[11px] text-text shadow-xl"
+              className="animate-fade-in pointer-events-none absolute z-10 -translate-x-1/2 -translate-y-full whitespace-nowrap sq-frame sq-lg sq-fill-elevated sq-ring edge edge-strong edge-panel rounded-lg border border-border bg-elevated px-2 py-1 text-[11px] text-text shadow-float"
               style={{ left: hover.x, top: hover.y - 6 }}
             >
               <span className="font-semibold tabular-nums">{hover.day.count}</span>{' '}

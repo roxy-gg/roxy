@@ -190,6 +190,18 @@ const EXTRA_VAR_ALLOWLIST = new Set([
   '--ease-drawer',
   // Corner geometry (see the squircle system in main.css)
   '--sq-scale',
+  // Edge lighting: the translucent hairline, its hover/float variant, and the
+  // top-lit bevel. These are derived from `--color-white` (the polarity token),
+  // so every theme already gets a coherent default -- these are here for a theme
+  // that wants a flatter or glassier look than the palette alone implies.
+  '--edge',
+  '--edge-strong',
+  '--edge-lit',
+  // Elevation. These are the indirection vars the `shadow-*` utilities read;
+  // the `--shadow-*` tokens themselves are compiled by Tailwind and cannot be
+  // re-pointed at runtime.
+  '--elevation-raised',
+  '--elevation-float',
   // Typography detail
   '--font-sans',
   '--font-mono',

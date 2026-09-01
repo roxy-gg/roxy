@@ -68,6 +68,10 @@ async function main(): Promise<void> {
   )
   check('es: accented text round-trips', t('settings.danger.wiping') === 'Borrando\u2026')
   check('es: the language section is translated', t('settings.language.heading') === 'Idioma')
+  check(
+    'es: the composer placeholder is translated',
+    t('composer.placeholder') === 'Pregúntale lo que quieras a Roxy… (pega o suelta imágenes)'
+  )
 
   // ---- The failure modes that matter -------------------------------------
   // A key missing from Spanish must render English, never the raw key.
