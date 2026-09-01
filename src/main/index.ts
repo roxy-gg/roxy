@@ -10,7 +10,12 @@ import { listModels } from './services/models'
 import { backfillUsageFromHistory } from './services/usage'
 import { listConnectedProviders } from './db/repo'
 import { setAppIcon, closeAll as closeAllBrowsers } from './services/browser'
-import { APP_USER_MODEL_ID, setToastIcon, setToastWindow } from './services/notifications'
+import {
+  APP_USER_MODEL_ID,
+  setToastIcon,
+  setToastWindow,
+  setWindowFactory
+} from './services/notifications'
 import { cleanupToolOutputs } from './services/tool-output-store'
 import { cancelAllBackgroundJobs } from './services/background-tasks'
 import { shutdownAllLsp } from './services/lsp'
@@ -143,6 +148,10 @@ app.whenReady().then(() => {
   // dashboard isn't empty after upgrading. Warm the models.dev catalog first so
   // backfilled rows can be priced (else they'd all cost $0). Best-effort + async.
   void warmCatalogThenBackfill()
+
+  // A toast clicked with every window closed (macOS keeps the app running)
+  // has to be able to open one.
+  setWindowFactory(createWindow)
 
   const mainWindow = createWindow()
   initAutoUpdater(mainWindow)

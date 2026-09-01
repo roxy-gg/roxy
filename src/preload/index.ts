@@ -43,6 +43,13 @@ const roxy: RoxyApi = {
     onActivated: (callback) => {
       const handler = (_event: Electron.IpcRendererEvent, chatId: string): void => callback(chatId)
       ipcRenderer.on(CHANNELS.notifyActivated, handler)
+      // Collect a click that landed before this window existed - on macOS the
+      // app outlives its windows, so the toast that reopened us has a session
+      // waiting. Asking here rather than being pushed to is what makes it
+      // race-free: by definition the listener above is already installed.
+      void ipcRenderer
+        .invoke(CHANNELS.notifyTakePending)
+        .then((chatId: string | null) => chatId && callback(chatId))
       return () => ipcRenderer.removeListener(CHANNELS.notifyActivated, handler)
     }
   },

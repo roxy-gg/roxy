@@ -239,6 +239,7 @@ export function registerIpc(): void {
   ipcMain.handle(CHANNELS.notifyToast, (_e, title: string, body: string, chatId: string) => {
     notifications.showTurnToast(title, body, chatId)
   })
+  ipcMain.handle(CHANNELS.notifyTakePending, () => notifications.takePendingActivation())
 
   // ---- providers ----
   ipcMain.handle(CHANNELS.providersList, () => repo.listConnectedProviders())

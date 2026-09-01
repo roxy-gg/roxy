@@ -14,7 +14,7 @@
  * queue is still draining, whether the window is focused, and what the strings
  * say.
  */
-import { BrowserWindow, Notification, nativeImage } from 'electron'
+import { app, BrowserWindow, Notification, nativeImage } from 'electron'
 import { CHANNELS } from '../../shared/ipc'
 
 /**
@@ -73,6 +73,33 @@ export function setToastWindow(win: BrowserWindow): void {
 }
 
 /**
+ * How to get a window back when there is none.
+ *
+ * A macOS-only path, and the reason it has to exist: `window-all-closed` does
+ * not quit on darwin, so the app can sit in the dock with no window while its
+ * toasts sit in Notification Center. Clicking one then has nothing to raise.
+ * On Windows the app is already gone in that situation.
+ */
+let openWindow: (() => BrowserWindow) | null = null
+export function setWindowFactory(fn: () => BrowserWindow): void {
+  openWindow = fn
+}
+
+/**
+ * A click that arrived before there was a renderer to tell, held until one
+ * asks for it. Pushing at a window that is still loading would be lost: the
+ * store subscribes to `notifyActivated` partway through bootstrap, well after
+ * `did-finish-load`, so main cannot know when the listener is up. The renderer
+ * pulls instead, at the moment it subscribes.
+ */
+let pendingChatId: string | null = null
+export function takePendingActivation(): string | null {
+  const id = pendingChatId
+  pendingChatId = null
+  return id
+}
+
+/**
  * A `file:///` URI Windows will actually load. `encodeURI` matters: the app can
  * sit under a path with spaces (a user folder like "Jair Escamilla" is the
  * common case) and an unencoded space silently drops the image, leaving the
@@ -90,6 +117,18 @@ function esc(s: string): string {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&apos;')
+}
+
+/**
+ * Bring the whole app forward, not just the window.
+ *
+ * macOS needs this: `BrowserWindow.focus()` raises the window within Roxy but
+ * cannot take focus from the editor you were actually in, so a clicked toast
+ * looked like it did nothing. `steal` is the documented way to say "the user
+ * asked for this", which a toast click is - it is not the app interrupting.
+ */
+function focusApp(): void {
+  if (process.platform === 'darwin') app.focus({ steal: true })
 }
 
 /**
@@ -133,14 +172,22 @@ export function showTurnToast(title: string, body: string, chatId: string): void
   notification.on('close', () => live.delete(notification))
   notification.on('click', () => {
     live.delete(notification)
-    const win = toastWindow
-    if (!win || win.isDestroyed()) return
-    if (win.isMinimized()) win.restore()
-    win.show()
-    win.focus()
+    const existing = toastWindow && !toastWindow.isDestroyed() ? toastWindow : null
+    if (!existing) {
+      // No window (macOS, everything closed): reopen, and leave the session id
+      // for the new renderer to collect once it is listening.
+      pendingChatId = chatId
+      openWindow?.()
+      focusApp()
+      return
+    }
+    if (existing.isMinimized()) existing.restore()
+    existing.show()
+    existing.focus()
+    focusApp()
     // Raising the window is not enough: it comes back on whatever session was
     // last open, which is exactly the one you did NOT get notified about.
-    win.webContents.send(CHANNELS.notifyActivated, chatId)
+    existing.webContents.send(CHANNELS.notifyActivated, chatId)
   })
   notification.show()
 }

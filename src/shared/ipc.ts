@@ -25,6 +25,12 @@ export const CHANNELS = {
   notifyToast: 'notify:toast',
   /** Main -> renderer: the toast for this session id was clicked. */
   notifyActivated: 'notify:activated',
+  /**
+   * Renderer -> main: hand me the session id of a toast that was clicked
+   * before I existed. macOS keeps the app alive with every window closed, so
+   * a click can land with no renderer to push it to.
+   */
+  notifyTakePending: 'notify:takePending',
 
   providersList: 'providers:listConnected',
   providersConnect: 'providers:connect',

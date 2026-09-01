@@ -741,6 +741,10 @@ export interface RoxyApi {
     /**
      * Subscribe to toast clicks; returns an unsubscribe fn. The payload is the
      * session id the toast was posted for, so the UI can open it.
+     *
+     * Fires for a click that happened BEFORE this window existed too: on macOS
+     * the app outlives its windows, so a toast can reopen one, and subscribing
+     * collects whatever was waiting.
      */
     onActivated(callback: (chatId: string) => void): () => void
   }
