@@ -228,9 +228,8 @@
     "unpin": "Открепить модель"
   },
   "notifications": {
-    "turnCompleteBody": "Ready for you.",
-    "turnCompleteTitle": "Roxy finished",
-    "turnCompleteUntitled": "Untitled session"
+    "turnCompleteBody": "Всё готово.",
+    "turnCompleteUntitled": "Сессия без названия"
   },
   "onboarding": {
     "apiKey": "Ключ API",
@@ -399,10 +398,10 @@
       "unhide": "Unhide"
     },
     "notifications": {
-      "completeDescription": "Get a notification when Roxy has finished a response. Useful for long-running tasks. Only fires when Roxy isn't focused; click it to jump to that session.",
-      "completeTitle": "Response completions",
-      "heading": "Notifications",
-      "preview": "Play"
+      "completeDescription": "Получайте уведомление, когда Roxy завершит ответ. Полезно для длительных задач. Срабатывает, только когда Roxy не в фокусе; нажмите, чтобы перейти к этой сессии.",
+      "completeTitle": "Завершение ответов",
+      "heading": "Уведомления",
+      "preview": "Воспроизвести"
     },
     "privacy": {
       "description": "Количество и время — запуски приложений, завершенные ходы, сколько шагов и инструментов занял ход, сколько токенов он использовал и примерно сколько это стоило — привязаны к случайному идентификатору, сгенерированному на этой машине. Никогда не ваши запросы, ваш код, пути к файлам, имена репозиториев или любой текст ошибки.",

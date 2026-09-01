@@ -228,9 +228,8 @@
     "unpin": "モデルのピン留めを解除"
   },
   "notifications": {
-    "turnCompleteBody": "Ready for you.",
-    "turnCompleteTitle": "Roxy finished",
-    "turnCompleteUntitled": "Untitled session"
+    "turnCompleteBody": "準備ができました。",
+    "turnCompleteUntitled": "無題のセッション"
   },
   "onboarding": {
     "apiKey": "APIキー",
@@ -399,10 +398,10 @@
       "unhide": "Unhide"
     },
     "notifications": {
-      "completeDescription": "Get a notification when Roxy has finished a response. Useful for long-running tasks. Only fires when Roxy isn't focused; click it to jump to that session.",
-      "completeTitle": "Response completions",
-      "heading": "Notifications",
-      "preview": "Play"
+      "completeDescription": "Roxy が応答を完了したときに通知を受け取ります。時間のかかるタスクに便利です。Roxy がフォーカスされていないときにのみ通知され、クリックするとそのセッションに移動します。",
+      "completeTitle": "応答の完了",
+      "heading": "通知",
+      "preview": "再生"
     },
     "privacy": {
       "description": "アプリの起動、完了したターン、ターンにかかったステップとツールの数、使用されたトークンの数、おおよそのコストなど、このマシンで生成されたランダムなIDに関連付けられたカウントとタイミング。プロンプト、コード、ファイルパス、リポジトリ名、エラーテキストは決して含まれません。",

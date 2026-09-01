@@ -228,9 +228,8 @@
     "unpin": "Modell lösen"
   },
   "notifications": {
-    "turnCompleteBody": "Ready for you.",
-    "turnCompleteTitle": "Roxy finished",
-    "turnCompleteUntitled": "Untitled session"
+    "turnCompleteBody": "Bereit für Sie.",
+    "turnCompleteUntitled": "Sitzung ohne Titel"
   },
   "onboarding": {
     "apiKey": "API-Schlüssel",
@@ -399,10 +398,10 @@
       "unhide": "Unhide"
     },
     "notifications": {
-      "completeDescription": "Get a notification when Roxy has finished a response. Useful for long-running tasks. Only fires when Roxy isn't focused; click it to jump to that session.",
-      "completeTitle": "Response completions",
-      "heading": "Notifications",
-      "preview": "Play"
+      "completeDescription": "Erhalten Sie eine Benachrichtigung, wenn Roxy eine Antwort abgeschlossen hat. Nützlich für lang laufende Aufgaben. Wird nur ausgelöst, wenn Roxy nicht im Vordergrund ist; klicken Sie darauf, um zu dieser Sitzung zu springen.",
+      "completeTitle": "Abgeschlossene Antworten",
+      "heading": "Benachrichtigungen",
+      "preview": "Abspielen"
     },
     "privacy": {
       "description": "Zählungen und Zeitangaben – App-Starts, abgeschlossene Züge, wie viele Schritte und Tools ein Zug benötigte, wie viele Token er verbrauchte und was er ungefähr kostete – verknüpft mit einer zufälligen ID, die auf diesem Gerät generiert wurde. Niemals Ihre Prompts, Ihr Code, Dateipfade, Repo-Namen oder Fehlermeldungen.",

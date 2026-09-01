@@ -228,9 +228,8 @@
     "unpin": "取消固定模型"
   },
   "notifications": {
-    "turnCompleteBody": "Ready for you.",
-    "turnCompleteTitle": "Roxy finished",
-    "turnCompleteUntitled": "Untitled session"
+    "turnCompleteBody": "已准备就绪。",
+    "turnCompleteUntitled": "未命名会话"
   },
   "onboarding": {
     "apiKey": "API 密钥",
@@ -399,10 +398,10 @@
       "unhide": "Unhide"
     },
     "notifications": {
-      "completeDescription": "Get a notification when Roxy has finished a response. Useful for long-running tasks. Only fires when Roxy isn't focused; click it to jump to that session.",
-      "completeTitle": "Response completions",
-      "heading": "Notifications",
-      "preview": "Play"
+      "completeDescription": "当 Roxy 完成一次回复时收到通知。适合耗时较长的任务。仅在 Roxy 未处于焦点时触发；点击即可跳转到该会话。",
+      "completeTitle": "回复完成",
+      "heading": "通知",
+      "preview": "播放"
     },
     "privacy": {
       "description": "计数和时间 — 应用程序启动、完成的回合、一个回合所需的步骤和工具数量、使用的令牌数量以及大致成本 — 与此机器上生成的随机 ID 绑定。绝不包含您的提示、代码、文件路径、仓库名称或任何错误文本。",

@@ -228,7 +228,6 @@
     "allHidden": "Every model is hidden. Bring some back in <settings>Settings → Models</settings>."
   },
   "notifications": {
-    "turnCompleteTitle": "Roxy finished",
     "turnCompleteBody": "Ready for you.",
     "turnCompleteUntitled": "Untitled session"
   },

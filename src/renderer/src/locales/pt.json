@@ -228,9 +228,8 @@
     "unpin": "Desafixar modelo"
   },
   "notifications": {
-    "turnCompleteBody": "Ready for you.",
-    "turnCompleteTitle": "Roxy finished",
-    "turnCompleteUntitled": "Untitled session"
+    "turnCompleteBody": "Pronto para você.",
+    "turnCompleteUntitled": "Sessão sem título"
   },
   "onboarding": {
     "apiKey": "Chave de API",
@@ -399,10 +398,10 @@
       "unhide": "Unhide"
     },
     "notifications": {
-      "completeDescription": "Get a notification when Roxy has finished a response. Useful for long-running tasks. Only fires when Roxy isn't focused; click it to jump to that session.",
-      "completeTitle": "Response completions",
-      "heading": "Notifications",
-      "preview": "Play"
+      "completeDescription": "Receba uma notificação quando o Roxy terminar uma resposta. Útil para tarefas longas. Só é acionada quando o Roxy não está em foco; clique nela para ir para essa sessão.",
+      "completeTitle": "Respostas concluídas",
+      "heading": "Notificações",
+      "preview": "Reproduzir"
     },
     "privacy": {
       "description": "Contagens e tempos — inicializações de aplicativos, turnos concluídos, quantos passos e ferramentas um turno levou, quantos tokens usou e aproximadamente quanto custou — vinculados a um ID aleatório gerado nesta máquina. Nunca seus prompts, seu código, caminhos de arquivo, nomes de repositórios ou qualquer texto de erro.",
