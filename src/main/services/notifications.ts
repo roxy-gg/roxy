@@ -24,6 +24,7 @@ import { CHANNELS } from '../../shared/ipc'
 export const APP_USER_MODEL_ID = 'com.roxy.app'
 
 const isWindows = process.platform === 'win32'
+const isMac = process.platform === 'darwin'
 
 /**
  * Toasts still awaiting a click, newest last.
@@ -128,7 +129,7 @@ function esc(s: string): string {
  * asked for this", which a toast click is - it is not the app interrupting.
  */
 function focusApp(): void {
-  if (process.platform === 'darwin') app.focus({ steal: true })
+  if (isMac) app.focus({ steal: true })
 }
 
 /**
@@ -148,7 +149,11 @@ export function showTurnToast(title: string, body: string, chatId: string): void
     title,
     body,
     silent: true,
-    ...(icon && !icon.isEmpty() ? { icon } : {}),
+    // On macOS, `icon` sets `contentImage` (displayed as an attachment thumbnail
+    // on the right side of the banner). The application icon on the left is
+    // provided natively by the OS from the .app bundle (Roxy in packaged builds).
+    // Suppress `icon` on macOS so we don't display a redundant thumbnail on the right.
+    ...(!isMac && icon && !icon.isEmpty() ? { icon } : {}),
     // Windows ignores `icon` for the large circular avatar, so ask for the
     // template explicitly. `ToastGeneric` + a `appLogoOverride` crop gives the
     // rounded app icon at the top-left instead of the generic placeholder.
