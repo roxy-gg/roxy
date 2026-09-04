@@ -227,6 +227,10 @@
     "sectionLatest": "Latest · {{provider}}",
     "allHidden": "Every model is hidden. Bring some back in <settings>Settings → Models</settings>."
   },
+  "notifications": {
+    "turnCompleteBody": "Ready for you.",
+    "turnCompleteUntitled": "Untitled session"
+  },
   "onboarding": {
     "welcomeTagline": "This might be a complete disaster. It might also be the best thing you use all year!",
     "continue": "Continue",
@@ -355,6 +359,12 @@
       "description": "The language Roxy's own interface is written in. It does not change how the agent talks to you — ask it in whatever language you like, in the chat.",
       "translatedBy": "Translations are community-maintained and may lag behind English.",
       "sourceLanguage": "Source language"
+    },
+    "notifications": {
+      "heading": "Notifications",
+      "completeTitle": "Response completions",
+      "completeDescription": "Get a notification when Roxy has finished a response. Useful for long-running tasks. Only fires when Roxy isn't focused; click it to jump to that session.",
+      "preview": "Play"
     },
     "workstreams": {
       "heading": "Workstreams",

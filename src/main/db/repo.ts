@@ -125,7 +125,10 @@ export function getSettings(): AppSettings {
     // (or a language later dropped from the app) must degrade to English rather
     // than leave the UI rendering raw keys.
     language: normalizeLanguage(map.get('language')),
-    activeThemeId: map.get('active_theme_id') ?? null
+    activeThemeId: map.get('active_theme_id') ?? null,
+    // Defaults ON, so the absence of a row means enabled - same convention as
+    // auto_workstream above, and for the same reason: no migration needed.
+    notifyOnComplete: map.get('notify_on_complete') !== '0'
   }
 }
 
@@ -229,6 +232,12 @@ export function setActiveThemeId(id: string | null): AppSettings {
 export function setAutoWorkstream(enabled: boolean): AppSettings {
   // Store only the OFF state; see getSettings for why.
   setSetting('auto_workstream', enabled ? null : '0')
+  return getSettings()
+}
+
+export function setNotifyOnComplete(enabled: boolean): AppSettings {
+  // Store only the OFF state; see getSettings for why.
+  setSetting('notify_on_complete', enabled ? null : '0')
   return getSettings()
 }
 

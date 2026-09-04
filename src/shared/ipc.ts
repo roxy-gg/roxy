@@ -8,6 +8,7 @@ export const CHANNELS = {
   settingsSetAutoWorkstream: 'settings:setAutoWorkstream',
   settingsSetBranchPrefix: 'settings:setBranchPrefix',
   settingsSetLanguage: 'settings:setLanguage',
+  settingsSetNotifyOnComplete: 'settings:setNotifyOnComplete',
   settingsCompleteOnboarding: 'settings:completeOnboarding',
   settingsReset: 'settings:reset',
   // Anonymous usage tracking. Its own pair of channels rather than a field on
@@ -15,6 +16,21 @@ export const CHANNELS = {
   // survives a factory reset (which wipes the settings table).
   settingsGetTelemetry: 'settings:getTelemetry',
   settingsSetTelemetry: 'settings:setTelemetry',
+
+  /**
+   * Turn-completion notifications. Only the toast crosses IPC: main posts it
+   * because main alone can focus the window when it is clicked. The sound is
+   * played wholly in the renderer, which is where the audio output is.
+   */
+  notifyToast: 'notify:toast',
+  /** Main -> renderer: the toast for this session id was clicked. */
+  notifyActivated: 'notify:activated',
+  /**
+   * Renderer -> main: hand me the session id of a toast that was clicked
+   * before I existed. macOS keeps the app alive with every window closed, so
+   * a click can land with no renderer to push it to.
+   */
+  notifyTakePending: 'notify:takePending',
 
   providersList: 'providers:listConnected',
   providersConnect: 'providers:connect',

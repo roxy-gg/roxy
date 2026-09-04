@@ -227,6 +227,10 @@
     "selectModel": "モデルを選択",
     "unpin": "モデルのピン留めを解除"
   },
+  "notifications": {
+    "turnCompleteBody": "準備ができました。",
+    "turnCompleteUntitled": "無題のセッション"
+  },
   "onboarding": {
     "apiKey": "APIキー",
     "back": "戻る",
@@ -392,6 +396,12 @@
       "showCount": "Show {{count}}",
       "someHidden": "{{shown}} of {{total}} shown · {{hidden}} hidden",
       "unhide": "Unhide"
+    },
+    "notifications": {
+      "completeDescription": "Roxy が応答を完了したときに通知を受け取ります。時間のかかるタスクに便利です。Roxy がフォーカスされていないときにのみ通知され、クリックするとそのセッションに移動します。",
+      "completeTitle": "応答の完了",
+      "heading": "通知",
+      "preview": "再生"
     },
     "privacy": {
       "description": "アプリの起動、完了したターン、ターンにかかったステップとツールの数、使用されたトークンの数、おおよそのコストなど、このマシンで生成されたランダムなIDに関連付けられたカウントとタイミング。プロンプト、コード、ファイルパス、リポジトリ名、エラーテキストは決して含まれません。",

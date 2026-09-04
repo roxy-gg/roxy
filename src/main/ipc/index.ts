@@ -29,6 +29,7 @@ import type {
   QueueImage,
   ReasoningEffort
 } from '../../shared/types'
+import * as notifications from '../services/notifications'
 import * as repo from '../db/repo'
 import * as copilot from '../services/copilot'
 import * as cliproxy from '../services/cliproxy'
@@ -210,6 +211,9 @@ export function registerIpc(): void {
   ipcMain.handle(CHANNELS.settingsSetBranchPrefix, (_e, prefix: string) =>
     repo.setBranchPrefix(prefix)
   )
+  ipcMain.handle(CHANNELS.settingsSetNotifyOnComplete, (_e, enabled: boolean) =>
+    repo.setNotifyOnComplete(enabled)
+  )
   ipcMain.handle(CHANNELS.settingsCompleteOnboarding, () => repo.completeOnboarding())
   ipcMain.handle(CHANNELS.settingsReset, async () => {
     // "Wipes all providers" has to include the subscription tokens held by the
@@ -229,6 +233,13 @@ export function registerIpc(): void {
   ipcMain.handle(CHANNELS.settingsSetTelemetry, (_e, enabled: boolean) =>
     setTrackingEnabled(enabled)
   )
+
+  // ---- notifications ----
+  // Both strings arrive translated - see the note on the api type.
+  ipcMain.handle(CHANNELS.notifyToast, (_e, title: string, body: string, chatId: string) => {
+    notifications.showTurnToast(title, body, chatId)
+  })
+  ipcMain.handle(CHANNELS.notifyTakePending, () => notifications.takePendingActivation())
 
   // ---- providers ----
   ipcMain.handle(CHANNELS.providersList, () => repo.listConnectedProviders())

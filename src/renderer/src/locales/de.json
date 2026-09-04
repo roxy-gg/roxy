@@ -227,6 +227,10 @@
     "selectModel": "Modell auswählen",
     "unpin": "Modell lösen"
   },
+  "notifications": {
+    "turnCompleteBody": "Bereit für Sie.",
+    "turnCompleteUntitled": "Sitzung ohne Titel"
+  },
   "onboarding": {
     "apiKey": "API-Schlüssel",
     "back": "Zurück",
@@ -392,6 +396,12 @@
       "showCount": "Show {{count}}",
       "someHidden": "{{shown}} of {{total}} shown · {{hidden}} hidden",
       "unhide": "Unhide"
+    },
+    "notifications": {
+      "completeDescription": "Erhalten Sie eine Benachrichtigung, wenn Roxy eine Antwort abgeschlossen hat. Nützlich für lang laufende Aufgaben. Wird nur ausgelöst, wenn Roxy nicht im Vordergrund ist; klicken Sie darauf, um zu dieser Sitzung zu springen.",
+      "completeTitle": "Abgeschlossene Antworten",
+      "heading": "Benachrichtigungen",
+      "preview": "Abspielen"
     },
     "privacy": {
       "description": "Zählungen und Zeitangaben – App-Starts, abgeschlossene Züge, wie viele Schritte und Tools ein Zug benötigte, wie viele Token er verbrauchte und was er ungefähr kostete – verknüpft mit einer zufälligen ID, die auf diesem Gerät generiert wurde. Niemals Ihre Prompts, Ihr Code, Dateipfade, Repo-Namen oder Fehlermeldungen.",

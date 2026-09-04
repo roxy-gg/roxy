@@ -227,6 +227,10 @@
     "selectModel": "Elige un modelo",
     "unpin": "Dejar de fijar el modelo"
   },
+  "notifications": {
+    "turnCompleteBody": "Listo para ti.",
+    "turnCompleteUntitled": "Sesión sin título"
+  },
   "onboarding": {
     "apiKey": "Clave de API",
     "back": "Atrás",
@@ -392,6 +396,12 @@
       "showCount": "Show {{count}}",
       "someHidden": "{{shown}} of {{total}} shown · {{hidden}} hidden",
       "unhide": "Unhide"
+    },
+    "notifications": {
+      "completeDescription": "Recibe una notificación cuando Roxy termine una respuesta. Útil para tareas largas. Solo se activa cuando Roxy no está en primer plano; haz clic para ir a esa sesión.",
+      "completeTitle": "Respuestas completadas",
+      "heading": "Notificaciones",
+      "preview": "Reproducir"
     },
     "privacy": {
       "description": "Recuentos y tiempos —arranques de la aplicación, turnos completados, cuántos pasos y herramientas necesitó un turno, cuántos tokens consumió y aproximadamente cuánto costó— asociados a un identificador aleatorio generado en este equipo. Nunca tus prompts, tu código, rutas de archivos, nombres de repositorios ni texto de errores.",
