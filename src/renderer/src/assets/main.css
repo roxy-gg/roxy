@@ -1,8 +1,5 @@
 @import 'tailwindcss';
 
-/* Scan Streamdown's prebuilt classes so streamed markdown renders styled. */
-@source '../../../../node_modules/streamdown/dist/*.js';
-
 @theme {
   /* Typography — Cursor-style geometric sans + mono */
   --font-sans: 'Geist Variable', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;

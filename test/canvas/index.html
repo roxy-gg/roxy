@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en" data-appearance="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Canvas transcript harness</title>
+    <!--
+      A standalone harness for the canvas transcript.
+
+      The renderer draws pixels, so "it typechecks" proves very little about it.
+      This mounts the REAL layout and paint code against fixture messages that
+      exercise every branch — each tool's card, a diff, terminal output with ANSI
+      and an exit footer, a nested subagent transcript, markdown with tables and
+      code, a live streaming turn — so the thing can be looked at, clicked, and
+      selected without needing a workspace and an API key.
+
+      Run: npx vite --config test/canvas/vite.config.mjs
+    -->
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #0a0a0a;
+      }
+      #root {
+        height: 100vh;
+        display: flex;
+        flex-direction: column;
+      }
+      .bar {
+        display: flex;
+        gap: 8px;
+        padding: 8px 12px;
+        font: 12px system-ui;
+        color: #9a9aa3;
+        border-bottom: 1px solid #232326;
+      }
+      .bar button {
+        background: #161618;
+        color: #ededed;
+        border: 1px solid #232326;
+        border-radius: 6px;
+        padding: 4px 10px;
+        font: 12px system-ui;
+        cursor: pointer;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <!--
+      A mirror of the canvas bitmap. The harness copies the backing store into
+      this <img> after each check, which is what makes the render inspectable in
+      an environment that never composites the page (and therefore cannot take a
+      screenshot of it).
+    -->
+    <img id="mirror" alt="canvas readback" style="display: none" />
+    <!-- An ASCII downsample of the same bitmap: composition at a glance. -->
+    <pre id="ascii" style="display: none"></pre>
+    <script type="module" src="./harness.tsx"></script>
+  </body>
+</html>

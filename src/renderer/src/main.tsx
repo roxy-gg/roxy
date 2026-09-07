@@ -1,7 +1,6 @@
 import '@fontsource-variable/geist/index.css'
 import '@fontsource-variable/geist-mono/index.css'
 import './assets/main.css'
-import 'streamdown/styles.css'
 // Ahead of every component import: anything that calls `useTranslation` while
 // rendering the first frame must find an initialised instance, not a bare
 // i18next. The stored language is applied later, in `bootstrap`.

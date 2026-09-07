@@ -47,7 +47,8 @@
     "smoke:store": "node test/store-guard.mjs",
     "smoke:cookies": "esbuild test/cookies.ts --bundle --platform=node --format=cjs --packages=external --outfile=test/.out/cookies.cjs && electron test/.out/cookies.cjs",
     "smoke:i18n": "esbuild test/i18n.ts --bundle --platform=node --format=cjs --outfile=test/.out/i18n.cjs && node test/.out/i18n.cjs",
-    "i18n:translate": "node script/i18n-translate.mjs"
+    "i18n:translate": "node script/i18n-translate.mjs",
+    "canvas": "vite --config test/canvas/vite.config.mjs"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^2.0.85",
@@ -57,7 +58,6 @@
     "@fontsource-variable/geist": "^5.2.9",
     "@fontsource-variable/geist-mono": "^5.2.8",
     "@modelcontextprotocol/sdk": "^1.29.0",
-    "@pierre/diffs": "^1.2.11",
     "ai": "^5.0.210",
     "better-sqlite3": "^12.11.1",
     "clsx": "^2.1.1",
@@ -70,7 +70,6 @@
     "qrcode.react": "^4.2.0",
     "react-i18next": "^16.6.6",
     "react-router-dom": "^7.18.0",
-    "streamdown": "^2.5.0",
     "tailwind-merge": "^3.6.0",
     "tinyglobby": "^0.2.17",
     "ws": "^8.21.0",
