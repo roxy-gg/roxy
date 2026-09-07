@@ -4,9 +4,12 @@ import { normalizeServerConfig, type McpServerConfig, type McpServerRecord } fro
 import { DEFAULT_BRANCH_PREFIX, normalizeBranchPrefix } from '../../shared/branch'
 import { DEFAULT_LANGUAGE, normalizeLanguage } from '../../shared/i18n'
 import type { Language } from '../../shared/i18n'
+import { ROXY_HOST_ID } from '../../shared/channel-members'
 import type {
   AddMessageInput,
   AppSettings,
+  BotAuthor,
+  BotMember,
   Chat,
   ConnectedProvider,
   ConnectProviderInput,
@@ -73,6 +76,7 @@ interface ChatRow {
   context_summary_at: number | null
   description: string | null
   tasks: string | null
+  channel_members: string | null
   sort_order: number
   created_at: number
   updated_at: number
@@ -84,6 +88,7 @@ interface MessageRow {
   role: string
   content: string
   parts: string | null
+  author: string | null
   created_at: number
 }
 
@@ -595,6 +600,28 @@ function parseTasks(raw: string | null): SessionTask[] {
   }
 }
 
+/**
+ * Parse the channel_members JSON column into the session's ATTACHED bots.
+ *
+ * The host is not stored (see the v22 migration), so this returns only the
+ * specialists and every reader goes through `withHost` to get the real member
+ * list. Malformed rows degrade to an empty list rather than throwing: a session
+ * with no attached bots is still a working channel.
+ */
+function parseChannelMembers(raw: string | null): BotMember[] {
+  if (!raw) return []
+  try {
+    const arr: unknown = JSON.parse(raw)
+    if (!Array.isArray(arr)) return []
+    return arr.filter(
+      (m): m is BotMember =>
+        !!m && typeof (m as BotMember).id === 'string' && typeof (m as BotMember).name === 'string'
+    )
+  } catch {
+    return []
+  }
+}
+
 function rowToChat(row: ChatRow): Chat {
   return {
     id: row.id,
@@ -616,6 +643,7 @@ function rowToChat(row: ChatRow): Chat {
     contextSummaryAt: row.context_summary_at,
     description: row.description,
     tasks: parseTasks(row.tasks),
+    channelMembers: parseChannelMembers(row.channel_members),
     sortOrder: row.sort_order,
     createdAt: row.created_at,
     updatedAt: row.updated_at
@@ -870,16 +898,16 @@ export function forkChat(sourceId: string, input: { title?: string } = {}): Chat
   const now = Date.now()
   const title = input.title?.trim() || `${source.title} (fork)`
   const messages = db
-    .prepare('SELECT role, content, parts, created_at FROM messages WHERE chat_id = ?')
-    .all(sourceId) as Pick<MessageRow, 'role' | 'content' | 'parts' | 'created_at'>[]
+    .prepare('SELECT role, content, parts, author, created_at FROM messages WHERE chat_id = ?')
+    .all(sourceId) as Pick<MessageRow, 'role' | 'content' | 'parts' | 'author' | 'created_at'>[]
 
   const insertMessage = db.prepare(
-    'INSERT INTO messages(id, chat_id, role, content, parts, created_at) VALUES(?, ?, ?, ?, ?, ?)'
+    'INSERT INTO messages(id, chat_id, role, content, parts, author, created_at) VALUES(?, ?, ?, ?, ?, ?, ?)'
   )
   db.transaction(() => {
     db.prepare(
-      `INSERT INTO chats(id, title, kind, provider_id, model, agent_id, reasoning_effort, context_limit, workspace_path, parent_id, context_summary, context_summary_at, description, sort_order, created_at, updated_at)
-       VALUES(?, ?, 'main', ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO chats(id, title, kind, provider_id, model, agent_id, reasoning_effort, context_limit, workspace_path, parent_id, context_summary, context_summary_at, description, channel_members, sort_order, created_at, updated_at)
+       VALUES(?, ?, 'main', ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
       id,
       title,
@@ -892,12 +920,13 @@ export function forkChat(sourceId: string, input: { title?: string } = {}): Chat
       source.contextSummary,
       source.contextSummaryAt,
       source.description,
+      source.channelMembers.length ? JSON.stringify(source.channelMembers) : null,
       now, // sort_order: the fork lands at the top of its project, like any new session
       now,
       now
     )
     for (const m of messages) {
-      insertMessage.run(randomUUID(), id, m.role, m.content, m.parts, m.created_at)
+      insertMessage.run(randomUUID(), id, m.role, m.content, m.parts, m.author, m.created_at)
     }
   })()
 
@@ -1025,6 +1054,24 @@ export function setChatConfig(chatId: string, patch: SessionConfigPatch): Chat {
       .prepare(`UPDATE chats SET ${sets.join(', ')} WHERE id = ?`)
       .run(...vals, chatId)
   }
+  const chat = getChat(chatId)
+  if (!chat) throw new Error('Chat not found')
+  return chat
+}
+
+/**
+ * Replace a session's ATTACHED channel members (the host is never stored).
+ *
+ * Attaching or detaching a bot is a change to who is in the room, not agent
+ * activity, so this deliberately leaves `updated_at` alone - bumping it would
+ * float the session to the top of the sidebar just for opening the members
+ * panel, the same reason `setChatConfig` above skips it.
+ */
+export function setChannelMembers(chatId: string, members: BotMember[]): Chat {
+  const attached = members.filter((m) => m.id !== ROXY_HOST_ID)
+  getDb()
+    .prepare('UPDATE chats SET channel_members = ? WHERE id = ?')
+    .run(attached.length ? JSON.stringify(attached) : null, chatId)
   const chat = getChat(chatId)
   if (!chat) throw new Error('Chat not found')
   return chat
@@ -1161,6 +1208,18 @@ function parseParts(raw: string | null, content: string): MessagePart[] {
   return [{ type: 'text', text: content }]
 }
 
+/** Parse the author JSON column, tolerating malformed data. */
+function parseAuthor(raw: string | null): BotAuthor | undefined {
+  if (!raw) return undefined
+  try {
+    const a: unknown = JSON.parse(raw)
+    if (!a || typeof (a as BotAuthor).name !== 'string') return undefined
+    return a as BotAuthor
+  } catch {
+    return undefined
+  }
+}
+
 function rowToMessage(row: MessageRow): Message {
   return {
     id: row.id,
@@ -1168,7 +1227,8 @@ function rowToMessage(row: MessageRow): Message {
     role: row.role as MessageRole,
     content: row.content,
     parts: parseParts(row.parts, row.content),
-    createdAt: row.created_at
+    createdAt: row.created_at,
+    author: parseAuthor(row.author)
   }
 }
 
@@ -1184,17 +1244,18 @@ export function addMessage(input: AddMessageInput): Message {
   const now = Date.now()
   const parts: MessagePart[] = input.parts ?? [{ type: 'text', text: input.content }]
   const partsJson = JSON.stringify(parts)
+  const authorJson = input.author ? JSON.stringify(input.author) : null
   const db = getDb()
   const tx = db.transaction(() => {
     db.prepare(
-      'INSERT INTO messages(id, chat_id, role, content, parts, created_at) VALUES(?, ?, ?, ?, ?, ?)'
-    ).run(id, input.chatId, input.role, input.content, partsJson, now)
+      'INSERT INTO messages(id, chat_id, role, content, parts, author, created_at) VALUES(?, ?, ?, ?, ?, ?, ?)'
+    ).run(id, input.chatId, input.role, input.content, partsJson, authorJson, now)
     db.prepare('UPDATE chats SET updated_at = ? WHERE id = ?').run(now, input.chatId)
-    // One assistant message = one agent turn. Credited to the durable ledger in
-    // the SAME transaction as the message, so the graph can never disagree with
-    // what was actually persisted - and, unlike the message, the credit stays
-    // when the session is later deleted. Counts sub and loop sessions too, which
-    // is what the previous message-counting query did.
+    // One assistant message = one agent turn. Credited to the durable ledger
+    // in the SAME transaction as the message, so the graph can never disagree
+    // with what was actually persisted - and, unlike the message, the credit
+    // stays when the session is later deleted. Counts sub and loop sessions
+    // too, which is what the previous message-counting query did.
     if (input.role === 'assistant') recordActivityTurn(localDay(now))
   })
   tx()
@@ -1204,7 +1265,8 @@ export function addMessage(input: AddMessageInput): Message {
     role: input.role,
     content: input.content,
     parts,
-    createdAt: now
+    createdAt: now,
+    author: input.author
   }
 }
 

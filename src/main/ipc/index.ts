@@ -26,6 +26,7 @@ import type {
 import type {
   AddMessageInput,
   ConnectProviderInput,
+  SetChannelMembersInput,
   QueueImage,
   ReasoningEffort
 } from '../../shared/types'
@@ -344,6 +345,9 @@ export function registerIpc(): void {
   // ---- messages ----
   ipcMain.handle(CHANNELS.messagesList, (_e, chatId: string) => repo.listMessages(chatId))
   ipcMain.handle(CHANNELS.messagesAdd, (_e, input: AddMessageInput) => repo.addMessage(input))
+  ipcMain.handle(CHANNELS.channelSetMembers, (_e, input: SetChannelMembersInput) =>
+    repo.setChannelMembers(input.chatId, input.members)
+  )
 
   // ---- integrations ----
   ipcMain.handle(CHANNELS.integrationsList, () => repo.listIntegrations())

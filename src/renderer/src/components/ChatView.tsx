@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+﻿import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
   Check,
   ChevronRight,
@@ -10,7 +10,8 @@ import {
   Repeat,
   RotateCw,
   Settings,
-  Square
+  Square,
+  Users
 } from 'lucide-react'
 import type { Chat } from '@shared/types'
 import { useRoxyStore } from '../lib/store'
@@ -19,6 +20,8 @@ import { formatInterval } from '@shared/format'
 import { cn } from '../lib/cn'
 import { MessageBubble } from './MessageBubble'
 import { Composer } from './Composer'
+import { ChannelMembersPanel } from './ChannelMembersPanel'
+import { withHost } from '@shared/channel-members'
 import { LoopDetailsPane } from './LoopDetailsPane'
 import { SessionInfo } from './SessionInfo'
 import { WorkstreamStrip } from './WorkstreamStrip'
@@ -44,7 +47,7 @@ import roxy from '../assets/roxy.png'
  * output, and the whole transcript is markdown re-parsed by Streamdown on every
  * render. A few hundred of those is a visibly janky pane.
  *
- * 8 was too aggressive though — it is fewer turns than fit on a 1440p screen, so
+ * 8 was too aggressive though â€” it is fewer turns than fit on a 1440p screen, so
  * an ordinary session showed the "showing the last 8 of N" notice while its own
  * content did not even fill the viewport, and any scroll up immediately paged.
  * 30 still bounds the worst case while covering essentially every session you
@@ -80,15 +83,28 @@ export function ChatView(): JSX.Element {
   )
   const backgroundTaskCount = runningTasks?.length ?? 0
   // A subagent working in ITS OWN session. Tracked separately from `sending`
-  // (which is per-chat local-send state): nobody "sent" this turn from the UI —
-  // the parent agent delegated it — so the only signal is the live run itself.
+  // (which is per-chat local-send state): nobody "sent" this turn from the UI â€”
+  // the parent agent delegated it â€” so the only signal is the live run itself.
   const subagentRunning = useRoxyStore((s) =>
     s.activeChatId ? !!s.runningSubagents[s.activeChatId] : false
   )
   const cancelSubagent = useRoxyStore((s) => s.cancelSubagent)
   const cancelBackgroundTask = useRoxyStore((s) => s.cancelBackgroundTask)
+  const setChannelMembers = useRoxyStore((s) => s.setChannelMembers)
+  const activeChannelMembers = useRoxyStore((s) =>
+    s.activeChatId ? s.chats.find((c) => c.id === s.activeChatId)?.channelMembers : undefined
+  )
+  // Who is mid-reply, so the live bubble is attributed to the member actually
+  // speaking rather than always to the host.
+  const streamingAuthor = useRoxyStore((s) =>
+    s.activeChatId ? s.speakingChats[s.activeChatId] : undefined
+  )
 
   const hasContent = messages.length > 0 || (streaming !== null && streaming.length > 0)
+  // `withHost` allocates, so it is memoized here rather than called inside the
+  // selector above - a selector returning a fresh array defeats zustand's
+  // identity check and re-renders the transcript on every unrelated write.
+  const members = useMemo(() => withHost(activeChannelMembers), [activeChannelMembers])
   // `messages` is cleared the instant you click a session and refilled only after
   // the round trip, so an empty array on its own says nothing about whether the
   // session HAS messages. Trusting it painted the empty state over every switch.
@@ -102,7 +118,7 @@ export function ChatView(): JSX.Element {
   const scrollRef = useRef<HTMLDivElement>(null)
   // Follow the conversation only while you're already at the bottom. If you've
   // scrolled up to read history, new messages/stream chunks must NOT yank you
-  // back down — resume following once you scroll back to the end.
+  // back down â€” resume following once you scroll back to the end.
   const stickToBottom = useRef(true)
   // The chat we have already jumped to the end of. Cleared on every switch, so
   // until it matches `activeChatId` the pane is still "arriving" and the tail
@@ -116,9 +132,14 @@ export function ChatView(): JSX.Element {
   // Show only the latest N; scrolling up loads older ones a page at a time.
   const [visibleCount, setVisibleCount] = useState(VISIBLE_MESSAGES)
   const restoreHeight = useRef<number | null>(null)
-  // Which chat `restoreHeight` was measured in — a height from another session
+  // Which chat `restoreHeight` was measured in â€” a height from another session
   // is meaningless and must not be applied.
   const restoreChatId = useRef<string | null>(null)
+  // Closed by default: a session with only Roxy in it has no roster worth a
+  // permanent column, and the header count is enough to discover it.
+  const [membersOpen, setMembersOpen] = useState(false)
+  // Text pushed into the composer by clicking a member ('@Name ').
+  const [draft, setDraft] = useState('')
 
   /** Jump to the newest message, recording the offset as ours. */
   const pinToBottom = useCallback((): void => {
@@ -135,7 +156,7 @@ export function ChatView(): JSX.Element {
     // Before the arrival pin lands, every scroll event here is our own doing:
     // the outgoing transcript unmounting collapses scrollHeight and the browser
     // clamps scrollTop to 0. Reading that back as "the user scrolled to the top"
-    // is what left switches parked at the top — it cleared `stickToBottom` for a
+    // is what left switches parked at the top â€” it cleared `stickToBottom` for a
     // session you had not even seen yet, so nothing ever pinned it, and at
     // scrollTop 0 it also paged in another 30 messages on the way past.
     if (arrivedChatId.current !== activeChatId) return
@@ -145,7 +166,7 @@ export function ChatView(): JSX.Element {
     // gap the user had opened by hand. The ResizeObserver re-pins that growth.
     stickToBottom.current =
       el.scrollTop === pinnedTop.current || el.scrollHeight - el.scrollTop - el.clientHeight < 80
-    // Near the top with more history → reveal another page, preserving position.
+    // Near the top with more history â†’ reveal another page, preserving position.
     if (el.scrollTop < 80 && visibleCount < messages.length) {
       restoreHeight.current = el.scrollHeight
       restoreChatId.current = activeChatId
@@ -159,7 +180,7 @@ export function ChatView(): JSX.Element {
   // do both after paint (`useEffect` + `scrollTop = 0`), which is a race it lost
   // every time: the new transcript arrives a commit LATER than the switch, so
   // the reset ran after the tail effect had already pinned and stomped the pin
-  // back to zero — and the scroll event that write produced then cleared
+  // back to zero â€” and the scroll event that write produced then cleared
   // `stickToBottom`, so nothing pinned again. That is the whole "switching to a
   // session lands at the top" bug. Marking the session "not arrived" instead
   // hands the offset to the tail effect below, which lands it whenever the
@@ -178,7 +199,7 @@ export function ChatView(): JSX.Element {
   }, [activeChatId])
 
   // Keep the scroll anchored when older messages prepend (no jump to the top).
-  // Guarded on the chat the measurement was taken in — `visibleCount` also
+  // Guarded on the chat the measurement was taken in â€” `visibleCount` also
   // changes on a session switch, which would otherwise replay a stale delta.
   useEffect(() => {
     const el = scrollRef.current
@@ -194,8 +215,8 @@ export function ChatView(): JSX.Element {
   //
   // Runs on layout (not after paint) so the jump is never a visible frame, and
   // re-pins on the next frame as well: a turn's content keeps growing AFTER this
-  // commit — images decode, `lazy()` diff/file views resolve, Streamdown re-lays
-  // out — and a single scrollTo lands short of the real bottom every time.
+  // commit â€” images decode, `lazy()` diff/file views resolve, Streamdown re-lays
+  // out â€” and a single scrollTo lands short of the real bottom every time.
   //
   // The first pin after a switch is unconditional. `stickToBottom` cannot be
   // trusted yet at that point: the outgoing transcript unmounting fires a scroll
@@ -203,7 +224,7 @@ export function ChatView(): JSX.Element {
   useLayoutEffect(() => {
     if (!scrollRef.current) return
     if (arrivedChatId.current !== activeChatId) {
-      // Still waiting on this session's transcript — nothing to land on yet.
+      // Still waiting on this session's transcript â€” nothing to land on yet.
       // This effect re-runs when it arrives.
       if (!transcriptReady) return
       arrivedChatId.current = activeChatId
@@ -220,8 +241,8 @@ export function ChatView(): JSX.Element {
   // guessing a delay.
   //
   // Attached by ref callback and kept for the column's lifetime. This used to be
-  // built inside the tail effect above, whose deps include `streaming` — a fresh
-  // array on EVERY streamed delta — so a live turn tore down and rebuilt a
+  // built inside the tail effect above, whose deps include `streaming` â€” a fresh
+  // array on EVERY streamed delta â€” so a live turn tore down and rebuilt a
   // ResizeObserver on each one, every rebuild firing an immediate observation
   // and forcing layout. That was a large share of the streaming jank.
   const resizeObserver = useRef<ResizeObserver | null>(null)
@@ -247,10 +268,10 @@ export function ChatView(): JSX.Element {
   // auto-growing as you type, the workstream strip. The browser does not adjust
   // `scrollTop` for that, and both directions are visibly wrong:
   //
-  //   shrinking (queue opens) — the max scroll offset grows, so an offset that
+  //   shrinking (queue opens) â€” the max scroll offset grows, so an offset that
   //     WAS the bottom is now short of it and the last messages slide out of
   //     view. Reads as the queue shoving the transcript upward.
-  //   growing (queue collapses) — the reclaimed height appears BELOW the last
+  //   growing (queue collapses) â€” the reclaimed height appears BELOW the last
   //     message as dead space, because the offset never moves back down. Reads
   //     as the collapsed queue still holding its space.
   //
@@ -280,7 +301,7 @@ export function ChatView(): JSX.Element {
   // read. Gate on having something to show, not on the session's kind.
   const hasSessionInfo = !!activeChat?.description?.trim() || sessionTasks.length > 0
 
-  // No workspace open — prompt to open a folder to start a session.
+  // No workspace open â€” prompt to open a folder to start a session.
   if (!activeChat) {
     return (
       <div className="flex h-full min-w-0 flex-1 flex-col bg-bg">
@@ -321,7 +342,7 @@ export function ChatView(): JSX.Element {
               <FolderOpen className="h-4 w-4 shrink-0 text-text-muted" />
             )}
             <span className="shrink-0 text-sm font-medium">{activeChat.title}</span>
-            {/* A delegate's session is only legible in context — who sent it, and
+            {/* A delegate's session is only legible in context â€” who sent it, and
                 a way back. The folder path is the parent's business. */}
             {isSub ? (
               parentChat && (
@@ -381,7 +402,7 @@ export function ChatView(): JSX.Element {
             )}
             {backgroundTaskCount > 0 && activeChatId && (
               // Detached tasks were cancellable in main from day one
-              // (`tasks:cancel`) but nothing ever called it — this badge counted
+              // (`tasks:cancel`) but nothing ever called it â€” this badge counted
               // them and offered no way out. Cancels them all: they're detached
               // by definition, so "stop the thing I didn't ask for" is the whole
               // interaction, and per-task control lives on the task card.
@@ -416,151 +437,197 @@ export function ChatView(): JSX.Element {
               <Settings className="h-3.5 w-3.5" /> {t('chat.settings')}
             </button>
           )}
+          <button
+            type="button"
+            onClick={() => setMembersOpen((o) => !o)}
+            title="Channel members"
+            className={cn(
+              'press-scale flex h-7 shrink-0 items-center gap-1.5 sq sq-lg rounded-lg px-2 text-xs',
+              membersOpen
+                ? 'bg-elevated text-text'
+                : 'text-text-muted hover:bg-white/5 hover:text-text'
+            )}
+          >
+            <Users className="h-3.5 w-3.5" />
+            <span>{members.length}</span>
+          </button>
           <UsageMeter />
         </div>
       </header>
 
       {infoOpen && <SessionInfo chat={activeChat} />}
 
-      <div
-        ref={scrollRef}
-        onScroll={onScroll}
-        // overflow-anchor is off because this pane does its own scroll math:
-        // paging in older messages measures scrollHeight and re-applies the
-        // delta by hand. Chromium's anchoring would apply its own correction on
-        // top of that, and the two together overshoot.
-        style={{ overflowAnchor: 'none' }}
-        className="flex min-h-0 flex-1 flex-col overflow-y-auto"
-      >
-        {messagesError ? (
-          // A failed load used to be indistinguishable from an empty session:
-          // silent, blank, and with no way back other than clicking away and
-          // returning. Name it and make it recoverable.
-          <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
-            <p className="max-w-xs text-sm text-text-muted">{t('chat.loadFailed')}</p>
-            <Button variant="ghost" onClick={() => void selectChat(activeChat.id)}>
-              <RotateCw className="h-4 w-4" /> {t('common.retry')}
-            </Button>
-          </div>
-        ) : loading ? (
-          // Deliberately blank: a transcript read is a local SQLite query, so it
-          // resolves within a frame or two and a spinner would be a flash of
-          // chrome rather than information. This branch exists to stop the EMPTY
-          // state (and its loop copy) from claiming the session has no messages
-          // before we know that.
-          <div className="h-full" />
-        ) : isEmpty ? (
-          <div className="flex h-full flex-col items-center justify-center px-6 text-center">
-            {activeLoop ? (
-              <p className="max-w-xs text-sm text-text-muted">
-                <Trans
-                  i18nKey="chat.loopEmpty"
-                  values={{
-                    title: activeChat.title,
-                    interval: formatInterval(activeLoop.intervalMinutes)
-                  }}
-                  components={{ strong: <span className="font-medium text-text" /> }}
-                />
-              </p>
+      <div className="flex min-h-0 flex-1 overflow-hidden">
+        <div className="flex min-h-0 flex-1 flex-col">
+          <div
+            ref={scrollRef}
+            onScroll={onScroll}
+            // overflow-anchor is off because this pane does its own scroll math:
+            // paging in older messages measures scrollHeight and re-applies the
+            // delta by hand. Chromium's anchoring would apply its own correction on
+            // top of that, and the two together overshoot.
+            style={{ overflowAnchor: 'none' }}
+            className="flex min-h-0 flex-1 flex-col overflow-y-auto"
+          >
+            {messagesError ? (
+              // A failed load used to be indistinguishable from an empty session:
+              // silent, blank, and with no way back other than clicking away and
+              // returning. Name it and make it recoverable.
+              <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
+                <p className="max-w-xs text-sm text-text-muted">{t('chat.loadFailed')}</p>
+                <Button variant="ghost" onClick={() => void selectChat(activeChat.id)}>
+                  <RotateCw className="h-4 w-4" /> {t('common.retry')}
+                </Button>
+              </div>
+            ) : loading ? (
+              // Deliberately blank: a transcript read is a local SQLite query, so it
+              // resolves within a frame or two and a spinner would be a flash of
+              // chrome rather than information. This branch exists to stop the EMPTY
+              // state (and its loop copy) from claiming the session has no messages
+              // before we know that.
+              <div className="h-full" />
+            ) : isEmpty ? (
+              <div className="flex h-full flex-col items-center justify-center px-6 text-center">
+                {activeLoop ? (
+                  <p className="max-w-xs text-sm text-text-muted">
+                    <Trans
+                      i18nKey="chat.loopEmpty"
+                      values={{
+                        title: activeChat.title,
+                        interval: formatInterval(activeLoop.intervalMinutes)
+                      }}
+                      components={{ strong: <span className="font-medium text-text" /> }}
+                    />
+                  </p>
+                ) : (
+                  <p className="text-sm text-text-muted"></p>
+                )}
+              </div>
             ) : (
-              <p className="text-sm text-text-muted"></p>
+              // mt-auto bottom-aligns a SHORT transcript.
+              //
+              // A new or brief session does not fill the pane, and a top-aligned
+              // column left everything below the last message as empty background --
+              // measured at 488px on a two-message session, which reads as a broken
+              // layout rather than breathing room. Pinning to the bottom cannot fix
+              // it: with nothing to scroll, scrollTop is already 0.
+              //
+              // mt-auto absorbs that slack while the column is shorter than the
+              // scrollport and resolves to 0 the moment it overflows, so long
+              // transcripts are untouched. Deliberately NOT justify-end on the
+              // parent: that clips overflow at the TOP in Chromium, which would put
+              // paged-in history out of reach. w-full because a flex child would
+              // otherwise shrink-to-fit and mx-auto would no longer center it.
+              //
+              // pb clears the fade below: at max scroll the last line has to end
+              // ABOVE the gradient, otherwise the final message always looks dimmed.
+              <div ref={setContentNode} className="mx-auto mt-auto w-full max-w-3xl px-4 pb-6 pt-4">
+                {messages.length > visibleCount && (
+                  <p className="mb-3 text-center text-xs text-text-subtle">
+                    Scroll up to load older â€” showing the last {visibleCount} of {messages.length}
+                  </p>
+                )}
+                {messages.slice(-visibleCount).map((message) => (
+                  <MessageBubble
+                    key={message.id}
+                    role={message.role}
+                    parts={message.parts}
+                    author={message.author}
+                    members={members}
+                  />
+                ))}
+                {streaming !== null && (
+                  <MessageBubble
+                    role="assistant"
+                    parts={streaming}
+                    author={streamingAuthor}
+                    members={members}
+                    streaming
+                  />
+                )}
+              </div>
             )}
           </div>
-        ) : (
-          // mt-auto bottom-aligns a SHORT transcript.
-          //
-          // A new or brief session does not fill the pane, and a top-aligned
-          // column left everything below the last message as empty background --
-          // measured at 488px on a two-message session, which reads as a broken
-          // layout rather than breathing room. Pinning to the bottom cannot fix
-          // it: with nothing to scroll, scrollTop is already 0.
-          //
-          // mt-auto absorbs that slack while the column is shorter than the
-          // scrollport and resolves to 0 the moment it overflows, so long
-          // transcripts are untouched. Deliberately NOT justify-end on the
-          // parent: that clips overflow at the TOP in Chromium, which would put
-          // paged-in history out of reach. w-full because a flex child would
-          // otherwise shrink-to-fit and mx-auto would no longer center it.
-          //
-          // pb clears the fade below: at max scroll the last line has to end
-          // ABOVE the gradient, otherwise the final message always looks dimmed.
-          <div ref={setContentNode} className="mx-auto mt-auto w-full max-w-3xl px-4 pb-6 pt-4">
-            {messages.length > visibleCount && (
-              <p className="mb-3 text-center text-xs text-text-subtle">
-                Scroll up to load older — showing the last {visibleCount} of {messages.length}
-              </p>
-            )}
-            {messages.slice(-visibleCount).map((message) => (
-              <MessageBubble key={message.id} role={message.role} parts={message.parts} />
-            ))}
-            {streaming !== null && <MessageBubble role="assistant" parts={streaming} streaming />}
-          </div>
-        )}
-      </div>
 
-      {/* The transcript used to end on a hard clip: the scrollport edge sliced
-          text mid-glyph, straight into the composer’s flat gutter, and the two
+          {/* The transcript used to end on a hard clip: the scrollport edge sliced
+          text mid-glyph, straight into the composerâ€™s flat gutter, and the two
           together read as a black bar cutting the pane in half. This is a
-          gradient of the pane’s own background laid over the last 24px of the
+          gradient of the paneâ€™s own background laid over the last 24px of the
           scroller, so lines dissolve into the composer instead of being cut.
 
-          Pulled back up by its own height (-mt-6) so it costs no layout — the
-          scroller keeps every pixel of flex-1 — and inert to the pointer, so
+          Pulled back up by its own height (-mt-6) so it costs no layout â€” the
+          scroller keeps every pixel of flex-1 â€” and inert to the pointer, so
           scrolling and text selection still work underneath it. The matching
           pb-6 on the message column is what keeps the last line legible: at
           max scroll it ends above the gradient instead of under it.
 
           The mr-2.5 is the scrollbar gutter (10px, see ::-webkit-scrollbar
-          in main.css). The bar occupies the scroller’s right edge, so a
+          in main.css). The bar occupies the scrollerâ€™s right edge, so a
           full-width fade would paint over its last 24px and wash out the
           thumb exactly when you drag it to the end. */}
-      <div
-        aria-hidden
-        className="pointer-events-none relative z-10 -mt-6 mr-2.5 h-6 shrink-0 bg-gradient-to-b from-transparent to-bg"
-      />
+          <div
+            aria-hidden
+            className="pointer-events-none relative z-10 -mt-6 mr-2.5 h-6 shrink-0 bg-gradient-to-b from-transparent to-bg"
+          />
 
-      {queue.length > 0 && (
-        <div className="bg-bg px-4 pt-2">
-          <div className="mx-auto max-w-3xl">
-            <Queue>
-              <QueueSection defaultOpen>
-                <QueueSectionTrigger>
-                  <QueueSectionLabel
-                    label={t('chat.queued')}
-                    count={queue.length}
-                    icon={<ListTree className="h-3.5 w-3.5 text-text-subtle" />}
-                  />
-                  {sending && (
-                    <span className="ml-auto text-[10px] text-text-subtle">
-                      {t('chat.runsAfterReply')}
-                    </span>
-                  )}
-                </QueueSectionTrigger>
-                <QueueSectionContent>
-                  <QueueList>
-                    {queue.map((item, i) => (
-                      <QueuedMessage key={item.id} item={item} index={i} total={queue.length} />
-                    ))}
-                  </QueueList>
-                </QueueSectionContent>
-              </QueueSection>
-            </Queue>
-          </div>
-        </div>
-      )}
+          {queue.length > 0 && (
+            <div className="bg-bg px-4 pt-2">
+              <div className="mx-auto max-w-3xl">
+                <Queue>
+                  <QueueSection defaultOpen>
+                    <QueueSectionTrigger>
+                      <QueueSectionLabel
+                        label={t('chat.queued')}
+                        count={queue.length}
+                        icon={<ListTree className="h-3.5 w-3.5 text-text-subtle" />}
+                      />
+                      {sending && (
+                        <span className="ml-auto text-[10px] text-text-subtle">
+                          {t('chat.runsAfterReply')}
+                        </span>
+                      )}
+                    </QueueSectionTrigger>
+                    <QueueSectionContent>
+                      <QueueList>
+                        {queue.map((item, i) => (
+                          <QueuedMessage key={item.id} item={item} index={i} total={queue.length} />
+                        ))}
+                      </QueueList>
+                    </QueueSectionContent>
+                  </QueueSection>
+                </Queue>
+              </div>
+            </div>
+          )}
 
-      {/* A subagent's session can now be stopped from its own composer: the Stop
+          {/* A subagent's session can now be stopped from its own composer: the Stop
           cancels the DELEGATE (there is no local request here to abort), which
           is what the button visibly means in this view. */}
-      <Composer
-        onSend={submit}
-        sending={sending || subagentRunning}
-        onStop={
-          subagentRunning && activeChatId ? () => void cancelSubagent(activeChatId) : () => stop()
-        }
-      />
+          <Composer
+            onSend={submit}
+            sending={sending || subagentRunning}
+            members={members}
+            draft={draft}
+            onDraftConsumed={() => setDraft('')}
+            onStop={
+              subagentRunning && activeChatId
+                ? () => void cancelSubagent(activeChatId)
+                : () => stop()
+            }
+          />
 
-      <WorkstreamStrip />
+          <WorkstreamStrip />
+        </div>
+
+        {membersOpen && (
+          <ChannelMembersPanel
+            members={members}
+            onChange={(next) => void setChannelMembers(activeChat.id, next)}
+            onMention={(name) => setDraft(`@${name} `)}
+            onClose={() => setMembersOpen(false)}
+          />
+        )}
+      </div>
 
       {loopPaneOpen && activeLoop && (
         <LoopDetailsPane
@@ -579,7 +646,7 @@ export function ChatView(): JSX.Element {
  * Shows `worktreePath` in preference to `workspacePath`. Those differ for every
  * workstream: the project folder is the repo you opened, but the agent's cwd is
  * an isolated checkout under `worktrees/`. Showing the project path meant the
- * header named a directory the session was NOT editing — actively misleading
+ * header named a directory the session was NOT editing â€” actively misleading
  * when several workstreams are open and you are trying to work out which
  * checkout a dev server or an editor tab belongs to.
  *

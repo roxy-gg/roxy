@@ -493,7 +493,22 @@ export const MIGRATIONS: Migration[] = [
       hidden_at   INTEGER NOT NULL,
       PRIMARY KEY (provider_id, model)
     );
-  `
+  `,
+
+  // ---- v24: channel members (multi-bot sessions) ----
+  // A session is a CHANNEL several bots sit in, not a one-on-one chat with a
+  // single agent. This column holds the ATTACHED specialists as a JSON
+  // BotMember[]; Roxy (the host) is implicit and never stored, so she cannot be
+  // detached by a bad write, and every session that predates this - NULL here -
+  // is already a valid channel with just her in it. See shared/channel-members.ts.
+  (db) => {
+    addColumnIfMissing(db, 'chats', 'channel_members', 'TEXT')
+    // WHICH member wrote an assistant message. Denormalized onto the row (a
+    // JSON BotAuthor) rather than joined from the member list, because a bot
+    // can be detached later and the transcript must still show who spoke.
+    // NULL = written by Roxy, which every pre-channel message was.
+    addColumnIfMissing(db, 'messages', 'author', 'TEXT')
+  }
 ]
 
 /**
@@ -527,6 +542,9 @@ export function repairSchema(db: Database): void {
   addColumnIfMissing(db, 'chats', 'worktree_pending', 'TEXT')
   // v21's composite (multi-repo) workstream membership.
   addColumnIfMissing(db, 'chats', 'repos', 'TEXT')
+  // v22's channel membership and per-message authorship.
+  addColumnIfMissing(db, 'chats', 'channel_members', 'TEXT')
+  addColumnIfMissing(db, 'messages', 'author', 'TEXT')
   // v17's per-session inference config.
   addColumnIfMissing(db, 'chats', 'agent_id', 'TEXT')
   addColumnIfMissing(db, 'chats', 'reasoning_effort', 'TEXT')

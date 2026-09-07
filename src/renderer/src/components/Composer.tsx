@@ -1,26 +1,63 @@
-import { useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent } from 'react'
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ClipboardEvent,
+  type DragEvent,
+  type KeyboardEvent
+} from 'react'
 import { useTranslation } from 'react-i18next'
 import { ArrowUp, Plus, Square, X } from 'lucide-react'
+import type { BotMember } from '@shared/types'
 import { ModelPicker } from './ModelPicker'
 import { ContextMeter, ContextPicker, ThinkingPicker, AgentPicker } from './InferenceControls'
 import { imageFilesFrom, readImageFile, type ComposerImage } from '../lib/images'
 import { ImagePreview } from './ImagePreview'
+import { BotAvatar } from './BotAvatar'
 
 export function Composer({
   onSend,
   sending,
-  onStop
+  onStop,
+  members = [],
+  draft,
+  onDraftConsumed
 }: {
   onSend: (text: string, images?: ComposerImage[]) => void
   sending?: boolean
   onStop?: () => void
+  /** Channel members offered by the `@` autocomplete (host first). */
+  members?: BotMember[]
+  /** Text pushed in from outside (clicking a member in the roster). */
+  draft?: string
+  onDraftConsumed?: () => void
 }): JSX.Element {
   const { t } = useTranslation()
   const [value, setValue] = useState('')
   const [images, setImages] = useState<ComposerImage[]>([])
   const [dragging, setDragging] = useState(false)
+  // Null = the `@` menu is closed. '' is a real state (just typed `@`), which
+  // is why this can't be a plain empty-string check.
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null)
+  const [mentionIndex, setMentionIndex] = useState(0)
   const ref = useRef<HTMLTextAreaElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
+
+  // Clicking a member in the roster prefills `@Name `, appending rather than
+  // replacing so it can be used mid-sentence without eating the draft.
+  useEffect(() => {
+    if (!draft) return
+    setValue((prev) => (prev ? `${prev.replace(/\s*$/, '')} ${draft}` : draft))
+    onDraftConsumed?.()
+    ref.current?.focus()
+  }, [draft, onDraftConsumed])
+
+  const matches = useMemo(() => {
+    if (mentionQuery === null) return []
+    const q = mentionQuery.toLowerCase()
+    return members.filter((m) => m.name.toLowerCase().startsWith(q))
+  }, [mentionQuery, members])
 
   const addFiles = async (files: File[]): Promise<void> => {
     if (files.length === 0) return
@@ -31,16 +68,66 @@ export function Composer({
 
   const removeImage = (id: string): void => setImages((prev) => prev.filter((i) => i.id !== id))
 
+  /** Open/close the `@` menu based on the word the caret is sitting in. */
+  const syncMention = (text: string, caret: number): void => {
+    // Only a `@` that starts a word opens the menu, so typing an email address
+    // doesn't turn the composer into a member picker.
+    const match = text.slice(0, caret).match(/(?:^|[^\w@])@([\w-]*)$/)
+    setMentionQuery(match ? match[1] : null)
+    if (match) setMentionIndex(0)
+  }
+
+  const insertMention = (member: BotMember): void => {
+    const el = ref.current
+    if (!el) return
+    const caret = el.selectionStart
+    const head = value.slice(0, caret).replace(/@[\w-]*$/, `@${member.name} `)
+    setValue(head + value.slice(caret))
+    setMentionQuery(null)
+    // The caret has to be restored after React commits the new value, or the
+    // browser parks it at the end of the whole textarea.
+    requestAnimationFrame(() => {
+      el.focus()
+      el.setSelectionRange(head.length, head.length)
+    })
+  }
+
   const submit = (): void => {
     const text = value.trim()
     if (!text && images.length === 0) return
     onSend(text, images.length ? images : undefined)
     setValue('')
     setImages([])
+    setMentionQuery(null)
     if (ref.current) ref.current.style.height = 'auto'
   }
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>): void => {
+    // The `@` menu owns the arrows, Enter/Tab, and Escape while it's open —
+    // checked first so Enter completes the member instead of sending a
+    // half-typed `@Rev`.
+    if (matches.length > 0) {
+      if (event.key === 'ArrowDown') {
+        event.preventDefault()
+        setMentionIndex((i) => (i + 1) % matches.length)
+        return
+      }
+      if (event.key === 'ArrowUp') {
+        event.preventDefault()
+        setMentionIndex((i) => (i - 1 + matches.length) % matches.length)
+        return
+      }
+      if (event.key === 'Enter' || event.key === 'Tab') {
+        event.preventDefault()
+        insertMention(matches[mentionIndex] ?? matches[0])
+        return
+      }
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        setMentionQuery(null)
+        return
+      }
+    }
     // Escape stops the turn. The button alone was not enough: it hides as soon
     // as you type (the composer switches to "add to queue"), so drafting a
     // follow-up while a turn ran left no visible way to stop it — you had to
@@ -87,7 +174,35 @@ export function Composer({
   const canSend = !!value.trim() || images.length > 0
 
   return (
-    <div className="bg-bg px-4 pb-1.5 pt-2">
+    <div className="relative bg-bg px-4 pb-1.5 pt-2">
+      {matches.length > 0 && (
+        <div className="absolute bottom-full left-1/2 z-30 mb-1 w-72 -translate-x-1/2 overflow-hidden sq sq-xl sq-ring rounded-xl border border-border bg-surface shadow-2xl">
+          <div className="flex items-center justify-between border-b border-border px-3 py-1.5 text-[11px] text-text-muted">
+            <span>Mention a member</span>
+            <span className="text-text-subtle">↑↓ · Enter</span>
+          </div>
+          <div className="max-h-48 overflow-y-auto p-1">
+            {matches.map((m, i) => (
+              <button
+                key={m.id}
+                type="button"
+                onClick={() => insertMention(m)}
+                onMouseEnter={() => setMentionIndex(i)}
+                className={`flex w-full items-center gap-2 sq sq-lg rounded-lg px-2 py-1.5 text-left text-xs ${
+                  i === mentionIndex ? 'bg-white/10 text-text' : 'text-text-muted'
+                }`}
+              >
+                <BotAvatar member={m} size="sm" />
+                <div className="min-w-0 flex-1">
+                  <div className="truncate font-medium text-text">{m.name}</div>
+                  <div className="truncate text-[10px] text-text-subtle">{m.role}</div>
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div
         onDragOver={(e) => {
           if (e.dataTransfer.types.includes('Files')) {
@@ -159,11 +274,20 @@ export function Composer({
               ? onStop
                 ? t('composer.queuePlaceholderStop')
                 : t('composer.queuePlaceholder')
-              : t('composer.placeholder')
+              : members.length > 1
+                ? t('composer.channelPlaceholder')
+                : t('composer.placeholder')
           }
           onChange={(e) => {
             setValue(e.target.value)
             autoGrow()
+            syncMention(e.target.value, e.target.selectionStart)
+          }}
+          // The caret can also move without the value changing (arrows, a
+          // click), which opens or closes the menu just the same.
+          onSelect={(e) => {
+            const el = e.currentTarget
+            syncMention(el.value, el.selectionStart)
           }}
           onKeyDown={onKeyDown}
           onPaste={onPaste}

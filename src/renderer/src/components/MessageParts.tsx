@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useState } from 'react'
 import { Streamdown } from 'streamdown'
-import { Brain, ChevronRight } from 'lucide-react'
+import { Brain, ChevronRight, CornerDownRight, UserMinus, UserPlus } from 'lucide-react'
 import type { MessagePart } from '@shared/types'
 import { streamSignature } from '@shared/parts'
 import { ToolCall } from './ToolCall'
@@ -147,7 +147,13 @@ export function MessageParts({
             />
           )
         }
-        return <Prose key={i} text={part.text} animating={streaming && isLast} />
+        if (part.type === 'notice') {
+          return <ChannelNotice key={i} part={part} />
+        }
+        if (part.type === 'text') {
+          return <Prose key={i} text={part.text} animating={streaming && isLast} />
+        }
+        return null
       })}
       {waiting && (
         <ThinkingIndicator
@@ -159,6 +165,40 @@ export function MessageParts({
           }
         />
       )}
+    </div>
+  )
+}
+
+/**
+ * A channel notice rendered as a centered divider rather than a bubble: who
+ * joined or left, or a hand-off from one member to another.
+ *
+ * It reads as a line in the room's history, not as something anyone said, which
+ * is exactly what it is - no member wrote it.
+ */
+function ChannelNotice({ part }: { part: Extract<MessagePart, { type: 'notice' }> }): JSX.Element {
+  const Icon = part.kind === 'join' ? UserPlus : part.kind === 'leave' ? UserMinus : CornerDownRight
+  return (
+    <div className="flex items-center justify-center gap-1.5 py-1 text-[11px] text-text-subtle">
+      <Icon className="h-3 w-3 shrink-0" />
+      <span>
+        {part.kind === 'join' && (
+          <>
+            <span className="text-text-muted">{part.member}</span> joined the channel
+          </>
+        )}
+        {part.kind === 'leave' && (
+          <>
+            <span className="text-text-muted">{part.member}</span> left the channel
+          </>
+        )}
+        {part.kind === 'handoff' && (
+          <>
+            <span className="text-text-muted">{part.member}</span> handed off to{' '}
+            <span className="text-text-muted">{part.to}</span>
+          </>
+        )}
+      </span>
     </div>
   )
 }

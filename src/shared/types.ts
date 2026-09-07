@@ -184,6 +184,14 @@ export interface Chat {
   description: string | null
   /** Agent-maintained task checklist for this session. */
   tasks: SessionTask[]
+  /**
+   * The specialist bots ATTACHED to this session's channel, in the order they
+   * were added. Roxy (the host) is always present and is NOT in this list -
+   * read the full membership through `withHost` in shared/channel-members.ts.
+   * Empty means a plain single-agent session, which is what every session
+   * created before channels existed is.
+   */
+  channelMembers: BotMember[]
   /** User-defined sort key within its project (higher = higher in the list). */
   sortOrder: number
   createdAt: number
@@ -191,6 +199,44 @@ export interface Chat {
 }
 
 export type MessageRole = 'user' | 'assistant' | 'system'
+
+/**
+ * Which channel member wrote an assistant message.
+ *
+ * Denormalized onto the message rather than joined from the member list,
+ * because a member can be detached from the channel later and the transcript
+ * must still show who said what. Absent on messages written before channels
+ * existed, and on turns from a single-agent session.
+ */
+export interface BotAuthor {
+  name: string
+  role?: string
+  icon?: string
+  color?: string
+}
+
+/**
+ * A bot sitting in one session's channel.
+ *
+ * `systemPrompt` is APPENDED to Roxy's base system prompt, never a replacement
+ * for it — a member is Roxy with a brief, so it inherits the workspace, the
+ * tools, and the house rules without being told who it is first.
+ */
+export interface BotMember {
+  id: string
+  name: string
+  role: string
+  /** Avatar key resolved by the renderer's icon map (see BotAvatar). */
+  icon?: string
+  /** Accent key used for the member's name/badge color. */
+  color?: string
+  /** Specialty instructions, appended to the base prompt. Absent on the host. */
+  systemPrompt?: string
+  /** Pinned model for this member. Null/absent = the session's model. */
+  model?: string
+  /** True for the built-in host (Roxy), which cannot be edited or detached. */
+  builtIn?: boolean
+}
 
 /**
  * One ordered piece of a turn. An assistant turn is a sequence of these, so
@@ -259,6 +305,20 @@ export type MessagePart =
        */
       children?: MessagePart[]
     }
+  | {
+      /**
+       * A channel notice: who joined or left, or a bot-to-bot hand-off. Carried
+       * as a part (not a bare text message) so the transcript renders it as a
+       * divider instead of prose, and so `visibleMessages` can keep it in every
+       * member's view regardless of who it names.
+       */
+      type: 'notice'
+      kind: 'join' | 'leave' | 'handoff'
+      /** The member the notice is about; the speaker, for a hand-off. */
+      member: string
+      /** For a hand-off: who the turn was passed to. */
+      to?: string
+    }
 
 export interface Message {
   id: string
@@ -268,6 +328,7 @@ export interface Message {
   /** Ordered parts for rich rendering; falls back to a single text part. */
   parts: MessagePart[]
   createdAt: number
+  author?: BotAuthor
 }
 
 export interface AddMessageInput {
@@ -275,6 +336,13 @@ export interface AddMessageInput {
   role: MessageRole
   content: string
   parts?: MessagePart[]
+  author?: BotAuthor
+}
+
+/** Replace a session's channel membership. The host is implicit and not stored. */
+export interface SetChannelMembersInput {
+  chatId: string
+  members: BotMember[]
 }
 
 // ---- Loops (scheduled agentic prompts) ---------------------------------------

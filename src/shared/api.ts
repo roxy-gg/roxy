@@ -20,6 +20,7 @@ import type {
   QueueItem,
   ReasoningEffort,
   SessionKind,
+  SetChannelMembersInput,
   ToolDiff,
   ToolResult,
   UsageStats,
@@ -371,6 +372,11 @@ export interface LlmStartInput {
   messages: ChatMessage[]
   /** Which primary agent to run (e.g. "build" or "plan"). Defaults to build. */
   agentId?: string
+  /**
+   * The channel block for the answering member - who else is in the room, plus
+   * that member's own brief - appended to the base system prompt. Absent in a solo channel.
+   */
+  memberPrompt?: string
   /** Thinking effort for reasoning-capable models. */
   reasoningEffort?: ReasoningEffort
   /** Whether the model supports reasoning (gates sending the effort param). */
@@ -762,6 +768,14 @@ export interface RoxyApi {
     listOrder(): Promise<string[]>
     /** Persist the project order; `paths` is the full list, top â†’ bottom. */
     reorder(paths: string[]): Promise<void>
+  }
+  channel: {
+    /**
+     * Replace a session's attached bots. Roxy is the host and is filtered out
+     * on the way in, so she can never be detached by a stale renderer list.
+     * Returns the updated session row.
+     */
+    setMembers(input: SetChannelMembersInput): Promise<Chat>
   }
   messages: {
     list(chatId: string): Promise<Message[]>

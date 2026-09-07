@@ -65,6 +65,9 @@ const roxy: RoxyApi = {
     list: (chatId) => ipcRenderer.invoke(CHANNELS.messagesList, chatId),
     add: (input) => ipcRenderer.invoke(CHANNELS.messagesAdd, input)
   },
+  channel: {
+    setMembers: (input) => ipcRenderer.invoke(CHANNELS.channelSetMembers, input)
+  },
   integrations: {
     list: () => ipcRenderer.invoke(CHANNELS.integrationsList),
     setEnabled: (id, enabled) => ipcRenderer.invoke(CHANNELS.integrationsSetEnabled, id, enabled)

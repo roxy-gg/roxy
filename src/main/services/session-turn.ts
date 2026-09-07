@@ -190,6 +190,7 @@ async function runTurn(
       model: input.model,
       messages: input.messages,
       agentId: input.agentId,
+      memberPrompt: input.memberPrompt,
       reasoning: input.reasoning,
       reasoningEffort: input.reasoningEffort,
       contextLimit: input.contextLimit,

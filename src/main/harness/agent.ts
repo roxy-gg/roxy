@@ -456,7 +456,8 @@ function buildSystemMessage(
   chatId?: string,
   agent?: AgentDef,
   mcpInfo?: string,
-  skillInfo?: string
+  skillInfo?: string,
+  memberPrompt?: string
 ): string {
   const base = promptText[selectPromptName(model)] || promptText.default || FALLBACK_PROMPT
   const gitRoot = cwd ? findGitRoot(cwd) : undefined
@@ -479,7 +480,13 @@ function buildSystemMessage(
     ...instructions,
     ...(skillInfo ? [skillInfo] : []),
     ...(mcpInfo ? [mcpInfo] : []),
-    ...(agentPrompt ? [agentPrompt] : [])
+    ...(agentPrompt ? [agentPrompt] : []),
+    // LAST, so the channel block (roster + the member's brief) is the most
+    // specific instruction in the prompt. It is APPENDED to Roxy's base rather
+    // than replacing it: a member is Roxy with a specialty, so it inherits the
+    // workspace, the tool rules, and the house style instead of starting as a
+    // blank model that has to be told who it is first.
+    ...(memberPrompt ? [memberPrompt] : [])
   ]
   const contextSummary = chatId ? (repo.getChat(chatId)?.contextSummary ?? undefined) : undefined
   return assembleSystemPrompt({
@@ -785,7 +792,7 @@ type ToolSchema = ReturnType<typeof fn>
 /** The delegation tool — lets a primary agent spawn a focused subagent. */
 const TASK_SCHEMA = fn(
   'task',
-  'Delegate a focused, self-contained sub-task to a specialized subagent that runs on its own and reports back. Use this to parallelize or offload work (e.g. research the codebase, build a page). The subagent has NO memory of this conversation, so put ALL the context it needs into `prompt`. It returns a single report. Call task multiple times IN ONE turn to batch independent work. CONCURRENCY: read-only "explore" subagents run in PARALLEL (bounded) - that is what subagents are for, and you should fan them out freely. Write-capable "general" subagents are SERIALIZED one at a time, because they share this session\'s working directory and would otherwise overwrite each other\'s edits; several of them in one turn is correct but no faster than doing the work yourself. To get genuinely parallel WRITES, the user should open separate sessions - each gets its own git worktree and therefore its own filesystem.',
+  'Delegate a focused, self-contained sub-task to a specialized subagent that runs on its own and reports back. Use this to parallelize or offload work (e.g. research the codebase, build a page). The subagent has NO memory of this conversation, so put ALL the context it needs into `prompt`. It returns a single report. Call task multiple times IN ONE turn to batch independent work. CONCURRENCY: read-only "explore" subagents run in PARALLEL (bounded) - that is what subagents are for, and you should fan them out freely. Write-capable "general" subagents are SERIALIZED one at a time, because they share this session\'s working directory and would otherwise overwrite each other\'s edits; several of them in one turn is correct but no faster than doing the work yourself. To get genuinely parallel WRITES, the user should open separate sessions - each gets its own git worktree and therefore its own filesystem. This tool is NOT how you reach another bot in this channel: a subagent is a blank child of your own context, while a channel member is a peer with its own brief - to reach one, @mention them at the end of your reply.',
   {
     description: str('A short (3-5 word) label for the task.'),
     prompt: str('The complete task for the subagent, including every bit of context it needs.'),
@@ -886,6 +893,12 @@ export interface RunTurnOptions {
   chatId?: string
   /** Which primary agent to run (e.g. "build" or "plan"). Defaults to build. */
   agentId?: string
+  /**
+   * The channel block for the answering member - the roster plus that member's
+   * own brief - appended to the base system prompt. Absent in a solo channel,
+   * which is Roxy's base prompt unmodified. See shared/channel-members.ts.
+   */
+  memberPrompt?: string
   signal: AbortSignal
   emit: (event: LlmEvent) => void
   /** Whether the model supports reasoning (gates the reasoning params). */
@@ -955,6 +968,7 @@ export async function runAgentTurn(opts: RunTurnOptions): Promise<void> {
     cwd,
     chatId,
     agentId,
+    memberPrompt,
     signal,
     emit,
     reasoning,
@@ -1027,7 +1041,8 @@ export async function runAgentTurn(opts: RunTurnOptions): Promise<void> {
     chatId,
     agent,
     mcpInfo,
-    parentSkillInfo
+    parentSkillInfo,
+    memberPrompt
   )
   const systemMessage: ChatMessage = { role: 'system', content: systemText }
 

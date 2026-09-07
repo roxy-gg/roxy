@@ -2,6 +2,15 @@ import { create } from 'zustand'
 import { DEFAULT_AGENT_ID, getAgent } from '@shared/agents'
 import type { Language } from '@shared/i18n'
 import { applyLanguage } from '../i18n'
+import {
+  MAX_HANDOFF_HOPS,
+  channelPrompt,
+  resolveHandoff,
+  resolveRecipient,
+  visibleMessages,
+  withHost
+} from '@shared/channel-members'
+import type { BotAuthor, BotMember } from '@shared/types'
 import type {
   AppSettings,
   Chat,
@@ -111,6 +120,14 @@ interface RoxyStore {
   sendingChats: Record<string, boolean>
   /** In-progress assistant parts per chat while a reply streams in. */
   streamingChats: Record<string, MessagePart[]>
+  /**
+   * Which channel member is mid-reply, per chat. Kept beside the streamed
+   * parts so the live bubble is attributed to whoever is actually speaking:
+   * during a hand-off chain the answering member changes between turns, and a
+   * bubble labelled "Roxy" while Reviewer types is simply wrong. Absent means
+   * the host is answering.
+   */
+  speakingChats: Record<string, BotAuthor>
   /**
    * The open session's mode, mirrored from its `chat.agentId` for synchronous
    * reads (the composer + the context meter re-render on every keystroke, and
@@ -251,7 +268,21 @@ interface RoxyStore {
   /** Persist the project (workspace) order (optimistic). `paths` = full list, top → bottom. */
   reorderProjects: (paths: string[]) => Promise<void>
   submit: (content: string, images?: ComposerImage[]) => Promise<void>
-  sendMessage: (content: string, chatId?: string, images?: ComposerImage[]) => Promise<void>
+  sendMessage: (
+    content: string,
+    chatId?: string,
+    images?: ComposerImage[],
+    /**
+     * Which channel member answers, overriding what the text addresses. Set
+     * only by a hand-off, where the next speaker is decided by the previous
+     * bot's reply rather than by the user's message.
+     */
+    speaker?: BotMember,
+    /** Hand-offs already spent on this user message (see MAX_HANDOFF_HOPS). */
+    hop?: number
+  ) => Promise<void>
+  /** Attach/detach this channel's bots, posting a join/leave notice. */
+  setChannelMembers: (chatId: string, members: BotMember[]) => Promise<void>
   drainQueue: (chatId: string) => Promise<void>
   removeQueued: (id: string) => Promise<void>
   moveQueued: (id: string, direction: 'up' | 'down') => Promise<void>
@@ -954,6 +985,7 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
   messagesError: false,
   sendingChats: {},
   streamingChats: {},
+  speakingChats: {},
   activeAgentId: DEFAULT_AGENT_ID,
   projectInstructions: {},
   projectOrder: [],
@@ -1721,11 +1753,13 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
     set((s) => {
       const sendingChats = { ...s.sendingChats }
       const streamingChats = { ...s.streamingChats }
+      const speakingChats = { ...s.speakingChats }
       const stopChats = { ...s.stopChats }
       delete sendingChats[id]
       delete streamingChats[id]
+      delete speakingChats[id]
       delete stopChats[id]
-      return { sendingChats, streamingChats, stopChats }
+      return { sendingChats, streamingChats, speakingChats, stopChats }
     })
     if (get().activeChatId === id) get().clearActive()
   },
@@ -1806,12 +1840,21 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
     await get().sendMessage(text, undefined, images)
   },
 
-  sendMessage: async (content, targetChatId, images) => {
+  sendMessage: async (content, targetChatId, images, speaker, hop = 0) => {
     const chatId = targetChatId ?? get().activeChatId
     if (!chatId) return
     if (get().sendingChats[chatId]) return
     if (content.startsWith('!') && !content.slice(1).trim()) return
     const { settings } = get()
+
+    // Who answers: the member a hand-off named, else the member the message is
+    // ADDRESSED to (it opens with their @mention), else the host. A mention
+    // later in the text is the user talking ABOUT a member - ".. and then call
+    // @Reviewer" is the host's job, ending in a hand-off - so it stays with the
+    // host, who is in every channel and keeps the room from having nobody
+    // listening. See resolveRecipient.
+    const members = withHost(get().chats.find((c) => c.id === chatId)?.channelMembers)
+    const author = speaker ?? resolveRecipient(content, members)
 
     // Make sure the workspace's instruction files are cached before we size the
     // window cut (the main process reads them fresh when it builds the prompt).
@@ -1886,13 +1929,24 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
           chatId,
           role: 'assistant',
           content: partsToContent(parts),
-          parts
+          parts,
+          author: {
+            name: author.name,
+            role: author.role,
+            icon: author.icon,
+            color: author.color
+          }
         })
         appendIfActive(assistantMessage)
       }
       setStreaming(null)
       setSending(false)
       clearStop()
+      set((s) => {
+        const next = { ...s.speakingChats }
+        delete next[chatId]
+        return { speakingChats: next }
+      })
       // If a remote (phone) turn landed while this local send was streaming, we
       // deferred the mirror to avoid clobbering the stream — reconcile it now.
       if (remoteMirror.deferred && get().remote.sessionId === chatId) {
@@ -1909,12 +1963,49 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
       if (active && !get().chats.some((c) => c.id === active)) {
         await get().selectChat(chatId)
       }
+      // A bot that ends its turn by @mentioning another member has handed the
+      // work over, so run that member next instead of returning to the user.
+      // This is what makes the channel a conversation: Builder finishes and
+      // says "@Reviewer ready", and the review happens without being asked.
+      //
+      // Capped at MAX_HANDOFF_HOPS: each hop is a full model turn of work the
+      // user did not directly ask for, so the chain is bounded rather than
+      // trusted to wind down on its own. A stopped turn hands off to nobody -
+      // stopping means stop, not "stop and start something else".
+      const next = wasStopped ? undefined : resolveHandoff(partsToContent(parts), author, members)
+      if (next && hop < MAX_HANDOFF_HOPS) {
+        const notice = await api.messages.add({
+          chatId,
+          role: 'system',
+          content: `${author.name} handed off to ${next.name}`,
+          parts: [{ type: 'notice', kind: 'handoff', member: author.name, to: next.name }]
+        })
+        appendIfActive(notice)
+        // The next member reads the hand-off from the transcript it can already
+        // see, so it needs no synthesized prompt telling it what it was asked -
+        // an invented user message would put words in the user's mouth and show
+        // up in the history as though they had typed it.
+        await get().sendMessage('', chatId, undefined, next, hop + 1)
+        return
+      }
+
       // Don't auto-run the next queued prompt when the user stopped this turn.
       if (!wasStopped) await get().drainQueue(chatId)
     }
 
     clearStop()
     setSending(true)
+    set((s) => ({
+      speakingChats: {
+        ...s.speakingChats,
+        [chatId]: {
+          name: author.name,
+          role: author.role,
+          icon: author.icon,
+          color: author.color
+        }
+      }
+    }))
 
     // The user turn carries any pasted/dropped images as image parts ahead of
     // the text, so they persist, render as thumbnails, and reach the model.
@@ -1927,13 +2018,19 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
       })),
       ...(content ? [{ type: 'text' as const, text: content }] : [])
     ]
-    const userMessage = await api.messages.add({
-      chatId,
-      role: 'user',
-      content,
-      parts: userParts.length ? userParts : undefined
-    })
-    appendIfActive(userMessage)
+    // A hand-off has no user turn behind it - the previous bot asked, not the
+    // user - so it writes nothing here. Persisting an empty user message would
+    // both show a blank bubble and, worse, make the model's own request look
+    // like something the user typed.
+    if (userParts.length) {
+      const userMessage = await api.messages.add({
+        chatId,
+        role: 'user',
+        content,
+        parts: userParts
+      })
+      appendIfActive(userMessage)
+    }
     // Reveal the assistant bubble right away (empty → a cute "thinking"
     // indicator) so there's no empty gap while we wait for the first token.
     setStreaming(parts)
@@ -2008,7 +2105,8 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
         contextBudget,
         info?.outputLimit ?? 4096,
         model,
-        agentId
+        agentId,
+        author
       )
       // Build parts live from the agent's event stream through the shared fold:
       // text grows the current text part, each tool call adds a card that flips
@@ -2086,6 +2184,10 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
           model,
           messages: chatMessages,
           agentId,
+          // The whole roster, not just this member's brief: a bot that isn't
+          // told who else is in the room answers "call @Reviewer" by spawning a
+          // subagent (or hunting for a GitHub user) instead of handing off.
+          memberPrompt: channelPrompt(members, author),
           reasoning: info?.reasoning ?? false,
           // Clamp to what THIS model accepts. A session's effort is sticky
           // across model switches, so "Max" set on one model would otherwise
@@ -2117,6 +2219,34 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
       if (!(await streamText('text', reply))) return
     }
     await finishTurn()
+  },
+
+  setChannelMembers: async (chatId, members) => {
+    const before = withHost(get().chats.find((c) => c.id === chatId)?.channelMembers)
+    const updated = await api.channel.setMembers({ chatId, members })
+    set({ chats: get().chats.map((c) => (c.id === chatId ? updated : c)) })
+
+    // Post a notice for what actually changed, so the transcript records who
+    // was in the room when each message was written. Without it, scrolling back
+    // through a channel whose membership moved reads as though today's roster
+    // had always been there.
+    const beforeIds = new Set(before.map((m) => m.id))
+    const afterIds = new Set(withHost(updated.channelMembers).map((m) => m.id))
+    const notices = [
+      ...before.filter((m) => !afterIds.has(m.id)).map((m) => ['leave', m.name] as const),
+      ...withHost(updated.channelMembers)
+        .filter((m) => !beforeIds.has(m.id))
+        .map((m) => ['join', m.name] as const)
+    ]
+    for (const [kind, name] of notices) {
+      const message = await api.messages.add({
+        chatId,
+        role: 'system',
+        content: `${name} ${kind === 'join' ? 'joined' : 'left'} the channel`,
+        parts: [{ type: 'notice', kind, member: name }]
+      })
+      if (get().activeChatId === chatId) set({ messages: [...get().messages, message] })
+    }
   },
 
   drainQueue: async (chatId) => {
@@ -2300,8 +2430,15 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
 export function buildSystemPrompt(
   chat: Chat | undefined,
   modelId?: string,
-  agentId?: string
+  agentId?: string,
+  /**
+   * The answering channel member, whose roster block + brief main APPENDS to
+   * the base prompt (see harness/agent.ts). Included here so the window reserve
+   * accounts for its length instead of under-reserving by that much.
+   */
+  member?: BotMember
 ): string {
+  const memberBlock = member ? channelPrompt(chat?.channelMembers ?? [], member) : undefined
   const base = PROMPT_TEXT[selectPromptName(modelId)] ?? PROMPT_TEXT.default
   const environment = buildEnvironment({
     cwd: chat?.workspacePath || undefined,
@@ -2317,7 +2454,11 @@ export function buildSystemPrompt(
   const instructions = workspace
     ? (useRoxyStore.getState().projectInstructions[workspace] ?? [])
     : []
-  const extra = [...instructions, ...(agentPrompt ? [agentPrompt] : [])]
+  const extra = [
+    ...instructions,
+    ...(agentPrompt ? [agentPrompt] : []),
+    ...(memberBlock ? [memberBlock] : [])
+  ]
   return assembleSystemPrompt({
     base,
     environment,
@@ -2335,15 +2476,24 @@ async function buildChatMessages(
   contextBudget = 128_000,
   outputReserve = 4096,
   modelId?: string,
-  agentId?: string
+  agentId?: string,
+  member?: BotMember
 ): Promise<ChatMessage[]> {
   const chat = useRoxyStore.getState().chats.find((c) => c.id === chatId)
-  const systemText = buildSystemPrompt(chat, modelId, agentId)
+  const systemText = buildSystemPrompt(chat, modelId, agentId, member)
   const since = chat?.contextSummaryAt ?? 0
+  const history = await api.messages.list(chatId)
+  // Narrow the transcript to what THIS member should see before anything else
+  // reads it. This is the whole reason a channel has separate bots rather than
+  // one agent wearing hats: a specialist that carries the entire project's
+  // cross-talk starts treating its own earlier conclusions as fresh evidence,
+  // and unrelated work crowds out the code it was actually asked about. The
+  // host is exempt - Roxy has to follow the whole room. See visibleMessages.
+  const scoped = member ? visibleMessages(history, member) : history
   // Each turn rebuilds into one or more chat messages; keeping them grouped means
   // the window cut below can never split an assistant's tool_calls from the
   // matching role:'tool' results (which would orphan them → provider 400s).
-  const groups = (await api.messages.list(chatId))
+  const groups = scoped
     .filter((m) => (m.role === 'user' || m.role === 'assistant') && m.createdAt > since)
     .map(reconstructTurn)
     .filter((g) => g.length > 0)
@@ -2381,6 +2531,22 @@ async function buildChatMessages(
   // from its tool_result. The current user turn is always at the tail, so this
   // only ever trims stale boundary turns, never real recent context.
   while (flat.length && flat[0].role !== 'user') flat.shift()
+
+  // Normalize the TRAILING edge too: a hand-off starts the next member's turn
+  // with no new user message, so the transcript it sees ends on the previous
+  // member's reply. Gemini rejects that outright ("Requests ending with a model
+  // turn are not supported"), and other providers quietly treat it as a request
+  // to continue that reply rather than to respond to it. Restating the hand-off
+  // as a user-role line is what makes it a question addressed TO this member -
+  // and it is attributed, so it reads as the room talking, not as the user.
+  if (flat.length && flat[flat.length - 1].role === 'assistant') {
+    const last = flat[flat.length - 1]
+    const lastAuthor = scoped.findLast((m) => m.role === 'assistant')?.author?.name
+    flat.push({
+      role: 'user',
+      content: `[${lastAuthor ?? 'the channel'}]: ${last.content}`.trim()
+    })
+  }
   return flat
 }
 
@@ -2401,7 +2567,7 @@ async function estimateUsedTokens(
         chars += Math.min((p.output ?? '').length, REPLAY_OUTPUT_CAP)
         if (p.input) chars += JSON.stringify(p.input).length
       } else if (p.type === 'image') images += 1
-      else chars += p.text.length
+      else if (p.type === 'text' || p.type === 'reasoning') chars += p.text.length
     }
   return Math.ceil(chars / 4) + images * 800
 }

@@ -46,6 +46,9 @@ export const CHANNELS = {
   messagesList: 'messages:list',
   messagesAdd: 'messages:add',
 
+  /** Attach/detach the bots in a session's channel. */
+  channelSetMembers: 'channel:setMembers',
+
   integrationsList: 'integrations:list',
   integrationsSetEnabled: 'integrations:setEnabled',
 

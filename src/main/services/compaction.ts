@@ -41,7 +41,9 @@ function flatten(m: Message): string {
           : `[tool:${p.tool}]`
         : p.type === 'image'
           ? '[image]'
-          : p.text
+          : p.type === 'text' || p.type === 'reasoning'
+            ? p.text
+            : ''
     )
     .join('')
     .trim()

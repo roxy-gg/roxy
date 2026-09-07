@@ -10,6 +10,19 @@ import {
   isInterruptibleTool
 } from '../src/shared/tools'
 import {
+  MAX_HANDOFF_HOPS,
+  ROXY_HOST_ID,
+  SUGGESTED_MEMBERS,
+  findMember,
+  channelPrompt,
+  parseBotMentions,
+  resolveHandoff,
+  resolveRecipient,
+  visibleMessages,
+  withHost
+} from '../src/shared/channel-members'
+import type { BotMember, Message } from '../src/shared/types'
+import {
   AGENTS,
   getAgent,
   isReadOnlyAgent,
@@ -6225,6 +6238,209 @@ async function main(): Promise<void> {
     'theme: dedupe ignores quoting differences',
     !resolveFontStack('SF Mono', 'mono', 'win32')!.match(/'SF Mono'.*'SF Mono'/),
     String(resolveFontStack('SF Mono', 'mono', 'win32'))
+  )
+
+  // ---- Channel members (multi-bot sessions) --------------------------------
+
+  const builder = SUGGESTED_MEMBERS.find((m) => m.id === 'builder')!
+  const reviewer = SUGGESTED_MEMBERS.find((m) => m.id === 'reviewer')!
+  const room = withHost([builder, reviewer])
+  const host = room[0]
+
+  check('channel: the host is always first', host.id === ROXY_HOST_ID)
+  check('channel: attached members follow the host', room.length === 3)
+  check(
+    'channel: a stored list cannot duplicate the host',
+    withHost([host, builder, host]).filter((m) => m.id === ROXY_HOST_ID).length === 1
+  )
+  check(
+    'channel: an empty channel still has the host in it',
+    withHost(undefined).length === 1 && withHost([]).length === 1
+  )
+  check(
+    'channel: no suggested member can claim the host id',
+    SUGGESTED_MEMBERS.every((m) => m.id !== ROXY_HOST_ID)
+  )
+  check(
+    'channel: every suggested member carries a brief',
+    SUGGESTED_MEMBERS.every((m) => !!m.systemPrompt?.trim())
+  )
+  check(
+    'channel: the host carries NO brief (it is the base prompt)',
+    host.systemPrompt === undefined
+  )
+
+  // Mentions
+  check(
+    'channel: mentions resolve in the order they appear',
+    parseBotMentions('@Reviewer then @Builder', room)
+      .map((m) => m.id)
+      .join() === 'reviewer,builder'
+  )
+  check(
+    'channel: a mention is matched case-insensitively and with punctuation',
+    parseBotMentions('hey @builder, look', room)[0]?.id === 'builder'
+  )
+  check(
+    'channel: an email address is not a mention',
+    parseBotMentions('mail user@builder.com', room).length === 0
+  )
+  check(
+    'channel: a member not in the room is not matched',
+    parseBotMentions('@Security audit this', room).length === 0
+  )
+  check(
+    'channel: a mention is deduped',
+    parseBotMentions('@Builder and @Builder', room).length === 1
+  )
+
+  // Routing
+  check(
+    'channel: an unaddressed message goes to the host',
+    resolveRecipient('fix the login bug', room).id === ROXY_HOST_ID
+  )
+  check(
+    'channel: an addressed message goes to that member',
+    resolveRecipient('@Builder fix the login bug', room).id === 'builder'
+  )
+  check(
+    'channel: routing falls back to the host even with no members stored',
+    resolveRecipient('anything', withHost([])).id === ROXY_HOST_ID
+  )
+  check(
+    'channel: a mention mid-sentence is ABOUT a member, so the host answers',
+    resolveRecipient('create the PR and then call @Reviewer to review it', room).id === ROXY_HOST_ID
+  )
+  check(
+    'channel: leading whitespace still counts as addressed',
+    resolveRecipient('   @Builder fix it', room).id === 'builder'
+  )
+  check(
+    'channel: a leading mention of a member NOT in the room falls back to the host',
+    resolveRecipient('@Security audit this', room).id === ROXY_HOST_ID
+  )
+  check(
+    'channel: findMember accepts @Name, name, and id',
+    findMember('@Builder', room)?.id === 'builder' &&
+      findMember('builder', room)?.id === 'builder' &&
+      findMember('BUILDER', room)?.id === 'builder'
+  )
+
+  // Hand-off
+  check(
+    'channel: a reply naming another member hands off to it',
+    resolveHandoff('done. @Reviewer ready for review', builder, room)?.id === 'reviewer'
+  )
+  check(
+    'channel: a bot naming ITSELF does not hand off (would spin forever)',
+    resolveHandoff('@Builder already did this', builder, room) === undefined
+  )
+  check(
+    'channel: a reply naming nobody ends the chain',
+    resolveHandoff('all done, tests pass.', builder, room) === undefined
+  )
+  check(
+    'channel: a bot naming itself THEN another still hands off to the other',
+    resolveHandoff('@Builder is done, @Reviewer over to you', builder, room)?.id === 'reviewer'
+  )
+  check('channel: the hand-off chain is bounded', MAX_HANDOFF_HOPS > 0 && MAX_HANDOFF_HOPS <= 8)
+
+  // The roster block - without it a bot has no idea the channel exists and
+  // answers "call @Reviewer" by spawning a subagent or hunting a GitHub user.
+  const hostBlock = channelPrompt(room, host) ?? ''
+  check(
+    'channel: the prompt names the other members and how to reach them',
+    hostBlock.includes('@Builder') &&
+      hostBlock.includes('@Reviewer') &&
+      hostBlock.includes('@mention')
+  )
+  check(
+    'channel: the prompt tells the bot NOT to delegate to a member via `task`',
+    /task/.test(hostBlock) && /not/i.test(hostBlock)
+  )
+  check('channel: the prompt says members are not GitHub users', /github/i.test(hostBlock))
+  check(
+    'channel: the prompt does not list the speaker as somebody else in the room',
+    !/ {2}@Roxy /.test(hostBlock)
+  )
+  check(
+    "channel: a member's brief is framed as a standing role, not a work order",
+    (() => {
+      const block = channelPrompt(room, builder) ?? ''
+      return block.includes(builder.systemPrompt!) && /standing identity/i.test(block)
+    })()
+  )
+  check(
+    'channel: a solo member still gets its role framed (the brief alone would read as a task)',
+    (() => {
+      const solo = channelPrompt([], builder) ?? ''
+      return solo.includes(builder.systemPrompt!) && /standing identity/i.test(solo)
+    })()
+  )
+  check(
+    'channel: a briefless solo channel gets no block at all',
+    channelPrompt([], host) === undefined
+  )
+
+  // Context isolation - the reason separate bots exist at all.
+  const msg = (role: Message['role'], content: string, authorName?: string): Message => ({
+    id: `${role}-${content.slice(0, 12)}`,
+    chatId: 'c',
+    role,
+    content,
+    parts: [{ type: 'text', text: content }],
+    createdAt: 1,
+    author: authorName ? { name: authorName } : undefined
+  })
+
+  const history: Message[] = [
+    msg('user', 'fix the login bug'),
+    msg('assistant', 'on it', 'Builder'),
+    msg('assistant', 'unrelated audit of billing.ts', 'Security'),
+    msg('assistant', '@Reviewer please check', 'Builder'),
+    msg('assistant', 'reviewed', 'Reviewer')
+  ]
+
+  const reviewerView = visibleMessages(history, reviewer)
+  check(
+    "channel: a member always sees the user's messages",
+    reviewerView.some((m) => m.role === 'user')
+  )
+  check(
+    'channel: a member sees its own past turns',
+    reviewerView.some((m) => m.author?.name === 'Reviewer')
+  )
+  check(
+    'channel: a member sees the turn that ADDRESSED it',
+    reviewerView.some((m) => m.content.includes('@Reviewer please check'))
+  )
+  check(
+    'channel: a member does NOT see unrelated cross-talk',
+    !reviewerView.some((m) => m.content.includes('unrelated audit'))
+  )
+  check(
+    'channel: the HOST sees the whole conversation',
+    visibleMessages(history, host).length === history.length
+  )
+  check(
+    'channel: a legacy turn with no author stays visible',
+    visibleMessages([msg('assistant', 'old reply')], reviewer).length === 1
+  )
+  check(
+    'channel: notices survive the filter (they are not assistant turns)',
+    visibleMessages(
+      [
+        {
+          id: 'n',
+          chatId: 'c',
+          role: 'system',
+          content: 'Security joined the channel',
+          parts: [{ type: 'notice', kind: 'join', member: 'Security' }],
+          createdAt: 1
+        }
+      ],
+      reviewer
+    ).length === 1
   )
 
   if (fails.length) {

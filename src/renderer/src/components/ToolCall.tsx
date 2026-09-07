@@ -121,6 +121,7 @@ function activity(parts: MessagePart[]): { label: string; step: number } {
   if (last.type === 'image') return { label: 'captured an image', step }
   // Prose: the delegate is writing its report — show its last line so you can
   // watch the conclusion form rather than a static "writing…".
+  if (last.type !== 'text') return { label: 'working…', step }
   const line = last.text.trim().split('\n').filter(Boolean).pop()
   return { label: line ? line.slice(0, 120) : 'writing…', step }
 }
