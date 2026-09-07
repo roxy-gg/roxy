@@ -69,6 +69,7 @@
   },
   "composer": {
     "attachImages": "画像を添付",
+    "channelPlaceholder": "Message the channel, or @mention a member.",
     "placeholder": "Roxy に何でも質問…（画像を貼り付けるかドロップ）",
     "queuePlaceholder": "次のメッセージをキューに追加…",
     "queuePlaceholderStop": "次のメッセージをキューに追加…（Esc で停止）",

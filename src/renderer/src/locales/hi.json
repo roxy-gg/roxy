@@ -69,6 +69,7 @@
   },
   "composer": {
     "attachImages": "छवियाँ संलग्न करें",
+    "channelPlaceholder": "Message the channel, or @mention a member.",
     "placeholder": "Roxy से कुछ भी पूछें… (चित्र चिपकाएँ या यहाँ छोड़ें)",
     "queuePlaceholder": "अगला संदेश कतार में जोड़ें…",
     "queuePlaceholderStop": "अगला संदेश कतार में जोड़ें… (रोकने के लिए Esc)",

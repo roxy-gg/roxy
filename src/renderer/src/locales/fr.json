@@ -69,6 +69,7 @@
   },
   "composer": {
     "attachImages": "Joindre des images",
+    "channelPlaceholder": "Message the channel, or @mention a member.",
     "placeholder": "Demandez ce que vous voulez à Roxy… (collez ou déposez des images)",
     "queuePlaceholder": "Mettre un message de suivi en file d’attente…",
     "queuePlaceholderStop": "Mettre un message de suivi en file d’attente… (Échap pour arrêter)",

@@ -69,6 +69,7 @@
   },
   "composer": {
     "attachImages": "Bilder anhängen",
+    "channelPlaceholder": "Message the channel, or @mention a member.",
     "placeholder": "Frag Roxy alles… (Bilder einfügen oder ablegen)",
     "queuePlaceholder": "Eine Folgeanfrage einreihen…",
     "queuePlaceholderStop": "Eine Folgeanfrage einreihen… (Esc zum Stoppen)",

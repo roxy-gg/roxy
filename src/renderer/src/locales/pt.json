@@ -69,6 +69,7 @@
   },
   "composer": {
     "attachImages": "Anexar imagens",
+    "channelPlaceholder": "Message the channel, or @mention a member.",
     "placeholder": "Pergunte qualquer coisa à Roxy… (cole ou solte imagens)",
     "queuePlaceholder": "Adicione uma continuação à fila…",
     "queuePlaceholderStop": "Adicione uma continuação à fila… (Esc para parar)",

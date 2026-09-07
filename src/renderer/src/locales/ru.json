@@ -69,6 +69,7 @@
   },
   "composer": {
     "attachImages": "Прикрепить изображения",
+    "channelPlaceholder": "Message the channel, or @mention a member.",
     "placeholder": "Спросите Roxy о чём угодно… (вставьте или перетащите изображения)",
     "queuePlaceholder": "Добавить следующий запрос в очередь…",
     "queuePlaceholderStop": "Добавить следующий запрос в очередь… (Esc — остановить)",
