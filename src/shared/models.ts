@@ -5,6 +5,7 @@
  * a tool-capable one, since Roxy is an agent that calls tools every turn.
  */
 import type { ModelInfo } from './api'
+import type { ConnectedProvider } from './types'
 
 /**
  * Pick a sensible default model from a provider's catalog so a freshly connected
@@ -16,6 +17,20 @@ export function pickDefaultModel(models: ModelInfo[]): string | undefined {
   if (models.length === 0) return undefined
   const toolCapable = models.find((m) => m.toolCall)
   return (toolCapable ?? models[0]).id
+}
+
+/** A saved Copilot selection is not proof that the account can still use it. */
+export function resolveProviderModel(
+  provider: Pick<ConnectedProvider, 'id' | 'defaultModel'>,
+  models: ModelInfo[],
+  selected: string | null
+): string | undefined {
+  if (provider.id === 'github-copilot') {
+    if (selected) return models.some((m) => m.id === selected) ? selected : undefined
+    if (models.some((m) => m.id === provider.defaultModel)) return provider.defaultModel
+    return pickDefaultModel(models)
+  }
+  return selected || provider.defaultModel || pickDefaultModel(models) || 'gpt-4o-mini'
 }
 
 /**

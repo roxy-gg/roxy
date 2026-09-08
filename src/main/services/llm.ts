@@ -25,8 +25,7 @@ import {
 } from './responses'
 
 const COPILOT_TOKEN_URL = 'https://api.github.com/copilot_internal/v2/token'
-const COPILOT_CHAT_URL = 'https://api.githubcopilot.com/chat/completions'
-const COPILOT_RESPONSES_URL = 'https://api.githubcopilot.com/responses'
+const COPILOT_API_URL = 'https://api.githubcopilot.com'
 export const COPILOT_EDITOR_HEADERS = {
   'User-Agent': 'GitHubCopilotChat/0.26.7',
   'Editor-Version': 'vscode/1.99.3',
@@ -51,8 +50,10 @@ export class ModelHttpError extends Error {
 }
 
 interface CopilotToken {
+  githubToken: string
   token: string
   expiresAt: number
+  apiUrl: string
 }
 let copilotCache: CopilotToken | null = null
 
@@ -109,23 +110,26 @@ function geminiParts(m: ChatMessage): unknown[] {
 }
 
 /** Exchange the stored GitHub token for a short-lived Copilot token (cached). */
-async function getCopilotToken(force = false): Promise<string> {
-  // Refresh a couple of minutes early so a near-expiry token is never sent
-  // (covers clock skew + the time a long agent turn spends between calls).
-  if (!force && copilotCache && copilotCache.expiresAt - 120_000 > Date.now()) {
-    return copilotCache.token
+async function getCopilotToken(): Promise<CopilotToken> {
+  const github = repo.getProviderToken('github-copilot')
+  if (!github) {
+    invalidateCopilotToken()
+    throw new Error('GitHub Copilot is not linked. Connect it in onboarding or Settings.')
   }
 
-  const github = repo.getProviderToken('github-copilot')
-  if (!github)
-    throw new Error('GitHub Copilot is not linked. Connect it in onboarding or Settings.')
+  // Refresh a couple of minutes early so a near-expiry token is never sent
+  // (covers clock skew + the time a long agent turn spends between calls).
+  if (copilotCache?.githubToken === github && copilotCache.expiresAt - 120_000 > Date.now()) {
+    return copilotCache
+  }
 
   const res = await fetch(COPILOT_TOKEN_URL, {
     headers: {
       Authorization: `token ${github}`,
       Accept: 'application/json',
       ...COPILOT_EDITOR_HEADERS
-    }
+    },
+    signal: AbortSignal.timeout(15_000)
   })
   if (!res.ok) {
     const body = await res.text().catch(() => '')
@@ -146,9 +150,21 @@ async function getCopilotToken(force = false): Promise<string> {
       `Copilot token exchange failed (${res.status}). ${body.slice(0, 200)}`
     )
   }
-  const data = (await res.json()) as { token: string; expires_at: number }
-  copilotCache = { token: data.token, expiresAt: data.expires_at * 1000 }
-  return data.token
+  const data = (await res.json()) as {
+    token: string
+    expires_at: number
+    endpoints?: { api?: string }
+  }
+  if (repo.getProviderToken('github-copilot') !== github) {
+    throw new Error('GitHub Copilot account changed. Try again.')
+  }
+  copilotCache = {
+    githubToken: github,
+    token: data.token,
+    expiresAt: data.expires_at * 1000,
+    apiUrl: (data.endpoints?.api || COPILOT_API_URL).replace(/\/+$/, '')
+  }
+  return copilotCache
 }
 
 /** Drop the cached Copilot token so the next call re-exchanges it (used on a 401). */
@@ -188,6 +204,15 @@ function copilotHeaders(token: string, vision = false): Record<string, string> {
   }
 }
 
+/** Discovery and inference must use the API host assigned to this account. */
+export async function copilotEndpoint(
+  path: '/models' | '/chat/completions' | '/responses',
+  vision = false
+): Promise<{ url: string; headers: Record<string, string> }> {
+  const auth = await getCopilotToken()
+  return { url: `${auth.apiUrl}${path}`, headers: copilotHeaders(auth.token, vision) }
+}
+
 /**
  * Resolve the base URL for a provider, booting the CLIProxyAPI sidecar first for
  * any subscription-backed provider.
@@ -218,10 +243,7 @@ export async function openaiEndpoint(
   opts: { vision?: boolean; responses?: boolean } = {}
 ): Promise<{ url: string; headers: Record<string, string> }> {
   if (providerId === 'github-copilot') {
-    return {
-      url: opts.responses ? COPILOT_RESPONSES_URL : COPILOT_CHAT_URL,
-      headers: copilotHeaders(await getCopilotToken(), opts.vision)
-    }
+    return copilotEndpoint(opts.responses ? '/responses' : '/chat/completions', opts.vision)
   }
   const provider = repo.listConnectedProviders().find((p) => p.id === providerId)
   if (!provider) throw new Error(`Provider "${providerId}" is not connected.`)
@@ -320,13 +342,15 @@ export async function streamChat(opts: StreamChatOptions): Promise<void> {
       ...openAiReasoning('github-copilot', reasoning, reasoningEffort),
       stream: true
     })
-    const send = async (): Promise<Response> =>
-      fetch(COPILOT_CHAT_URL, {
+    const send = async (): Promise<Response> => {
+      const { url, headers } = await copilotEndpoint('/chat/completions', vision)
+      return fetch(url, {
         method: 'POST',
-        headers: copilotHeaders(await getCopilotToken(), vision),
+        headers,
         body,
         signal
       })
+    }
     // Responses-only models (GPT-5.x) 400 on /chat/completions. Skip straight to
     // the Responses API once we've learned that for this model; otherwise try
     // chat and fall back on that specific error. Claude stays on chat throughout.
@@ -448,13 +472,15 @@ async function streamCopilotResponses(opts: {
     ...toResponsesReasoning(opts.reasoning, opts.reasoningEffort),
     stream: true
   })
-  const send = async (): Promise<Response> =>
-    fetch(COPILOT_RESPONSES_URL, {
+  const send = async (): Promise<Response> => {
+    const { url, headers } = await copilotEndpoint('/responses', opts.vision)
+    return fetch(url, {
       method: 'POST',
-      headers: copilotHeaders(await getCopilotToken(), opts.vision),
+      headers,
       body,
       signal: opts.signal
     })
+  }
   const res = await withCopilotRetry(true, send, opts.signal)
   return readResponsesSse(res, opts.onDelta)
 }

@@ -6,8 +6,8 @@
  *  3. poll /login/oauth/access_token -> GitHub access token
  *
  * The GitHub token is stored; the short-lived Copilot token is exchanged from it
- * at request time (a later milestone). Uses the public Copilot client id that
- * community tooling uses for the device flow.
+ * by llm.ts for model discovery and inference. Uses the public Copilot client id
+ * that community tooling uses for the device flow.
  */
 import type { DeviceFlowStart } from '../../shared/types'
 

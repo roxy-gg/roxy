@@ -1,7 +1,6 @@
 /**
- * Model catalog from models.dev — the live list of models each provider offers,
- * so the user picks from real, current models for whatever they connected.
- * Fetched once and cached (the JSON is large; ~144 providers).
+ * Model discovery: account-specific catalogs for subscription providers and
+ * models.dev for the rest. Public metadata is never an entitlement allow-list.
  */
 import type { ModelInfo, ModelCost } from '../../shared/api'
 import type { ReasoningEffort } from '../../shared/types'
@@ -9,6 +8,7 @@ import { REASONING_EFFORTS } from '../../shared/session-config'
 import { getProviderToken, listConnectedProviders } from '../db/repo'
 import { isCliProxyProvider } from '../../shared/cliproxy'
 import { ensureRunning as ensureCliProxy, listProxyModels } from './cliproxy'
+import { copilotEndpoint, withCopilotRetry } from './llm'
 
 const CATALOG_URL = 'https://models.dev/api.json'
 const TTL_MS = 60 * 60 * 1000
@@ -29,6 +29,103 @@ interface ModelsDevProvider {
 }
 
 let cache: { at: number; data: Record<string, ModelsDevProvider> } | null = null
+
+interface CopilotModel {
+  id: string
+  name?: string
+  model_picker_enabled?: boolean
+  is_chat_default?: boolean
+  policy?: { state?: string }
+  supported_endpoints?: string[]
+  capabilities?: {
+    type?: string
+    limits?: { max_context_window_tokens?: number; max_output_tokens?: number }
+    supports?: { tool_calls?: boolean; thinking?: boolean; reasoning_effort?: string[] }
+  }
+}
+
+const COPILOT_TTL_MS = 60_000
+let copilotCache: {
+  credential: string
+  at: number
+  data: ModelInfo[]
+  pending?: Promise<ModelInfo[]>
+} | null = null
+
+export function invalidateCopilotModels(): void {
+  copilotCache = null
+}
+
+/** The public catalog cannot know the signed-in account's model policies. */
+async function listCopilotModels(): Promise<ModelInfo[]> {
+  const credential = getProviderToken('github-copilot')
+  if (!credential) {
+    copilotCache = null
+    return []
+  }
+  if (copilotCache?.credential !== credential) {
+    copilotCache = { credential, at: 0, data: [] }
+  }
+  const entry = copilotCache
+  if (entry.pending) return entry.pending
+  if (Date.now() - entry.at < COPILOT_TTL_MS) return entry.data
+
+  entry.pending = (async () => {
+    try {
+      const signal = AbortSignal.timeout(20_000)
+      const res = await withCopilotRetry(
+        true,
+        async () => {
+          if (getProviderToken('github-copilot') !== credential) {
+            throw new Error('GitHub Copilot account changed.')
+          }
+          const { url, headers } = await copilotEndpoint('/models')
+          return fetch(url, { headers: { ...headers, Accept: 'application/json' }, signal })
+        },
+        signal
+      )
+      if (!res.ok) throw new Error(`GitHub Copilot models returned ${res.status}`)
+      const body = (await res.json()) as { data?: CopilotModel[] }
+      if (!Array.isArray(body.data)) throw new Error('Invalid GitHub Copilot model list.')
+
+      const models = body.data
+        .filter(
+          (m) =>
+            typeof m?.id === 'string' &&
+            m.id.length > 0 &&
+            m.capabilities?.type === 'chat' &&
+            m.model_picker_enabled === true &&
+            (!m.policy || m.policy.state === 'enabled') &&
+            (!m.supported_endpoints ||
+              m.supported_endpoints.some((p) => p === '/chat/completions' || p === '/responses'))
+        )
+        .sort((a, b) => Number(Boolean(b.is_chat_default)) - Number(Boolean(a.is_chat_default)))
+        .map((m): ModelInfo => {
+          const supports = m.capabilities?.supports
+          const efforts = REASONING_EFFORTS.filter((e) => supports?.reasoning_effort?.includes(e))
+          return {
+            id: m.id,
+            name: m.name || m.id,
+            reasoning: supports?.thinking === true || Boolean(supports?.reasoning_effort?.length),
+            toolCall: supports?.tool_calls === true,
+            ...(efforts.length ? { reasoningEfforts: efforts } : {}),
+            contextLimit: m.capabilities?.limits?.max_context_window_tokens,
+            outputLimit: m.capabilities?.limits?.max_output_tokens
+          }
+        })
+      if (copilotCache !== entry || getProviderToken('github-copilot') !== credential) return []
+      entry.data = models
+    } catch {
+      // Fail closed: a stale or public list can advertise models the tenant revoked.
+      entry.data = []
+    } finally {
+      entry.at = Date.now()
+      entry.pending = undefined
+    }
+    return entry.data
+  })()
+  return entry.pending
+}
 
 /**
  * Roxy's own inference gateway isn't in the models.dev catalog — it exposes its
@@ -253,8 +350,9 @@ function toModelCost(c: ModelsDevModel['cost']): ModelCost | undefined {
   return Object.keys(cost).length ? cost : undefined
 }
 
-/** List the models models.dev knows for a provider id (newest first). */
+/** List a provider's available models, preferring its account-aware API. */
 export async function listModels(providerId: string): Promise<ModelInfo[]> {
+  if (providerId === 'github-copilot') return listCopilotModels()
   if (providerId === 'roxy') return listRoxyModels()
   if (isCliProxyProvider(providerId)) return listSubscriptionModels(providerId)
   try {

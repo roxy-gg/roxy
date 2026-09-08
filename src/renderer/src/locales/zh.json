@@ -237,6 +237,7 @@
   },
   "models": {
     "allHidden": "Every model is hidden. Bring some back in <settings>Settings → Models</settings>.",
+    "copilotUnavailable": "No available GitHub Copilot model is selected. Choose an enabled model, or check your account's model access and connection, then try again.",
     "loadFailed": "无法从 models.dev 加载模型 — 您仍然可以使用当前模型发送。",
     "loading": "正在加载模型…",
     "noMatch": "没有模型与“{{query}}”匹配。",

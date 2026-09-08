@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { DEFAULT_AGENT_ID, getAgent } from '@shared/agents'
 import type { Language } from '@shared/i18n'
-import { applyLanguage } from '../i18n'
+import i18n, { applyLanguage } from '../i18n'
 import type {
   AppSettings,
   Chat,
@@ -30,7 +30,7 @@ import { PROMPT_TEXT, AGENT_PROMPT_TEXT } from '@shared/prompt-text'
 import { reconstructTurn, REPLAY_OUTPUT_CAP } from '@shared/tool-history'
 import { PartsFold, partsToContent } from '@shared/parts'
 import { isOverflow, pruneToolMessages, KEEP_RECENT_TOKENS } from '@shared/context'
-import { pickDefaultModel } from '@shared/models'
+import { resolveProviderModel } from '@shared/models'
 import {
   clampReasoningEffort,
   contextBudgetFor,
@@ -64,13 +64,13 @@ interface RoxyStore {
    */
   telemetryEnabled: boolean
   providers: ConnectedProvider[]
-  /** models.dev model lists per provider id (lazy-loaded + cached). */
+  /** Provider model lists; Copilot availability is refreshed from the account. */
   modelCatalog: Record<string, ModelInfo[]>
   /**
    * Providers whose catalog has been REQUESTED and settled, however it settled.
    *
-   * Distinct from `modelCatalog` having a key, because an empty result is not
-   * cached (a starting-up proxy has to be retried). Without this the picker
+   * Distinct from `modelCatalog` having a key, because empty public/proxy lists
+   * are retried rather than cached. Without this the picker
    * cannot tell "still fetching" from "genuinely has no models", and blanked
    * the whole menu behind whichever provider was slowest.
    */
@@ -379,8 +379,6 @@ let chatsUpdatedSubscribed = false
 const deltaHandlers = new Map<string, (event: LlmEvent) => void>()
 /** The active llm request id per chat, so stop() can abort the right stream. */
 const chatRequests = new Map<string, string>()
-/** Cross-render cache of models.dev lists so we fetch each provider once. */
-const modelCatalogCache = new Map<string, ModelInfo[]>()
 /**
  * In-flight `ensureModels` calls, keyed by provider.
  *
@@ -939,6 +937,7 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
     // here means the first painted frame is already in the right language
     // rather than flashing English and re-rendering.
     await applyLanguage(settings.language)
+    modelCatalogInflight.clear()
     set({
       settings,
       providers,
@@ -946,6 +945,9 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
       loops,
       projectOrder,
       telemetryEnabled,
+      modelCatalog: {},
+      modelsTried: {},
+      recentModels: {},
       pinnedModels: [],
       hiddenModels: new Set(),
       ready: true
@@ -1122,7 +1124,19 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
       api.providers.listConnected(),
       api.settings.getAll()
     ])
-    set({ providers, settings })
+    // A reconnect can keep the same provider id while changing the account.
+    // Invalidate pending responses too, so an old account cannot refill the UI.
+    modelCatalogInflight.delete('github-copilot')
+    set((s) => {
+      const modelCatalog = { ...s.modelCatalog }
+      const modelsTried = { ...s.modelsTried }
+      delete modelCatalog['github-copilot']
+      delete modelsTried['github-copilot']
+      return { providers, settings, modelCatalog, modelsTried }
+    })
+    if (providers.some((p) => p.id === 'github-copilot')) {
+      await get().ensureModels('github-copilot')
+    }
   },
 
   reorderProviders: async (ids) => {
@@ -1380,36 +1394,36 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
   },
 
   ensureModels: async (providerId) => {
+    const accountAware = providerId === 'github-copilot'
+    if (accountAware && !get().providers.some((p) => p.id === providerId)) return
     const existing = get().modelCatalog[providerId]
-    if (existing && existing.length > 0) return
-    const cached = modelCatalogCache.get(providerId)
-    if (cached && cached.length > 0) {
-      set((s) => ({ modelCatalog: { ...s.modelCatalog, [providerId]: cached } }))
-      return
-    }
+    // Main owns Copilot's short TTL. Never keep its first success forever here.
+    if (!accountAware && existing && existing.length > 0) return
     // Share one round trip between every caller that asks in the same tick.
     const pending = modelCatalogInflight.get(providerId)
     if (pending) return pending
-    const load = (async () => {
+    const load = Promise.resolve().then(async () => {
       try {
         const list = await api.models.list(providerId)
-        // Only cache non-empty lists. If the proxy or connection is starting up,
-        // we want to try again on the next mount/action rather than caching an
-        // empty list forever.
-        if (list.length > 0) {
-          modelCatalogCache.set(providerId, list)
+        if (modelCatalogInflight.get(providerId) !== load) return
+        // Copilot's empty list revokes old entries. Other providers still retry
+        // empty lists when a proxy or connection is starting up.
+        if (accountAware || list.length > 0) {
           set((s) => ({ modelCatalog: { ...s.modelCatalog, [providerId]: list } }))
         }
       } catch {
-        // Leave the catalog untouched - the picker shows the provider as empty
-        // and the next mount retries.
+        if (accountAware && modelCatalogInflight.get(providerId) === load) {
+          set((s) => ({ modelCatalog: { ...s.modelCatalog, [providerId]: [] } }))
+        }
       } finally {
         // Mark the attempt either way, so the picker can stop showing a
         // provider as "loading" once it has actually been asked.
-        modelCatalogInflight.delete(providerId)
-        set((s) => ({ modelsTried: { ...s.modelsTried, [providerId]: true } }))
+        if (modelCatalogInflight.get(providerId) === load) {
+          modelCatalogInflight.delete(providerId)
+          set((s) => ({ modelsTried: { ...s.modelsTried, [providerId]: true } }))
+        }
       }
-    })()
+    })
     modelCatalogInflight.set(providerId, load)
     return load
   },
@@ -1942,11 +1956,19 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
       // has to type a model name for a connected provider to just work.
       // Only trust the session's model when it belongs to the provider we
       // actually resolved, so a stale pin can never cross providers.
-      const model =
-        (config.providerId === provider.id ? config.model : null) ||
-        provider.defaultModel ||
-        pickDefaultModel(catalog) ||
-        (provider.id === 'github-copilot' ? 'gpt-4o' : 'gpt-4o-mini')
+      const model = resolveProviderModel(
+        provider,
+        catalog,
+        config.providerId === provider.id ? config.model : null
+      )
+      if (!model || stopped()) {
+        if (!stopped()) {
+          parts = [...parts, { type: 'text', text: i18n.t('models.copilotUnavailable') }]
+          setStreaming(parts)
+        }
+        await finishTurn()
+        return
+      }
       const info = catalog.find((m) => m.id === model)
       const modelContext = info?.contextLimit ?? 128_000
       const contextBudget = contextBudgetFor(config.contextLimit, modelContext)
@@ -2199,11 +2221,12 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
     const provider = providers.find((p) => p.id === config.providerId) ?? providers[0] ?? null
     if (!provider || !(provider.hasCredential || provider.auth === 'none')) return
     await get().ensureModels(provider.id)
-    const model =
-      (config.providerId === provider.id ? config.model : null) ||
-      provider.defaultModel ||
-      pickDefaultModel(get().modelCatalog[provider.id] ?? []) ||
-      (provider.id === 'github-copilot' ? 'gpt-4o' : 'gpt-4o-mini')
+    const model = resolveProviderModel(
+      provider,
+      get().modelCatalog[provider.id] ?? [],
+      config.providerId === provider.id ? config.model : null
+    )
+    if (!model) return
     set((s) => ({ compactingChats: { ...s.compactingChats, [chatId]: true } }))
     try {
       await api.context.compact(chatId, provider.id, model)
