@@ -56,8 +56,10 @@ jobs:
       matrix:
         # windows-2022 ships Visual Studio 2022, which node-gyp detects reliably
         # (the newest windows-latest image has a VS that older node-gyp can't
-        # parse). macOS/Linux have working toolchains out of the box.
-        os: [windows-2022, macos-latest, ubuntu-latest]
+        # parse). Pin macOS too: the macos-latest update to 26.6.2 broke
+        # electron-builder 25's temporary signing keychain (SecKeychainUnlock).
+        # macos-15 keeps the same arm64 artifacts; CI still tests macos-latest.
+        os: [windows-2022, macos-15, ubuntu-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4

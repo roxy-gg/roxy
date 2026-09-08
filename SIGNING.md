@@ -161,6 +161,15 @@ Windows job).
 
 ### Troubleshooting
 
+**`security set-key-partition-list` fails with `SecKeychainUnlock`** during
+packaging: this is access to the temporary signing keychain, before Apple
+notarization. The macOS 26.6.2 runner image failed here with electron-builder
+25.1.8, while 26.5.2 signed and notarized successfully using the same signing
+secrets. The release workflow pins `macos-15` (still ARM64) to avoid that image;
+regular CI continues to test `macos-latest`. Do not rotate the Apple
+app-specific password for this error. To use the updated workflow for a stuck
+draft, start a fresh run as described below rather than rerunning the old job.
+
 **`⨯ APPLE_APP_SPECIFIC_PASSWORD env var needs to be set`** (mac job signs the
 app, then fails) — one of the notarization secrets is **empty**. The workflow's
 _“Verify macOS signing secrets”_ preflight now catches this in ~1s and names the
@@ -185,6 +194,17 @@ gh run watch  <run-id>
 
 Get `<run-id>` from `gh run list`. Once mac passes, the `publish` job flips the
 draft to Latest automatically.
+
+If the fix changes the **workflow**, merge it to `main` and start a fresh run
+instead. Rerunning a failed job uses the original commit and workflow, not the
+updated code:
+
+```sh
+gh workflow run release.yml --ref main
+```
+
+No version bump is needed while that version's release is still a draft. The
+new run rebuilds all three platforms and publishes only after they all succeed.
 
 ## Windows
 
