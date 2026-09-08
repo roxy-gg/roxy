@@ -424,6 +424,37 @@ check('returning to an identical IPC snapshot reuses measured text', () => {
   layoutTranscript({ ...input, messages: structuredClone(longMessages) }, cache)
   assert.ok(calls < initialCalls / 3, `revisit ${calls} versus cold ${initialCalls}`)
 })
+check(
+  'bot identity preserves measured text on remount and still invalidates renamed headers',
+  () => {
+    let calls = 0
+    const counted = {
+      ...metrics,
+      measure: (value: string, f: ReturnType<typeof font>) => {
+        calls++
+        return metrics.measure(value, f)
+      }
+    } as unknown as TextMetrics
+    for (const messages of [[longMessages[149]], longMessages]) {
+      const cache = new BlockCache()
+      const input = { ...longInput(messages), metrics: counted, botUsername: 'helper' }
+      calls = 0
+      layoutTranscript(input, cache)
+      const cold = calls
+      cache.detach()
+      calls = 0
+      const revisited = layoutTranscript(
+        { ...input, messages: structuredClone(messages), view: view() },
+        cache
+      )
+      if (messages.length > 1) assert.ok(calls < cold / 2, `remount ${calls} versus cold ${cold}`)
+      assert.ok(JSON.stringify(revisited.blocks.at(-1)!.nodes).includes('@helper'))
+      const renamed = layoutTranscript({ ...input, botUsername: 'reviewer' }, cache)
+      assert.ok(JSON.stringify(renamed.blocks.at(-1)!.nodes).includes('@reviewer'))
+      assert.ok(!JSON.stringify(renamed.blocks.at(-1)!.nodes).includes('@helper'))
+    }
+  }
+)
 check('changed text invalidates cached parts despite stable message ids', () => {
   const cache = new BlockCache()
   const input = longInput(longMessages)

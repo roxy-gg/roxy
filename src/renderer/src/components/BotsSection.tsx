@@ -1,11 +1,12 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
-import { Plus } from 'lucide-react'
+import { Plus, Settings, Trash2 } from 'lucide-react'
 import { useRoxyStore } from '../lib/store'
 import { cn } from '../lib/cn'
 import { BotAvatar } from './BotAvatar'
 import { Button, Input } from './ui'
+import { ContextMenuRow, ContextMenuSurface, CONTEXT_MENU_PAD, CONTEXT_ROW_H } from './ContextMenu'
 
 export function BotsSection({ rail = false }: { rail?: boolean }): JSX.Element {
   const { t } = useTranslation()
@@ -14,6 +15,22 @@ export function BotsSection({ rail = false }: { rail?: boolean }): JSX.Element {
   const running = useRoxyStore((s) => s.runningAutomation)
   const selectChat = useRoxyStore((s) => s.selectChat)
   const createBot = useRoxyStore((s) => s.createBot)
+  const setBotSettings = useRoxyStore((s) => s.setBotSettings)
+  const [menu, setMenu] = useState<{
+    botId: string
+    x: number
+    y: number
+    trigger: HTMLButtonElement
+  } | null>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+  const menuBot = bots.find((bot) => bot.id === menu?.botId)
+  const closeMenu = (): void => {
+    setMenu(null)
+    menu?.trigger.focus({ preventScroll: true })
+  }
+  useEffect(() => {
+    if (menu) menuRef.current?.querySelector('button')?.focus({ preventScroll: true })
+  }, [menu])
   const [open, setOpen] = useState(false)
   const [username, setUsername] = useState('')
   const [busy, setBusy] = useState(false)
@@ -44,6 +61,23 @@ export function BotsSection({ rail = false }: { rail?: boolean }): JSX.Element {
             aria-label={`@${bot.username}`}
             aria-pressed={active === bot.chatId}
             onClick={() => void selectChat(bot.chatId)}
+            onContextMenu={(e) => {
+              e.preventDefault()
+              const rect = e.currentTarget.getBoundingClientRect()
+              setMenu({
+                botId: bot.id,
+                x: e.clientX || rect.left,
+                y: e.clientY || rect.bottom,
+                trigger: e.currentTarget
+              })
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) {
+                e.preventDefault()
+                const rect = e.currentTarget.getBoundingClientRect()
+                setMenu({ botId: bot.id, x: rect.left, y: rect.bottom, trigger: e.currentTarget })
+              }
+            }}
             className={cn(
               'press-scale relative shrink-0 rounded-full outline-none focus-visible:ring-2 focus-visible:ring-accent',
               active === bot.chatId && 'ring-2 ring-accent ring-offset-2 ring-offset-surface'
@@ -74,6 +108,56 @@ export function BotsSection({ rail = false }: { rail?: boolean }): JSX.Element {
           {!bots.length && !rail && t('bots.new')}
         </button>
       </div>
+      {menu && menuBot && (
+        <ContextMenuSurface
+          x={menu.x}
+          y={menu.y}
+          height={2 * CONTEXT_ROW_H + CONTEXT_MENU_PAD}
+          onClose={closeMenu}
+        >
+          <div
+            ref={menuRef}
+            data-bot-menu={menuBot.id}
+            onKeyDown={(e) => {
+              const buttons = [...e.currentTarget.querySelectorAll('button')]
+              const index = buttons.indexOf(document.activeElement as HTMLButtonElement)
+              if (
+                e.key === 'ArrowDown' ||
+                e.key === 'ArrowUp' ||
+                e.key === 'Home' ||
+                e.key === 'End'
+              ) {
+                e.preventDefault()
+                const next =
+                  e.key === 'Home'
+                    ? 0
+                    : e.key === 'End'
+                      ? buttons.length - 1
+                      : (index + (e.key === 'ArrowDown' ? 1 : -1) + buttons.length) % buttons.length
+                buttons[next]?.focus()
+              } else if (e.key === 'Tab') closeMenu()
+            }}
+          >
+            <ContextMenuRow
+              label={t('bots.settings')}
+              icon={Settings}
+              onSelect={() => {
+                closeMenu()
+                setBotSettings(menuBot.id)
+              }}
+            />
+            <ContextMenuRow
+              label={t('bots.delete')}
+              icon={Trash2}
+              danger
+              onSelect={() => {
+                closeMenu()
+                setBotSettings(menuBot.id, true)
+              }}
+            />
+          </div>
+        </ContextMenuSurface>
+      )}
       {open &&
         createPortal(
           <div
@@ -133,7 +217,7 @@ export function BotsSection({ rail = false }: { rail?: boolean }): JSX.Element {
                 <Input
                   autoFocus
                   value={username}
-                  onChange={(e) => setUsername(e.target.value.replace(/^@/, ''))}
+                  onChange={(e) => setUsername(e.target.value.replace(/\s/g, '').replace(/^@/, ''))}
                   placeholder="helper"
                   maxLength={32}
                   autoCapitalize="none"

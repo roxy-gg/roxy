@@ -709,6 +709,8 @@ export interface RoxyApi {
     jobs(botId: string): Promise<BotJob[]>
     saveJob(input: BotJobInput, id?: string): Promise<BotJob>
     removeJob(id: string): Promise<void>
+    /** Queue an extra run without changing the schedule or its remaining-run limit. */
+    runJob(id: string): Promise<QueueItem>
     onChanged(callback: () => void): () => void
   }
   automation: {

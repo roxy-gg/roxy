@@ -63,6 +63,9 @@ export interface LayoutInput {
 const CANCEL_REVEAL_MS = 1200
 
 export function layoutTranscript(input: LayoutInput, cache: BlockCache): Scene {
+  cache.setIdentity(
+    `${input.botUsername ?? ''}|${input.bots?.map((bot) => `${bot.id}:${bot.username}`).join('|') ?? ''}`
+  )
   const { messages, streaming, width, theme, view } = input
   const availableWidth =
     width - (messages.some((message) => message.role === 'user') ? PROMPT_GUTTER : 0)
@@ -523,6 +526,13 @@ function layoutThinking(builder: Builder, x: number, y: number, label: string): 
  */
 export class BlockCache {
   readonly window = new TranscriptWindow()
+  private identity: string | undefined
+
+  /** Identity invalidation must survive canvas remounts alongside retained measurements. */
+  setIdentity(identity: string): void {
+    if (this.identity !== undefined && this.identity !== identity) this.clear()
+    this.identity = identity
+  }
   private messages: Message[] | null = null
   private units = 0
   private characters = 0

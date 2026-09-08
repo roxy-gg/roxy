@@ -30,6 +30,7 @@ const roxy: RoxyApi = {
     jobs: (botId) => ipcRenderer.invoke(CHANNELS.botsJobs, botId),
     saveJob: (input, id) => ipcRenderer.invoke(CHANNELS.botsSaveJob, input, id),
     removeJob: (id) => ipcRenderer.invoke(CHANNELS.botsRemoveJob, id),
+    runJob: (id) => ipcRenderer.invoke(CHANNELS.botsRunJob, id),
     onChanged: (callback) => {
       const handler = (): void => callback()
       ipcRenderer.on(CHANNELS.botsChanged, handler)

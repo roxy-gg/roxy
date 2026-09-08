@@ -104,13 +104,13 @@ export function ChatView(): JSX.Element {
   // Wait for history even when live tokens are available, so arrival paints the complete tail once.
   const loading = !messagesError && messagesChatId !== activeChatId
   const isEmpty = !hasContent && !loading
-  const [botPaneOpen, setBotPaneOpen] = useState(false)
+  const botSettings = useRoxyStore((s) => s.botSettings)
+  const setBotSettings = useRoxyStore((s) => s.setBotSettings)
   const [infoOpen, setInfoOpen] = useState(false)
 
   // The keyed canvas owns bottom-first arrival and resize anchoring. Queue changes must not re-pin it.
   useLayoutEffect(() => {
     setInfoOpen(false)
-    setBotPaneOpen(false)
   }, [activeChatId])
   const activeChat = chats.find((c) => c.id === activeChatId)
   const isSub = activeChat?.kind === 'sub'
@@ -118,6 +118,7 @@ export function ChatView(): JSX.Element {
     ? chats.find((c) => c.id === activeChat.parentId)
     : undefined
   const activeBot = bots.find((bot) => bot.chatId === activeChatId)
+  const botPaneOpen = !!activeBot && botSettings?.botId === activeBot.id
   const sessionTasks = activeChat?.tasks ?? []
   const tasksDone = sessionTasks.filter((t) => t.status === 'completed').length
   // Any session can carry a description + checklist: the `general` subagent has
@@ -147,160 +148,166 @@ export function ChatView(): JSX.Element {
   }
 
   return (
-    <div className="relative flex h-full min-w-0 flex-1 flex-col bg-bg">
-      <header className="titlebar reserve-controls-right flex h-12 shrink-0 items-center justify-between gap-3 px-4">
-        {activeBot ? (
-          <div className="flex min-w-0 items-center gap-2">
-            <BotAvatar username={activeBot.username} size={28} />
-            <span className="truncate text-sm font-medium">@{activeBot.username}</span>
-          </div>
-        ) : (
-          <div className="flex min-w-0 items-center gap-2">
-            {isSub ? (
-              <Hammer className="h-4 w-4 shrink-0 text-text-muted" />
-            ) : (
-              <FolderOpen className="h-4 w-4 shrink-0 text-text-muted" />
-            )}
-            <span className="shrink-0 text-sm font-medium">{activeChat.title}</span>
-            {/* A delegate's session is only legible in context — who sent it, and
+    <div className="@container/chat relative flex h-full min-w-0 flex-1 bg-bg">
+      {botPaneOpen && activeBot && (
+        <BotSettingsPane key={activeBot.id} bot={activeBot} onClose={() => setBotSettings(null)} />
+      )}
+      <div key="conversation" className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <header className="titlebar reserve-controls-right flex h-12 shrink-0 items-center justify-between gap-3 px-4">
+          {activeBot ? (
+            <div className="flex min-w-0 items-center gap-2">
+              <BotAvatar username={activeBot.username} size={28} />
+              <span className="truncate text-sm font-medium">@{activeBot.username}</span>
+            </div>
+          ) : (
+            <div className="flex min-w-0 items-center gap-2">
+              {isSub ? (
+                <Hammer className="h-4 w-4 shrink-0 text-text-muted" />
+              ) : (
+                <FolderOpen className="h-4 w-4 shrink-0 text-text-muted" />
+              )}
+              <span className="shrink-0 text-sm font-medium">{activeChat.title}</span>
+              {/* A delegate's session is only legible in context — who sent it, and
                 a way back. The folder path is the parent's business. */}
-            {isSub ? (
-              parentChat && (
+              {isSub ? (
+                parentChat && (
+                  <button
+                    onClick={() => void selectChat(parentChat.id)}
+                    title={t('chat.backTo', { title: parentChat.title })}
+                    className="flex min-w-0 items-center gap-1 truncate text-xs text-text-subtle transition-colors hover:text-text"
+                  >
+                    <CornerUpLeft className="h-3 w-3 shrink-0" />
+                    <span className="truncate">{parentChat.title}</span>
+                  </button>
+                )
+              ) : (
+                <WorkspacePath chat={activeChat} />
+              )}
+              {subagentRunning && activeChatId && (
+                // Clickable, because this used to be the one running thing in the
+                // app with no way to stop it: a subagent's turn is driven by its
+                // parent, so the composer's Stop was deliberately withheld here
+                // (it had no request of its own to abort) and the session was
+                // simply uninterruptible from its own view.
                 <button
-                  onClick={() => void selectChat(parentChat.id)}
-                  title={t('chat.backTo', { title: parentChat.title })}
-                  className="flex min-w-0 items-center gap-1 truncate text-xs text-text-subtle transition-colors hover:text-text"
+                  onClick={() => void cancelSubagent(activeChatId)}
+                  title={t('chat.cancelSubagent')}
+                  className="press-scale group flex shrink-0 items-center gap-1 sq sq-md rounded-md bg-accent/10 px-1.5 py-0.5 text-[11px] text-accent transition-colors hover:bg-accent/20"
                 >
-                  <CornerUpLeft className="h-3 w-3 shrink-0" />
-                  <span className="truncate">{parentChat.title}</span>
+                  <Loader2 className="h-3 w-3 animate-spin group-hover:hidden" />
+                  <Square className="hidden h-2.5 w-2.5 fill-current group-hover:block" />
+                  <span className="group-hover:hidden">{t('chat.working')}</span>
+                  <span className="hidden group-hover:inline">{t('chat.cancel')}</span>
                 </button>
-              )
-            ) : (
-              <WorkspacePath chat={activeChat} />
-            )}
-            {subagentRunning && activeChatId && (
-              // Clickable, because this used to be the one running thing in the
-              // app with no way to stop it: a subagent's turn is driven by its
-              // parent, so the composer's Stop was deliberately withheld here
-              // (it had no request of its own to abort) and the session was
-              // simply uninterruptible from its own view.
+              )}
+              {hasSessionInfo && (
+                <button
+                  onClick={() => setInfoOpen((o) => !o)}
+                  title={t('chat.descriptionAndTasks')}
+                  className={cn(
+                    'flex shrink-0 items-center gap-1 sq sq-md rounded-md px-1.5 py-0.5 text-[11px] transition-colors',
+                    infoOpen
+                      ? 'bg-elevated text-text'
+                      : 'text-text-muted hover:bg-white/5 hover:text-text'
+                  )}
+                >
+                  <ListTree className="h-3.5 w-3.5" />
+                  {sessionTasks.length > 0 && (
+                    <span className="tabular-nums">
+                      {tasksDone}/{sessionTasks.length}
+                    </span>
+                  )}
+                  <ChevronRight
+                    className={cn(
+                      'h-3 w-3 transition-transform duration-200 ease-out-quart',
+                      infoOpen && 'rotate-90'
+                    )}
+                  />
+                </button>
+              )}
+              {backgroundTaskCount > 0 && activeChatId && (
+                // Detached tasks were cancellable in main from day one
+                // (`tasks:cancel`) but nothing ever called it — this badge counted
+                // them and offered no way out. Cancels them all: they're detached
+                // by definition, so "stop the thing I didn't ask for" is the whole
+                // interaction, and per-task control lives on the task card.
+                <button
+                  onClick={() => {
+                    for (const t of runningTasks ?? []) {
+                      void cancelBackgroundTask(activeChatId, t.jobId)
+                    }
+                  }}
+                  title={t('chat.cancelBackground', { count: backgroundTaskCount })}
+                  className="press-scale group flex shrink-0 items-center gap-1 sq sq-md rounded-md bg-accent/10 px-1.5 py-0.5 text-[11px] text-accent transition-colors hover:bg-accent/20"
+                >
+                  <Loader2 className="h-3 w-3 animate-spin group-hover:hidden" />
+                  <Square className="hidden h-2.5 w-2.5 fill-current group-hover:block" />
+                  <span className="tabular-nums">{backgroundTaskCount}</span>
+                </button>
+              )}
+            </div>
+          )}
+          <div className="flex shrink-0 items-center gap-2">
+            {activeBot && (
               <button
-                onClick={() => void cancelSubagent(activeChatId)}
-                title={t('chat.cancelSubagent')}
-                className="press-scale group flex shrink-0 items-center gap-1 sq sq-md rounded-md bg-accent/10 px-1.5 py-0.5 text-[11px] text-accent transition-colors hover:bg-accent/20"
-              >
-                <Loader2 className="h-3 w-3 animate-spin group-hover:hidden" />
-                <Square className="hidden h-2.5 w-2.5 fill-current group-hover:block" />
-                <span className="group-hover:hidden">{t('chat.working')}</span>
-                <span className="hidden group-hover:inline">{t('chat.cancel')}</span>
-              </button>
-            )}
-            {hasSessionInfo && (
-              <button
-                onClick={() => setInfoOpen((o) => !o)}
-                title={t('chat.descriptionAndTasks')}
+                onClick={() => setBotSettings(botPaneOpen ? null : activeBot.id)}
+                title={t('bots.settings')}
+                aria-expanded={botPaneOpen}
+                aria-controls={botPaneOpen ? 'bot-settings-pane' : undefined}
                 className={cn(
-                  'flex shrink-0 items-center gap-1 sq sq-md rounded-md px-1.5 py-0.5 text-[11px] transition-colors',
-                  infoOpen
+                  'press-scale flex h-7 shrink-0 items-center gap-1.5 sq sq-lg rounded-lg px-2 text-xs',
+                  botPaneOpen
                     ? 'bg-elevated text-text'
                     : 'text-text-muted hover:bg-white/5 hover:text-text'
                 )}
               >
-                <ListTree className="h-3.5 w-3.5" />
-                {sessionTasks.length > 0 && (
-                  <span className="tabular-nums">
-                    {tasksDone}/{sessionTasks.length}
-                  </span>
-                )}
-                <ChevronRight
-                  className={cn(
-                    'h-3 w-3 transition-transform duration-200 ease-out-quart',
-                    infoOpen && 'rotate-90'
-                  )}
-                />
+                <Settings className="h-3.5 w-3.5" /> {t('chat.settings')}
               </button>
             )}
-            {backgroundTaskCount > 0 && activeChatId && (
-              // Detached tasks were cancellable in main from day one
-              // (`tasks:cancel`) but nothing ever called it — this badge counted
-              // them and offered no way out. Cancels them all: they're detached
-              // by definition, so "stop the thing I didn't ask for" is the whole
-              // interaction, and per-task control lives on the task card.
-              <button
-                onClick={() => {
-                  for (const t of runningTasks ?? []) {
-                    void cancelBackgroundTask(activeChatId, t.jobId)
-                  }
-                }}
-                title={t('chat.cancelBackground', { count: backgroundTaskCount })}
-                className="press-scale group flex shrink-0 items-center gap-1 sq sq-md rounded-md bg-accent/10 px-1.5 py-0.5 text-[11px] text-accent transition-colors hover:bg-accent/20"
-              >
-                <Loader2 className="h-3 w-3 animate-spin group-hover:hidden" />
-                <Square className="hidden h-2.5 w-2.5 fill-current group-hover:block" />
-                <span className="tabular-nums">{backgroundTaskCount}</span>
-              </button>
+            <UsageMeter />
+          </div>
+        </header>
+
+        {infoOpen && <SessionInfo chat={activeChat} />}
+
+        {messagesError ? (
+          // A failed load used to be indistinguishable from an empty session:
+          // silent, blank, and with no way back other than clicking away and
+          // returning. Name it and make it recoverable.
+          <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
+            <p className="max-w-xs text-sm text-text-muted">{t('chat.loadFailed')}</p>
+            <Button variant="ghost" onClick={() => void selectChat(activeChat.id)}>
+              <RotateCw className="h-4 w-4" /> {t('common.retry')}
+            </Button>
+          </div>
+        ) : loading ? (
+          // Deliberately blank: a transcript read is a local SQLite query, so it
+          // resolves within a frame or two and a spinner would be a flash of
+          // chrome rather than information. This branch exists to stop the EMPTY
+          // state from claiming the session has no messages
+          // before we know that.
+          <div className="min-h-0 flex-1" />
+        ) : isEmpty ? (
+          <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-6 text-center">
+            {activeBot ? (
+              <div className="flex flex-col items-center gap-4">
+                <BotAvatar username={activeBot.username} size={56} />
+                <p className="max-w-xs text-sm text-text-muted">{t('bots.intro')}</p>
+              </div>
+            ) : (
+              <p className="text-sm text-text-muted"></p>
             )}
           </div>
+        ) : (
+          <CanvasTranscript
+            messages={messages}
+            streaming={streaming}
+            chatId={activeChatId}
+            onCancelSubagent={(subChatId) => void cancelSubagent(subChatId)}
+            onCancelTool={(callId) => void cancelToolCall(callId)}
+          />
         )}
-        <div className="flex shrink-0 items-center gap-2">
-          {activeBot && (
-            <button
-              onClick={() => setBotPaneOpen((o) => !o)}
-              title={t('bots.settings')}
-              className={cn(
-                'press-scale flex h-7 shrink-0 items-center gap-1.5 sq sq-lg rounded-lg px-2 text-xs',
-                botPaneOpen
-                  ? 'bg-elevated text-text'
-                  : 'text-text-muted hover:bg-white/5 hover:text-text'
-              )}
-            >
-              <Settings className="h-3.5 w-3.5" /> {t('chat.settings')}
-            </button>
-          )}
-          <UsageMeter />
-        </div>
-      </header>
-
-      {infoOpen && <SessionInfo chat={activeChat} />}
-
-      {messagesError ? (
-        // A failed load used to be indistinguishable from an empty session:
-        // silent, blank, and with no way back other than clicking away and
-        // returning. Name it and make it recoverable.
-        <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
-          <p className="max-w-xs text-sm text-text-muted">{t('chat.loadFailed')}</p>
-          <Button variant="ghost" onClick={() => void selectChat(activeChat.id)}>
-            <RotateCw className="h-4 w-4" /> {t('common.retry')}
-          </Button>
-        </div>
-      ) : loading ? (
-        // Deliberately blank: a transcript read is a local SQLite query, so it
-        // resolves within a frame or two and a spinner would be a flash of
-        // chrome rather than information. This branch exists to stop the EMPTY
-        // state from claiming the session has no messages
-        // before we know that.
-        <div className="min-h-0 flex-1" />
-      ) : isEmpty ? (
-        <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-6 text-center">
-          {activeBot ? (
-            <div className="flex flex-col items-center gap-4">
-              <BotAvatar username={activeBot.username} size={56} />
-              <p className="max-w-xs text-sm text-text-muted">{t('bots.intro')}</p>
-            </div>
-          ) : (
-            <p className="text-sm text-text-muted"></p>
-          )}
-        </div>
-      ) : (
-        <CanvasTranscript
-          messages={messages}
-          streaming={streaming}
-          chatId={activeChatId}
-          onCancelSubagent={(subChatId) => void cancelSubagent(subChatId)}
-          onCancelTool={(callId) => void cancelToolCall(callId)}
-        />
-      )}
-      {/* The transcript used to end on a hard clip: the scrollport edge sliced
+        {/* The transcript used to end on a hard clip: the scrollport edge sliced
           text mid-glyph, straight into the composer’s flat gutter, and the two
           together read as a black bar cutting the pane in half. This is a
           gradient of the pane’s own background laid over the last 24px of the
@@ -316,58 +323,55 @@ export function ChatView(): JSX.Element {
           in main.css). The bar occupies the scroller’s right edge, so a
           full-width fade would paint over its last 24px and wash out the
           thumb exactly when you drag it to the end. */}
-      <div
-        aria-hidden
-        className="pointer-events-none relative z-10 -mt-6 mr-2.5 h-6 shrink-0 bg-gradient-to-b from-transparent to-bg"
-      />
+        <div
+          aria-hidden
+          className="pointer-events-none relative z-10 -mt-6 mr-2.5 h-6 shrink-0 bg-gradient-to-b from-transparent to-bg"
+        />
 
-      {queue.length > 0 && (
-        <div className="bg-bg px-4 pt-2">
-          <div className="mx-auto max-w-3xl">
-            <Queue>
-              <QueueSection defaultOpen>
-                <QueueSectionTrigger>
-                  <QueueSectionLabel
-                    label={t('chat.queued')}
-                    count={queue.length}
-                    icon={<ListTree className="h-3.5 w-3.5 text-text-subtle" />}
-                  />
-                  {sending && (
-                    <span className="ml-auto text-[10px] text-text-subtle">
-                      {t('chat.runsAfterReply')}
-                    </span>
-                  )}
-                </QueueSectionTrigger>
-                <QueueSectionContent>
-                  <QueueList>
-                    {queue.map((item, i) => (
-                      <QueuedMessage key={item.id} item={item} index={i} total={queue.length} />
-                    ))}
-                  </QueueList>
-                </QueueSectionContent>
-              </QueueSection>
-            </Queue>
+        {queue.length > 0 && (
+          <div className="bg-bg px-4 pt-2">
+            <div className="mx-auto max-w-3xl">
+              <Queue>
+                <QueueSection defaultOpen>
+                  <QueueSectionTrigger>
+                    <QueueSectionLabel
+                      label={t('chat.queued')}
+                      count={queue.length}
+                      icon={<ListTree className="h-3.5 w-3.5 text-text-subtle" />}
+                    />
+                    {sending && (
+                      <span className="ml-auto text-[10px] text-text-subtle">
+                        {t('chat.runsAfterReply')}
+                      </span>
+                    )}
+                  </QueueSectionTrigger>
+                  <QueueSectionContent>
+                    <QueueList>
+                      {queue.map((item, i) => (
+                        <QueuedMessage key={item.id} item={item} index={i} total={queue.length} />
+                      ))}
+                    </QueueList>
+                  </QueueSectionContent>
+                </QueueSection>
+              </Queue>
+            </div>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* A subagent's session can now be stopped from its own composer: the Stop
+        {/* A subagent's session can now be stopped from its own composer: the Stop
           cancels the DELEGATE (there is no local request here to abort), which
           is what the button visibly means in this view. */}
-      <Composer
-        key={activeChatId}
-        onSend={submit}
-        sending={sending || subagentRunning}
-        onStop={
-          subagentRunning && activeChatId ? () => void cancelSubagent(activeChatId) : () => stop()
-        }
-      />
+        <Composer
+          key={activeChatId}
+          onSend={submit}
+          sending={sending || subagentRunning}
+          onStop={
+            subagentRunning && activeChatId ? () => void cancelSubagent(activeChatId) : () => stop()
+          }
+        />
 
-      {!activeBot && activeChat.kind !== 'bot' && <WorkstreamStrip />}
-
-      {botPaneOpen && activeBot && (
-        <BotSettingsPane key={activeBot.id} bot={activeBot} onClose={() => setBotPaneOpen(false)} />
-      )}
+        {!activeBot && activeChat.kind !== 'bot' && <WorkstreamStrip />}
+      </div>
     </div>
   )
 }

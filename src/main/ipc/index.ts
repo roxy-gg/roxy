@@ -770,6 +770,15 @@ export function registerIpc(): void {
     if (bot) notifyAutomation(bot.chatId)
   })
   ipcMain.handle(CHANNELS.automationSnapshot, () => automationSnapshot())
+  ipcMain.handle(CHANNELS.botsRunJob, (_e, id: string) => {
+    const job = bots.listJobs().find((entry) => entry.id === id)
+    if (!job) throw new Error('Schedule not found')
+    const bot = bots.getBot(job.botId)
+    if (!bot) throw new Error('Bot not found')
+    const item = enqueuePrompt(bot.chatId, job.prompt)
+    wakeAutomation()
+    return item
+  })
   ipcMain.handle(CHANNELS.automationWake, () => wakeAutomation())
 
   // ---- tools ----

@@ -124,6 +124,8 @@ interface RoxyStore {
   /** Workspace paths in the user's chosen sidebar order (top → bottom). */
   projectOrder: string[]
   bots: Bot[]
+  botSettings: { botId: string; confirmDelete: boolean } | null
+  setBotSettings: (botId: string | null, confirmDelete?: boolean) => void
   /** Main-owned queued turns, distinct from renderer-owned direct sends. */
   runningAutomation: Record<string, true>
   /** Pending prompts queued on the active chat (FIFO). */
@@ -973,6 +975,17 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
   projectInstructions: {},
   projectOrder: [],
   bots: [],
+  botSettings: null,
+  setBotSettings: (botId, confirmDelete = false) => {
+    const bot = get().bots.find((entry) => entry.id === botId)
+    if (!bot) {
+      set({ botSettings: null })
+      return
+    }
+    // selectChat switches synchronously and clears the pane before loading history.
+    if (get().activeChatId !== bot.chatId) void get().selectChat(bot.chatId)
+    set({ botSettings: { botId: bot.id, confirmDelete } })
+  },
   runningAutomation: {},
   queue: [],
   stopChats: {},
@@ -1615,6 +1628,7 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
     const chat = get().chats.find((c) => c.id === id)
     set({
       activeChatId: id,
+      botSettings: null,
       messages: [],
       // `null` = loading. Without this the pane cannot tell a session that is
       // still fetching from one with no messages, and shows the empty state for
@@ -1650,6 +1664,7 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
   clearActive: () =>
     set({
       activeChatId: null,
+      botSettings: null,
       messages: [],
       messagesChatId: null,
       messagesError: false,

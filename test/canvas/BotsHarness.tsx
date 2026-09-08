@@ -98,6 +98,12 @@ Object.assign(window.roxy, {
       )
       notify()
     },
+    runJob: async (id: string) => {
+      const job = jobs.find((entry) => entry.id === id)
+      const bot = bots.find((entry) => entry.id === job?.botId)
+      if (!job || !bot) throw new Error('Schedule not found')
+      return window.roxy.queue.add(bot.chatId, job.prompt)
+    },
     onChanged: (callback: () => void) => {
       changed.add(callback)
       return () => changed.delete(callback)

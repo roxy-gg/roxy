@@ -369,14 +369,55 @@ async function main(): Promise<void> {
           botId: viaBridge.id,
           name: 'Bridge cron',
           prompt: 'Check',
+          enabled: false,
+          remainingRuns: 2,
           schedule: { kind: 'cron', expression: '0 9 * * 1-5', timezone: 'UTC' }
         })})`
       )
       assert.equal(bridgeJob.schedule.kind, 'cron')
+      const releaseForced = claimTurn(viaBridge.chatId, new AbortController())!
+      const forced = await win.webContents.executeJavaScript(
+        `window.roxy.bots.runJob(${JSON.stringify(bridgeJob.id)})`
+      )
+      assert.equal(forced.chatId, viaBridge.chatId)
+      assert.equal(forced.content, 'Check')
+      assert.equal(
+        repo.listQueue(viaBridge.chatId).length,
+        1,
+        'force run queues once behind the active turn'
+      )
+      assert.deepEqual(
+        bots.listJobs(viaBridge.id)[0],
+        bridgeJob,
+        'paused schedule and run limits remain unchanged'
+      )
+      releaseForced()
+      const beforeForcedRequest = requests.length
+      wakeAutomation()
+      const forceDeadline = Date.now() + 10000
+      while (sessionBusy(viaBridge.chatId) && Date.now() < forceDeadline)
+        await new Promise((resolve) => setTimeout(resolve, 10))
+      assert.equal(
+        requests.length,
+        beforeForcedRequest + 1,
+        'forced schedule uses the real harness'
+      )
+      assert.equal(repo.listQueue(viaBridge.chatId).length, 0)
+      assert.equal(repo.listMessages(viaBridge.chatId).at(-1)?.content, 'Reviewed by the bot.')
+      assert.deepEqual(
+        bots.listJobs(viaBridge.id)[0],
+        bridgeJob,
+        'test run does not consume the scheduled run'
+      )
       await win.webContents.executeJavaScript(
         `window.roxy.bots.removeJob(${JSON.stringify(bridgeJob.id)})`
       )
       assert.equal(bots.listJobs(viaBridge.id).length, 0)
+      const missingRun = await win.webContents.executeJavaScript(
+        `window.roxy.bots.runJob(${JSON.stringify(bridgeJob.id)}).then(() => '', error => error.message)`
+      )
+      assert.match(missingRun, /Schedule not found/)
+      assert.equal(repo.listQueue(viaBridge.chatId).length, 0, 'deleted schedule cannot be forced')
       await win.webContents.executeJavaScript(
         `window.roxy.bots.remove(${JSON.stringify(viaBridge.id)})`
       )

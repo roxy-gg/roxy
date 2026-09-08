@@ -7,6 +7,7 @@ export const CHANNELS = {
   botsJobs: 'bots:jobs',
   botsSaveJob: 'bots:saveJob',
   botsRemoveJob: 'bots:removeJob',
+  botsRunJob: 'bots:runJob',
   botsChanged: 'bots:changed',
   automationDelta: 'automation:delta',
   automationSnapshot: 'automation:snapshot',

@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Pencil, Plus, Trash2, X } from 'lucide-react'
+import { Pencil, Play, Plus, Trash2, X } from 'lucide-react'
 import type { Bot, BotJob, BotSchedule } from '@shared/bots'
 import { api } from '../lib/api'
 import { useRoxyStore } from '../lib/store'
@@ -16,6 +16,7 @@ const message = (error: unknown): string => (error instanceof Error ? error.mess
 export function BotSettingsPane({ bot, onClose }: { bot: Bot; onClose: () => void }): JSX.Element {
   const { t } = useTranslation()
   const refreshBots = useRoxyStore((s) => s.refreshBots)
+  const refreshQueue = useRoxyStore((s) => s.refreshQueue)
   const removeBot = useRoxyStore((s) => s.removeBot)
   const [username, setUsername] = useState(bot.username)
   const [instructions, setInstructions] = useState(bot.instructions)
@@ -24,8 +25,20 @@ export function BotSettingsPane({ bot, onClose }: { bot: Bot; onClose: () => voi
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [saved, setSaved] = useState(false)
-  const [confirmDelete, setConfirmDelete] = useState(false)
+  const [queuedJob, setQueuedJob] = useState<string | null>(null)
+  const confirmDelete = useRoxyStore(
+    (s) => s.botSettings?.botId === bot.id && s.botSettings.confirmDelete
+  )
+  const setBotSettings = useRoxyStore((s) => s.setBotSettings)
+  const deleteSection = useRef<HTMLDivElement>(null)
   const [editingJob, setEditingJob] = useState<BotJob | 'new' | null>(null)
+
+  useEffect(() => {
+    if (confirmDelete) {
+      deleteSection.current?.scrollIntoView({ block: 'nearest' })
+      deleteSection.current?.focus({ preventScroll: true })
+    }
+  }, [confirmDelete])
 
   useEffect(() => {
     let live = true
@@ -62,8 +75,9 @@ export function BotSettingsPane({ bot, onClose }: { bot: Bot; onClose: () => voi
 
   return (
     <aside
+      id="bot-settings-pane"
       aria-label={t('bots.settings')}
-      className="absolute bottom-0 right-0 top-12 z-30 flex w-96 max-w-full flex-col border-l border-border bg-surface shadow-2xl"
+      className="absolute bottom-0 left-0 top-12 z-30 flex w-80 max-w-full flex-col border-r border-border bg-surface shadow-xl @min-[48rem]/chat:static @min-[48rem]/chat:shrink-0 @min-[48rem]/chat:shadow-none"
       onKeyDown={(e) => {
         if (e.key === 'Escape') {
           e.stopPropagation()
@@ -71,7 +85,7 @@ export function BotSettingsPane({ bot, onClose }: { bot: Bot; onClose: () => voi
         }
       }}
     >
-      <div className="flex h-12 shrink-0 items-center justify-between border-b border-border px-4">
+      <div className="titlebar flex h-12 shrink-0 items-center justify-between border-b border-border px-4">
         <div className="flex items-center gap-2">
           <BotAvatar username={bot.username} size={24} />
           <h2 className="text-sm font-medium">{t('bots.settings')}</h2>
@@ -82,6 +96,7 @@ export function BotSettingsPane({ bot, onClose }: { bot: Bot; onClose: () => voi
       </div>
       <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto p-4">
         <form
+          id="bot-profile-form"
           className="flex flex-col gap-3"
           onSubmit={(e) => {
             e.preventDefault()
@@ -97,7 +112,7 @@ export function BotSettingsPane({ bot, onClose }: { bot: Bot; onClose: () => voi
             <Input
               value={username}
               onChange={(e) => {
-                setUsername(e.target.value.replace(/^@/, ''))
+                setUsername(e.target.value.replace(/\s/g, '').replace(/^@/, ''))
                 setSaved(false)
               }}
               maxLength={32}
@@ -119,22 +134,7 @@ export function BotSettingsPane({ bot, onClose }: { bot: Bot; onClose: () => voi
               placeholder={t('bots.instructionsHint')}
             />
           </label>
-          <div className="flex items-center justify-end gap-2">
-            {saved && (
-              <span role="status" className="text-xs text-success">
-                {t('bots.saved')}
-              </span>
-            )}
-            <Button size="sm" type="submit" disabled={busy || username.toLowerCase() === 'roxy'}>
-              {t('common.save')}
-            </Button>
-          </div>
         </form>
-        {error && (
-          <p role="alert" className="text-xs text-danger">
-            {error}
-          </p>
-        )}
         <section className="border-t border-border pt-4">
           <div className="mb-3 flex items-center justify-between">
             <h3 className="text-sm font-medium">{t('bots.schedules')}</h3>
@@ -167,7 +167,11 @@ export function BotSettingsPane({ bot, onClose }: { bot: Bot; onClose: () => voi
                 !jobs.length && <p className="text-xs text-text-subtle">{t('bots.noSchedules')}</p>
               )}
               {jobs.map((job) => (
-                <div key={job.id} className="rounded-lg border border-border bg-surface-2 p-3">
+                <div
+                  key={job.id}
+                  data-bot-job={job.id}
+                  className="rounded-lg border border-border bg-surface-2 p-3"
+                >
                   <div className="flex items-start justify-between gap-2">
                     <span className="min-w-0 break-words text-sm font-medium">{job.name}</span>
                     <div className="flex shrink-0 gap-1">
@@ -222,69 +226,117 @@ export function BotSettingsPane({ bot, onClose }: { bot: Bot; onClose: () => voi
                       <div>{t('bots.runsLeft', { count: job.remainingRuns })}</div>
                     )}
                   </dl>
-                  <Button
-                    className="mt-2"
-                    size="sm"
-                    variant="ghost"
-                    disabled={busy}
-                    onClick={() =>
-                      void run(async () => {
-                        await api.bots.saveJob(
-                          {
-                            botId: job.botId,
-                            name: job.name,
-                            prompt: job.prompt,
-                            schedule: job.schedule,
-                            enabled: !job.enabled,
-                            remainingRuns: job.remainingRuns
-                          },
-                          job.id
-                        )
-                        setJobs(await api.bots.jobs(bot.id))
-                        await api.automation.wake()
-                      })
-                    }
-                  >
-                    {job.enabled ? t('bots.pause') : t('bots.enable')}
-                  </Button>
+                  <div className="mt-2 flex items-center justify-between gap-2">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={busy}
+                      onClick={() =>
+                        void run(async () => {
+                          await api.bots.saveJob(
+                            {
+                              botId: job.botId,
+                              name: job.name,
+                              prompt: job.prompt,
+                              schedule: job.schedule,
+                              enabled: !job.enabled,
+                              remainingRuns: job.remainingRuns
+                            },
+                            job.id
+                          )
+                          setJobs(await api.bots.jobs(bot.id))
+                          await api.automation.wake()
+                        })
+                      }
+                    >
+                      {job.enabled ? t('bots.pause') : t('bots.enable')}
+                    </Button>
+                    <Button
+                      size="sm"
+                      title={t('bots.forceRunHint')}
+                      disabled={busy}
+                      onClick={() =>
+                        void run(async () => {
+                          setQueuedJob(null)
+                          await api.bots.runJob(job.id)
+                          setQueuedJob(job.id)
+                          await refreshQueue()
+                        })
+                      }
+                    >
+                      <Play className="h-3.5 w-3.5" />
+                      {t('bots.forceRun')}
+                    </Button>
+                  </div>
+                  {queuedJob === job.id && (
+                    <p role="status" className="mt-2 text-xs text-success">
+                      {t('bots.runQueued')}
+                    </p>
+                  )}
                 </div>
               ))}
             </div>
           )}
         </section>
-        <div className="mt-auto border-t border-border pt-4">
+      </div>
+      <footer
+        ref={deleteSection}
+        tabIndex={-1}
+        className="shrink-0 border-t border-border p-4 outline-none"
+      >
+        {error && (
+          <p role="alert" className="mb-3 break-words text-xs text-danger">
+            {error}
+          </p>
+        )}
+        {confirmDelete && (
+          <p className="mb-3 text-xs text-text-muted">
+            {t('bots.deleteConfirm', { username: bot.username })}
+          </p>
+        )}
+        <div className="flex items-center justify-between gap-2">
           {confirmDelete ? (
-            <>
-              <p className="mb-3 text-xs text-text-muted">
-                {t('bots.deleteConfirm', { username: bot.username })}
-              </p>
-              <div className="flex gap-2">
-                <Button
-                  variant="danger"
-                  size="sm"
-                  disabled={busy}
-                  onClick={() =>
-                    void run(async () => {
-                      await removeBot(bot.id)
-                      onClose()
-                    })
-                  }
-                >
-                  {t('bots.delete')}
-                </Button>
-                <Button size="sm" variant="ghost" onClick={() => setConfirmDelete(false)}>
-                  {t('common.cancel')}
-                </Button>
-              </div>
-            </>
+            <div className="flex gap-1">
+              <Button
+                variant="danger"
+                size="sm"
+                disabled={busy}
+                onClick={() =>
+                  void run(async () => {
+                    await removeBot(bot.id)
+                    onClose()
+                  })
+                }
+              >
+                {t('bots.delete')}
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => setBotSettings(bot.id)}>
+                {t('common.cancel')}
+              </Button>
+            </div>
           ) : (
-            <Button size="sm" variant="danger" onClick={() => setConfirmDelete(true)}>
+            <Button size="sm" variant="danger" onClick={() => setBotSettings(bot.id, true)}>
               <Trash2 className="h-3.5 w-3.5" />
               {t('bots.delete')}
             </Button>
           )}
+          <div className="ml-auto flex items-center gap-2">
+            {saved && !confirmDelete && (
+              <span role="status" className="text-xs text-success">
+                {t('bots.saved')}
+              </span>
+            )}
+            <Button
+              size="sm"
+              type="submit"
+              form="bot-profile-form"
+              disabled={busy || username.toLowerCase() === 'roxy'}
+            >
+              {t('common.save')}
+            </Button>
+          </div>
         </div>
-      </div>
+      </footer>
     </aside>
   )
 }
