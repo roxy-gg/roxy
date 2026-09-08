@@ -49,6 +49,13 @@ export const CHANNELS = {
   /** Attach/detach the bots in a session's channel. */
   channelSetMembers: 'channel:setMembers',
 
+  /** The saved-bot library — bots that outlive a session and own their own chat. */
+  botsList: 'bots:list',
+  botsCreate: 'bots:create',
+  botsUpdate: 'bots:update',
+  botsRemove: 'bots:remove',
+  botsReorder: 'bots:reorder',
+
   integrationsList: 'integrations:list',
   integrationsSetEnabled: 'integrations:setEnabled',
 

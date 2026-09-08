@@ -21,6 +21,7 @@ export function Composer({
   sending,
   onStop,
   members = [],
+  soloName,
   draft,
   onDraftConsumed
 }: {
@@ -29,6 +30,13 @@ export function Composer({
   onStop?: () => void
   /** Channel members offered by the `@` autocomplete (host first). */
   members?: BotMember[]
+  /**
+   * Set in a bot's own chat: the one bot listening. Turns the placeholder into
+   * "Message <name>" and suppresses the `@` menu, because in a one-on-one the
+   * only member to complete is the one already reading, and a mention there
+   * both looks like a channel and invites the model to hand off to nobody.
+   */
+  soloName?: string
   /** Text pushed in from outside (clicking a member in the roster). */
   draft?: string
   onDraftConsumed?: () => void
@@ -54,7 +62,7 @@ export function Composer({
   }, [draft, onDraftConsumed])
 
   const matches = useMemo(() => {
-    if (mentionQuery === null) return []
+    if (soloName || mentionQuery === null) return []
     const q = mentionQuery.toLowerCase()
     return members.filter((m) => m.name.toLowerCase().startsWith(q))
   }, [mentionQuery, members])
@@ -274,9 +282,11 @@ export function Composer({
               ? onStop
                 ? t('composer.queuePlaceholderStop')
                 : t('composer.queuePlaceholder')
-              : members.length > 1
-                ? t('composer.channelPlaceholder')
-                : t('composer.placeholder')
+              : soloName
+                ? t('bots.chatPlaceholder', { name: soloName })
+                : members.length > 1
+                  ? t('composer.channelPlaceholder')
+                  : t('composer.placeholder')
           }
           onChange={(e) => {
             setValue(e.target.value)

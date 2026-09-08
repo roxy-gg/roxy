@@ -6,7 +6,7 @@
  * any point in the conversation. Addressing is by `@Name`; an unaddressed
  * message goes to Roxy, so the channel can never end up with nobody listening.
  */
-import type { BotMember, Message } from './types'
+import type { Bot, BotMember, Message } from './types'
 
 /** Id of the built-in host. Reserved — a user-added bot can never claim it. */
 export const ROXY_HOST_ID = 'roxy'
@@ -85,6 +85,57 @@ export const SUGGESTED_MEMBERS: BotMember[] = [
   }
 ]
 
+/** Avatar/accent pairs a saved bot can wear. Keys must exist in BotAvatar. */
+export const BOT_LOOKS = [
+  { icon: 'builder', color: 'blue' },
+  { icon: 'reviewer', color: 'purple' },
+  { icon: 'security', color: 'emerald' },
+  { icon: 'architect', color: 'amber' },
+  { icon: 'tester', color: 'cyan' }
+] as const
+
+/**
+ * A bot's id, derived from its name.
+ *
+ * Slugged so `@Name` addressing and the id agree, and suffixed rather than
+ * rejected on collision — two bots called "QA" is the user's call, but two bots
+ * with one id would make every roster ambiguous. The host id can never be
+ * claimed: Roxy is in every channel and a second `roxy` would shadow her.
+ */
+export function botId(name: string, taken: Iterable<string> = []): string {
+  const base =
+    name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-|-$/g, '') || 'bot'
+  const used = new Set(taken)
+  used.add(ROXY_HOST_ID)
+  if (!used.has(base)) return base
+  for (let n = 2; ; n++) {
+    const candidate = `${base}-${n}`
+    if (!used.has(candidate)) return candidate
+  }
+}
+
+/**
+ * The channel identity of a SAVED bot.
+ *
+ * The single conversion between the two shapes, so a bot attached to a project
+ * channel is the same bot as the one in its own chat — same id, same brief,
+ * same face. Duplicating this mapping per call site is how a bot ends up
+ * answering to `@Name` with a preset's prompt instead of its own.
+ */
+export function botMember(bot: Bot): BotMember {
+  return {
+    id: bot.id,
+    name: bot.name,
+    role: bot.description || 'Specialist',
+    icon: bot.icon,
+    color: bot.color,
+    systemPrompt: bot.instructions.trim() || undefined
+  }
+}
+
 /** Every channel starts with just the host in it. */
 export function defaultMembers(): BotMember[] {
   return [ROXY_HOST]
@@ -150,6 +201,21 @@ export function findMember(name: string, members: BotMember[]): BotMember | unde
  * Grok Bot's equivalent has no host, so a message with no mention in it reaches
  * nobody and the user has to name a bot before any work can start.
  */
+/**
+ * Who answers in a BOT chat — always that bot, whatever the message says.
+ *
+ * A bot's own chat is a one-on-one, not a channel: it has exactly one attached
+ * member and the host is present only as a technicality. Routing it through
+ * `resolveRecipient` would hand every unaddressed message to Roxy, so talking
+ * to your bot would silently be talking to Roxy — the one thing this chat
+ * exists NOT to do. Falls back to the host if the row somehow has no member,
+ * because a chat with nobody listening is worse than the wrong greeter.
+ */
+export function soloSpeaker(members: BotMember[]): BotMember {
+  const roster = withHost(members)
+  return roster.find((m) => m.id !== ROXY_HOST_ID) ?? roster[0]
+}
+
 export function resolveRecipient(text: string, members: BotMember[]): BotMember {
   const host = withHost(members)[0]
   // Addressed means the message OPENS with the mention ("@Reviewer look at
@@ -183,9 +249,24 @@ export function resolveRecipient(text: string, members: BotMember[]): BotMember 
  * Returns undefined for a briefless solo channel, where there is nothing to say
  * that the base prompt doesn't already cover.
  */
-export function channelPrompt(members: BotMember[], speaker: BotMember): string | undefined {
+export function channelPrompt(
+  members: BotMember[],
+  speaker: BotMember,
+  /**
+   * Treat this as a PRIVATE one-on-one: nobody else is in the room, whatever
+   * the member list says.
+   *
+   * Set for a bot's own chat. The host is in every membership list as a
+   * technicality (`withHost`), so without this a bot alone with the user would
+   * be told Roxy is standing there and offered the hand-off protocol - and it
+   * uses it: a question it judged out of scope came back as "@Roxy can you take
+   * this", to nobody, in a chat with no host turn to follow. A private chat has
+   * one participant and no exits.
+   */
+  solo = false
+): string | undefined {
   const roster = withHost(members)
-  const others = roster.filter((m) => m.id !== speaker.id)
+  const others = solo ? [] : roster.filter((m) => m.id !== speaker.id)
   const brief = speaker.systemPrompt?.trim()
   if (others.length === 0 && !brief) return undefined
   const lines = [

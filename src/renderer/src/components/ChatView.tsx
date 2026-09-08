@@ -23,6 +23,8 @@ import { Composer } from './Composer'
 import { ChannelMembersPanel } from './ChannelMembersPanel'
 import { withHost } from '@shared/channel-members'
 import { LoopDetailsPane } from './LoopDetailsPane'
+import { BotAvatar } from './BotAvatar'
+import { BotDialog } from './BotDialog'
 import { SessionInfo } from './SessionInfo'
 import { WorkstreamStrip } from './WorkstreamStrip'
 import { QueuedMessage } from './QueuedMessage'
@@ -73,6 +75,9 @@ export function ChatView(): JSX.Element {
   const activeChatId = useRoxyStore((s) => s.activeChatId)
   const chats = useRoxyStore((s) => s.chats)
   const loops = useRoxyStore((s) => s.loops)
+  const bots = useRoxyStore((s) => s.bots)
+  const updateBot = useRoxyStore((s) => s.updateBot)
+  const removeBot = useRoxyStore((s) => s.removeBot)
   // Subscribe to the STORED array, not a defaulted copy. A selector returning
   // `?? []` builds a new array every call, so zustand's Object.is check never
   // matches and the component re-renders forever ("getSnapshot should be
@@ -128,6 +133,7 @@ export function ChatView(): JSX.Element {
   // mistaken for the user scrolling away (see `onScroll`).
   const pinnedTop = useRef(-1)
   const [loopPaneOpen, setLoopPaneOpen] = useState(false)
+  const [botEditOpen, setBotEditOpen] = useState(false)
   const [infoOpen, setInfoOpen] = useState(false)
   // Show only the latest N; scrolling up loads older ones a page at a time.
   const [visibleCount, setVisibleCount] = useState(VISIBLE_MESSAGES)
@@ -290,6 +296,10 @@ export function ChatView(): JSX.Element {
 
   const activeChat = chats.find((c) => c.id === activeChatId)
   const isSub = activeChat?.kind === 'sub'
+  // The bot whose private chat this is, if any. Drives the header identity, the
+  // empty state, and the composer placeholder - everything that says WHO you
+  // are talking to, which in this view is the whole point.
+  const activeBot = useMemo(() => bots.find((b) => b.chatId === activeChatId), [bots, activeChatId])
   const parentChat = activeChat?.parentId
     ? chats.find((c) => c.id === activeChat.parentId)
     : undefined
@@ -336,7 +346,18 @@ export function ChatView(): JSX.Element {
           </div>
         ) : (
           <div className="flex min-w-0 items-center gap-2">
-            {isSub ? (
+            {activeBot ? (
+              <BotAvatar
+                member={{
+                  id: activeBot.id,
+                  name: activeBot.name,
+                  role: activeBot.description,
+                  icon: activeBot.icon,
+                  color: activeBot.color
+                }}
+                size="sm"
+              />
+            ) : isSub ? (
               <Hammer className="h-4 w-4 shrink-0 text-text-muted" />
             ) : (
               <FolderOpen className="h-4 w-4 shrink-0 text-text-muted" />
@@ -344,7 +365,11 @@ export function ChatView(): JSX.Element {
             <span className="shrink-0 text-sm font-medium">{activeChat.title}</span>
             {/* A delegate's session is only legible in context â€” who sent it, and
                 a way back. The folder path is the parent's business. */}
-            {isSub ? (
+            {activeBot ? (
+              // A bot chat has no folder, so the slot shows the bot's role
+              // instead - the one line the user wrote to say what it is for.
+              <span className="truncate text-xs text-text-subtle">{activeBot.description}</span>
+            ) : isSub ? (
               parentChat && (
                 <button
                   onClick={() => void selectChat(parentChat.id)}
@@ -423,6 +448,17 @@ export function ChatView(): JSX.Element {
           </div>
         )}
         <div className="flex shrink-0 items-center gap-2">
+          {/* Edit, not "members": there is one bot in here and its brief is the
+              only thing worth changing from this view. */}
+          {activeBot && (
+            <button
+              onClick={() => setBotEditOpen(true)}
+              title={t('bots.edit')}
+              className="press-scale flex h-7 shrink-0 items-center gap-1.5 sq sq-lg rounded-lg px-2 text-xs text-text-muted hover:bg-white/5 hover:text-text"
+            >
+              <Settings className="h-3.5 w-3.5" /> {t('common.edit')}
+            </button>
+          )}
           {activeLoop && (
             <button
               onClick={() => setLoopPaneOpen((o) => !o)}
@@ -437,8 +473,12 @@ export function ChatView(): JSX.Element {
               <Settings className="h-3.5 w-3.5" /> {t('chat.settings')}
             </button>
           )}
+          {/* Hidden in a bot chat: its roster is fixed at one bot, so a panel
+              for attaching others would invite building a channel in the one
+              place that exists to be a one-on-one. */}
           <button
             type="button"
+            hidden={!!activeBot}
             onClick={() => setMembersOpen((o) => !o)}
             title="Channel members"
             className={cn(
@@ -488,7 +528,41 @@ export function ChatView(): JSX.Element {
               <div className="h-full" />
             ) : isEmpty ? (
               <div className="flex h-full flex-col items-center justify-center px-6 text-center">
-                {activeLoop ? (
+                {activeBot ? (
+                  // Says the two things a fresh bot chat has to: that only this
+                  // bot answers here, and that `@Name` in a project reaches the
+                  // SAME bot - the relationship between the two doors is not
+                  // guessable, and getting it wrong means maintaining the bot
+                  // twice.
+                  <div className="flex max-w-sm flex-col items-center gap-3">
+                    <BotAvatar
+                      member={{
+                        id: activeBot.id,
+                        name: activeBot.name,
+                        role: activeBot.description,
+                        icon: activeBot.icon,
+                        color: activeBot.color
+                      }}
+                      size="lg"
+                    />
+                    <div>
+                      <p className="text-sm font-medium">
+                        {t('bots.chatEmptyTitle', { name: activeBot.name })}
+                      </p>
+                      <p className="mt-1 text-sm text-text-muted">
+                        {t('bots.chatEmptyBody', { name: activeBot.name })}
+                      </p>
+                    </div>
+                    {!activeBot.instructions.trim() && (
+                      <button
+                        onClick={() => setBotEditOpen(true)}
+                        className="press-scale sq sq-lg rounded-lg bg-accent/10 px-2.5 py-1.5 text-xs text-accent hover:bg-accent/20"
+                      >
+                        {t('bots.chatEmptyNoBrief', { name: activeBot.name })}
+                      </button>
+                    )}
+                  </div>
+                ) : activeLoop ? (
                   <p className="max-w-xs text-sm text-text-muted">
                     <Trans
                       i18nKey="chat.loopEmpty"
@@ -607,6 +681,7 @@ export function ChatView(): JSX.Element {
             onSend={submit}
             sending={sending || subagentRunning}
             members={members}
+            soloName={activeBot?.name}
             draft={draft}
             onDraftConsumed={() => setDraft('')}
             onStop={
@@ -619,7 +694,7 @@ export function ChatView(): JSX.Element {
           <WorkstreamStrip />
         </div>
 
-        {membersOpen && (
+        {membersOpen && !activeBot && (
           <ChannelMembersPanel
             members={members}
             onChange={(next) => void setChannelMembers(activeChat.id, next)}
@@ -634,6 +709,15 @@ export function ChatView(): JSX.Element {
           loop={activeLoop}
           chat={activeChat}
           onClose={() => setLoopPaneOpen(false)}
+        />
+      )}
+
+      {botEditOpen && activeBot && (
+        <BotDialog
+          bot={activeBot}
+          onSave={(input) => updateBot(activeBot.id, input)}
+          onDelete={() => removeBot(activeBot.id)}
+          onClose={() => setBotEditOpen(false)}
         />
       )}
     </div>

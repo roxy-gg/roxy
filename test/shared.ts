@@ -13,9 +13,13 @@ import {
   MAX_HANDOFF_HOPS,
   ROXY_HOST_ID,
   SUGGESTED_MEMBERS,
+  BOT_LOOKS,
+  botId,
+  botMember,
   findMember,
   channelPrompt,
   parseBotMentions,
+  soloSpeaker,
   resolveHandoff,
   resolveRecipient,
   visibleMessages,
@@ -6441,6 +6445,91 @@ async function main(): Promise<void> {
       ],
       reviewer
     ).length === 1
+  )
+
+  // ---- Saved bots (the bot library + its private chats) --------------------
+
+  check('bots: a name slugs to an addressable id', botId('Code Reviewer') === 'code-reviewer')
+  check('bots: punctuation and case collapse into the slug', botId('  QA!! Bot  ') === 'qa-bot')
+  check('bots: a nameless bot still gets an id', botId('') === 'bot' && botId('!!!') === 'bot')
+  check(
+    'bots: a colliding name is suffixed, not rejected',
+    botId('QA', ['qa']) === 'qa-2' && botId('QA', ['qa', 'qa-2']) === 'qa-3'
+  )
+  check(
+    'bots: no bot can claim the host id and shadow Roxy',
+    botId('Roxy') !== ROXY_HOST_ID && botId('roxy') !== ROXY_HOST_ID
+  )
+  check(
+    'bots: every offered look is one BotAvatar can render',
+    BOT_LOOKS.every((l) => !!l.icon && !!l.color)
+  )
+
+  const savedBot = {
+    id: 'reviewer-x',
+    name: 'Reviewer X',
+    description: 'Reviews diffs',
+    icon: 'reviewer',
+    color: 'purple',
+    instructions: 'You review changes for risk.',
+    chatId: 'chat-1',
+    sortOrder: 1,
+    createdAt: 1,
+    updatedAt: 1
+  }
+  const asMember = botMember(savedBot)
+  check(
+    'bots: a saved bot keeps its id as a member, so @mention resolves to IT',
+    asMember.id === savedBot.id
+  )
+  check(
+    "bots: the bot's instructions become the member's brief",
+    asMember.systemPrompt === savedBot.instructions
+  )
+  check(
+    'bots: the description becomes the role the other bots read',
+    asMember.role === savedBot.description
+  )
+  check(
+    'bots: a briefless bot carries no empty prompt (it would blank the base one)',
+    botMember({ ...savedBot, instructions: '   ' }).systemPrompt === undefined
+  )
+  check(
+    'bots: a roleless bot still gets a role, never an empty label',
+    !!botMember({ ...savedBot, description: '' }).role
+  )
+  check(
+    'bots: a saved bot is findable by @mention in a channel it joined',
+    findMember('Reviewer X', withHost([asMember]))?.id === savedBot.id
+  )
+
+  // The private chat: one bot, and it answers everything.
+  const solo = withHost([asMember])
+  check('bots: its own chat has exactly the bot plus the host', solo.length === 2)
+  check(
+    'bots: the bot answers an unaddressed message in its own chat',
+    soloSpeaker(solo).id === savedBot.id
+  )
+  check(
+    'bots: routing that same message as a CHANNEL would have hit Roxy instead',
+    resolveRecipient('hello', solo).id === ROXY_HOST_ID
+  )
+  check(
+    'bots: a chat that somehow lost its bot still has somebody listening',
+    soloSpeaker([]).id === ROXY_HOST_ID
+  )
+  const soloBlock = channelPrompt(solo, asMember, true) ?? ''
+  check(
+    'bots: a solo chat still tells the bot who it is',
+    soloBlock.includes(savedBot.instructions)
+  )
+  check(
+    'bots: a solo chat offers no hand-off (there is nobody to hand off to)',
+    !soloBlock.includes('@Roxy') && !soloBlock.includes('Roxy')
+  )
+  check(
+    'bots: the same roster WITHOUT solo does advertise the host',
+    (channelPrompt(solo, asMember) ?? '').includes('Roxy')
   )
 
   if (fails.length) {

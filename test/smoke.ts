@@ -730,6 +730,85 @@ async function main(): Promise<void> {
   const dueAfter = repo.dueLoops(Date.now() + 1000).some((l) => l.id === projLoop.id)
   check('markLoopRan advances the schedule', dueBefore === true && dueAfter === false)
 
+  // ---- saved bots: a bot owns a chat, and that chat is where it answers ----
+  const rev = repo.createBot({
+    name: 'Reviewer X',
+    description: 'Reviews diffs',
+    instructions: 'You review changes for risk.',
+    icon: 'reviewer',
+    color: 'purple'
+  })
+  check('createBot slugs the name into an addressable id', rev.id === 'reviewer-x')
+  check('createBot gives the bot its own chat', !!rev.chatId)
+  const revChat = repo.getChat(rev.chatId)
+  check('bot chat is kind=bot', revChat?.kind === 'bot')
+  check('bot chat carries no workspace (it is for talking, not building)', !revChat?.workspacePath)
+  // The membership is what makes the BOT the one answering there rather than
+  // Roxy wearing its name: the turn path resolves the speaker from this list.
+  check(
+    'bot chat has the bot attached as its only member',
+    revChat?.channelMembers?.length === 1 && revChat.channelMembers[0].id === rev.id
+  )
+  check(
+    "the attached member carries the bot's brief",
+    revChat?.channelMembers?.[0].systemPrompt === 'You review changes for risk.'
+  )
+  check(
+    'a bot chat is not listed as a project session',
+    !repo.listChats().some((c) => c.id === rev.chatId && c.kind === 'main')
+  )
+
+  const twin = repo.createBot({ name: 'Reviewer X' })
+  check('two bots may share a name but never an id', twin.id !== rev.id)
+  check('a same-named bot gets its own chat', twin.chatId !== rev.chatId)
+  check(
+    'a briefless bot is still created (it just answers as Roxy)',
+    repo.getBot(twin.id)?.instructions === ''
+  )
+
+  check('getBotByChat maps a chat back to its bot', repo.getBotByChat(rev.chatId)?.id === rev.id)
+  check('listBots returns both', repo.listBots().length >= 2)
+
+  // Renaming has to reach the chat's stored membership, or the one place you
+  // went to change the bot keeps addressing @OldName with the old brief.
+  const renamed = repo.updateBot(rev.id, { name: 'Auditor', instructions: 'You audit.' })
+  check('updateBot keeps the id stable across a rename', renamed.id === rev.id)
+  check('updateBot retitles the bot chat', repo.getChat(rev.chatId)?.title === 'Auditor')
+  const afterEdit = repo.getChat(rev.chatId)?.channelMembers?.[0]
+  check('updateBot rewrites the chat membership name', afterEdit?.name === 'Auditor')
+  check('updateBot rewrites the chat membership brief', afterEdit?.systemPrompt === 'You audit.')
+  check(
+    'a field left out of the patch is untouched',
+    repo.getBot(rev.id)?.description === 'Reviews diffs'
+  )
+
+  // A bot attached to a PROJECT session is a copy: the transcript must keep
+  // saying who spoke even after the original is renamed or deleted.
+  repo.setChannelMembers(chat.id, [{ ...afterEdit! }])
+  repo.updateBot(rev.id, { name: 'Auditor 2' })
+  check(
+    'renaming a bot does NOT rewrite the sessions it joined',
+    repo.getChat(chat.id)?.channelMembers?.[0].name === 'Auditor'
+  )
+
+  repo.reorderBots([twin.id, rev.id])
+  check('reorderBots puts the requested bot first', repo.listBots()[0].id === twin.id)
+
+  repo.addMessage({ chatId: twin.chatId, role: 'user', content: 'hi' })
+  const twinChatId = twin.chatId
+  repo.deleteBot(twin.id)
+  check('deleteBot removes the bot', !repo.getBot(twin.id))
+  check(
+    'deleteBot takes its conversation with it (nothing else can reach it)',
+    !repo.listChats().some((c) => c.id === twinChatId)
+  )
+  check('a deleted bot leaves the other one alone', !!repo.getBot(rev.id))
+  check(
+    'a session the deleted bot joined keeps its member record',
+    repo.getChat(chat.id)?.channelMembers?.length === 1
+  )
+  repo.setChannelMembers(chat.id, [])
+
   // ---- sessions status excludes loop chats ----
   const status = repo.listSessionsStatus()
   check(

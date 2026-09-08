@@ -1,0 +1,6 @@
+[
+  {
+    "find": "          'no-scrollbar flex gap-2',\n          railed ? 'flex-col items-center' : 'items-start overflow-x-auto pb-0.5'",
+    "replace": "          'flex gap-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden',\n          railed ? 'flex-col items-center' : 'items-start overflow-x-auto pb-0.5'"
+  }
+]

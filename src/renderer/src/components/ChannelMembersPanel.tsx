@@ -1,7 +1,9 @@
 import { useMemo, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Check, Plus, Trash2, UserPlus, X } from 'lucide-react'
 import type { BotMember } from '@shared/types'
-import { ROXY_HOST_ID, SUGGESTED_MEMBERS } from '@shared/channel-members'
+import { ROXY_HOST_ID, SUGGESTED_MEMBERS, botMember } from '@shared/channel-members'
+import { useRoxyStore } from '../lib/store'
 import { BotAvatar, accentOf } from './BotAvatar'
 import { Button, Input, Textarea } from './ui'
 import { cn } from '../lib/cn'
@@ -37,6 +39,15 @@ export function ChannelMembersPanel({
   onMention: (name: string) => void
   onClose: () => void
 }): JSX.Element {
+  const { t } = useTranslation()
+  // The user's SAVED bots, offered before the presets.
+  //
+  // This is what makes the dedicated chats complement `@` rather than compete
+  // with it: attaching from here copies the identity of the very bot you have
+  // been training in its own chat (same id, so `@Name` resolves to it), instead
+  // of a same-named copy whose brief you would then have to retype and keep in
+  // sync by hand.
+  const savedBots = useRoxyStore((s) => s.bots)
   const [adding, setAdding] = useState(false)
   const [custom, setCustom] = useState<{
     name: string
@@ -47,6 +58,10 @@ export function ChannelMembersPanel({
 
   const present = useMemo(() => new Set(members.map((m) => m.id)), [members])
   const available = SUGGESTED_MEMBERS.filter((m) => !present.has(m.id))
+  const availableSaved = useMemo(
+    () => savedBots.filter((b) => !present.has(b.id)).map(botMember),
+    [savedBots, present]
+  )
 
   const attach = (member: BotMember): void => {
     onChange([...members, member])
@@ -153,6 +168,30 @@ export function ChannelMembersPanel({
                 <X className="h-3 w-3" />
               </button>
             </div>
+
+            {availableSaved.length > 0 && (
+              <>
+                <div className="mb-1 px-0.5 text-[10px] uppercase tracking-wide text-text-subtle">
+                  {t('bots.savedGroup')}
+                </div>
+                {availableSaved.map((m) => (
+                  <button
+                    key={m.id}
+                    type="button"
+                    onClick={() => attach(m)}
+                    className="press-scale flex w-full items-center gap-2 sq sq-lg rounded-lg px-1.5 py-1.5 text-left hover:bg-white/5"
+                  >
+                    <BotAvatar member={m} size="sm" />
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-xs font-medium text-text">{m.name}</div>
+                      <div className="truncate text-[10px] text-text-subtle">{m.role}</div>
+                    </div>
+                    <Plus className="h-3 w-3 shrink-0 text-text-subtle" />
+                  </button>
+                ))}
+                <div className="my-2 border-t border-border" />
+              </>
+            )}
 
             {available.map((m) => (
               <button

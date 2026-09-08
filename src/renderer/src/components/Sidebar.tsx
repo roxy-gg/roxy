@@ -10,6 +10,7 @@ import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import type { TFunction } from 'i18next'
 import {
+  Bot as BotIcon,
   FolderOpen,
   GitBranch,
   GitFork,
@@ -27,7 +28,7 @@ import {
   Trash2
 } from 'lucide-react'
 import { MorphIcon } from 'morphicons/react'
-import type { Chat, Loop } from '@shared/types'
+import type { Bot, Chat, Loop } from '@shared/types'
 import type { LifecycleView } from '@shared/forge'
 import { isPullRequestPhase } from '@shared/forge'
 import { statusKeyForSession } from '@shared/workstream'
@@ -40,6 +41,8 @@ import { ContextMenuRow, ContextMenuSurface, CONTEXT_MENU_PAD, CONTEXT_ROW_H } f
 import { TONE_BG, TONE_TEXT_STATIC } from '../lib/lifecycle'
 import { HeartbeatDot } from './LoopsSection'
 import { RemoteWorkspaceDialog } from './RemoteWorkspaceDialog'
+import { BotCarousel } from './BotCarousel'
+import { BotDialog } from './BotDialog'
 import { BrailleSpinner } from './ThinkingIndicator'
 import { UpdateCard } from './UpdateCard'
 import roxy from '../assets/roxy.png'
@@ -172,11 +175,18 @@ export function Sidebar(): JSX.Element {
   const cancelSubagent = useRoxyStore((s) => s.cancelSubagent)
   const loops = useRoxyStore((s) => s.loops)
   const removeLoop = useRoxyStore((s) => s.removeLoop)
+  const bots = useRoxyStore((s) => s.bots)
+  const createBot = useRoxyStore((s) => s.createBot)
+  const updateBot = useRoxyStore((s) => s.updateBot)
+  const removeBot = useRoxyStore((s) => s.removeBot)
   const reorderSessions = useRoxyStore((s) => s.reorderSessions)
   const reorderProjects = useRoxyStore((s) => s.reorderProjects)
   const projectOrder = useRoxyStore((s) => s.projectOrder)
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   const [expandedSubs, setExpandedSubs] = useState<Set<string>>(new Set())
+  // `undefined` = closed, `null` = creating, a Bot = editing that one. One bit
+  // of state because the dialog is one component for both (see BotDialog).
+  const [botDialog, setBotDialog] = useState<Bot | null | undefined>(undefined)
   const [width, setWidth] = useState<number>(() => {
     const v = Number(localStorage.getItem(WIDTH_KEY))
     return Number.isFinite(v) && v >= MIN_WIDTH && v <= MAX_WIDTH ? v : DEFAULT_WIDTH
@@ -497,6 +507,15 @@ export function Sidebar(): JSX.Element {
       return next
     })
 
+  // Which bot chats have a turn in flight, for the carousel's pulsing ring. A
+  // Set keyed by CHAT id because that is what `sendingChats` is keyed by, and
+  // the strip is the only place a running bot is visible while its chat is
+  // closed (its session row is not in the project list at all).
+  const botBusyChatIds = useMemo(
+    () => new Set(bots.map((b) => b.chatId).filter((id) => !!sendingChats[id])),
+    [bots, sendingChats]
+  )
+
   const toggleProject = (path: string): void =>
     setCollapsed((prev) => {
       const next = new Set(prev)
@@ -524,6 +543,27 @@ export function Sidebar(): JSX.Element {
           >
             <FolderOpen className="h-4 w-4" />
           </button>
+          <button
+            onClick={() => setBotDialog(null)}
+            title={t('bots.newTitle')}
+            className="press-scale flex h-8 w-8 items-center justify-center sq sq-lg rounded-lg text-text-muted hover:bg-white/5 hover:text-text"
+          >
+            <BotIcon className="h-4 w-4" />
+          </button>
+        </div>
+        {/* Faces only, stacked - the rail has no room for names, and a bot IS
+            its face here. Scrolls so a long roster cannot push the footer nav
+            off the bottom. */}
+        <div className="mt-2 flex min-h-0 w-full flex-col overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <BotCarousel
+            railed
+            bots={bots}
+            activeChatId={activeChatId}
+            busyChatIds={botBusyChatIds}
+            onOpen={(bot) => void selectChat(bot.chatId)}
+            onEdit={(bot) => setBotDialog(bot)}
+            onNew={() => setBotDialog(null)}
+          />
         </div>
         <div className="mb-3 mt-auto flex flex-col items-center gap-1">
           <button
@@ -571,6 +611,17 @@ export function Sidebar(): JSX.Element {
           </button>
         </div>
         {remoteOpen && <RemoteWorkspaceDialog onClose={() => setRemoteOpen(false)} />}
+        {botDialog !== undefined && (
+          <BotDialog
+            bot={botDialog ?? undefined}
+            onSave={async (input) => {
+              if (botDialog) await updateBot(botDialog.id, input)
+              else await createBot(input)
+            }}
+            onDelete={botDialog ? () => removeBot(botDialog.id) : undefined}
+            onClose={() => setBotDialog(undefined)}
+          />
+        )}
       </aside>
     )
   }
@@ -1060,6 +1111,18 @@ export function Sidebar(): JSX.Element {
       )}
 
       {remoteOpen && <RemoteWorkspaceDialog onClose={() => setRemoteOpen(false)} />}
+
+      {botDialog !== undefined && (
+        <BotDialog
+          bot={botDialog ?? undefined}
+          onSave={async (input) => {
+            if (botDialog) await updateBot(botDialog.id, input)
+            else await createBot(input)
+          }}
+          onDelete={botDialog ? () => removeBot(botDialog.id) : undefined}
+          onClose={() => setBotDialog(undefined)}
+        />
+      )}
 
       <CustomizeNav onOpenRemote={() => setRemoteOpen(true)} remoteDot={remoteDot} />
 

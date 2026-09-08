@@ -68,6 +68,13 @@ const roxy: RoxyApi = {
   channel: {
     setMembers: (input) => ipcRenderer.invoke(CHANNELS.channelSetMembers, input)
   },
+  bots: {
+    list: () => ipcRenderer.invoke(CHANNELS.botsList),
+    create: (input) => ipcRenderer.invoke(CHANNELS.botsCreate, input),
+    update: (id, patch) => ipcRenderer.invoke(CHANNELS.botsUpdate, id, patch),
+    remove: (id) => ipcRenderer.invoke(CHANNELS.botsRemove, id),
+    reorder: (ids) => ipcRenderer.invoke(CHANNELS.botsReorder, ids)
+  },
   integrations: {
     list: () => ipcRenderer.invoke(CHANNELS.integrationsList),
     setEnabled: (id, enabled) => ipcRenderer.invoke(CHANNELS.integrationsSetEnabled, id, enabled)

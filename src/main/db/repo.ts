@@ -4,13 +4,15 @@ import { normalizeServerConfig, type McpServerConfig, type McpServerRecord } fro
 import { DEFAULT_BRANCH_PREFIX, normalizeBranchPrefix } from '../../shared/branch'
 import { DEFAULT_LANGUAGE, normalizeLanguage } from '../../shared/i18n'
 import type { Language } from '../../shared/i18n'
-import { ROXY_HOST_ID } from '../../shared/channel-members'
+import { BOT_LOOKS, ROXY_HOST_ID, botId, botMember } from '../../shared/channel-members'
 import type {
   AddMessageInput,
   AppSettings,
+  Bot,
   BotAuthor,
   BotMember,
   Chat,
+  CreateBotInput,
   ConnectedProvider,
   ConnectProviderInput,
   IntegrationConnection,
@@ -27,6 +29,7 @@ import type {
   SessionStatus,
   SessionTask,
   TokenUsage,
+  UpdateBotInput,
   UsageRecord,
   WorktreeIntent
 } from '../../shared/types'
@@ -1075,6 +1078,186 @@ export function setChannelMembers(chatId: string, members: BotMember[]): Chat {
   const chat = getChat(chatId)
   if (!chat) throw new Error('Chat not found')
   return chat
+}
+
+// ---- Saved bots --------------------------------------------------------------
+
+interface BotRow {
+  id: string
+  name: string
+  description: string
+  icon: string
+  color: string
+  instructions: string
+  chat_id: string
+  sort_order: number
+  created_at: number
+  updated_at: number
+}
+
+function rowToBot(row: BotRow): Bot {
+  return {
+    id: row.id,
+    name: row.name,
+    description: row.description,
+    icon: row.icon,
+    color: row.color,
+    instructions: row.instructions,
+    chatId: row.chat_id,
+    sortOrder: row.sort_order,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  }
+}
+
+/** Every saved bot, in carousel order (newest first). */
+export function listBots(): Bot[] {
+  const rows = getDb()
+    .prepare('SELECT * FROM bots ORDER BY sort_order DESC, created_at DESC')
+    .all() as BotRow[]
+  return rows.map(rowToBot)
+}
+
+export function getBot(id: string): Bot | undefined {
+  const row = getDb().prepare('SELECT * FROM bots WHERE id = ?').get(id) as BotRow | undefined
+  return row ? rowToBot(row) : undefined
+}
+
+/** The bot that owns a chat, when that chat is a bot's own conversation. */
+export function getBotByChat(chatId: string): Bot | undefined {
+  const row = getDb().prepare('SELECT * FROM bots WHERE chat_id = ?').get(chatId) as
+    | BotRow
+    | undefined
+  return row ? rowToBot(row) : undefined
+}
+
+/**
+ * Create a bot AND the chat it lives in, in one transaction.
+ *
+ * The chat is not optional and not lazy: a bot with no conversation is a
+ * preset, and the whole point of saving one is that you can open it and talk to
+ * it. Creating them together means the carousel can never hold a bot whose
+ * avatar opens nothing.
+ *
+ * The bot is ATTACHED to its own chat as a channel member, which is what makes
+ * it the one answering there - the turn path resolves the speaker from the
+ * session's membership, so a bot chat with an empty roster would be Roxy
+ * wearing the bot's name in the header. It carries no workspace: this chat is
+ * for teaching and asking, and a bot needs a project channel to touch files.
+ */
+export function createBot(input: CreateBotInput): Bot {
+  const db = getDb()
+  const now = Date.now()
+  const name = input.name.trim() || 'New bot'
+  const taken = (db.prepare('SELECT id FROM bots').all() as { id: string }[]).map((r) => r.id)
+  const id = botId(name, taken)
+  const bot: Bot = {
+    id,
+    name,
+    description: input.description?.trim() ?? '',
+    icon: input.icon ?? BOT_LOOKS[0].icon,
+    color: input.color ?? BOT_LOOKS[0].color,
+    instructions: input.instructions?.trim() ?? '',
+    chatId: '',
+    sortOrder: now,
+    createdAt: now,
+    updatedAt: now
+  }
+  const chat = createChat({ title: name, kind: 'bot' })
+  const write = db.transaction(() => {
+    db.prepare(
+      `INSERT INTO bots(id, name, description, icon, color, instructions, chat_id, sort_order, created_at, updated_at)
+       VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      bot.id,
+      bot.name,
+      bot.description,
+      bot.icon,
+      bot.color,
+      bot.instructions,
+      chat.id,
+      bot.sortOrder,
+      now,
+      now
+    )
+    db.prepare('UPDATE chats SET channel_members = ? WHERE id = ?').run(
+      JSON.stringify([botMember({ ...bot, chatId: chat.id })]),
+      chat.id
+    )
+  })
+  write()
+  const created = getBot(id)
+  if (!created) throw new Error('Failed to create bot')
+  return created
+}
+
+/**
+ * Edit a bot, and re-stamp its identity onto the chat it owns.
+ *
+ * The membership rewrite is the part that is easy to forget and impossible to
+ * notice: a channel stores a COPY of the member, so renaming a bot without
+ * updating its own chat leaves that chat addressing `@OldName` with the old
+ * brief, in the one place the user went specifically to change it.
+ *
+ * PROJECT channels are deliberately left alone. A session's roster is a record
+ * of who was in that room, and rewriting every transcript's membership from
+ * here would retroactively rename bots in conversations that already happened.
+ */
+export function updateBot(id: string, patch: UpdateBotInput): Bot {
+  const current = getBot(id)
+  if (!current) throw new Error('Bot not found')
+  const next: Bot = {
+    ...current,
+    name: patch.name?.trim() || current.name,
+    description: patch.description?.trim() ?? current.description,
+    icon: patch.icon ?? current.icon,
+    color: patch.color ?? current.color,
+    instructions: patch.instructions?.trim() ?? current.instructions,
+    updatedAt: Date.now()
+  }
+  const db = getDb()
+  const write = db.transaction(() => {
+    db.prepare(
+      'UPDATE bots SET name = ?, description = ?, icon = ?, color = ?, instructions = ?, updated_at = ? WHERE id = ?'
+    ).run(next.name, next.description, next.icon, next.color, next.instructions, next.updatedAt, id)
+    db.prepare('UPDATE chats SET title = ?, channel_members = ? WHERE id = ?').run(
+      next.name,
+      JSON.stringify([botMember(next)]),
+      next.chatId
+    )
+  })
+  write()
+  return next
+}
+
+/**
+ * Delete a bot and its conversation.
+ *
+ * The chat goes with it: it belongs to the bot and nothing else can reach it
+ * once the carousel entry is gone, so leaving it behind would strand a session
+ * in the database with no way in. Sessions the bot was ATTACHED to keep their
+ * copy of it, so their transcripts still say who spoke.
+ */
+export function deleteBot(id: string): void {
+  const bot = getBot(id)
+  if (!bot) return
+  const db = getDb()
+  const write = db.transaction(() => {
+    db.prepare('DELETE FROM bots WHERE id = ?').run(id)
+    db.prepare('DELETE FROM chats WHERE id = ?').run(bot.chatId)
+  })
+  write()
+}
+
+/** Persist the carousel order; `ids` is the full list, first to last. */
+export function reorderBots(ids: string[]): void {
+  const db = getDb()
+  const stmt = db.prepare('UPDATE bots SET sort_order = ? WHERE id = ?')
+  const write = db.transaction(() => {
+    // Descending, matching `listBots` — first in the list gets the highest key.
+    ids.forEach((id, i) => stmt.run(ids.length - i, id))
+  })
+  write()
 }
 
 /** Update agent-settable session metadata (any subset of name / description / tasks). */

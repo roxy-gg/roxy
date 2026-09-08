@@ -93,9 +93,10 @@ export interface DeviceFlowStart {
 /**
  * Every chat row is a session. Main sessions are the ones a user opens against a
  * workspace; sub sessions are spawned by the harness (e.g. the `task` tool);
- * loop sessions are driven by a scheduled Loop.
+ * loop sessions are driven by a scheduled Loop; `bot` sessions are the private
+ * one-on-one chat a saved Bot owns (see `Bot.chatId`).
  */
-export type SessionKind = 'main' | 'sub' | 'loop'
+export type SessionKind = 'main' | 'sub' | 'loop' | 'bot'
 
 /** A single item in a session's agent-maintained task checklist. */
 export interface SessionTask {
@@ -237,6 +238,63 @@ export interface BotMember {
   /** True for the built-in host (Roxy), which cannot be edited or detached. */
   builtIn?: boolean
 }
+
+/**
+ * A bot the user SAVED — a named specialist that outlives any one session.
+ *
+ * Two things hang off one row, and that is the point:
+ *
+ *  - its own CHAT (`chatId`), a private one-on-one where the bot is the only
+ *    one answering. This is what Grok's bots do, and it is where you TEACH one:
+ *    talk to it directly, correct it, let it accumulate its own history.
+ *  - its `member` identity, offered to every project channel so `@Name` reaches
+ *    the same bot you have been training rather than a fresh copy of a preset.
+ *
+ * So the dedicated chat does not compete with `@mention`ing it inside a
+ * project — they are two doors onto the same bot. Editing the bot here changes
+ * the brief every channel it sits in will use from its next turn.
+ */
+export interface Bot {
+  /** Slug derived from the name at create time, and stable after a rename. */
+  id: string
+  name: string
+  /**
+   * The one-line role shown beside the name — in the roster, in the `@` menu,
+   * and in the channel prompt other bots read. NOT the brief; see `instructions`.
+   */
+  description: string
+  /** Avatar key resolved by the renderer's icon map (see BotAvatar). */
+  icon: string
+  /** Accent key used for the avatar/name color (see BotAvatar's ACCENTS). */
+  color: string
+  /**
+   * The bot's full brief, appended to Roxy's base system prompt exactly as
+   * `BotMember.systemPrompt` is — a bot is Roxy with a specialty, never a blank
+   * model that has to be told who it is first.
+   */
+  instructions: string
+  /**
+   * The session holding this bot's own conversation. Created with the bot and
+   * deleted with it, so a bot always has somewhere to be talked to.
+   */
+  chatId: string
+  /** Display order in the carousel (higher = first, newest-first by default). */
+  sortOrder: number
+  createdAt: number
+  updatedAt: number
+}
+
+/** Fields a new bot is created from. Everything else is derived or defaulted. */
+export interface CreateBotInput {
+  name: string
+  description?: string
+  icon?: string
+  color?: string
+  instructions?: string
+}
+
+/** Any subset of a bot's editable fields. */
+export type UpdateBotInput = Partial<Omit<CreateBotInput, 'name'>> & { name?: string }
 
 /**
  * One ordered piece of a turn. An assistant turn is a sequence of these, so

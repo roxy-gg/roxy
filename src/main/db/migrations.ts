@@ -508,7 +508,33 @@ export const MIGRATIONS: Migration[] = [
     // can be detached later and the transcript must still show who spoke.
     // NULL = written by Roxy, which every pre-channel message was.
     addColumnIfMissing(db, 'messages', 'author', 'TEXT')
-  }
+  },
+
+  // ---- v25: saved bots (a bot library, each with its own chat) ----
+  // Until now a bot existed only INSIDE the session it was attached to: its
+  // brief lived in that row's `channel_members` JSON, so the same specialist
+  // had to be retyped per project and could never be talked to on its own.
+  //
+  // This table makes a bot a first-class thing the user owns. `chat_id` is its
+  // private one-on-one conversation (a `bot`-kind session), created with the bot
+  // and cascaded away with it, which is where the bot is actually taught. The
+  // channel path is unchanged - attaching one still copies its identity into
+  // `chats.channel_members` - so every existing session keeps working and a bot
+  // detached from the library does not silently vanish from a live transcript.
+  /* sql */ `
+    CREATE TABLE IF NOT EXISTS bots (
+      id           TEXT PRIMARY KEY,
+      name         TEXT NOT NULL,
+      description  TEXT NOT NULL DEFAULT '',
+      icon         TEXT NOT NULL DEFAULT 'builder',
+      color        TEXT NOT NULL DEFAULT 'blue',
+      instructions TEXT NOT NULL DEFAULT '',
+      chat_id      TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+      sort_order   INTEGER NOT NULL DEFAULT 0,
+      created_at   INTEGER NOT NULL,
+      updated_at   INTEGER NOT NULL
+    );
+  `
 ]
 
 /**
@@ -545,6 +571,21 @@ export function repairSchema(db: Database): void {
   // v22's channel membership and per-message authorship.
   addColumnIfMissing(db, 'chats', 'channel_members', 'TEXT')
   addColumnIfMissing(db, 'messages', 'author', 'TEXT')
+  // v25's saved-bot library.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS bots (
+      id           TEXT PRIMARY KEY,
+      name         TEXT NOT NULL,
+      description  TEXT NOT NULL DEFAULT '',
+      icon         TEXT NOT NULL DEFAULT 'builder',
+      color        TEXT NOT NULL DEFAULT 'blue',
+      instructions TEXT NOT NULL DEFAULT '',
+      chat_id      TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+      sort_order   INTEGER NOT NULL DEFAULT 0,
+      created_at   INTEGER NOT NULL,
+      updated_at   INTEGER NOT NULL
+    );
+  `)
   // v17's per-session inference config.
   addColumnIfMissing(db, 'chats', 'agent_id', 'TEXT')
   addColumnIfMissing(db, 'chats', 'reasoning_effort', 'TEXT')

@@ -7,12 +7,14 @@ import {
   channelPrompt,
   resolveHandoff,
   resolveRecipient,
+  soloSpeaker,
   visibleMessages,
   withHost
 } from '@shared/channel-members'
-import type { BotAuthor, BotMember } from '@shared/types'
+import type { BotAuthor, BotMember, CreateBotInput, UpdateBotInput } from '@shared/types'
 import type {
   AppSettings,
+  Bot,
   Chat,
   ConnectedProvider,
   Loop,
@@ -97,6 +99,14 @@ interface RoxyStore {
    */
   hiddenModels: Set<string>
   chats: Chat[]
+  /**
+   * The saved-bot library, in carousel order.
+   *
+   * Top-level state rather than derived from `chats`, because a bot is not a
+   * session: it has an identity (name, brief, face) that outlives the chat it
+   * owns and is offered to every project channel. The chat is a thing it HAS.
+   */
+  bots: Bot[]
   activeChatId: string | null
   messages: Message[]
   /**
@@ -200,6 +210,14 @@ interface RoxyStore {
 
   bootstrap: () => Promise<void>
   refreshChats: () => Promise<void>
+  refreshBots: () => Promise<void>
+  /** Create a bot and open its own chat, so the next thing you do is talk to it. */
+  createBot: (input: CreateBotInput) => Promise<Bot>
+  updateBot: (id: string, patch: UpdateBotInput) => Promise<void>
+  /** Delete a bot and its conversation, leaving the sessions it joined intact. */
+  removeBot: (id: string) => Promise<void>
+  /** Persist the carousel order (optimistic). `ids` = full list, first to last. */
+  reorderBots: (ids: string[]) => Promise<void>
   refreshLoops: () => Promise<void>
   refreshQueue: () => Promise<void>
   refreshProviders: () => Promise<void>
@@ -979,6 +997,7 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
   pinnedModels: [],
   hiddenModels: new Set<string>(),
   chats: [],
+  bots: [],
   activeChatId: null,
   messages: [],
   messagesChatId: null,
@@ -1007,14 +1026,16 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
   usageStats: null,
 
   bootstrap: async () => {
-    const [settings, providers, chats, loops, projectOrder, telemetryEnabled] = await Promise.all([
-      api.settings.getAll(),
-      api.providers.listConnected(),
-      api.chats.list(),
-      api.loops.list(),
-      api.projects.listOrder(),
-      api.settings.getTelemetry()
-    ])
+    const [settings, providers, chats, bots, loops, projectOrder, telemetryEnabled] =
+      await Promise.all([
+        api.settings.getAll(),
+        api.providers.listConnected(),
+        api.chats.list(),
+        api.bots.list(),
+        api.loops.list(),
+        api.projects.listOrder(),
+        api.settings.getTelemetry()
+      ])
     // A factory reset truncates these tables and re-bootstraps, so the load
     // guards have to fall with them or the picker keeps filtering on a
     // deny-list the database no longer has.
@@ -1028,6 +1049,7 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
       settings,
       providers,
       chats,
+      bots,
       loops,
       projectOrder,
       telemetryEnabled,
@@ -1171,6 +1193,45 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
     // pull it in the same round trip — one set, so the sidebar re-renders once.
     const [chats, projectOrder] = await Promise.all([api.chats.list(), api.projects.listOrder()])
     set({ chats, projectOrder })
+  },
+
+  refreshBots: async () => {
+    set({ bots: await api.bots.list() })
+  },
+
+  createBot: async (input) => {
+    const bot = await api.bots.create(input)
+    // The chat came with the bot, so both lists are stale.
+    await Promise.all([get().refreshBots(), get().refreshChats()])
+    // Open it immediately: a bot you cannot see is indistinguishable from one
+    // that failed to save, and its own chat is where it gets taught.
+    await get().selectChat(bot.chatId)
+    return bot
+  },
+
+  updateBot: async (id, patch) => {
+    await api.bots.update(id, patch)
+    // `refreshChats` too: renaming a bot retitles its chat and rewrites that
+    // chat's membership, so the sidebar row and the composer's `@` menu would
+    // otherwise keep showing the old name until something else refetched.
+    await Promise.all([get().refreshBots(), get().refreshChats()])
+  },
+
+  removeBot: async (id) => {
+    const bot = get().bots.find((b) => b.id === id)
+    await api.bots.remove(id)
+    await Promise.all([get().refreshBots(), get().refreshChats()])
+    // Its chat is gone with it - if that was what you were reading, the pane
+    // would otherwise sit on a transcript belonging to no session.
+    if (bot && get().activeChatId === bot.chatId) get().clearActive()
+  },
+
+  reorderBots: async (ids) => {
+    const by = new Map(get().bots.map((b) => [b.id, b]))
+    const next = ids.map((id) => by.get(id)).filter((b): b is Bot => !!b)
+    if (next.length === ids.length) set({ bots: next })
+    await api.bots.reorder(ids)
+    await get().refreshBots()
   },
 
   refreshLoops: async () => {
@@ -1853,8 +1914,13 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
     // @Reviewer" is the host's job, ending in a hand-off - so it stays with the
     // host, who is in every channel and keeps the room from having nobody
     // listening. See resolveRecipient.
+    const chatKind = get().chats.find((c) => c.id === chatId)?.kind
     const members = withHost(get().chats.find((c) => c.id === chatId)?.channelMembers)
-    const author = speaker ?? resolveRecipient(content, members)
+    // A BOT chat is a one-on-one, so its bot answers everything - see
+    // `soloSpeaker`. Routing it like a channel would give every unaddressed
+    // message to the host, i.e. talking to your bot would be talking to Roxy.
+    const author =
+      speaker ?? (chatKind === 'bot' ? soloSpeaker(members) : resolveRecipient(content, members))
 
     // Make sure the workspace's instruction files are cached before we size the
     // window cut (the main process reads them fresh when it builds the prompt).
@@ -2187,7 +2253,7 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
           // The whole roster, not just this member's brief: a bot that isn't
           // told who else is in the room answers "call @Reviewer" by spawning a
           // subagent (or hunting for a GitHub user) instead of handing off.
-          memberPrompt: channelPrompt(members, author),
+          memberPrompt: channelPrompt(members, author, chatKind === 'bot'),
           reasoning: info?.reasoning ?? false,
           // Clamp to what THIS model accepts. A session's effort is sticky
           // across model switches, so "Max" set on one model would otherwise
@@ -2438,7 +2504,9 @@ export function buildSystemPrompt(
    */
   member?: BotMember
 ): string {
-  const memberBlock = member ? channelPrompt(chat?.channelMembers ?? [], member) : undefined
+  const memberBlock = member
+    ? channelPrompt(chat?.channelMembers ?? [], member, chat?.kind === 'bot')
+    : undefined
   const base = PROMPT_TEXT[selectPromptName(modelId)] ?? PROMPT_TEXT.default
   const environment = buildEnvironment({
     cwd: chat?.workspacePath || undefined,

@@ -1,0 +1,6 @@
+[
+  {
+    "find": "        <div className=\"no-scrollbar mt-2 flex min-h-0 w-full flex-col overflow-y-auto\">",
+    "replace": "        <div className=\"mt-2 flex min-h-0 w-full flex-col overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden\">"
+  }
+]

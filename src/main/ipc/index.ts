@@ -26,9 +26,11 @@ import type {
 import type {
   AddMessageInput,
   ConnectProviderInput,
+  CreateBotInput,
   SetChannelMembersInput,
   QueueImage,
-  ReasoningEffort
+  ReasoningEffort,
+  UpdateBotInput
 } from '../../shared/types'
 import * as repo from '../db/repo'
 import * as copilot from '../services/copilot'
@@ -348,6 +350,28 @@ export function registerIpc(): void {
   ipcMain.handle(CHANNELS.channelSetMembers, (_e, input: SetChannelMembersInput) =>
     repo.setChannelMembers(input.chatId, input.members)
   )
+
+  // ---- saved bots (the bot library) ----
+  ipcMain.handle(CHANNELS.botsList, () => repo.listBots())
+  ipcMain.handle(CHANNELS.botsCreate, (_e, input: CreateBotInput) => repo.createBot(input))
+  ipcMain.handle(CHANNELS.botsUpdate, (_e, id: string, patch: UpdateBotInput) =>
+    repo.updateBot(id, patch)
+  )
+  ipcMain.handle(CHANNELS.botsRemove, (_e, id: string) => {
+    // A bot's chat is a real session, so it gets the same teardown any deleted
+    // session does before the row goes. It owns no worktree (a bot chat has no
+    // workspace) but it CAN have opened a browser or a background process from
+    // a tool call, and those outlive the row unless they are stopped here.
+    const bot = repo.getBot(id)
+    if (bot) {
+      cancelSessionBackgroundJobs(bot.chatId)
+      endSubagentRuns(bot.chatId)
+      killSessionBackground(bot.chatId)
+      browser.disposeSession(bot.chatId)
+    }
+    return repo.deleteBot(id)
+  })
+  ipcMain.handle(CHANNELS.botsReorder, (_e, ids: string[]) => repo.reorderBots(ids))
 
   // ---- integrations ----
   ipcMain.handle(CHANNELS.integrationsList, () => repo.listIntegrations())

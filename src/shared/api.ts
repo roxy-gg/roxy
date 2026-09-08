@@ -8,7 +8,10 @@ import type {
   AppSettings,
   AppVersions,
   ActivityStats,
+  Bot,
   Chat,
+  CreateBotInput,
+  UpdateBotInput,
   ConnectedProvider,
   ConnectProviderInput,
   DeviceFlowStart,
@@ -776,6 +779,24 @@ export interface RoxyApi {
      * Returns the updated session row.
      */
     setMembers(input: SetChannelMembersInput): Promise<Chat>
+  }
+  /**
+   * The saved-bot library: bots the user owns, each with its own chat.
+   *
+   * Distinct from `channel.setMembers`, which edits who is in ONE session. A
+   * bot here is the reusable original — attaching it to a channel copies its
+   * identity in, and every call below returns the refreshed list so the
+   * carousel updates in one round trip.
+   */
+  bots: {
+    list(): Promise<Bot[]>
+    /** Create a bot and the chat it lives in; returns the bot (with `chatId`). */
+    create(input: CreateBotInput): Promise<Bot>
+    update(id: string, patch: UpdateBotInput): Promise<Bot>
+    /** Delete a bot and its own conversation. Sessions it joined keep their copy. */
+    remove(id: string): Promise<void>
+    /** Persist the carousel order; `ids` is the full list, first to last. */
+    reorder(ids: string[]): Promise<void>
   }
   messages: {
     list(chatId: string): Promise<Message[]>
