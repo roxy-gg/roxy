@@ -117,7 +117,13 @@ import {
   abortableDelay,
   MODEL_FATAL_ATTEMPTS
 } from '../src/main/harness/agent'
-import { COPILOT_EDITOR_HEADERS, ModelHttpError } from '../src/main/services/llm'
+import {
+  COPILOT_EDITOR_HEADERS,
+  invalidateCopilotToken,
+  ModelHttpError,
+  openaiEndpoint
+} from '../src/main/services/llm'
+import { invalidateCopilotModels, listModels } from '../src/main/services/models'
 import { getUsageStats } from '../src/main/services/usage'
 import { consumeAiSdkStream } from '../src/main/services/aisdk'
 import { APICallError } from 'ai'
@@ -3828,6 +3834,263 @@ async function main(): Promise<void> {
     browser.close()
   } catch (e) {
     check('browser tools', false, e instanceof Error ? e.message : String(e))
+  }
+
+  // ---- Copilot discovery follows the signed-in account and live policies ----
+  {
+    const realFetch = globalThis.fetch
+    const realNow = Date.now
+    let now = realNow()
+    Date.now = () => now
+    const exchanges: string[] = []
+    const requests: { url: string; auth: string; method: string }[] = []
+    const capabilities = {
+      type: 'chat',
+      limits: { max_context_window_tokens: 128_000, max_output_tokens: 16_384 },
+      supports: { tool_calls: true, reasoning_effort: ['low', 'high'] }
+    }
+    const enabled = {
+      id: 'test-new-model',
+      name: 'New Model',
+      model_picker_enabled: true,
+      policy: { state: 'enabled' },
+      capabilities,
+      supported_endpoints: ['/responses']
+    }
+    let body: unknown = {
+      data: [
+        enabled,
+        { ...enabled, id: 'blocked', policy: { state: 'disabled' } },
+        { ...enabled, id: 'unconfigured', policy: {} },
+        { ...enabled, id: 'future-policy', policy: { state: 'pending' } },
+        { ...enabled, id: 'hidden', model_picker_enabled: false },
+        { ...enabled, id: 'internal', model_picker_enabled: undefined },
+        { ...enabled, id: 'embedding', capabilities: { type: 'embeddings' } },
+        { ...enabled, id: 'wrong-api', supported_endpoints: ['/messages'] },
+        { ...enabled, id: 'no-policy', policy: undefined, is_chat_default: true },
+        {
+          ...enabled,
+          id: 'plain-chat',
+          capabilities: { type: 'chat', supports: {} },
+          supported_endpoints: undefined
+        }
+      ]
+    }
+    let status = 200
+    let unauthorized = false
+    let networkError = false
+    const pending: { release?: (response: Response) => void } = {}
+    let paused = false
+    globalThis.fetch = async (input, init) => {
+      const url = String(input)
+      const auth = new Headers(init?.headers).get('Authorization') ?? ''
+      if (url === 'https://api.github.com/copilot_internal/v2/token') {
+        exchanges.push(auth)
+        return Response.json({
+          token: `copilot-${auth.slice('token '.length)}`,
+          expires_at: Math.floor(Date.now() / 1000) + 3600,
+          endpoints: {
+            api:
+              auth === 'token test-account-a'
+                ? 'https://api.business.githubcopilot.com/'
+                : 'https://api.enterprise.githubcopilot.com/'
+          }
+        })
+      }
+      requests.push({ url, auth, method: init?.method ?? 'GET' })
+      if (!url.endsWith('.githubcopilot.com/models')) {
+        throw new Error(`Unexpected Copilot test request: ${url}`)
+      }
+      if (networkError) throw new TypeError('fetch failed')
+      if (unauthorized) {
+        unauthorized = false
+        return Response.json({}, { status: 401 })
+      }
+      if (paused)
+        return new Promise<Response>((resolve) => {
+          pending.release = resolve
+        })
+      return Response.json(body, { status })
+    }
+    try {
+      repo.storeCopilotCredential('test-account-a')
+      const a = await openaiEndpoint('github-copilot')
+      check('Copilot: exchanges the stored OAuth token', exchanges[0] === 'token test-account-a')
+      check(
+        'Copilot: requests use the exchanged token',
+        a.headers.Authorization === 'Bearer copilot-test-account-a'
+      )
+      await openaiEndpoint('github-copilot')
+      check('Copilot: a live token is reused for the same account', exchanges.length === 1)
+      check(
+        'Copilot: inference uses the assigned tenant API host',
+        a.url === 'https://api.business.githubcopilot.com/chat/completions'
+      )
+      const responses = await openaiEndpoint('github-copilot', { responses: true, vision: true })
+      check(
+        'Copilot: responses and vision use the same tenant',
+        responses.url === 'https://api.business.githubcopilot.com/responses' &&
+          responses.headers['Copilot-Vision-Request'] === 'true'
+      )
+
+      const [models, concurrent] = await Promise.all([
+        listModels('github-copilot'),
+        listModels('github-copilot')
+      ])
+      check(
+        'Copilot: concurrent discovery is deduplicated',
+        requests.length === 1 && models === concurrent
+      )
+      check(
+        'Copilot: discovery uses tenant host and exchanged token',
+        requests[0].url === 'https://api.business.githubcopilot.com/models' &&
+          requests[0].auth === 'Bearer copilot-test-account-a'
+      )
+      check(
+        'Copilot: only enabled, picker-visible chat models on supported APIs survive',
+        models.map((m) => m.id).join(',') === 'no-policy,test-new-model,plain-chat'
+      )
+      check(
+        'Copilot: models unknown to models.dev retain live capabilities and limits',
+        models[1].name === 'New Model' &&
+          models[1].toolCall &&
+          models[1].reasoning &&
+          models[1].reasoningEfforts?.join(',') === 'low,high' &&
+          models[1].contextLimit === 128_000 &&
+          models[1].outputLimit === 16_384
+      )
+      check(
+        'Copilot: absent capability flags are not invented',
+        !models[2].toolCall && !models[2].reasoning
+      )
+      await listModels('github-copilot')
+      check('Copilot: opening several pickers reuses a fresh list', requests.length === 1)
+
+      body = { data: [{ ...enabled, id: 'just-enabled' }] }
+      now += 60_001
+      const refreshed = await listModels('github-copilot')
+      check(
+        'Copilot: expiry removes revoked models and discovers newly enabled models',
+        refreshed.length === 1 && refreshed[0].id === 'just-enabled' && requests.length === 2
+      )
+
+      now += 60_001
+      status = 403
+      check(
+        'Copilot: denied discovery does not reuse stale or public models',
+        (await listModels('github-copilot')).length === 0
+      )
+      status = 200
+      now += 60_001
+      body = { data: [] }
+      check(
+        'Copilot: an empty tenant list stays empty',
+        (await listModels('github-copilot')).length === 0
+      )
+      now += 60_001
+      body = { unexpected: [] }
+      check(
+        'Copilot: malformed discovery fails closed',
+        (await listModels('github-copilot')).length === 0
+      )
+      now += 60_001
+      body = { data: [enabled] }
+      networkError = true
+      check(
+        'Copilot: an offline tenant never falls back to models.dev',
+        (await listModels('github-copilot')).length === 0
+      )
+      networkError = false
+      now += 60_001
+      unauthorized = true
+      const beforeRetry = exchanges.length
+      check(
+        'Copilot: a rejected short-lived token is refreshed and retried',
+        (await listModels('github-copilot')).length === 1 && exchanges.length === beforeRetry + 1
+      )
+
+      repo.storeCopilotCredential('test-account-b')
+      const beforeSwitch = exchanges.length
+      const b = await openaiEndpoint('github-copilot')
+      check(
+        'Copilot: switching accounts never reuses the previous token',
+        exchanges.length === beforeSwitch + 1 &&
+          b.headers.Authorization === 'Bearer copilot-test-account-b'
+      )
+      body = { data: [{ ...enabled, id: 'account-b-model' }] }
+      const accountB = await listModels('github-copilot')
+      check(
+        'Copilot: switching accounts bypasses the previous model cache',
+        accountB[0]?.id === 'account-b-model'
+      )
+      check(
+        'Copilot: the new account uses its own tenant endpoint',
+        requests.at(-1)?.url === 'https://api.enterprise.githubcopilot.com/models'
+      )
+
+      paused = true
+      now += 60_001
+      const stale = listModels('github-copilot')
+      while (!pending.release) await new Promise((resolve) => setTimeout(resolve, 0))
+      repo.storeCopilotCredential('test-account-a')
+      paused = false
+      body = { data: [{ ...enabled, id: 'account-a-model' }] }
+      const accountA = await listModels('github-copilot')
+      pending.release(Response.json({ data: [{ ...enabled, id: 'stale-account-b-model' }] }))
+      check(
+        'Copilot: an old account response is discarded after switching',
+        (await stale).length === 0
+      )
+      check(
+        'Copilot: an old response cannot overwrite the new account cache',
+        (await listModels('github-copilot')) === accountA
+      )
+
+      const previousRelease = pending.release
+      paused = true
+      now += 60_001
+      const invalidated = listModels('github-copilot')
+      while (pending.release === previousRelease) {
+        await new Promise((resolve) => setTimeout(resolve, 0))
+      }
+      invalidateCopilotModels()
+      paused = false
+      body = { data: [{ ...enabled, id: 'reconnected-model' }] }
+      const reconnected = await listModels('github-copilot')
+      pending.release(Response.json({ data: [enabled] }))
+      check(
+        'Copilot: reconnecting the same account discards in-flight discovery',
+        (await invalidated).length === 0 && (await listModels('github-copilot')) === reconnected
+      )
+
+      repo.disconnectProvider('github-copilot')
+      const beforeDisconnect = exchanges.length + requests.length
+      let disconnected = false
+      try {
+        await openaiEndpoint('github-copilot')
+      } catch {
+        disconnected = true
+      }
+      check('Copilot: disconnect cannot keep using a cached token', disconnected)
+      check(
+        'Copilot: disconnect hides the cached models',
+        (await listModels('github-copilot')).length === 0
+      )
+      check(
+        'Copilot: disconnect makes no network request',
+        exchanges.length + requests.length === beforeDisconnect
+      )
+      check(
+        'Copilot: discovery never enables a policy or consults the public catalog',
+        requests.every((r) => r.method === 'GET' && r.url.endsWith('.githubcopilot.com/models'))
+      )
+    } finally {
+      Date.now = realNow
+      globalThis.fetch = realFetch
+      invalidateCopilotModels()
+      invalidateCopilotToken()
+      repo.disconnectProvider('github-copilot')
+    }
   }
 
   // ---- overnight resilience: transient model failures don't kill the run ----

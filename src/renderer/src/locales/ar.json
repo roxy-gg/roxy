@@ -236,6 +236,7 @@
     "title": "خوادم MCP"
   },
   "models": {
+    "copilotUnavailable": "No available GitHub Copilot model is selected. Choose an enabled model, or check your account's model access and connection, then try again.",
     "allHidden": "كل النماذج مخفية. أعد بعضها في <settings>الإعدادات ← النماذج</settings>.",
     "loadFailed": "تعذر تحميل النماذج من models.dev — لا يزال بإمكانك الإرسال بالنموذج الحالي.",
     "loading": "جارٍ تحميل النماذج…",

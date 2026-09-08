@@ -236,6 +236,7 @@
     "title": "MCP सर्वर"
   },
   "models": {
+    "copilotUnavailable": "No available GitHub Copilot model is selected. Choose an enabled model, or check your account's model access and connection, then try again.",
     "allHidden": "हर मॉडल छिपा हुआ है। कुछ को <settings>सेटिंग्स → मॉडल</settings> में वापस लाएँ।",
     "loadFailed": "models.dev से मॉडल लोड नहीं हो सके — आप अभी भी वर्तमान मॉडल के साथ भेज सकते हैं।",
     "loading": "मॉडल लोड हो रहे हैं…",

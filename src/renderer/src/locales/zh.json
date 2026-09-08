@@ -236,6 +236,7 @@
     "title": "MCP 服务器"
   },
   "models": {
+    "copilotUnavailable": "No available GitHub Copilot model is selected. Choose an enabled model, or check your account's model access and connection, then try again.",
     "allHidden": "所有模型都已隐藏。在<settings>设置 → 模型</settings>中恢复一些模型。",
     "loadFailed": "无法从 models.dev 加载模型 — 您仍然可以使用当前模型发送。",
     "loading": "正在加载模型…",

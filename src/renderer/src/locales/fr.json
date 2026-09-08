@@ -236,6 +236,7 @@
     "title": "Serveurs MCP"
   },
   "models": {
+    "copilotUnavailable": "No available GitHub Copilot model is selected. Choose an enabled model, or check your account's model access and connection, then try again.",
     "allHidden": "Tous les modèles sont masqués. Réactivez-en dans <settings>Paramètres → Modèles</settings>.",
     "loadFailed": "Impossible de charger les modèles depuis models.dev — vous pouvez toujours envoyer avec le modèle actuel.",
     "loading": "Chargement des modèles…",
