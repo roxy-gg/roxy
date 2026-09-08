@@ -23,6 +23,7 @@ import { ActivitySection } from '../components/ActivitySection'
 import { ProviderLogo } from '../lib/providerLogos'
 import { SubscriptionAccounts } from '../components/SubscriptionSetup'
 import { useRoxyStore } from '../lib/store'
+import { DICTATION_MODEL_FILE, DICTATION_MODEL_SIZE, type DictationState } from '@shared/dictation'
 
 export default function Settings(): JSX.Element {
   const navigate = useNavigate()
@@ -35,6 +36,10 @@ export default function Settings(): JSX.Element {
   const telemetryEnabled = useRoxyStore((s) => s.telemetryEnabled)
   const setTelemetryEnabled = useRoxyStore((s) => s.setTelemetryEnabled)
   const setBranchPrefix = useRoxyStore((s) => s.setBranchPrefix)
+  const setDictationMode = useRoxyStore((s) => s.setDictationMode)
+  const setDictationPolish = useRoxyStore((s) => s.setDictationPolish)
+  const [dictationState, setDictationState] = useState<DictationState | null>(null)
+  const [clearingDictation, setClearingDictation] = useState(false)
   const [prefix, setPrefix] = useState('')
   const prefixError = branchPrefixError(prefix)
   // Pinned once per mount: a preview that reshuffled on every keystroke
@@ -94,6 +99,11 @@ export default function Settings(): JSX.Element {
     )
     return off
   }, [refreshProviders])
+
+  useEffect(() => {
+    void api.dictation.status().then(setDictationState)
+    return api.dictation.onState(setDictationState)
+  }, [])
 
   const disconnect = async (id: string): Promise<void> => {
     await api.providers.disconnect(id)
@@ -198,6 +208,78 @@ export default function Settings(): JSX.Element {
           >
             <Plus className="h-4 w-4" /> Add provider
           </button>
+        </div>
+      </section>
+
+      <section className="mb-8">
+        <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-text-subtle">
+          Voice dictation
+        </h2>
+        <div className="sq sq-xl sq-ring rounded-xl border border-border bg-surface p-4">
+          <div className="text-sm font-medium text-text">Free local transcription</div>
+          <p className="mt-0.5 text-xs text-text-muted">
+            Roxy transcribes microphone audio on this device with NVIDIA Nemotron Speech. Audio is
+            kept in memory and is not sent to your chat provider or saved to disk. The first use
+            downloads about {Math.round(DICTATION_MODEL_SIZE / 1_048_576)} MB.
+          </p>
+          <div className="mt-3 flex gap-2">
+            {(['fast', 'accurate'] as const).map((mode) => (
+              <button
+                key={mode}
+                type="button"
+                onClick={() => void setDictationMode(mode)}
+                className={cn(
+                  'sq sq-lg sq-ring rounded-lg border px-3 py-2 text-left',
+                  (settings?.dictationMode ?? 'fast') === mode
+                    ? 'border-accent [--sq-ring:var(--color-accent)] bg-accent/10 text-text'
+                    : 'border-border bg-surface-2 text-text-muted hover:border-border-strong'
+                )}
+              >
+                <span className="block text-xs font-medium capitalize">{mode}</span>
+                <span className="block text-[11px] text-text-subtle">
+                  {mode === 'fast' ? '160 ms, lower CPU latency' : '560 ms, better accuracy'}
+                </span>
+              </button>
+            ))}
+          </div>
+          <p className="mt-3 text-[11px] text-text-subtle">
+            {dictationState?.installed
+              ? `Installed: ${DICTATION_MODEL_FILE}`
+              : dictationState?.status === 'unsupported'
+                ? dictationState.error
+                : 'The runtime and model download when you first press the microphone.'}{' '}
+            NVIDIA Open Model License; runtime Apache-2.0.
+          </p>
+          {dictationState?.installed && (
+            <Button
+              variant="secondary"
+              className="mt-3"
+              disabled={clearingDictation}
+              onClick={() => {
+                setClearingDictation(true)
+                void api.dictation
+                  .clearCache()
+                  .then(setDictationState)
+                  .finally(() => setClearingDictation(false))
+              }}
+            >
+              {clearingDictation ? 'Clearing…' : 'Clear local model cache'}
+            </Button>
+          )}
+        </div>
+        <div className="mt-3 flex flex-col gap-3 sq sq-xl sq-ring rounded-xl border border-border bg-surface p-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0">
+            <div className="text-sm font-medium text-text">Show transcript Polish action</div>
+            <p className="mt-0.5 text-xs text-text-muted">
+              Uses the AI model already selected in the composer to remove filler words and restore
+              punctuation. This is optional, off by default, and may consume billable provider
+              tokens. It never changes the selected model.
+            </p>
+          </div>
+          <Switch
+            checked={settings?.dictationPolish ?? false}
+            onChange={(enabled) => void setDictationPolish(enabled)}
+          />
         </div>
       </section>
 

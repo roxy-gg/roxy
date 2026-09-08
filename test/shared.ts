@@ -56,6 +56,14 @@ import {
   type ModelFamily,
   type TurnErrorKind
 } from '../src/shared/telemetry'
+import { replaceDictationSuffix, retainedDictationSuffix } from '../src/shared/dictation-draft'
+import {
+  DICTATION_MODEL_REVISION,
+  dictationModelUrl,
+  dictationRuntimeAsset,
+  dictationRuntimeUrl
+} from '../src/shared/dictation'
+import { assistantSpeechText, takeSpeakableSentences } from '../src/renderer/src/lib/voice-output'
 
 /** Every family/kind the classifiers may return - asserted to be exhaustive. */
 const MODEL_FAMILIES: ModelFamily[] = [
@@ -2697,6 +2705,46 @@ console.log('\nremote workspace ipc parity\n')
 }
 
 async function main(): Promise<void> {
+  check(
+    'dictation: partial preserves typed prefix',
+    replaceDictationSuffix('explain this', '', 'file') === 'explain this file'
+  )
+  check(
+    'dictation: cumulative partial replaces only its suffix',
+    replaceDictationSuffix('please open src/ma', 'src/ma', 'src/main.ts') ===
+      'please open src/main.ts'
+  )
+  check(
+    'dictation: user edit owns changed partial',
+    retainedDictationSuffix('please open source/main', 'src/main') === ''
+  )
+  const windowsDictation = dictationRuntimeAsset('win32', 'x64')
+  check(
+    'dictation: Windows runtime is pinned',
+    windowsDictation?.sha256 === '5e4ea81046012edcd77fd8848de8eefb5a4ba38cc26f52eb544ab184695a75d6'
+  )
+  check(
+    'dictation: runtime URL is version-pinned',
+    !!windowsDictation && dictationRuntimeUrl(windowsDictation.archive).includes('/v0.1.0/')
+  )
+  check(
+    'dictation: model URL is revision-pinned',
+    dictationModelUrl().includes(`/${DICTATION_MODEL_REVISION}/`)
+  )
+  check(
+    'voice: speaks assistant text only',
+    assistantSpeechText([
+      { type: 'reasoning', text: 'secret thought' },
+      { type: 'text', text: 'Hello. ' },
+      { type: 'tool' },
+      { type: 'text', text: 'Done.' }
+    ]) === 'Hello. Done.'
+  )
+  const spoken = takeSpeakableSentences('Hello there. Still streaming')
+  check(
+    'voice: buffers incomplete streamed sentence',
+    spoken.chunks.join('|') === 'Hello there.' && spoken.rest === 'Still streaming'
+  )
   // mapWithConcurrency: empty input is a no-op empty array.
   check(
     'mapWithConcurrency([]) is empty',

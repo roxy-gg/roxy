@@ -418,6 +418,10 @@ export interface AppSettings {
    * people prefer; it is a real choice, not a reason to reimpose the default.
    */
   branchPrefix: string
+  /** Local speech-to-text latency/accuracy tradeoff; unrelated to the chat model. */
+  dictationMode: 'fast' | 'accurate'
+  /** Whether the explicit post-dictation Polish action is shown. */
+  dictationPolish: boolean
 }
 
 export interface AppVersions {

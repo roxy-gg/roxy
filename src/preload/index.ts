@@ -14,6 +14,7 @@ import type {
   UpdateState
 } from '../shared/api'
 import type { CliProxyState } from '../shared/cliproxy'
+import type { DictationState, DictationTranscript } from '../shared/dictation'
 
 /**
  * The typed bridge exposed to the renderer as `window.roxy`. Every method maps
@@ -30,10 +31,33 @@ const roxy: RoxyApi = {
     setWebSearchApiKey: (key) => ipcRenderer.invoke(CHANNELS.settingsSetWebSearchApiKey, key),
     setAutoWorkstream: (enabled) => ipcRenderer.invoke(CHANNELS.settingsSetAutoWorkstream, enabled),
     setBranchPrefix: (prefix) => ipcRenderer.invoke(CHANNELS.settingsSetBranchPrefix, prefix),
+    setDictationMode: (mode) => ipcRenderer.invoke(CHANNELS.settingsSetDictationMode, mode),
+    setDictationPolish: (enabled) =>
+      ipcRenderer.invoke(CHANNELS.settingsSetDictationPolish, enabled),
     completeOnboarding: () => ipcRenderer.invoke(CHANNELS.settingsCompleteOnboarding),
     reset: () => ipcRenderer.invoke(CHANNELS.settingsReset),
     getTelemetry: () => ipcRenderer.invoke(CHANNELS.settingsGetTelemetry),
     setTelemetry: (enabled) => ipcRenderer.invoke(CHANNELS.settingsSetTelemetry, enabled)
+  },
+  dictation: {
+    status: () => ipcRenderer.invoke(CHANNELS.dictationStatus),
+    start: (input) => ipcRenderer.invoke(CHANNELS.dictationStart, input),
+    pushAudio: (requestId, pcm16) => ipcRenderer.send(CHANNELS.dictationAudio, requestId, pcm16),
+    stop: (requestId, cancel) => ipcRenderer.invoke(CHANNELS.dictationStop, requestId, cancel),
+    polish: (input) => ipcRenderer.invoke(CHANNELS.dictationPolish, input),
+    clearCache: () => ipcRenderer.invoke(CHANNELS.dictationClearCache),
+    onState: (callback) => {
+      const handler = (_event: Electron.IpcRendererEvent, state: DictationState): void =>
+        callback(state)
+      ipcRenderer.on(CHANNELS.dictationState, handler)
+      return () => ipcRenderer.removeListener(CHANNELS.dictationState, handler)
+    },
+    onTranscript: (callback) => {
+      const handler = (_event: Electron.IpcRendererEvent, payload: DictationTranscript): void =>
+        callback(payload)
+      ipcRenderer.on(CHANNELS.dictationTranscript, handler)
+      return () => ipcRenderer.removeListener(CHANNELS.dictationTranscript, handler)
+    }
   },
   providers: {
     listConnected: () => ipcRenderer.invoke(CHANNELS.providersList),

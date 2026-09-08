@@ -119,7 +119,9 @@ export function getSettings(): AppSettings {
     autoWorkstream: map.get('auto_workstream') !== '0',
     // `?? DEFAULT` and not `|| DEFAULT`: an EMPTY string is a deliberate
     // "no prefix", and must survive a round trip through settings.
-    branchPrefix: map.get('branch_prefix') ?? DEFAULT_BRANCH_PREFIX
+    branchPrefix: map.get('branch_prefix') ?? DEFAULT_BRANCH_PREFIX,
+    dictationMode: map.get('dictation_mode') === 'accurate' ? 'accurate' : 'fast',
+    dictationPolish: map.get('dictation_polish') === '1'
   }
 }
 
@@ -216,6 +218,16 @@ export function setAutoWorkstream(enabled: boolean): AppSettings {
 export function setWebSearchApiKey(key: string | null): AppSettings {
   const trimmed = key?.trim()
   setSetting('web_search_api_key', trimmed ? trimmed : null)
+  return getSettings()
+}
+
+export function setDictationMode(mode: 'fast' | 'accurate'): AppSettings {
+  setSetting('dictation_mode', mode === 'accurate' ? 'accurate' : null)
+  return getSettings()
+}
+
+export function setDictationPolish(enabled: boolean): AppSettings {
+  setSetting('dictation_polish', enabled ? '1' : null)
   return getSettings()
 }
 

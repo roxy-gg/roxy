@@ -30,6 +30,12 @@ import type { ForgeStatusView, ForgeHostView, ForgeKind } from './forge'
 import type { RepoLayout } from './repos'
 import type { SessionConfigPatch } from './session-config'
 import type { ClipboardAction } from './context-menu'
+import type {
+  DictationPolishInput,
+  DictationStartInput,
+  DictationState,
+  DictationTranscript
+} from './dictation'
 
 /** A configured MCP server merged with its live connection status (for Settings). */
 export interface McpServerView {
@@ -680,6 +686,8 @@ export interface RoxyApi {
     setWebSearchApiKey(key: string | null): Promise<AppSettings>
     setAutoWorkstream(enabled: boolean): Promise<AppSettings>
     setBranchPrefix(prefix: string): Promise<AppSettings>
+    setDictationMode(mode: 'fast' | 'accurate'): Promise<AppSettings>
+    setDictationPolish(enabled: boolean): Promise<AppSettings>
     completeOnboarding(): Promise<AppSettings>
     reset(): Promise<void>
     /**
@@ -689,6 +697,16 @@ export interface RoxyApi {
      */
     getTelemetry(): Promise<boolean>
     setTelemetry(enabled: boolean): Promise<boolean>
+  }
+  dictation: {
+    status(): Promise<DictationState>
+    start(input: DictationStartInput): Promise<DictationState>
+    pushAudio(requestId: string, pcm16: ArrayBuffer): void
+    stop(requestId: string, cancel: boolean): Promise<DictationState>
+    polish(input: DictationPolishInput): Promise<string>
+    clearCache(): Promise<DictationState>
+    onState(callback: (state: DictationState) => void): () => void
+    onTranscript(callback: (payload: DictationTranscript) => void): () => void
   }
   providers: {
     listConnected(): Promise<ConnectedProvider[]>

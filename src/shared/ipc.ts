@@ -8,6 +8,8 @@ export const CHANNELS = {
   settingsSetWebSearchApiKey: 'settings:setWebSearchApiKey',
   settingsSetAutoWorkstream: 'settings:setAutoWorkstream',
   settingsSetBranchPrefix: 'settings:setBranchPrefix',
+  settingsSetDictationMode: 'settings:setDictationMode',
+  settingsSetDictationPolish: 'settings:setDictationPolish',
   settingsCompleteOnboarding: 'settings:completeOnboarding',
   settingsReset: 'settings:reset',
   // Anonymous usage tracking. Its own pair of channels rather than a field on
@@ -81,6 +83,15 @@ export const CHANNELS = {
   cliproxyInstallFile: 'cliproxy:installFile',
   /** main -> renderer: sidecar install/run status changed */
   cliproxyState: 'cliproxy:state',
+
+  dictationStatus: 'dictation:status',
+  dictationStart: 'dictation:start',
+  dictationAudio: 'dictation:audio',
+  dictationStop: 'dictation:stop',
+  dictationPolish: 'dictation:polish',
+  dictationClearCache: 'dictation:clearCache',
+  dictationState: 'dictation:state',
+  dictationTranscript: 'dictation:transcript',
 
   dialogOpenWorkspace: 'dialog:openWorkspace',
 

@@ -16,6 +16,7 @@ import { shutdownAllLsp } from './services/lsp'
 import { shutdownAllMcp } from './services/mcp'
 import { shutdownRemote } from './services/remote'
 import { shutdownCliProxy } from './services/cliproxy'
+import { shutdown as shutdownDictation } from './services/dictation'
 import { initAutoUpdater } from './services/updater'
 import { initTracking, shutdownTracking } from './services/track'
 import { killAllBackground, setPromptText, setAgentPromptText } from './harness'
@@ -119,6 +120,32 @@ app.whenReady().then(() => {
   void warmCatalogThenBackfill()
 
   const mainWindow = createWindow()
+  const rendererSession = mainWindow.webContents.session
+  const trustedRenderer = (webContents: Electron.WebContents | null, url: string): boolean => {
+    if (!webContents || !BrowserWindow.fromWebContents(webContents)) return false
+    if (url.startsWith('file://')) return true
+    const devUrl = process.env['ELECTRON_RENDERER_URL']
+    return Boolean(devUrl && url.startsWith(devUrl))
+  }
+  rendererSession.setPermissionCheckHandler(
+    (webContents, permission, requestingOrigin, details) => {
+      return (
+        trustedRenderer(webContents, requestingOrigin) &&
+        permission === 'media' &&
+        (details.mediaType === 'audio' || details.mediaType === 'unknown')
+      )
+    }
+  )
+  rendererSession.setPermissionRequestHandler((webContents, permission, callback, details) => {
+    const ownRenderer = trustedRenderer(webContents, details.requestingUrl)
+    const microphone =
+      permission === 'media' &&
+      'mediaTypes' in details &&
+      Array.isArray(details.mediaTypes) &&
+      details.mediaTypes.includes('audio') &&
+      !details.mediaTypes.includes('video')
+    callback(ownRenderer && microphone)
+  })
   initAutoUpdater(mainWindow)
 
   app.on('activate', () => {
@@ -152,4 +179,5 @@ app.on('will-quit', () => {
   // The Codex sidecar holds the user's subscription tokens - never leave it
   // running (and listening on loopback) after the app that owns it is gone.
   shutdownCliProxy()
+  shutdownDictation()
 })

@@ -31,6 +31,7 @@ import type {
 import * as repo from '../db/repo'
 import * as copilot from '../services/copilot'
 import * as cliproxy from '../services/cliproxy'
+import * as dictation from '../services/dictation'
 import * as browser from '../services/browser'
 import * as cookies from '../services/cookies'
 import { listModels } from '../services/models'
@@ -191,6 +192,13 @@ export function registerIpc(): void {
   )
   ipcMain.handle(CHANNELS.settingsSetBranchPrefix, (_e, prefix: string) =>
     repo.setBranchPrefix(prefix)
+  )
+  ipcMain.handle(CHANNELS.settingsSetDictationMode, (_e, mode: 'fast' | 'accurate') => {
+    if (mode !== 'fast' && mode !== 'accurate') throw new Error('Invalid dictation mode.')
+    return repo.setDictationMode(mode)
+  })
+  ipcMain.handle(CHANNELS.settingsSetDictationPolish, (_e, enabled: boolean) =>
+    repo.setDictationPolish(enabled === true)
   )
   ipcMain.handle(CHANNELS.settingsSetWebSearchApiKey, (_e, key: string | null) =>
     repo.setWebSearchApiKey(key)
@@ -462,6 +470,17 @@ export function registerIpc(): void {
   // Every call carries a provider id. One sidecar process serves both ChatGPT
   // and Gemini, so "which subscription" is never inferable from the process.
   ipcMain.handle(CHANNELS.cliproxyStatus, () => cliproxy.status())
+
+  ipcMain.handle(CHANNELS.dictationStatus, () => dictation.status())
+  ipcMain.handle(CHANNELS.dictationStart, (event, input) => dictation.start(input, event.sender.id))
+  ipcMain.on(CHANNELS.dictationAudio, (event, requestId: string, audio) => {
+    dictation.pushAudio(requestId, audio, event.sender.id)
+  })
+  ipcMain.handle(CHANNELS.dictationStop, (event, requestId: string, cancel: boolean) =>
+    dictation.stop(requestId, cancel === true, event.sender.id)
+  )
+  ipcMain.handle(CHANNELS.dictationPolish, (_event, input) => dictation.polish(input))
+  ipcMain.handle(CHANNELS.dictationClearCache, () => dictation.clearCache())
   ipcMain.handle(CHANNELS.cliproxyLogin, async (_e, providerId: string) => {
     try {
       const { url, state } = await cliproxy.startLogin(providerId)
