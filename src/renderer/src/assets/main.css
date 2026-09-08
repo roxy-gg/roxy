@@ -176,22 +176,23 @@
   transform: scale(0.96);
 }
 
-/* Respect reduced-motion: keep the opacity fade (it aids comprehension) but drop
-   the scale/translate movement and the press squish. */
-@media (prefers-reduced-motion: reduce) {
-  :root {
-    --animate-pop-in: fade-in 120ms ease both;
-    --animate-fade-in: fade-in 120ms ease both;
-  }
-  .animate-modal-in {
-    animation: modal-scrim-in 140ms ease both;
-  }
-  .press-scale:active:not(:disabled) {
-    transform: none;
-  }
-  .animate-ticker-in {
-    animation: fade-in 120ms ease both;
-  }
+/* One resolved app preference drives CSS and canvas alike. */
+:root[data-motion='reduced'] {
+  --animate-pop-in: fade-in 120ms ease both;
+  --animate-fade-in: fade-in 120ms ease both;
+}
+[data-motion='reduced'] .animate-modal-in {
+  animation: modal-scrim-in 140ms ease both;
+}
+[data-motion='reduced'] .press-scale:active:not(:disabled) {
+  transform: none;
+}
+[data-motion='reduced'] .animate-ticker-in {
+  animation: fade-in 120ms ease both;
+}
+[data-motion='reduced'] .animate-spin,
+[data-motion='reduced'] .animate-ping {
+  animation: pulse 2s ease-in-out infinite;
 }
 
 /* On macOS, prefer the native system font (San Francisco) over Geist so the app

@@ -414,6 +414,15 @@
       "someHidden": "{{shown}} of {{total}} shown · {{hidden}} hidden",
       "unhide": "Unhide"
     },
+    "motion": {
+      "description": "Choose how Roxy animates. On keeps normal animations enabled without changing your operating system settings. Reduced removes movement while keeping gentle progress feedback. Streaming speed is unchanged.",
+      "heading": "Appearance",
+      "label": "Motion",
+      "on": "On (default)",
+      "reduced": "Reduced",
+      "saveFailed": "Couldn't save the motion preference. Try again.",
+      "system": "Follow system"
+    },
     "privacy": {
       "description": "गणना और समय — ऐप लॉन्च, समाप्त मोड़, एक मोड़ में कितने कदम और उपकरण लगे, इसने कितने टोकन का उपयोग किया और मोटे तौर पर इसकी लागत कितनी थी — इस मशीन पर उत्पन्न एक यादृच्छिक आईडी से जुड़ा हुआ। कभी भी आपके प्रॉम्प्ट, आपका कोड, फ़ाइल पथ, रेपो नाम, या कोई त्रुटि पाठ नहीं।",
       "heading": "गोपनीयता",
@@ -585,9 +594,11 @@
     "collapse": "Collapse",
     "copy": "copy",
     "copyCode": "Copy code",
+    "copyCommand": "Copy command",
     "copyFailed": "Could not copy to the clipboard. Try again with the app focused.",
     "copyMessage": "Copy message",
     "copyNewContents": "Copy the new contents",
+    "copyOutput": "Copy output",
     "copySelection": "Copy selection",
     "expand": "Expand",
     "history": "Chat history",

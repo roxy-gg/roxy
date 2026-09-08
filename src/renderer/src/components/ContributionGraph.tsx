@@ -16,16 +16,10 @@
  */
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ActivityDay, ActivityStats } from '@shared/types'
-import {
-  BAYER,
-  OFF_TIER,
-  bloomLayerStyle,
-  clamp01,
-  easeOutCubic,
-  prefersReducedMotion
-} from './dither-kit/dither-paint'
+import { BAYER, OFF_TIER, bloomLayerStyle, clamp01, easeOutCubic } from './dither-kit/dither-paint'
 import { PALETTE, rgb } from './dither-kit/palette'
 import { useChartDimensions } from './dither-kit/use-chart-dimensions'
+import { useMotion } from '../lib/motion'
 
 const ROWS = 7 // days of the week (Sun → Sat)
 // Weekday gutter labels, GitHub-style: only every other row (Mon/Wed/Fri) so the
@@ -199,6 +193,7 @@ function monthLabels(columns: Cell[][], step: number): { text: string; left: num
  * full year of data across the container width, so it fills the card.
  */
 export function ContributionGraph({ data }: { data: ActivityStats }): JSX.Element {
+  const { reduced: reduce } = useMotion()
   const { ref: wrapRef, size } = useChartDimensions<HTMLDivElement>()
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const bloomRef = useRef<HTMLCanvasElement>(null)
@@ -240,8 +235,6 @@ export function ContributionGraph({ data }: { data: ActivityStats }): JSX.Elemen
       cv.style.width = `${gridW}px`
       cv.style.height = `${gridH}px`
     }
-
-    const reduce = prefersReducedMotion()
 
     const paint = (prog: number): void => {
       const cols2 = columnsRef.current
@@ -304,7 +297,7 @@ export function ContributionGraph({ data }: { data: ActivityStats }): JSX.Elemen
       running = false
       cancelAnimationFrame(raf)
     }
-  }, [columns, gridW, gridH, step, cellSize, radius, size.width])
+  }, [columns, gridW, gridH, step, cellSize, radius, size.width, reduce])
 
   const onPointerMove = (e: React.PointerEvent<HTMLCanvasElement>): void => {
     const rect = e.currentTarget.getBoundingClientRect()

@@ -130,24 +130,26 @@ export function parseAnsi(text: string): AnsiSpan[][] {
   const lines: AnsiSpan[][] = []
   let current: AnsiSpan[] = []
   let style: AnsiStyle = {}
+  let carriageReturn = false
 
   /** Append a run of plain text, honouring newlines and carriage returns. */
   const pushText = (chunk: string): void => {
     if (chunk === '') return
-    const rows = chunk.split('\n')
-    for (let r = 0; r < rows.length; r++) {
-      if (r > 0) {
+    for (const part of chunk.split(/([\r\n])/)) {
+      if (part === '\r') {
+        // A CR only overwrites when more text follows. CRLF (even across SGR spans) ends the line.
+        carriageReturn = true
+      } else if (part === '\n') {
         lines.push(current)
         current = []
+        carriageReturn = false
+      } else if (part !== '') {
+        if (carriageReturn) current = []
+        carriageReturn = false
+        const last = current[current.length - 1]
+        if (last && sameStyle(last, style)) last.text += part
+        else current.push({ ...style, text: part })
       }
-      // Everything before the last CR on a row was overwritten in place.
-      const segments = rows[r].split('\r')
-      if (segments.length > 1) current = []
-      const visible = segments[segments.length - 1]
-      if (visible === '') continue
-      const last = current[current.length - 1]
-      if (last && sameStyle(last, style)) last.text += visible
-      else current.push({ ...style, text: visible })
     }
   }
 

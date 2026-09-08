@@ -4,6 +4,7 @@ import { normalizeServerConfig, type McpServerConfig, type McpServerRecord } fro
 import { DEFAULT_BRANCH_PREFIX, normalizeBranchPrefix } from '../../shared/branch'
 import { DEFAULT_LANGUAGE, normalizeLanguage } from '../../shared/i18n'
 import type { Language } from '../../shared/i18n'
+import { DEFAULT_MOTION, normalizeMotion, type MotionPreference } from '../../shared/motion'
 import type {
   AddMessageInput,
   AppSettings,
@@ -125,6 +126,7 @@ export function getSettings(): AppSettings {
     // (or a language later dropped from the app) must degrade to English rather
     // than leave the UI rendering raw keys.
     language: normalizeLanguage(map.get('language')),
+    motion: normalizeMotion(map.get('motion')),
     activeThemeId: map.get('active_theme_id') ?? null
   }
 }
@@ -223,6 +225,12 @@ export function setLanguage(language: Language): AppSettings {
 
 export function setActiveThemeId(id: string | null): AppSettings {
   setSetting('active_theme_id', id)
+  return getSettings()
+}
+
+export function setMotion(value: MotionPreference): AppSettings {
+  const motion = normalizeMotion(value)
+  setSetting('motion', motion === DEFAULT_MOTION ? null : motion)
   return getSettings()
 }
 

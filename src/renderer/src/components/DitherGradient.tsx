@@ -7,11 +7,11 @@ import {
   clamp01,
   easeInOutCubic,
   easeOutCubic,
-  prefersReducedMotion,
   type BloomInput
 } from './dither-kit/dither-paint'
 import type { AreaVariant } from './dither-kit/chart-context'
 import { PALETTE, rgb, type DitherColor } from './dither-kit/palette'
+import { useMotion } from '../lib/motion'
 
 export type DitherDirection = 'top' | 'bottom' | 'left' | 'right'
 
@@ -83,6 +83,7 @@ export function DitherGradient({
   const crispRef = useRef<HTMLCanvasElement>(null)
   const bloomRef = useRef<HTMLCanvasElement>(null)
   const starsRef = useRef<HTMLCanvasElement>(null)
+  const { reduced } = useMotion()
 
   useEffect(() => {
     const host = hostRef.current
@@ -92,7 +93,6 @@ export function DitherGradient({
     if (!host || !crisp) return
 
     const seed = PALETTE[from]
-    const reduced = prefersReducedMotion()
     let raf = 0
     let cols = 0
     let rows = 0
@@ -280,7 +280,18 @@ export function DitherGradient({
       cancelAnimationFrame(raf)
       ro.disconnect()
     }
-  }, [from, direction, variant, animate, animationDuration, replayToken, stars, turn, turnDuration])
+  }, [
+    from,
+    direction,
+    variant,
+    animate,
+    animationDuration,
+    replayToken,
+    stars,
+    turn,
+    turnDuration,
+    reduced
+  ])
 
   const glowStyle = bloomLayerStyle(bloom, true)
 

@@ -11,6 +11,7 @@ import ReactDOM from 'react-dom/client'
 import { BrowserChrome } from './BrowserChrome'
 import { AppContextMenu } from '../components/AppContextMenu'
 import { primeTheme, startTheme } from '../lib/theme'
+import { startMotion } from '../lib/motion'
 
 // Reserve space for the native window-control overlay (same as the main window).
 document.documentElement.dataset.platform = window.electron?.process?.platform ?? 'win32'
@@ -20,6 +21,7 @@ document.documentElement.dataset.platform = window.electron?.process?.platform ?
 // broadcast from main rather than reading a value once at launch.
 primeTheme()
 startTheme()
+startMotion()
 
 // Best-effort: paint in English if the settings read fails rather than blocking
 // the toolbar on it.

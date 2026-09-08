@@ -1,6 +1,7 @@
 .prompt-history {
   position: absolute;
-  top: 16px;
+  top: 50%;
+  transform: translateY(-50%);
   right: 12px;
   width: 28px;
   z-index: 20;
@@ -133,9 +134,7 @@
   font-variant-numeric: tabular-nums;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .prompt-history-marker > span,
-  .prompt-history-preview {
-    transition: none;
-  }
+[data-motion='reduced'] .prompt-history-marker > span,
+[data-motion='reduced'] .prompt-history-preview {
+  transition: none;
 }

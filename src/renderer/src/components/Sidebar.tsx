@@ -9,6 +9,7 @@ import {
 import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import type { TFunction } from 'i18next'
+import { useMotion } from '../lib/motion'
 import {
   FolderOpen,
   GitBranch,
@@ -123,12 +124,11 @@ const FOLDER_OPEN =
  * 1. CSS can only interpolate `d` when both paths share an identical command
  *    sequence, which lucide's two folders do NOT - matching them by hand meant
  *    redrawing one icon to fit the other, and the result barely moved.
- * 2. A CSS transition is silently zeroed for anyone whose OS asks for reduced
- *    motion - which on Windows includes everyone who turned off window
- *    animations. That is why the morph first shipped looking like a plain
- *    swap. See `reducedMotion` below.
+ * 2. The explicit reducedMotion prop follows Roxy's app preference, so this
+ *    library and the canvas progress indicators agree about whether to animate.
  */
 function FolderMorph({ open, className }: { open: boolean; className?: string }): JSX.Element {
+  const { reduced } = useMotion()
   return (
     <MorphIcon
       icon={open ? FOLDER_OPEN : FOLDER_CLOSED}
@@ -140,13 +140,7 @@ function FolderMorph({ open, className }: { open: boolean; className?: string })
       // relation every built-in preset uses). Settles in ~225ms, against the
       // preset's ~450ms - which was sluggish for an icon this small.
       spring={{ stiffness: 680, damping: 52 }}
-      // Play even when the OS asks for reduced motion. That setting exists to
-      // stop large-area movement that can cause nausea; this is a 14px icon
-      // redrawing itself in place, with no travel across the screen. Honouring
-      // it here does not help anyone - it just silently deletes the animation
-      // for every Windows user who turned off window animations, which is a
-      // common setting and is exactly how this shipped broken the first time.
-      reducedMotion="never"
+      reducedMotion={reduced ? 'always' : 'never'}
       className={className}
     />
   )

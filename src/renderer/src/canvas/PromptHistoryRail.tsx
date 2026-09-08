@@ -149,7 +149,7 @@ export function PromptHistoryRail({
       observer.disconnect()
       window.removeEventListener('resize', close)
     }
-  }, [item, close, height, scrollTop, i18n.language])
+  }, [item, close, height, viewport, scrollTop, i18n.language])
 
   if (!entries.length || height < 56) return null
 

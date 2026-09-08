@@ -42,6 +42,7 @@ import {
   upstreamFor
 } from '../src/shared/cliproxy'
 import { modelLabel, pickDefaultModel } from '../src/shared/models'
+import { DEFAULT_MOTION, normalizeMotion, reduceMotion } from '../src/shared/motion'
 import {
   BUILT_IN_THEMES,
   DEFAULT_THEME_ID,
@@ -351,6 +352,25 @@ function check(name: string, cond: boolean, detail = ''): void {
 }
 
 console.log('shared catalogs\n')
+
+check('motion: normal animation is the default', DEFAULT_MOTION === 'on')
+check(
+  'motion: missing and unknown values fall back to On',
+  [undefined, null, '', 'invalid', true].every((value) => normalizeMotion(value) === 'on')
+)
+check(
+  'motion: explicit reduced mode survives normalization',
+  normalizeMotion('reduced') === 'reduced'
+)
+check('motion: On overrides OS reduction without altering the OS', !reduceMotion('on', true))
+check(
+  'motion: Reduced applies regardless of OS preference',
+  reduceMotion('reduced', false) && reduceMotion('reduced', true)
+)
+check(
+  'motion: Follow system tracks both OS states',
+  !reduceMotion('system', false) && reduceMotion('system', true)
+)
 
 // ---- tools ----
 check('tools non-empty', TOOLS.length > 0)

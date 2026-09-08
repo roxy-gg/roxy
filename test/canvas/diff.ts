@@ -22,6 +22,10 @@ import { FIXTURES, LARGE_DIFF } from './fixtures'
 import { activePrompt, promptEntries } from '../../src/renderer/src/canvas/prompt-history'
 import type { Message, MessagePart } from '../../src/shared/types'
 import { parseMarkdown } from '../../src/renderer/src/canvas/markdown'
+import { ansiLineText, parseAnsi } from '../../src/renderer/src/canvas/ansi'
+import { layoutToolCard } from '../../src/renderer/src/canvas/tool-card'
+import { layoutTerminalBody } from '../../src/renderer/src/canvas/terminal'
+import { createStreamPublisher } from '../../src/renderer/src/lib/stream-publisher'
 
 let checks = 0
 function check(name: string, run: () => void): void {
@@ -647,6 +651,263 @@ check('a dragged selection retains its source rows across viewport boundaries', 
   )
   assert.ok(next.blocks[0].selectable.some((line) => line.key === anchor))
   assert.ok(next.window!.end >= next.window!.scrollTop + 600)
+})
+
+check('Windows terminal lines survive CRLF and ANSI style changes', () => {
+  assert.deepEqual(parseAnsi('first\r\nsecond\r\n').map(ansiLineText), ['first', 'second', ''])
+  assert.deepEqual(parseAnsi('\u001b[31merror\r\u001b[0m\nnext').map(ansiLineText), [
+    'error',
+    'next'
+  ])
+  assert.deepEqual(parseAnsi('10%\r20%\r\u001b[32m100%\r').map(ansiLineText), ['100%'])
+})
+
+check('short bash cards do not reserve blank ANSI output space', () => {
+  const part: Extract<MessagePart, { type: 'tool' }> = {
+    type: 'tool',
+    tool: 'bash',
+    state: 'done',
+    title: 'pwd',
+    output: '$ pwd\n' + '\u001b[0m\r\n'.repeat(40)
+  }
+  const builder = new Builder(metrics, theme, { value: 0 }, t)
+  const height = layoutToolCard(
+    builder,
+    { part, id: 'bash', view: view(), open: true, live: false, cancellable: false },
+    0,
+    0,
+    600
+  )
+  assert.ok(height < 90, `One command occupied ${height}px`)
+})
+
+check('long bash commands wrap completely instead of being clipped', () => {
+  const command = 'Copy-Item ' + '"C:\\long folder\\file.txt" '.repeat(12) + '-Force'
+  const part: Extract<MessagePart, { type: 'tool' }> = {
+    type: 'tool',
+    tool: 'bash',
+    state: 'done',
+    input: { command },
+    title: command,
+    output: `$ ${command}\n`
+  }
+  const builder = new Builder(metrics, theme, { value: 0 }, t)
+  const height = layoutToolCard(
+    builder,
+    { part, id: 'bash', view: view(), open: true, live: false, cancellable: false },
+    0,
+    0,
+    300
+  )
+  const scene = sceneOf(builder, height)
+  const rows = scene.blocks[0].selectable
+  assert.ok(rows.length > 1)
+  assert.ok(rows.every((row) => row.runs.every((run) => row.x + run.x + run.width <= 288)))
+  assert.equal(
+    selectionText(scene, {
+      startLine: 0,
+      startChar: 0,
+      endLine: rows.length - 1,
+      endChar: rows.at(-1)!.text.length
+    }),
+    `$ ${command}`
+  )
+})
+
+check('terminal wrapping retains ANSI styles, tabs and graphemes', () => {
+  const part: Extract<MessagePart, { type: 'tool' }> = {
+    type: 'tool',
+    tool: 'bash_output',
+    state: 'done',
+    output:
+      '\u001b[1;3;4;31;44m' +
+      'red\t'.repeat(8) +
+      '\u001b[0m\r\n' +
+      '\u6f22\u{1f600}'.repeat(20) +
+      '\r\n[exit 1]\r\n'
+  }
+  const builder = new Builder(metrics, theme, { value: 0 }, t)
+  const height = layoutTerminalBody(builder, part, 'ansi', view(), 0, 0, 180)
+  const scene = sceneOf(builder, height)
+  const rows = scene.blocks[0].selectable
+  const runs = rows.flatMap((row) => row.runs)
+  assert.ok(
+    runs.some(
+      (run) =>
+        run.color === '#f87171' &&
+        run.background === '#60a5fa' &&
+        run.underline &&
+        run.font.weight === 700 &&
+        run.font.style === 'italic'
+    )
+  )
+  assert.ok(
+    runs.filter((run) => run.text === '\t').every((run) => run.width > 0 && run.width <= 24)
+  )
+  assert.ok(runs.every((run) => !/[\uD800-\uDBFF]$/.test(run.text)))
+  assert.equal(
+    selectionText(scene, {
+      startLine: 0,
+      startChar: 0,
+      endLine: rows.length - 1,
+      endChar: rows.at(-1)!.text.length
+    }),
+    'red\t'.repeat(8) + '\n' + '\u6f22\u{1f600}'.repeat(20) + '\n[exit 1]'
+  )
+})
+
+check('long terminal output scrolls to every wrapped row without remeasuring', () => {
+  const part: Extract<MessagePart, { type: 'tool' }> = {
+    type: 'tool',
+    tool: 'bash_output',
+    state: 'done',
+    output:
+      Array.from({ length: 100 }, (_, i) => `row ${i}\t${'payload '.repeat(15)}`).join('\r\n') +
+      '\r\n[exit 0]\r\n'
+  }
+  const state = view()
+  const layout = (m = metrics): Scene => {
+    const builder = new Builder(m, theme, { value: 0 }, t)
+    return sceneOf(builder, layoutTerminalBody(builder, part, 'terminal', state, 0, 0, 200))
+  }
+  let scene = layout()
+  const start = scene.blocks[0].scrollRegions[0]
+  assert.equal(start.h, 288)
+  assert.equal(start.contentWidth, start.w)
+  assert.ok(start.contentHeight > 2000)
+  state.scroll.set('terminal', { top: 999999, left: 500 })
+  scene = layout({
+    ...metrics,
+    measure: () => {
+      throw new Error('Rewrapped during a scroll')
+    }
+  } as unknown as TextMetrics)
+  const end = scene.blocks[0].scrollRegions[0]
+  const row = scene.blocks[0].selectable.at(-1)!
+  assert.equal(end.left, 0)
+  assert.equal(end.top, end.contentHeight - end.h)
+  assert.equal(row.text, '[exit 0]')
+  assert.ok(row.y >= end.y && row.y + row.height <= end.y + end.h)
+  assert.equal(hitText(scene, 20, end.y - 5, metrics), null)
+})
+
+check('multiline commands and terminal copies use full input without duplicates', () => {
+  const command = 'first-command\n  second-command --argument "literal spaces"'
+  const part: Extract<MessagePart, { type: 'tool' }> = {
+    type: 'tool',
+    tool: 'bash',
+    state: 'done',
+    title: 'first-command...',
+    input: { command },
+    output: `$ ${command}\nok\r\n\r\n[exit 1]\r\n`
+  }
+  const builder = new Builder(metrics, theme, { value: 0 }, t)
+  const height = layoutTerminalBody(builder, part, 'multi', view(), 0, 0, 210)
+  const block = sceneOf(builder, height).blocks[0]
+  assert.equal(
+    block.scrollRegions[0].copyActions?.find((action) => action.label === 'Copy command')?.text,
+    command
+  )
+  assert.equal(
+    block.scrollRegions[0].copyActions?.find((action) => action.label === 'Copy output')?.text,
+    'ok\n[exit 1]'
+  )
+  assert.equal(
+    block.selectable
+      .map((row) => row.text)
+      .join('')
+      .split('second-command').length,
+    2
+  )
+})
+
+check('terminal cache updates streamed output and shrinks short completed results', () => {
+  const part: Extract<MessagePart, { type: 'tool' }> = {
+    type: 'tool',
+    tool: 'bash',
+    state: 'running',
+    title: 'pwd'
+  }
+  const state = view()
+  const render = (): Scene => {
+    const builder = new Builder(metrics, theme, { value: 0 }, t)
+    return sceneOf(builder, layoutTerminalBody(builder, part, 'stream', state, 0, 0, 300))
+  }
+  assert.equal(render().height, 37)
+  part.output = '$ pwd\n' + 'line\r\n'.repeat(100)
+  assert.equal(render().height, 289)
+  state.scroll.set('stream', { left: 0, top: 500 })
+  part.state = 'done'
+  part.output = '$ pwd\nC:\\workspace\r\n'
+  const scene = render()
+  assert.equal(scene.height, 57)
+  assert.equal(scene.blocks[0].scrollRegions[0].top, 0)
+  assert.ok(scene.blocks[0].selectable.some((row) => row.text === 'C:\\workspace'))
+})
+
+check('stream publishing stays frame-coalesced with a non-resetting timer fallback', () => {
+  const original = {
+    raf: globalThis.requestAnimationFrame,
+    cancel: globalThis.cancelAnimationFrame,
+    timeout: globalThis.setTimeout,
+    clear: globalThis.clearTimeout
+  }
+  const frames = new Map<number, FrameRequestCallback>()
+  const timers = new Map<number, () => void>()
+  let id = 0
+  globalThis.requestAnimationFrame = (cb) => {
+    frames.set(++id, cb)
+    return id
+  }
+  globalThis.cancelAnimationFrame = (id) => {
+    frames.delete(id)
+  }
+  globalThis.setTimeout = ((cb: () => void, delay: number) => {
+    assert.equal(delay, 50)
+    timers.set(++id, cb)
+    return id
+  }) as unknown as typeof setTimeout
+  globalThis.clearTimeout = ((id: number) => {
+    timers.delete(id)
+  }) as unknown as typeof clearTimeout
+  try {
+    const output: (MessagePart[] | null)[] = []
+    const publish = createStreamPublisher((parts) => output.push(parts))
+    const first: MessagePart[] = [{ type: 'text', text: 'a' }]
+    const latest: MessagePart[] = [{ type: 'text', text: 'abc' }]
+    publish(first)
+    publish(latest)
+    assert.equal(frames.size, 1)
+    assert.equal(timers.size, 1)
+    assert.equal(output.length, 0)
+    frames.values().next().value!(16)
+    assert.deepEqual(output, [latest])
+    assert.equal(timers.size, 0)
+    publish(first)
+    const timer = timers.values().next().value!
+    publish(latest)
+    assert.equal(timers.values().next().value, timer)
+    timer()
+    assert.equal(output[1], latest)
+    assert.equal(frames.size, 0)
+    publish(first)
+    const cancelledFrame = frames.values().next().value!
+    const cancelledTimer = timers.values().next().value!
+    publish(null)
+    cancelledFrame(50)
+    cancelledTimer()
+    assert.equal(output.length, 3)
+    assert.equal(output[2], null)
+    assert.equal(frames.size + timers.size, 0)
+    publish(first)
+    publish.cancel()
+    assert.equal(frames.size + timers.size, 0)
+  } finally {
+    globalThis.requestAnimationFrame = original.raf
+    globalThis.cancelAnimationFrame = original.cancel
+    globalThis.setTimeout = original.timeout
+    globalThis.clearTimeout = original.clear
+  }
 })
 
 console.log(`DIFF/CANVAS MODEL OK - ${checks} checks passed`)

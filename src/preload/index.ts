@@ -15,6 +15,7 @@ import type {
 } from '../shared/api'
 import type { CliProxyState } from '../shared/cliproxy'
 import type { ResolvedTheme } from '../shared/theme'
+import type { MotionPreference } from '../shared/motion'
 
 /**
  * The typed bridge exposed to the renderer as `window.roxy`. Every method maps
@@ -31,6 +32,13 @@ const roxy: RoxyApi = {
     setAutoWorkstream: (enabled) => ipcRenderer.invoke(CHANNELS.settingsSetAutoWorkstream, enabled),
     setBranchPrefix: (prefix) => ipcRenderer.invoke(CHANNELS.settingsSetBranchPrefix, prefix),
     setLanguage: (language) => ipcRenderer.invoke(CHANNELS.settingsSetLanguage, language),
+    setMotion: (motion) => ipcRenderer.invoke(CHANNELS.settingsSetMotion, motion),
+    onMotionChanged: (callback) => {
+      const handler = (_event: Electron.IpcRendererEvent, motion: MotionPreference): void =>
+        callback(motion)
+      ipcRenderer.on(CHANNELS.settingsMotionChanged, handler)
+      return () => ipcRenderer.removeListener(CHANNELS.settingsMotionChanged, handler)
+    },
     completeOnboarding: () => ipcRenderer.invoke(CHANNELS.settingsCompleteOnboarding),
     reset: () => ipcRenderer.invoke(CHANNELS.settingsReset),
     getTelemetry: () => ipcRenderer.invoke(CHANNELS.settingsGetTelemetry),

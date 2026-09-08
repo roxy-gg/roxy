@@ -11,6 +11,7 @@ import App from './App'
 import { AppContextMenu } from './components/AppContextMenu'
 import { installSquircle } from './lib/squircle'
 import { primeTheme, startTheme } from './lib/theme'
+import { startMotion } from './lib/motion'
 
 // Tag the platform so CSS can reserve room for the native window controls
 // (traffic lights on macOS, control overlay on Windows/Linux).
@@ -21,6 +22,7 @@ document.documentElement.dataset.platform = window.electron?.process?.platform ?
 // the built-in dark palette on the way to a light theme.
 primeTheme()
 startTheme()
+startMotion()
 
 // Upgrade every `.sq*` corner from a quarter-circle to a superellipse. Async and
 // purely additive -- the first frame paints with the plain `rounded-*` fallback.

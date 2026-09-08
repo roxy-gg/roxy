@@ -8,10 +8,14 @@ import '../../src/renderer/src/i18n'
 import { CanvasTranscript } from '../../src/renderer/src/canvas/CanvasTranscript'
 import { AppContextMenu } from '../../src/renderer/src/components/AppContextMenu'
 import { DiffViewer } from '../../src/renderer/src/components/diff/DiffViewer'
-import { FIXTURES, STREAMING, LARGE_DIFF, HISTORY_FIXTURES } from './fixtures'
+import { FIXTURES, STREAMING, LARGE_DIFF, HISTORY_FIXTURES, TERMINAL_FIXTURES } from './fixtures'
 import { PerformanceHarness } from './PerformanceHarness'
+import { AnimationHarness } from './AnimationHarness'
+import { startMotion } from '../../src/renderer/src/lib/motion'
 
 document.documentElement.dataset.platform = 'win32'
+const stopMotion = startMotion()
+import.meta.hot?.dispose(stopMotion)
 
 function Harness(): JSX.Element {
   const [streaming, setStreaming] = useState(false)
@@ -23,8 +27,9 @@ function Harness(): JSX.Element {
   const [composerTall, setComposerTall] = useState(false)
   const [longHistory, setLongHistory] = useState(false)
   const [addedPrompt, setAddedPrompt] = useState(false)
+  const [terminalCards, setTerminalCards] = useState(false)
   const messages = useMemo(() => {
-    const base = longHistory ? HISTORY_FIXTURES : FIXTURES
+    const base = terminalCards ? TERMINAL_FIXTURES : longHistory ? HISTORY_FIXTURES : FIXTURES
     return addedPrompt
       ? [
           ...base,
@@ -37,7 +42,7 @@ function Harness(): JSX.Element {
           }
         ]
       : base
-  }, [longHistory, addedPrompt])
+  }, [longHistory, addedPrompt, terminalCards])
   useEffect(() => {
     if (!loading) return
     const timer = setTimeout(() => setLoading(false), 180)
@@ -110,6 +115,9 @@ function Harness(): JSX.Element {
         <button id="add-prompt" onClick={() => setAddedPrompt(true)}>
           Add prompt
         </button>
+        <button id="terminal-cards" onClick={() => setTerminalCards(!terminalCards)}>
+          Bash cards
+        </button>
       </div>
       {standalone ? (
         <DiffViewer {...LARGE_DIFF} height={600} />
@@ -119,7 +127,7 @@ function Harness(): JSX.Element {
         <CanvasTranscript
           messages={messages}
           streaming={streaming ? STREAMING : null}
-          chatId={`harness-${session}-${longHistory}`}
+          chatId={`harness-${session}-${longHistory}-${terminalCards}`}
           pinSignal={pin}
           onCancelSubagent={(id) => window.__canvasTest.cancelled.push(id)}
           onCancelTool={(id) => window.__canvasTest.cancelled.push(id)}
@@ -137,6 +145,12 @@ function Harness(): JSX.Element {
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    {new URLSearchParams(location.search).has('performance') ? <PerformanceHarness /> : <Harness />}
+    {new URLSearchParams(location.search).has('animation') ? (
+      <AnimationHarness />
+    ) : new URLSearchParams(location.search).has('performance') ? (
+      <PerformanceHarness />
+    ) : (
+      <Harness />
+    )}
   </StrictMode>
 )
