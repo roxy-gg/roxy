@@ -1,7 +1,5 @@
 @import 'tailwindcss';
-
-/* Scan Streamdown's prebuilt classes so streamed markdown renders styled. */
-@source '../../../../node_modules/streamdown/dist/*.js';
+@source '../';
 
 @theme {
   /* Typography — Cursor-style geometric sans + mono */
