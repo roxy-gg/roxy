@@ -13,6 +13,7 @@ import { font, type Font, type InlineSpan } from './text'
 import { FONT_SIZE, SPACE } from './metrics'
 import { highlight, tokenColors, familyFor } from './highlight'
 import { alpha, mix } from './theme'
+import { linkUrl } from './links'
 
 /** Gap after each block kind — the prose rhythm. */
 const BLOCK_GAP = 10
@@ -42,6 +43,7 @@ export function toSpans(
   const palette = builder.palette
   const base = baseFont ?? font(style.size, 400, 'sans', style.italic ? 'italic' : 'normal')
   return inlines.map((frag) => {
+    const href = frag.href ? (linkUrl(frag.href) ?? undefined) : undefined
     if (frag.code) {
       return {
         text: frag.text,
@@ -51,6 +53,8 @@ export function toSpans(
         font: font(Math.max(10, base.size - 1), 400, 'mono'),
         color: mix(style.color, palette.accent, 0.35),
         chipColor: alpha(palette.white, builder.theme.appearance === 'light' ? 0.06 : 0.07),
+        href,
+        underline: Boolean(href),
         offset: frag.offset
       }
     }
@@ -64,10 +68,10 @@ export function toSpans(
         base.family,
         italic ? 'italic' : 'normal'
       ),
-      color: frag.href ? palette.accent : style.color,
-      underline: Boolean(frag.href),
+      color: href ? palette.accent : style.color,
+      underline: Boolean(href),
       strike: frag.strike,
-      href: frag.href,
+      href,
       offset: frag.offset
     }
   })
@@ -91,7 +95,7 @@ export function layoutMarkdown(
   return cursor - y
 }
 
-function layoutBlock(
+export function layoutBlock(
   builder: Builder,
   block: MdBlock,
   x: number,
@@ -264,7 +268,9 @@ export function layoutCodeBlock(
       cursor += w
       return run
     })
-    builder.selectableRow(x + padX, textTop + i * lineHeight, lineHeight, runs, text)
+    builder.selectableRow(x + padX, textTop + i * lineHeight, lineHeight, runs, text, {
+      clip: { x: x + 1, y: y + 1, w: width - 2, h: height - 2 }
+    })
   })
   return height
 }

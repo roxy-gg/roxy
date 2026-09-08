@@ -283,6 +283,9 @@ const KEYWORDS: Record<string, string[]> = {
 }
 
 const FAMILY: Record<string, Family> = {}
+const KEYWORD_SETS = Object.fromEntries(
+  Object.entries(KEYWORDS).map(([family, words]) => [family, new Set(words)])
+)
 for (const ext of [
   'ts',
   'tsx',
@@ -426,9 +429,8 @@ export function highlightLine(line: string, family: Family, state: HlState): Tok
     i = end + 1
   }
 
-  const words =
-    KEYWORDS[family === 'markup' || family === 'css' || family === 'json' ? 'c-like' : family] ?? []
-  const keywords = new Set(words)
+  const keywords =
+    KEYWORD_SETS[family === 'markup' || family === 'css' || family === 'json' ? 'c-like' : family]
 
   while (i < line.length) {
     const ch = line[i]
@@ -550,7 +552,7 @@ export function highlightLine(line: string, family: Family, state: HlState): Tok
       if (m) {
         const word = m[0]
         const after = line.slice(i + word.length)
-        if (keywords.has(word)) push(word, 'keyword')
+        if (keywords?.has(word)) push(word, 'keyword')
         else if (/^\s*\(/.test(after)) push(word, 'function')
         // A leading capital is a type in every language here that has types.
         else if (/^[A-Z]/.test(word) && family === 'c-like') push(word, 'type')

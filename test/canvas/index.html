@@ -29,6 +29,8 @@
       }
       .bar {
         display: flex;
+        flex-wrap: wrap;
+        flex-shrink: 0;
         gap: 8px;
         padding: 8px 12px;
         font: 12px system-ui;
@@ -48,15 +50,6 @@
   </head>
   <body>
     <div id="root"></div>
-    <!--
-      A mirror of the canvas bitmap. The harness copies the backing store into
-      this <img> after each check, which is what makes the render inspectable in
-      an environment that never composites the page (and therefore cannot take a
-      screenshot of it).
-    -->
-    <img id="mirror" alt="canvas readback" style="display: none" />
-    <!-- An ASCII downsample of the same bitmap: composition at a glance. -->
-    <pre id="ascii" style="display: none"></pre>
     <script type="module" src="./harness.tsx"></script>
   </body>
 </html>

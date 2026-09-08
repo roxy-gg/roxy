@@ -54,6 +54,9 @@ jobs:
       - name: Store guard (regression test over renderer source)
         run: npm run smoke:store
 
+      - name: Canvas diff and interaction model suite
+        run: npm run smoke:diff
+
   # The Electron-runtime suites: real SQLite migrations, the harness tool loop,
   # git/worktree operations, and (Linux only) the cookie jar + browser tools,
   # which need a real Chromium and so a virtual display.
@@ -119,6 +122,18 @@ jobs:
         env:
           SMOKE_TIMEOUT_MS: '300000'
         run: npm run smoke:app
+
+      - name: Canvas interactions (real Chromium input and clipboard menus)
+        if: runner.os == 'Linux'
+        env:
+          ELECTRON_DISABLE_SANDBOX: '1'
+        run: xvfb-run --auto-servernum npm run smoke:canvas
+
+      - name: Canvas session-switch performance budget
+        if: runner.os == 'Linux'
+        env:
+          ELECTRON_DISABLE_SANDBOX: '1'
+        run: xvfb-run --auto-servernum npm run perf:canvas
 
       - name: Multi-repo suite (composite worktrees, real git)
         run: npm run smoke:multirepo

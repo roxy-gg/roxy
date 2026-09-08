@@ -8,12 +8,13 @@
  * different.
  */
 
-import type { Block, HitAction, HitRegion, Node, SelectableLine } from './scene'
+import type { Block, HitAction, HitRegion, Node, Rect, ScrollRegion, SelectableLine } from './scene'
 import type { Font, TextRun, WrappedLine } from './text'
 import { TextMetrics, wrapSpans, type InlineSpan } from './text'
 import type { IconName } from './icons'
 import type { CanvasTheme } from './theme'
 import type { TFunction } from 'i18next'
+import { linkUrl } from './links'
 
 export class Builder {
   readonly metrics: TextMetrics
@@ -31,6 +32,8 @@ export class Builder {
   private readonly nodes: Node[] = []
   private readonly regions: HitRegion[] = []
   private readonly selectable: SelectableLine[] = []
+  private readonly scrollRegions: ScrollRegion[] = []
+  private clipRect: Rect | undefined
   /** Where nodes are appended — swapped while filling a clip's children. */
   private target: Node[] = this.nodes
   private lineCounter: { value: number }
@@ -157,14 +160,27 @@ export class Builder {
     opts: { lineGap?: number; selectable?: boolean } = {}
   ): number {
     const { lines, height } = wrapSpans(spans, maxWidth, this.metrics, opts.lineGap ?? 0)
-    this.push({ kind: 'lines', x, y, lines })
-    if (opts.selectable !== false) this.registerLines(lines, x, y)
+    this.lines(x, y, lines, opts.selectable !== false)
     return height
   }
 
   /** Emit pre-wrapped lines (used when a caller wrapped them itself). */
   lines(x: number, y: number, lines: WrappedLine[], selectable = true): void {
     this.push({ kind: 'lines', x, y, lines })
+    for (const line of lines) {
+      for (const run of line.runs) {
+        const href = run.href && linkUrl(run.href)
+        if (href)
+          this.region(
+            x + run.x,
+            y + line.y,
+            run.width,
+            line.height,
+            { type: 'link', href },
+            { title: href }
+          )
+      }
+    }
     if (selectable) this.registerLines(lines, x, y)
   }
 
@@ -184,7 +200,8 @@ export class Builder {
         height: line.height,
         runs: line.runs,
         text: line.runs.map((r) => r.text).join(''),
-        breakAfter: i === lines.length - 1
+        breakAfter: line.breakAfter || i === lines.length - 1,
+        clip: this.clipRect
       })
     })
   }
@@ -194,7 +211,14 @@ export class Builder {
    * terminal output and diffs, where lines are laid out by the block itself and
    * every row is a real line break.
    */
-  selectableRow(x: number, y: number, height: number, runs: TextRun[], text: string): void {
+  selectableRow(
+    x: number,
+    y: number,
+    height: number,
+    runs: TextRun[],
+    text: string,
+    options: { clip?: Rect; group?: string; breakAfter?: boolean } = {}
+  ): void {
     this.selectable.push({
       index: this.lineCounter.value++,
       x,
@@ -202,7 +226,9 @@ export class Builder {
       height,
       runs,
       text,
-      breakAfter: true
+      breakAfter: options.breakAfter ?? true,
+      clip: options.clip ?? this.clipRect,
+      group: options.group
     })
   }
 
@@ -214,6 +240,14 @@ export class Builder {
     action: HitAction,
     opts: { hover?: HitRegion['hover']; cursor?: HitRegion['cursor']; title?: string } = {}
   ): void {
+    if (this.clipRect) {
+      const bounds = intersect({ x, y, w, h }, this.clipRect)
+      x = bounds.x
+      y = bounds.y
+      w = bounds.w
+      h = bounds.h
+    }
+    if (w <= 0 || h <= 0) return
     this.regions.push({
       x,
       y,
@@ -226,20 +260,21 @@ export class Builder {
     })
   }
 
-  /**
-   * Emit a clipped subtree. Nodes produced by `fill` land inside the clip;
-   * regions and selectable lines do NOT, because they are resolved against the
-   * scene's own geometry and clipping them here would need the whole hit path to
-   * understand nesting. Blocks that clip scrollable content register their
-   * regions against the visible rect instead.
-   */
+  /** Paint, hit regions, and selections share the intersection of all parent clips. */
   clipped(x: number, y: number, w: number, h: number, radius: number, fill: () => void): void {
     const children: Node[] = []
     const previous = this.target
+    const previousClip = this.clipRect
+    this.clipRect = previousClip ? intersect(previousClip, { x, y, w, h }) : { x, y, w, h }
     this.target = children
     fill()
     this.target = previous
+    this.clipRect = previousClip
     this.push({ kind: 'clip', x, y, w, h, radius, children })
+  }
+
+  scrollRegion(region: ScrollRegion): void {
+    this.scrollRegions.push(region)
   }
 
   /** Wrap a subtree in a pulsing-opacity group. */
@@ -266,7 +301,19 @@ export class Builder {
       nodes: this.nodes,
       regions: this.regions,
       selectable: this.selectable,
+      scrollRegions: this.scrollRegions,
       animated: this.animated
     }
+  }
+}
+
+function intersect(a: Rect, b: Rect): Rect {
+  const x = Math.max(a.x, b.x)
+  const y = Math.max(a.y, b.y)
+  return {
+    x,
+    y,
+    w: Math.max(0, Math.min(a.x + a.w, b.x + b.w) - x),
+    h: Math.max(0, Math.min(a.y + a.h, b.y + b.h) - y)
   }
 }

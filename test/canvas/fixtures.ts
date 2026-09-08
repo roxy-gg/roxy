@@ -111,12 +111,28 @@ const NESTED: MessagePart[] = [
   { type: 'text', text: 'Found it — the entry point is `layoutTranscript`.' }
 ]
 
+const longLines = Array.from(
+  { length: 160 },
+  (_, i) => `export const item${i} = '${'value'.repeat(i === 40 ? 70 : 1)}'`
+)
+export const LARGE_DIFF = {
+  path: 'src/catalog.ts',
+  before: longLines.join('\n') + '\n',
+  after: longLines
+    .map((line, i) => (i === 5 || i === 80 || i === 159 ? line.replace('const', 'let') : line))
+    .join('\n')
+}
+
 export const FIXTURES: Message[] = [
   message('m1', 'user', [{ type: 'text', text: 'Replace the DOM transcript with canvas.' }], 1),
   message(
     'm2',
     'assistant',
     [
+      {
+        type: 'text',
+        text: 'Visit [the docs](https://example.com/docs) and [`API`](https://example.com/api).\n\nhttps://example.com/guide'
+      },
       { type: 'reasoning', text: 'The transcript is the hot path, so layout has to be cached.' },
       { type: 'text', text: "I'll start by reading the current renderer." },
       {
@@ -135,6 +151,15 @@ export const FIXTURES: Message[] = [
         title: 'src/greet.ts',
         output: 'ok',
         diff: { path: 'src/greet.ts', before: BEFORE, after: AFTER }
+      },
+      {
+        type: 'tool',
+        tool: 'edit',
+        state: 'done',
+        callId: 'large',
+        title: LARGE_DIFF.path,
+        diff: LARGE_DIFF,
+        output: 'updated'
       },
       {
         type: 'tool',
@@ -175,14 +200,38 @@ export const FIXTURES: Message[] = [
         callId: 'c7',
         title: 'Find the layout entry point',
         subChatId: 'sub-1',
-        children: NESTED,
+        children: [
+          ...NESTED,
+          {
+            type: 'tool',
+            tool: 'edit',
+            state: 'done',
+            callId: 'nested-diff',
+            title: LARGE_DIFF.path,
+            diff: LARGE_DIFF
+          }
+        ],
         output: 'The entry point is `layoutTranscript` in transcript.ts:57.'
       },
       { type: 'text', text: MARKDOWN }
     ],
     2
   ),
-  message('m3', 'user', [{ type: 'text', text: 'Now check the diff view and keep going.' }], 3)
+  message(
+    'm3',
+    'user',
+    [
+      {
+        type: 'image',
+        name: 'pixel.png',
+        mediaType: 'image/png',
+        dataUrl:
+          'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aP3sAAAAASUVORK5CYII='
+      },
+      { type: 'text', text: 'Now check the diff view and keep going.' }
+    ],
+    3
+  )
 ]
 
 /** A live turn — spinners, the activity strip, a running card. */
@@ -219,3 +268,35 @@ export const STREAMING: MessagePart[] = [
     ]
   }
 ]
+
+/** Enough prompts to exercise a bounded rail rather than mounting the entire index. */
+export const HISTORY_FIXTURES: Message[] = Array.from({ length: 80 }, (_, index) => {
+  const text =
+    index === 10
+      ? ''
+      : index === 11
+        ? 'Check this multiline request.\n\n' + 'Keep the layout readable. '.repeat(40)
+        : index === 79
+          ? 'Wrap up the canvas improvements.'
+          : `Question ${index + 1}: Make the chat experience feel more polished.`
+  const parts: MessagePart[] = text ? [{ type: 'text', text }] : [FIXTURES[2].parts[0]]
+  return [
+    {
+      ...message(`history-user-${index}`, 'user', parts, index * 2),
+      createdAt: Date.now() - (79 - index) * 60_000
+    },
+    message(
+      `history-assistant-${index}`,
+      'assistant',
+      [
+        {
+          type: 'text',
+          text:
+            'I will keep the change focused and check the result.\n\n' +
+            'A considered response with enough detail to fill the conversation. '.repeat(3)
+        }
+      ],
+      index * 2 + 1
+    )
+  ]
+}).flat()

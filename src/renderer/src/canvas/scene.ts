@@ -17,8 +17,23 @@
 import type { Font, TextRun, WrappedLine } from './text'
 import type { IconName } from './icons'
 import type { AnsiSpan } from './ansi'
-import type { DiffRow } from './diff'
 import type { Token } from './highlight'
+import type { DiffCommand, DiffViewState } from '../components/diff/model'
+
+export interface ViewState {
+  open: Set<string>
+  startedAt: Map<string, number>
+  images: Map<string, HTMLImageElement>
+  diffs: Map<string, DiffViewState>
+  scroll: Map<string, { left: number; top: number }>
+}
+
+export interface Rect {
+  x: number
+  y: number
+  w: number
+  h: number
+}
 
 /** Where a click lands. The scene is walked front-to-back to resolve one. */
 export type HitAction =
@@ -27,7 +42,17 @@ export type HitAction =
   | { type: 'cancel'; id: string }
   | { type: 'copy'; text: string }
   | { type: 'image'; src: string }
-  | { type: 'scroll'; id: string }
+  | { type: 'diff'; id: string; command: DiffCommand; gap?: number }
+  | { type: 'scroll'; id: string; left: number; top: number }
+
+export interface ScrollRegion extends Rect {
+  id: string
+  contentWidth: number
+  contentHeight: number
+  left: number
+  top: number
+  copyActions?: { label: string; text: string }[]
+}
 
 export interface HitRegion {
   x: number
@@ -50,6 +75,7 @@ export interface HitRegion {
  * yields the source text with its original line breaks.
  */
 export interface SelectableLine {
+  key?: string
   /** Ordinal across the whole transcript, assigned during layout. */
   index: number
   x: number
@@ -60,6 +86,10 @@ export interface SelectableLine {
   text: string
   /** True when a newline should follow this line in copied output. */
   breakAfter: boolean
+  /** Selection and hit testing use the same clipping rectangle as paint. */
+  clip?: Rect
+  /** Split diffs keep a drag on the source side where it began. */
+  group?: string
 }
 
 /** Every drawable. A discriminated union so paint is one exhaustive switch. */
@@ -131,17 +161,6 @@ export type Node =
       rows: AnsiSpan[][]
       defaultColor: string
     }
-  | {
-      kind: 'diff'
-      x: number
-      y: number
-      w: number
-      lineHeight: number
-      font: Font
-      rows: DiffRow[]
-      gutterWidth: number
-      palette: DiffPalette
-    }
   | { kind: 'clip'; x: number; y: number; w: number; h: number; radius: number; children: Node[] }
   | {
       kind: 'fade'
@@ -164,18 +183,6 @@ export type Node =
   /** Pulsing opacity — `animate-pulse`. Repaints while on screen. */
   | { kind: 'pulse'; children: Node[] }
 
-export interface DiffPalette {
-  addBg: string
-  delBg: string
-  addText: string
-  delText: string
-  gapBg: string
-  gutter: string
-  text: string
-  marker: string
-  gapText: string
-}
-
 /**
  * A laid-out block with its own vertical extent.
  *
@@ -190,6 +197,8 @@ export interface Block {
   nodes: Node[]
   regions: HitRegion[]
   selectable: SelectableLine[]
+  scrollRegions: ScrollRegion[]
+  copyText?: () => string
   /** True while this block is streaming, so paint knows to keep animating. */
   animated: boolean
 }
@@ -198,6 +207,9 @@ export interface Scene {
   blocks: Block[]
   height: number
   width: number
+  /** Range whose content has been measured; outside it only lightweight height estimates exist. */
+  window?: { start: number; end: number; scrollTop: number }
+  copyText?: () => string
 }
 
 /** Walk a node tree, in paint order. */
@@ -208,4 +220,32 @@ export function forEachNode(nodes: Node[], visit: (node: Node) => void): void {
       forEachNode(node.children, visit)
     }
   }
+}
+
+/** Respect translations and clips before decoding images, not just before painting them. */
+export function visibleImages(scene: Scene, top: number, height: number): Set<string> {
+  const sources = new Set<string>()
+  const walk = (nodes: Node[], offset: number, start: number, end: number): void => {
+    for (const node of nodes) {
+      if (
+        node.kind === 'image' &&
+        node.src !== '__roxy__' &&
+        node.y + offset < end &&
+        node.y + offset + node.h > start
+      )
+        sources.add(node.src)
+      else if (node.kind === 'group') walk(node.children, offset + (node.offsetY ?? 0), start, end)
+      else if (node.kind === 'pulse') walk(node.children, offset, start, end)
+      else if (node.kind === 'clip') {
+        const clippedStart = Math.max(start, node.y + offset)
+        const clippedEnd = Math.min(end, node.y + offset + node.h)
+        if (clippedStart < clippedEnd) walk(node.children, offset, clippedStart, clippedEnd)
+      }
+    }
+  }
+  for (const block of scene.blocks) {
+    if (block.y < top + height && block.y + block.height > top)
+      walk(block.nodes, 0, top, top + height)
+  }
+  return sources
 }

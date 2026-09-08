@@ -1,4 +1,5 @@
 @import 'tailwindcss';
+@source '../';
 
 @theme {
   /* Typography — Cursor-style geometric sans + mono */

@@ -156,6 +156,9 @@ const TOKENS: Record<keyof CanvasPalette, [cssVar: string, fallback: string]> = 
 }
 
 let epoch = 0
+let lastTheme: CanvasTheme | undefined
+let fontEpoch = 0
+let lastKey = ''
 
 /** Read the live tokens off <html> into a paintable theme. */
 export function readTheme(): CanvasTheme {
@@ -173,7 +176,11 @@ export function readTheme(): CanvasTheme {
     style.getPropertyValue('--font-sans').trim() || 'ui-sans-serif, system-ui, sans-serif'
   const mono = style.getPropertyValue('--font-mono').trim() || 'ui-monospace, monospace'
   const appearance = root.dataset.appearance === 'light' ? 'light' : 'dark'
-  return { palette, appearance, sans, mono, epoch: ++epoch }
+  const key = JSON.stringify([palette, appearance, sans, mono, fontEpoch, document.fonts.status])
+  if (lastTheme && key === lastKey) return lastTheme
+  lastKey = key
+  lastTheme = { palette, appearance, sans, mono, epoch: ++epoch }
+  return lastTheme
 }
 
 /**
@@ -193,7 +200,10 @@ export function observeTheme(onChange: (theme: CanvasTheme) => void): () => void
   // Fonts load after first paint; Geist arriving changes every measurement, so
   // re-read once the face is actually available.
   const fonts = (document as Document & { fonts?: FontFaceSet }).fonts
-  const onFonts = (): void => onChange(readTheme())
+  const onFonts = (): void => {
+    fontEpoch++
+    onChange(readTheme())
+  }
   fonts?.addEventListener?.('loadingdone', onFonts)
   return () => {
     observer.disconnect()

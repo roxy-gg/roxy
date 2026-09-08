@@ -10,8 +10,8 @@
  * `font`/`fillStyle` are tracked so redundant assignments are skipped.
  */
 
-import type { Block, DiffPalette, HitRegion, Node, Scene, SelectableLine } from './scene'
-import { fontCss, type Font, type TextRun } from './text'
+import type { Block, HitRegion, Node, Rect, Scene, SelectableLine } from './scene'
+import { fontCss, type Font, type TextRun, type TextMetrics } from './text'
 import type { CanvasTheme } from './theme'
 import { alpha, mix } from './theme'
 import { drawIcon, fillIcon } from './icons'
@@ -38,6 +38,7 @@ export interface PaintContext {
   images: Map<string, HTMLImageElement>
   /** Selection to highlight, in transcript space. */
   selection: SelectionRange | null
+  metrics: TextMetrics
 }
 
 export interface SelectionRange {
@@ -46,6 +47,8 @@ export interface SelectionRange {
   startChar: number
   endLine: number
   endChar: number
+  group?: string
+  all?: boolean
 }
 
 /** Track the last-assigned context state so redundant sets are skipped. */
@@ -207,17 +210,15 @@ function paintNode(node: Node, paint: PaintContext, pen: Pen): void {
       paintAnsi(node, paint, pen)
       return
 
-    case 'diff':
-      paintDiff(node, paint, pen)
-      return
-
     case 'clip': {
       ctx.save()
       ctx.beginPath()
-      ctx.rect(node.x, node.y, node.w, node.h)
-      ctx.clip()
+      ctx.clip(squircle(node.x, node.y, node.w, node.h, node.radius))
       pen.invalidate()
-      paintNodes(node.children, paint, pen)
+      const top = Math.max(paint.scrollTop, node.y)
+      const bottom = Math.min(paint.scrollTop + paint.viewportHeight, node.y + node.h)
+      if (bottom > top)
+        paintNodes(node.children, { ...paint, scrollTop: top, viewportHeight: bottom - top }, pen)
       ctx.restore()
       pen.invalidate()
       return
@@ -232,7 +233,7 @@ function paintNode(node: Node, paint: PaintContext, pen: Pen): void {
       if (node.offsetY) {
         ctx.save()
         ctx.translate(0, node.offsetY)
-        paintNodes(node.children, paint, pen)
+        paintNodes(node.children, { ...paint, scrollTop: paint.scrollTop - node.offsetY }, pen)
         ctx.restore()
         pen.invalidate()
       } else {
@@ -264,6 +265,10 @@ function paintRuns(
   const { ctx, theme } = paint
   // Chips first: they sit behind their glyphs.
   for (const run of runs) {
+    if (run.background) {
+      pen.setFill(run.background)
+      ctx.fillRect(x + run.x, y, run.width, lineHeight)
+    }
     if (!run.chipColor) continue
     pen.setFill(run.chipColor)
     const pad = 3
@@ -273,7 +278,7 @@ function paintRuns(
     pen.setFont(fontCss(run.font, theme))
     pen.setFill(run.color)
     const baseline = y + baselineOffset(run.font, lineHeight)
-    ctx.fillText(run.text, x + run.x, baseline)
+    if (run.text !== '\t') ctx.fillText(run.text, x + run.x, baseline)
     if (run.underline) {
       pen.setFill(run.color)
       ctx.fillRect(x + run.x, baseline + 2, run.width, 1)
@@ -313,6 +318,13 @@ function paintImage(node: Extract<Node, { kind: 'image' }>, paint: PaintContext,
       theme.palette.surface2,
       node.border ?? null
     )
+    if (node.src === '__roxy__') {
+      ctx.font = fontCss({ size: 15, weight: 600, family: 'sans', style: 'normal' }, theme)
+      ctx.fillStyle = theme.palette.textMuted
+      ctx.textAlign = 'center'
+      ctx.fillText('R', node.x + node.w / 2, node.y + node.h / 2 + 5)
+      ctx.textAlign = 'left'
+    }
     pen.invalidate()
     return
   }
@@ -410,62 +422,6 @@ function paintAnsi(node: Extract<Node, { kind: 'ansi' }>, paint: PaintContext, p
   pen.setFont(fontCss(node.font, theme))
 }
 
-function paintDiff(node: Extract<Node, { kind: 'diff' }>, paint: PaintContext, pen: Pen): void {
-  const { ctx, theme } = paint
-  const baseline = baselineOffset(node.font, node.lineHeight)
-  const top = paint.scrollTop
-  const bottom = top + paint.viewportHeight
-  const first = Math.max(0, Math.floor((top - node.y) / node.lineHeight))
-  const last = Math.min(node.rows.length - 1, Math.ceil((bottom - node.y) / node.lineHeight))
-  const advance = measureAdvance(ctx, node.font, theme)
-  const p: DiffPalette = node.palette
-  const numberFont: Font = { ...node.font, size: node.font.size - 1 }
-
-  for (let i = first; i <= last; i++) {
-    const row = node.rows[i]
-    const rowY = node.y + i * node.lineHeight
-
-    if (row.kind === 'gap') {
-      pen.setFill(p.gapBg)
-      ctx.fillRect(node.x, rowY, node.w, node.lineHeight)
-      pen.setFont(fontCss(numberFont, theme))
-      pen.setFill(p.gapText)
-      ctx.fillText(`⋯ ${row.label}`, node.x + node.gutterWidth, rowY + baseline)
-      continue
-    }
-
-    const line = row.line
-    if (line.op !== 'same') {
-      pen.setFill(line.op === 'add' ? p.addBg : p.delBg)
-      ctx.fillRect(node.x, rowY, node.w, node.lineHeight)
-    }
-
-    // Line numbers: before and after, so a diff can be read against either file.
-    pen.setFont(fontCss(numberFont, theme))
-    pen.setFill(p.gutter)
-    const half = node.gutterWidth / 2
-    ctx.textAlign = 'right'
-    if (line.before !== null) ctx.fillText(String(line.before), node.x + half - 4, rowY + baseline)
-    if (line.after !== null) {
-      ctx.fillText(String(line.after), node.x + node.gutterWidth - 8, rowY + baseline)
-    }
-    ctx.textAlign = 'left'
-
-    pen.setFont(fontCss(node.font, theme))
-    const marker = line.op === 'add' ? '+' : line.op === 'del' ? '−' : ' '
-    if (marker !== ' ') {
-      pen.setFill(line.op === 'add' ? p.addText : p.delText)
-      ctx.fillText(marker, node.x + node.gutterWidth, rowY + baseline)
-    }
-    pen.setFill(line.op === 'same' ? p.marker : p.text)
-    const textX = node.x + node.gutterWidth + advance * 2
-    // Clipped rather than wrapped: indentation is structure in a diff, and a
-    // wrapped continuation that starts at column zero destroys it.
-    const room = Math.max(0, Math.floor((node.x + node.w - textX) / advance))
-    ctx.fillText(line.text.slice(0, room), textX, rowY + baseline)
-  }
-}
-
 /**
  * Monospace advance, measured against the live context.
  *
@@ -497,7 +453,7 @@ function measureAdvance(ctx: CanvasRenderingContext2D, f: Font, theme: CanvasThe
  */
 function paintSelection(scene: Scene, paint: PaintContext, pen: Pen): void {
   const { ctx, theme, selection } = paint
-  if (!selection) return
+  if (!selection || selectionCollapsed(selection)) return
   const color = alpha(mix(theme.palette.accent, theme.palette.white, 0.1), 0.28)
   const [from, to] = normalizeSelection(selection)
   ctx.fillStyle = color
@@ -508,10 +464,20 @@ function paintSelection(scene: Scene, paint: PaintContext, pen: Pen): void {
     if (block.y > paint.scrollTop + paint.viewportHeight) break
     for (const line of block.selectable) {
       if (line.index < from.line || line.index > to.line) continue
+      if (selection.group && line.group !== selection.group) continue
       const startChar = line.index === from.line ? from.char : 0
       const endChar = line.index === to.line ? to.char : Infinity
-      const rect = charRange(line, startChar, endChar)
-      if (rect) ctx.fillRect(rect.x, line.y, rect.w, line.height)
+      const rect = charRange(line, startChar, endChar, paint.metrics)
+      if (rect) {
+        ctx.save()
+        if (line.clip) {
+          ctx.beginPath()
+          ctx.rect(line.clip.x, line.clip.y, line.clip.w, line.clip.h)
+          ctx.clip()
+        }
+        ctx.fillRect(rect.x, line.y, rect.w, line.height)
+        ctx.restore()
+      }
     }
   }
 }
@@ -529,7 +495,8 @@ function normalizeSelection(
 function charRange(
   line: SelectableLine,
   startChar: number,
-  endChar: number
+  endChar: number,
+  metrics: TextMetrics
 ): { x: number; w: number } | null {
   let consumed = 0
   let startX: number | null = null
@@ -537,12 +504,11 @@ function charRange(
   for (const run of line.runs) {
     const runStart = consumed
     const runEnd = consumed + run.text.length
-    const perChar = run.text.length > 0 ? run.width / run.text.length : 0
     if (startX === null && startChar <= runEnd) {
-      startX = line.x + run.x + Math.max(0, startChar - runStart) * perChar
+      startX = line.x + run.x + runAdvance(run, Math.max(0, startChar - runStart), metrics)
     }
     if (endChar <= runEnd) {
-      endX = line.x + run.x + Math.max(0, Math.min(run.text.length, endChar - runStart)) * perChar
+      endX = line.x + run.x + runAdvance(run, Math.max(0, endChar - runStart), metrics)
       break
     }
     endX = line.x + run.x + run.width
@@ -569,45 +535,103 @@ export function hitTest(scene: Scene, x: number, y: number): HitRegion | null {
 }
 
 /** The selectable line and character offset nearest a point. */
-export function hitText(scene: Scene, x: number, y: number): { line: number; char: number } | null {
+export function hitText(
+  scene: Scene,
+  x: number,
+  y: number,
+  metrics: TextMetrics,
+  options: { nearest?: boolean; group?: string } = {}
+): { line: number; char: number; group?: string } | null {
   let best: { line: SelectableLine; distance: number } | null = null
   for (const block of scene.blocks) {
-    if (y < block.y - 200 || y > block.y + block.height + 200) continue
+    if (!options.nearest && (y < block.y || y > block.y + block.height)) continue
     for (const line of block.selectable) {
-      const distance =
-        y < line.y ? line.y - y : y > line.y + line.height ? y - (line.y + line.height) : 0
+      if (options.group && line.group !== options.group) continue
+      if (!options.nearest && (y < line.y || y > line.y + line.height)) continue
+      const left = line.x + (line.runs[0]?.x ?? 0)
+      const right = line.runs.reduce(
+        (right, run) => Math.max(right, line.x + run.x + run.width),
+        left + 1
+      )
+      const bounds: Rect = { x: left, y: line.y, w: right - left, h: line.height }
+      if (line.clip) {
+        const end = Math.min(bounds.y + bounds.h, line.clip.y + line.clip.h)
+        bounds.y = Math.max(bounds.y, line.clip.y)
+        bounds.h = end - bounds.y
+        if (bounds.h <= 0) continue
+      }
+      if (
+        !options.nearest &&
+        (!contains(bounds, x, y) || (line.clip && !contains(line.clip, x, y)))
+      )
+        continue
+      const dx = x < left ? left - x : Math.max(0, x - right)
+      const dy = y < bounds.y ? bounds.y - y : Math.max(0, y - bounds.y - bounds.h)
+      const distance = dy * 10000 + dx
       if (!best || distance < best.distance) best = { line, distance }
-      if (distance === 0 && x >= line.x) best = { line, distance }
     }
   }
   if (!best) return null
-  return { line: best.line.index, char: charAt(best.line, x) }
+  const clippedX = best.line.clip
+    ? Math.max(best.line.clip.x, Math.min(x, best.line.clip.x + best.line.clip.w))
+    : x
+  return {
+    line: best.line.index,
+    char: charAt(best.line, clippedX, metrics),
+    group: best.line.group
+  }
 }
 
 /** Character offset within a line for an x coordinate. */
-function charAt(line: SelectableLine, x: number): number {
+function charAt(line: SelectableLine, x: number, metrics: TextMetrics): number {
   let consumed = 0
   for (const run of line.runs) {
     const left = line.x + run.x
     const right = left + run.width
     if (x < left) return consumed
     if (x <= right) {
-      const perChar = run.text.length > 0 ? run.width / run.text.length : 0
-      if (perChar === 0) return consumed
-      return consumed + Math.round((x - left) / perChar)
+      if (run.font.family === 'mono' && /^[\x20-\x7e]+$/.test(run.text))
+        return (
+          consumed +
+          Math.max(
+            0,
+            Math.min(run.text.length, Math.round((x - left) / (run.width / run.text.length)))
+          )
+        )
+      let boundaries = graphemes.get(run)
+      if (!boundaries) {
+        boundaries = Array.from(segmenter.segment(run.text), (segment) => segment.index)
+        boundaries.push(run.text.length)
+        graphemes.set(run, boundaries)
+      }
+      let low = 0
+      let high = boundaries.length - 1
+      while (low < high) {
+        const mid = Math.floor((low + high) / 2)
+        const a = runAdvance(run, boundaries[mid], metrics)
+        const b = runAdvance(run, boundaries[mid + 1], metrics)
+        if (x - left < (a + b) / 2) high = mid
+        else low = mid + 1
+      }
+      return consumed + boundaries[low]
     }
     consumed += run.text.length
   }
   return consumed
 }
 
+const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' })
+const graphemes = new WeakMap<TextRun, number[]>()
+
 /** The text of a selection, for the clipboard. */
 export function selectionText(scene: Scene, selection: SelectionRange): string {
+  if (selection.all && scene.copyText) return scene.copyText()
   const [from, to] = normalizeSelection(selection)
   const parts: string[] = []
   for (const block of scene.blocks) {
     for (const line of block.selectable) {
       if (line.index < from.line || line.index > to.line) continue
+      if (selection.group && line.group !== selection.group) continue
       const start = line.index === from.line ? from.char : 0
       const end = line.index === to.line ? to.char : line.text.length
       parts.push(line.text.slice(start, Math.max(start, end)))
@@ -618,6 +642,20 @@ export function selectionText(scene: Scene, selection: SelectionRange): string {
     }
   }
   return parts.join('')
+}
+
+export function selectionCollapsed(selection: SelectionRange): boolean {
+  return selection.startLine === selection.endLine && selection.startChar === selection.endChar
+}
+
+function runAdvance(run: TextRun, offset: number, metrics: TextMetrics): number {
+  if (offset >= run.text.length) return run.width
+  if (offset <= 0) return 0
+  return metrics.measure(run.text.slice(0, offset), run.font)
+}
+
+export function contains(rect: Rect, x: number, y: number): boolean {
+  return x >= rect.x && x < rect.x + rect.w && y >= rect.y && y < rect.y + rect.h
 }
 
 /** Every block that needs continuous repaint (spinners, pulses, live text). */

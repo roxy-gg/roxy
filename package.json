@@ -48,7 +48,10 @@
     "smoke:cookies": "esbuild test/cookies.ts --bundle --platform=node --format=cjs --packages=external --outfile=test/.out/cookies.cjs && electron test/.out/cookies.cjs",
     "smoke:i18n": "esbuild test/i18n.ts --bundle --platform=node --format=cjs --outfile=test/.out/i18n.cjs && node test/.out/i18n.cjs",
     "i18n:translate": "node script/i18n-translate.mjs",
-    "canvas": "vite --config test/canvas/vite.config.mjs"
+    "canvas": "vite --config test/canvas/vite.config.mjs",
+    "smoke:canvas": "electron test/canvas/smoke.cjs",
+    "perf:canvas": "electron test/canvas/performance.cjs",
+    "smoke:diff": "esbuild test/canvas/diff.ts --bundle --platform=node --format=cjs --packages=external --outfile=test/.out/diff.cjs && node test/.out/diff.cjs"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^2.0.85",
@@ -63,6 +66,7 @@
     "clsx": "^2.1.1",
     "d3-scale": "^4.0.2",
     "d3-shape": "^3.2.0",
+    "diff": "^9.0.0",
     "electron-updater": "^6.3.9",
     "i18next": "^25.10.10",
     "lucide-react": "^1.21.0",
@@ -70,6 +74,7 @@
     "qrcode.react": "^4.2.0",
     "react-i18next": "^16.6.6",
     "react-router-dom": "^7.18.0",
+    "shiki": "^4.4.3",
     "tailwind-merge": "^3.6.0",
     "tinyglobby": "^0.2.17",
     "ws": "^8.21.0",

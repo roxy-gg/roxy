@@ -52,9 +52,9 @@ import roxy from '../assets/roxy.png'
  * message's layout is cached by REFERENCE (its parts array never changes once
  * written to SQLite) so a streaming turn never re-measures the history above it.
  *
- * That makes the whole transcript affordable, so the window is gone: every
- * message in the session is rendered, and scrolling through a thousand of them
- * costs what scrolling through ten did.
+ * Large histories retain a height index for every message, but only nearby
+ * parts are measured into scene nodes. This includes long single-turn agent
+ * transcripts: opening a session must not re-layout thousands of old steps.
  *
  * The renderer lives in src/renderer/src/canvas/ -- text measurement, the
  * markdown and syntax-highlighting layers, the tool-card layouts, and the
@@ -98,38 +98,16 @@ export function ChatView(): JSX.Element {
   const cancelToolCall = useRoxyStore((s) => s.cancelToolCall)
 
   const hasContent = messages.length > 0 || (streaming !== null && streaming.length > 0)
-  // `messages` is cleared the instant you click a session and refilled only after
-  // the round trip, so an empty array on its own says nothing about whether the
-  // session HAS messages. Trusting it painted the empty state over every switch.
-  const loading = !hasContent && !messagesError && messagesChatId !== activeChatId
+  // Wait for history even when live tokens are available, so arrival paints the complete tail once.
+  const loading = !messagesError && messagesChatId !== activeChatId
   const isEmpty = !hasContent && !loading
   const [loopPaneOpen, setLoopPaneOpen] = useState(false)
   const [infoOpen, setInfoOpen] = useState(false)
 
-  // Scrolling, stick-to-bottom, virtualization and paging all live INSIDE the
-  // canvas transcript now.
-  //
-  // They have to: the canvas owns the geometry, so it is the only thing that
-  // knows how tall the conversation is or where a message begins. What was ~120
-  // lines of scroll arbitration here -- an arrival pin racing a reset, a
-  // self-scroll guard, two ResizeObservers, and a prepend anchor to keep the
-  // offset steady while older messages paged in -- collapses into the renderer,
-  // which re-places blocks without changing the scroll offset at all.
-  //
-  // This keeps only the one thing the PARENT is responsible for: forcing a jump
-  // to the newest message when the session changes.
-  const [pinSignal, setPinSignal] = useState(0)
+  // The keyed canvas owns bottom-first arrival and resize anchoring. Queue changes must not re-pin it.
   useLayoutEffect(() => {
     setInfoOpen(false)
-    setPinSignal((n) => n + 1)
   }, [activeChatId])
-
-  // Everything stacked below the transcript takes its height out of this pane's
-  // flex-1 -- the queue opening, the composer auto-growing, the workstream strip
-  // -- and none of that changes messages, so it has to be signalled by hand.
-  useLayoutEffect(() => {
-    setPinSignal((n) => n + 1)
-  }, [queue.length])
   const activeChat = chats.find((c) => c.id === activeChatId)
   const isSub = activeChat?.kind === 'sub'
   const parentChat = activeChat?.parentId
@@ -324,7 +302,6 @@ export function ChatView(): JSX.Element {
           messages={messages}
           streaming={streaming}
           chatId={activeChatId}
-          pinSignal={pinSignal}
           onCancelSubagent={(subChatId) => void cancelSubagent(subChatId)}
           onCancelTool={(callId) => void cancelToolCall(callId)}
         />

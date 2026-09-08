@@ -15,25 +15,15 @@
 import type { TFunction } from 'i18next'
 import type { Message, MessagePart } from '@shared/types'
 import { Builder } from './builder'
-import type { Block, Scene } from './scene'
+import type { Block, Scene, ViewState } from './scene'
 import { TextMetrics, font } from './text'
 import type { CanvasTheme } from './theme'
 import { alpha } from './theme'
 import { FONT_SIZE, SIZE, SPACE } from './metrics'
 import { layoutMarkdown, layoutPlainText } from './prose'
 import { layoutToolCard, type ToolCardInput } from './tool-card'
-
-/** View state the transcript owns but does not persist. */
-export interface ViewState {
-  /** Card ids that are expanded. */
-  open: Set<string>
-  /** Reasoning block ids that are expanded. */
-  openReasoning: Set<string>
-  /** callId → when we first saw it running, for the cancel reveal delay. */
-  startedAt: Map<string, number>
-  /** Decoded images, keyed by data URL. */
-  images: Map<string, HTMLImageElement>
-}
+import { PROMPT_GUTTER } from './prompt-history'
+import { TranscriptWindow } from './transcript-window'
 
 export interface LayoutInput {
   messages: Message[]
@@ -44,6 +34,14 @@ export interface LayoutInput {
   theme: CanvasTheme
   view: ViewState
   now: number
+  language?: string
+  viewport?: {
+    top: number
+    height: number
+    tail: boolean
+    targetId?: string
+    selectionKeys?: string[]
+  }
   /** Which calls can actually be cancelled (the store knows; layout does not). */
   canCancel: (part: Extract<MessagePart, { type: 'tool' }>) => boolean
   /**
@@ -60,35 +58,33 @@ export interface LayoutInput {
 /** How long a call must run before its cancel button appears. */
 const CANCEL_REVEAL_MS = 1200
 
-/** The avatar images, decoded once and shared by every message. */
-export interface Avatars {
-  assistant: HTMLImageElement | null
-}
-
-export function layoutTranscript(input: LayoutInput, avatars: Avatars, cache: BlockCache): Scene {
+export function layoutTranscript(input: LayoutInput, cache: BlockCache): Scene {
   const { messages, streaming, width, theme, view } = input
-  const column = Math.min(SPACE.columnMax, width - SPACE.columnPadX * 2)
-  const x = Math.max(SPACE.columnPadX, (width - column) / 2)
+  const availableWidth =
+    width - (messages.some((message) => message.role === 'user') ? PROMPT_GUTTER : 0)
+  const column = Math.max(1, Math.min(SPACE.columnMax, availableWidth - SPACE.columnPadX * 2))
+  const x = Math.max(SPACE.columnPadX, (availableWidth - column) / 2)
+  if (input.viewport && cache.windowed(input.messages, input.streaming))
+    return cache.window.layout(input, x, column)
 
   const blocks: Block[] = []
   let y = SPACE.columnPadTop
   const counter = { value: 0 }
 
   for (const message of messages) {
-    const cached = cache.get(message, column, theme.epoch, view)
+    const cached = cache.get(message, availableWidth, theme.epoch, view, input.t)
     if (cached) {
       // Reuse, but re-place: an earlier message growing shifts everything below
       // it, and only `y` changes — the node geometry inside is relative to the
       // block's own origin, so a shifted block is still correct.
-      const moved = cached.y === y ? cached : shiftBlock(cached, y - cached.y)
-      cache.store(message, column, theme.epoch, view, moved)
+      const moved = shiftBlock(cached, y - cached.y, counter.value)
       blocks.push(moved)
       y += moved.height
       counter.value += moved.selectable.length
       continue
     }
-    const block = layoutMessage(input, avatars, message, x, y, column, counter)
-    cache.store(message, column, theme.epoch, view, block)
+    const block = layoutMessage(input, message, x, y, column, counter)
+    cache.store(message, availableWidth, theme.epoch, view, block, input.t)
     blocks.push(block)
     y += block.height
   }
@@ -96,7 +92,6 @@ export function layoutTranscript(input: LayoutInput, avatars: Avatars, cache: Bl
   if (streaming !== null) {
     const block = layoutMessage(
       input,
-      avatars,
       {
         id: '__streaming__',
         chatId: '',
@@ -119,8 +114,8 @@ export function layoutTranscript(input: LayoutInput, avatars: Avatars, cache: Bl
 }
 
 /** Move a cached block to a new vertical origin. */
-function shiftBlock(block: Block, delta: number): Block {
-  if (delta === 0) return block
+function shiftBlock(block: Block, delta: number, firstLine: number): Block {
+  if (delta === 0 && (block.selectable[0]?.index ?? firstLine) === firstLine) return block
   return {
     ...block,
     y: block.y + delta,
@@ -130,14 +125,19 @@ function shiftBlock(block: Block, delta: number): Block {
     // O(1) instead of O(nodes).
     nodes: [{ kind: 'group', children: block.nodes, offsetY: delta }],
     regions: block.regions.map((r) => ({ ...r, y: r.y + delta })),
-    selectable: block.selectable.map((l) => ({ ...l, y: l.y + delta }))
+    selectable: block.selectable.map((l, index) => ({
+      ...l,
+      index: firstLine + index,
+      y: l.y + delta,
+      clip: l.clip ? { ...l.clip, y: l.clip.y + delta } : undefined
+    })),
+    scrollRegions: block.scrollRegions.map((r) => ({ ...r, y: r.y + delta }))
   }
 }
 
 /** One message — avatar, name, then its parts. */
 function layoutMessage(
   input: LayoutInput,
-  avatars: Avatars,
   message: Message,
   x: number,
   y: number,
@@ -146,11 +146,37 @@ function layoutMessage(
   streaming = false
 ): Block {
   const builder = new Builder(input.metrics, input.theme, counter, input.t)
-  const palette = input.theme.palette
-  const isUser = message.role === 'user'
+  const body = layoutMessageHeader(builder, message.role === 'user', x, y, width)
+  let cursor = body.y
+  if (message.role === 'user') {
+    cursor += layoutUserBody(builder, message.parts, body.x, cursor, body.width)
+  } else {
+    cursor += layoutParts(
+      builder,
+      message.parts,
+      body.x,
+      cursor,
+      body.width,
+      input,
+      streaming,
+      `${message.id}/`
+    )
+  }
+  const height = cursor - y + SPACE.messagePadY
+  return { ...builder.finish(message.id, y, height), copyText: () => partsText(message.parts) }
+}
+
+export function layoutMessageHeader(
+  builder: Builder,
+  isUser: boolean,
+  x: number,
+  y: number,
+  width: number
+): { x: number; y: number; width: number } {
+  const palette = builder.palette
   const top = y + SPACE.messagePadY
   const bodyX = x + SPACE.messagePadX + SPACE.avatar + SPACE.avatarGap
-  const bodyWidth = width - SPACE.messagePadX * 2 - SPACE.avatar - SPACE.avatarGap
+  const bodyWidth = Math.max(1, width - SPACE.messagePadX * 2 - SPACE.avatar - SPACE.avatarGap)
 
   // Avatar.
   const avatarY = top + 2
@@ -165,7 +191,7 @@ function layoutMessage(
       palette.border
     )
     builder.icon(x + SPACE.messagePadX + 6, avatarY + 6, SIZE.icon, 'user', palette.textMuted)
-  } else if (avatars.assistant) {
+  } else {
     builder.push({
       kind: 'image',
       x: x + SPACE.messagePadX,
@@ -176,15 +202,6 @@ function layoutMessage(
       radius: SPACE.radiusLg,
       border: palette.border
     })
-  } else {
-    builder.rect(
-      x + SPACE.messagePadX,
-      avatarY,
-      SPACE.avatar,
-      SPACE.avatar,
-      SPACE.radiusLg,
-      palette.accent
-    )
   }
 
   const nameFont = font(FONT_SIZE.small, 500, 'sans')
@@ -195,35 +212,16 @@ function layoutMessage(
     nameFont,
     palette.textMuted
   )
-  let cursor = top + builder.metrics.lineHeight(nameFont) + 2
-
-  if (isUser) {
-    cursor += layoutUserBody(builder, message.parts, bodyX, cursor, bodyWidth, input)
-  } else {
-    cursor += layoutParts(
-      builder,
-      message.parts,
-      bodyX,
-      cursor,
-      bodyWidth,
-      input,
-      streaming,
-      `${message.id}/`
-    )
-  }
-
-  const height = cursor - y + SPACE.messagePadY
-  return builder.finish(message.id, y, height)
+  return { x: bodyX, y: top + builder.metrics.lineHeight(nameFont) + 2, width: bodyWidth }
 }
 
 /** A user turn: attached images, then plain text. */
-function layoutUserBody(
+export function layoutUserBody(
   builder: Builder,
   parts: MessagePart[],
   x: number,
   y: number,
-  width: number,
-  input: LayoutInput
+  width: number
 ): number {
   const palette = builder.palette
   let cursor = y
@@ -276,7 +274,6 @@ function layoutUserBody(
       size: FONT_SIZE.body
     })
   }
-  void input
   return cursor - y
 }
 
@@ -294,14 +291,16 @@ export function layoutParts(
   width: number,
   input: LayoutInput,
   streaming: boolean,
-  idPrefix: string
+  idPrefix: string,
+  firstIndex = 0,
+  indicator = true
 ): number {
   const palette = builder.palette
   let cursor = y
 
   parts.forEach((part, i) => {
     const isLast = i === parts.length - 1
-    const id = `${idPrefix}${i}`
+    const id = `${idPrefix}${firstIndex + i}`
 
     if (part.type === 'tool') {
       const card: ToolCardInput = {
@@ -310,6 +309,7 @@ export function layoutParts(
         open: input.view.open.has(id),
         live: part.state === 'running',
         cancellable: cancelReady(part, input),
+        view: input.view,
         renderNested: (nestedBuilder, children, nx, ny, nw, live, prefix) =>
           layoutParts(nestedBuilder, children, nx, ny, nw, input, streaming && live, prefix)
       }
@@ -322,7 +322,7 @@ export function layoutParts(
         builder,
         part.text,
         id,
-        input.view.openReasoning.has(id),
+        input.view.open.has(id),
         streaming && isLast,
         x,
         cursor,
@@ -363,7 +363,7 @@ export function layoutParts(
   const last = parts[parts.length - 1]
   const runningTool = last?.type === 'tool' && last.state === 'running'
   const liveText = (last?.type === 'text' || last?.type === 'reasoning') && last.text.trim() !== ''
-  if (streaming && !runningTool && !liveText) {
+  if (indicator && streaming && !runningTool && !liveText) {
     cursor += layoutThinking(
       builder,
       x,
@@ -498,7 +498,35 @@ function layoutThinking(builder: Builder, x: number, y: number, label: string): 
  * because each invalidates layout.
  */
 export class BlockCache {
-  private entries = new Map<string, { parts: MessagePart[]; key: string; block: Block }>()
+  readonly window = new TranscriptWindow()
+  private messages: Message[] | null = null
+  private units = 0
+  private characters = 0
+
+  windowed(messages: Message[], streaming: MessagePart[] | null): boolean {
+    if (this.messages !== messages) {
+      this.messages = messages
+      this.units = messages.reduce((n, message) => n + message.parts.length + 2, 0)
+      this.characters = messages.reduce(
+        (n, message) =>
+          n +
+          message.parts.reduce(
+            (size, part) => size + (part.type === 'text' ? part.text.length : 0),
+            0
+          ),
+        0
+      )
+    }
+    return (
+      this.units + (streaming?.length ?? 0) > 128 ||
+      this.characters > 60000 ||
+      (streaming?.some((part) => part.type === 'text' && part.text.length > 60000) ?? false)
+    )
+  }
+  private entries = new Map<
+    string,
+    { parts: MessagePart[]; key: string; block: Block; t: TFunction }
+  >()
 
   private viewKey(message: Message, view: ViewState): string {
     // Only the cards belonging to THIS message matter; a card opening elsewhere
@@ -506,29 +534,47 @@ export class BlockCache {
     const prefix = `${message.id}/`
     const open: string[] = []
     for (const id of view.open) if (id.startsWith(prefix)) open.push(id)
-    for (const id of view.openReasoning) if (id.startsWith(prefix)) open.push(`r${id}`)
+    for (const [id, state] of view.diffs)
+      if (id.startsWith(prefix)) open.push(`d${id}:${state.revision}`)
+    for (const [id, scroll] of view.scroll)
+      if (id.startsWith(prefix)) open.push(`s${id}:${scroll.left}:${scroll.top}`)
     return open.sort().join(',')
   }
 
-  get(message: Message, width: number, epoch: number, view: ViewState): Block | null {
+  get(message: Message, width: number, epoch: number, view: ViewState, t: TFunction): Block | null {
     const hit = this.entries.get(message.id)
     if (!hit) return null
-    if (hit.parts !== message.parts) return null
+    if (hit.parts !== message.parts || hit.t !== t) return null
     if (hit.key !== `${width}|${epoch}|${this.viewKey(message, view)}`) return null
     return hit.block
   }
 
-  store(message: Message, width: number, epoch: number, view: ViewState, block: Block): void {
+  store(
+    message: Message,
+    width: number,
+    epoch: number,
+    view: ViewState,
+    block: Block,
+    t: TFunction
+  ): void {
     this.entries.set(message.id, {
       parts: message.parts,
       key: `${width}|${epoch}|${this.viewKey(message, view)}`,
-      block
+      block,
+      t
     })
   }
 
   /** Drop everything — a session switch, or a theme change. */
   clear(): void {
     this.entries.clear()
+    this.window.clear()
+  }
+
+  detach(): void {
+    this.entries.clear()
+    this.messages = null
+    this.window.detach()
   }
 
   /** Forget messages that are no longer in the transcript. */
@@ -536,4 +582,34 @@ export class BlockCache {
     const live = new Set(messages.map((m) => m.id))
     for (const id of this.entries.keys()) if (!live.has(id)) this.entries.delete(id)
   }
+}
+
+const recentLayouts = new Map<string, BlockCache>()
+export function transcriptCache(session: string): BlockCache {
+  let cache = recentLayouts.get(session)
+  if (!cache) cache = new BlockCache()
+  recentLayouts.delete(session)
+  recentLayouts.set(session, cache)
+  while (recentLayouts.size > 4) recentLayouts.delete(recentLayouts.keys().next().value!)
+  return cache
+}
+
+export function partsText(parts: MessagePart[]): string {
+  return parts
+    .map((part) => {
+      if (part.type === 'text' || part.type === 'reasoning') return part.text
+      if (part.type === 'image') return part.name ?? ''
+      return [
+        part.tool,
+        part.title,
+        part.output,
+        part.diff?.before,
+        part.diff?.after,
+        part.children && partsText(part.children)
+      ]
+        .filter(Boolean)
+        .join('\n')
+    })
+    .filter(Boolean)
+    .join('\n\n')
 }

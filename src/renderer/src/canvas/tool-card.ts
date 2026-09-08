@@ -18,14 +18,16 @@
  */
 
 import type { TFunction } from 'i18next'
-import type { MessagePart, ToolDiff } from '@shared/types'
+import type { MessagePart } from '@shared/types'
 import type { Builder } from './builder'
+import type { ViewState } from './scene'
 import type { IconName } from './icons'
 import { FONT_SIZE, SIZE, SPACE } from './metrics'
 import { font } from './text'
-import { alpha, mix } from './theme'
-import { layoutPlainText, familyFor } from './prose'
-import { collapse, diffLines, diffStats, type DiffRow } from './diff'
+import { alpha } from './theme'
+import { layoutPlainText } from './prose'
+import { layoutDiffViewer } from '../components/diff/layout'
+import { createDiffState } from '../components/diff/model'
 import { highlight, tokenColors } from './highlight'
 import { ANSI_BG, ANSI_DEFAULT_FG, ANSI_PROMPT, parseAnsi } from './ansi'
 
@@ -89,6 +91,7 @@ export interface ToolCardInput {
   live: boolean
   /** Set when a cancel is genuinely available for this call. */
   cancellable: boolean
+  view: ViewState
   /** Renders a subagent's transcript. Supplied by the transcript layout. */
   renderNested?: (
     builder: Builder,
@@ -114,7 +117,7 @@ export function layoutToolCard(
   const { part, id, open, live } = input
   const palette = builder.palette
   const top = y + SPACE.cardMarginY
-  const body = (part.output ?? '').trimEnd()
+  const body = open ? (part.output ?? '').trimEnd() : ''
   const nested = part.children && part.children.length > 0 ? part.children : undefined
   const showNested = Boolean(nested && input.renderNested)
 
@@ -122,6 +125,18 @@ export function layoutToolCard(
   // the body is laid out — its height IS the body's height. So the frame takes a
   // reserved slot here and is filled in at the end.
   const frame = builder.slot()
+  // Broad controls register first so the cancel button can win hit testing.
+  builder.region(
+    x,
+    top,
+    width,
+    HEADER_HEIGHT,
+    { type: 'toggle', id },
+    {
+      hover: 'card',
+      title: builder.t(open ? 'transcript.collapse' : 'transcript.expand')
+    }
+  )
 
   let cursor = top + HEADER_HEIGHT
   const contentWidth = width - 2
@@ -132,7 +147,17 @@ export function layoutToolCard(
 
   if (open) {
     if (part.diff) {
-      cursor += layoutDiffBody(builder, part.diff, x + 1, cursor, contentWidth)
+      let state = input.view.diffs.get(id)
+      if (
+        !state ||
+        state.document.before !== part.diff.before ||
+        state.document.after !== part.diff.after ||
+        state.document.path !== part.diff.path
+      ) {
+        state = createDiffState(part.diff.path, part.diff.before, part.diff.after)
+        input.view.diffs.set(id, state)
+      }
+      cursor += layoutDiffViewer(builder, id, state, input.view, x + 1, cursor, contentWidth)
     } else if (part.tool === 'read' && part.state === 'done' && body && !part.image) {
       cursor += layoutFileBody(builder, part.title ?? 'file.txt', body, x + 1, cursor, contentWidth)
     } else if (part.tool === 'bash' || part.tool === 'bash_output') {
@@ -162,20 +187,6 @@ export function layoutToolCard(
   })
 
   layoutHeader(builder, input, x, top, width)
-
-  // The whole header toggles; the body does not, so a click inside a terminal
-  // pane can select text rather than collapsing the thing you are reading.
-  builder.region(
-    x,
-    top,
-    width,
-    HEADER_HEIGHT,
-    { type: 'toggle', id },
-    {
-      hover: 'card',
-      title: builder.t(open ? 'transcript.collapse' : 'transcript.expand')
-    }
-  )
 
   return height + SPACE.cardMarginY * 2
 }
@@ -393,139 +404,6 @@ function activity(parts: MessagePart[], t: TFunction): { label: string; step: nu
   return { label: line ? line.slice(0, 120) : t('transcript.activityWriting'), step }
 }
 
-/** A unified diff for a write/edit card. */
-function layoutDiffBody(
-  builder: Builder,
-  diff: ToolDiff,
-  x: number,
-  y: number,
-  width: number
-): number {
-  const palette = builder.palette
-  const lines = diffLines(diff.before, diff.after)
-  const rows = collapse(lines, 3, (count) => builder.t('transcript.unchanged', { count }))
-  const stats = diffStats(lines)
-  const codeFont = font(FONT_SIZE.small, 400, 'mono')
-  const lineHeight = builder.metrics.lineHeight(codeFont)
-
-  builder.hairline(x, y, width, palette.border)
-  let cursor = y + 1
-
-  // A summary strip. The DOM diff had no counts; a card that says "+12 -3"
-  // before you open it is the single most useful thing about a diff, and it is
-  // free to compute here since the diff was needed anyway.
-  const statFont = font(FONT_SIZE.micro, 500, 'mono')
-  const summaryHeight = 20
-  builder.rect(x, cursor, width, summaryHeight, 0, palette.surface)
-  const added = `+${stats.added}`
-  const removed = `−${stats.removed}`
-  const addedWidth = builder.metrics.measure(added, statFont)
-  builder.text(x + SPACE.bodyPadX, cursor + 4, added, statFont, palette.success)
-  builder.text(x + SPACE.bodyPadX + addedWidth + 8, cursor + 4, removed, statFont, palette.danger)
-  const copyLabel = builder.t('transcript.copy')
-  const copyFont = font(FONT_SIZE.micro, 500, 'sans')
-  const copyWidth = builder.metrics.measure(copyLabel, copyFont)
-  builder.text(
-    x + width - SPACE.bodyPadX - copyWidth,
-    cursor + 4,
-    copyLabel,
-    copyFont,
-    palette.textSubtle
-  )
-  builder.region(
-    x + width - SPACE.bodyPadX - copyWidth - 6,
-    cursor,
-    copyWidth + 12,
-    summaryHeight,
-    { type: 'copy', text: diff.after },
-    { hover: 'subtle', title: builder.t('transcript.copyNewContents') }
-  )
-  builder.hairline(x, cursor + summaryHeight - 1, width, palette.border)
-  cursor += summaryHeight
-
-  // Gutter wide enough for the larger of the two line numbers.
-  const maxLineNo = Math.max(lines.length, 1)
-  const gutterWidth =
-    builder.metrics.advance(font(FONT_SIZE.micro, 400, 'mono')) * String(maxLineNo).length * 2 + 22
-
-  const bodyHeight = Math.min(SIZE.diffMax, rows.length * lineHeight + SPACE.bodyPadY * 2)
-  const diffPalette = {
-    addBg: mix(palette.surface, palette.success, 0.16),
-    delBg: mix(palette.surface, palette.danger, 0.16),
-    addText: palette.text,
-    delText: palette.text,
-    gapBg: palette.surface2,
-    gutter: palette.textSubtle,
-    text: palette.text,
-    marker: palette.textMuted,
-    gapText: palette.textSubtle
-  }
-
-  builder.rect(x, cursor, width, bodyHeight, 0, palette.surface)
-  builder.clipped(x, cursor, width, bodyHeight, 0, () => {
-    builder.push({
-      kind: 'diff',
-      x,
-      y: cursor + SPACE.bodyPadY,
-      w: width,
-      lineHeight,
-      font: codeFont,
-      rows,
-      gutterWidth,
-      palette: diffPalette
-    })
-  })
-
-  registerDiffSelection(
-    builder,
-    rows,
-    x + gutterWidth,
-    cursor + SPACE.bodyPadY,
-    lineHeight,
-    codeFont,
-    bodyHeight,
-    cursor
-  )
-  return 1 + summaryHeight + bodyHeight
-}
-
-/** Make the visible diff rows selectable, so a hunk can be copied. */
-function registerDiffSelection(
-  builder: Builder,
-  rows: DiffRow[],
-  x: number,
-  y: number,
-  lineHeight: number,
-  f: ReturnType<typeof font>,
-  maxHeight: number,
-  clipTop: number
-): void {
-  const advance = builder.metrics.advance(f)
-  rows.forEach((row, i) => {
-    const rowY = y + i * lineHeight
-    if (rowY + lineHeight < clipTop || rowY > clipTop + maxHeight) return
-    if (row.kind === 'gap') return
-    const prefix = row.line.op === 'add' ? '+' : row.line.op === 'del' ? '-' : ' '
-    const text = prefix + row.line.text
-    builder.selectableRow(
-      x,
-      rowY,
-      lineHeight,
-      [
-        {
-          text,
-          font: f,
-          color: builder.palette.text,
-          x: 0,
-          width: advance * text.length,
-          offset: 0
-        }
-      ],
-      text
-    )
-  })
-}
-
 /** A `read` card's contents, syntax-highlighted. */
 function layoutFileBody(
   builder: Builder,
@@ -538,7 +416,7 @@ function layoutFileBody(
   const palette = builder.palette
   const codeFont = font(FONT_SIZE.small, 400, 'mono')
   const lineHeight = builder.metrics.lineHeight(codeFont)
-  const rows = highlight(contents, familyFor(name))
+  const rows = highlight(contents, name)
   const colors = tokenColors(builder.theme.appearance)
   const gutterWidth =
     builder.metrics.advance(font(FONT_SIZE.micro, 400, 'mono')) * String(rows.length).length + 20
@@ -583,7 +461,8 @@ function layoutFileBody(
       y + 1 + SPACE.bodyPadY + i * lineHeight,
       lineHeight,
       runs,
-      text
+      text,
+      { clip: { x, y: y + 1, w: width, h: height } }
     )
   })
   return 1 + height
@@ -701,7 +580,8 @@ function layoutTerminalBody(
       selY,
       lineHeight,
       [{ text: value, font: codeFont, color, x: 0, width: advance * value.length, offset: 0 }],
-      value
+      value,
+      { clip: { x, y: y + 1, w: width, h: height } }
     )
     selY += lineHeight
   }

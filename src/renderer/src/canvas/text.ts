@@ -191,6 +191,8 @@ export interface TextRun {
    * the original text rather than the wrapped fragments.
    */
   offset: number
+  /** Intraline diff background, separate from inline-code chips. */
+  background?: string
 }
 
 export interface WrappedLine {
@@ -199,6 +201,7 @@ export interface WrappedLine {
   y: number
   height: number
   width: number
+  breakAfter?: boolean
 }
 
 /** An unwrapped piece of styled text, as the markdown parser produces it. */
@@ -211,6 +214,7 @@ export interface InlineSpan {
   chipColor?: string
   href?: string
   offset: number
+  background?: string
 }
 
 /**
@@ -228,16 +232,17 @@ export function wrapSpans(
   metrics: TextMetrics,
   lineGap = 0
 ): { lines: WrappedLine[]; height: number } {
+  maxWidth = Math.max(1, maxWidth)
   const lines: WrappedLine[] = []
   let runs: TextRun[] = []
   let x = 0
   let lineHeight = 0
   let y = 0
 
-  const flush = (): void => {
+  const flush = (breakAfter = false): void => {
     // An empty line still occupies a row (a blank line in a code block).
     const height = (lineHeight || (spans[0] ? metrics.lineHeight(spans[0].font) : 16)) + lineGap
-    lines.push({ runs, y, height, width: x })
+    lines.push({ runs, y, height, width: x, breakAfter })
     y += height
     runs = []
     x = 0
@@ -248,8 +253,12 @@ export function wrapSpans(
     if (span.text === '') continue
     // Explicit newlines split before anything else is considered.
     const paragraphs = span.text.split('\n')
+    let paragraphOffset = span.offset
     for (let p = 0; p < paragraphs.length; p++) {
-      if (p > 0) flush()
+      if (p > 0) {
+        flush(true)
+        paragraphOffset += paragraphs[p - 1].length + 1
+      }
       const chunk = paragraphs[p]
       if (chunk === '') {
         lineHeight = Math.max(lineHeight, metrics.lineHeight(span.font))
@@ -260,7 +269,7 @@ export function wrapSpans(
       const tokens = chunk.match(/\S+\s*|\s+/g) ?? []
       let cursor = 0
       for (const token of tokens) {
-        const tokenOffset = span.offset + cursor
+        const tokenOffset = paragraphOffset + cursor
         cursor += token.length
         const trimmed = token.replace(/\s+$/, '')
         // Measured without its trailing space: a word that only overflows
@@ -274,16 +283,21 @@ export function wrapSpans(
           let restOffset = tokenOffset
           while (rest !== '') {
             const room = maxWidth - x
-            let take = rest.length
-            // Binary search the largest prefix that fits.
+            // Grow a bounded prefix instead of repeatedly measuring half of a megabyte-long token.
             let lo = 1
-            let hi = rest.length
+            let hi = Math.min(16, rest.length)
+            while (hi < rest.length && metrics.measure(rest.slice(0, hi), span.font) <= room) {
+              lo = hi
+              hi = Math.min(rest.length, hi * 2)
+            }
             while (lo < hi) {
               const mid = (lo + hi + 1) >> 1
               if (metrics.measure(rest.slice(0, mid), span.font) <= room) lo = mid
               else hi = mid - 1
             }
-            take = Math.max(1, lo)
+            let take = Math.max(1, lo)
+            if (take < rest.length && /[\uD800-\uDBFF]/.test(rest[take - 1]))
+              take = take === 1 ? 2 : take - 1
             const piece = rest.slice(0, take)
             const width = metrics.measure(piece, span.font)
             if (width > room && x > 0) {
@@ -305,6 +319,7 @@ export function wrapSpans(
       }
     }
   }
-  if (runs.length > 0 || lines.length === 0) flush()
+  if (runs.length > 0 || lines.length === 0 || spans[spans.length - 1]?.text.endsWith('\n'))
+    flush(true)
   return { lines, height: y }
 }

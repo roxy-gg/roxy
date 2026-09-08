@@ -90,7 +90,7 @@ export function parseMarkdown(src: string): MdBlock[] {
     }
 
     // Thematic break — checked before lists, since `***` and `---` are both.
-    if (/^(\s*[-*_])(\s*\1?){2,}\s*$/.test(line) && /^[\s\-*_]+$/.test(trimmed)) {
+    if (/^(?:-{3,}|\*{3,}|_{3,})$/.test(trimmed.replace(/[ \t]/g, ''))) {
       blocks.push({ type: 'rule' })
       i++
       continue
@@ -179,6 +179,8 @@ export function parseMarkdown(src: string): MdBlock[] {
       body.push(l.trim())
       i++
     }
+    // A streamed heading marker like "# " can look like a boundary without being a heading yet.
+    if (body.length === 0) body.push(lines[i++].trim())
     const text = body.join(' ')
     if (text !== '') blocks.push({ type: 'paragraph', inlines: parseInline(text), text })
   }
