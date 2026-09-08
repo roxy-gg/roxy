@@ -2725,6 +2725,22 @@ console.log('\nremote workspace ipc parity\n')
     preload.includes('removeListener(CHANNELS.remoteDelta')
   )
   check('main emits remote:delta', service.includes('CHANNELS.remoteDelta'))
+  check(
+    'persisted desktop messages refresh the remote transcript',
+    /CHANNELS\.messagesAdd[\s\S]{0,300}remote\.notifyTranscriptChanged\(input\.chatId\)/.test(
+      handlers
+    )
+  )
+  check(
+    'remote transcript refresh sends an authoritative snapshot',
+    /function notifyTranscriptChanged[\s\S]{0,300}sendSnapshot\(sessionId\)/.test(service)
+  )
+  check(
+    'phone turns reconcile before becoming idle',
+    /active\.liveTurns\.get\(sessionId\)[\s\S]{0,300}sendSnapshot\(sessionId\)[\s\S]{0,200}state: 'idle'/.test(
+      service
+    )
+  )
 
   // ---- chats:updated parity ----
   // The push that keeps the workstream strip honest. `worktree_path`, `branch`

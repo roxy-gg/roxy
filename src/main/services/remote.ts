@@ -542,6 +542,9 @@ async function runTurn(
     // prompts aren't permanently rejected; only clear if we still own it.
     if (active.turns.get(sessionId) === controller) active.turns.delete(sessionId)
     if (active.liveTurns.get(sessionId) === acc) active.liveTurns.delete(sessionId)
+    // Deltas make the turn feel live; this snapshot makes it reliable. It also
+    // covers aborts and failures that complete without emitting a text event.
+    sendSnapshot(sessionId)
     sendFrameFor(active, { t: 'turn', sessionId, state: 'idle' })
     // Drop the desktop's live bubble; the persisted reply (bumped above) is
     // reconciled from disk by the renderer's mirror, so this hands off cleanly.
@@ -580,6 +583,21 @@ async function drainRemoteQueue(active: Share, sessionId: string): Promise<void>
  */
 export function notifyQueueChanged(): void {
   if (share) sendQueue(share.currentSessionId)
+}
+
+/**
+ * Reconcile a desktop-persisted message with the phone's transcript.
+ *
+ * Live deltas remain the fast path, but they are not an authoritative record:
+ * a provider can fail before emitting one, a local command never enters the LLM
+ * stream, and a guest can connect between two events. The renderer persists both
+ * sides of a desktop turn through `messages:add`, so publishing a snapshot from
+ * that boundary guarantees the phone eventually shows the same transcript.
+ */
+export function notifyTranscriptChanged(sessionId: string): void {
+  const active = share
+  if (!active || active.currentSessionId !== sessionId) return
+  sendSnapshot(sessionId)
 }
 
 // --- Relaying a *desktop-driven* turn to the phone -------------------------

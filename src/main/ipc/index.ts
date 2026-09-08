@@ -361,7 +361,11 @@ export function registerIpc(): void {
 
   // ---- messages ----
   ipcMain.handle(CHANNELS.messagesList, (_e, chatId: string) => repo.listMessages(chatId))
-  ipcMain.handle(CHANNELS.messagesAdd, (_e, input: AddMessageInput) => repo.addMessage(input))
+  ipcMain.handle(CHANNELS.messagesAdd, (_e, input: AddMessageInput) => {
+    const message = repo.addMessage(input)
+    remote.notifyTranscriptChanged(input.chatId)
+    return message
+  })
 
   // ---- integrations ----
   ipcMain.handle(CHANNELS.integrationsList, () => repo.listIntegrations())
