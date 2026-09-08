@@ -1,5 +1,5 @@
 import './bridge'
-import { StrictMode, useEffect, useMemo, useState } from 'react'
+import { lazy, StrictMode, Suspense, useEffect, useMemo, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import '@fontsource-variable/geist/index.css'
 import '@fontsource-variable/geist-mono/index.css'
@@ -12,6 +12,10 @@ import { FIXTURES, STREAMING, LARGE_DIFF, HISTORY_FIXTURES, TERMINAL_FIXTURES } 
 import { PerformanceHarness } from './PerformanceHarness'
 import { AnimationHarness } from './AnimationHarness'
 import { startMotion } from '../../src/renderer/src/lib/motion'
+
+const BotsHarness = lazy(() =>
+  import('./BotsHarness').then((module) => ({ default: module.BotsHarness }))
+)
 
 document.documentElement.dataset.platform = 'win32'
 const stopMotion = startMotion()
@@ -145,7 +149,11 @@ function Harness(): JSX.Element {
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    {new URLSearchParams(location.search).has('animation') ? (
+    {new URLSearchParams(location.search).has('bots') ? (
+      <Suspense>
+        <BotsHarness />
+      </Suspense>
+    ) : new URLSearchParams(location.search).has('animation') ? (
       <AnimationHarness />
     ) : new URLSearchParams(location.search).has('performance') ? (
       <PerformanceHarness />

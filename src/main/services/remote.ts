@@ -14,33 +14,16 @@
  * put. `start` mints + connects, `stop` tears down + revokes, and `remote:state`
  * pushes keep the desktop dialog live.
  */
-import { randomUUID } from 'node:crypto'
 import { BrowserWindow } from 'electron'
 import { is } from '@electron-toolkit/utils'
 import WebSocket from 'ws'
 import { CHANNELS } from '../../shared/ipc'
-import type {
-  ChatMessage,
-  LlmEvent,
-  ModelInfo,
-  RemoteDelta,
-  RemotePhase,
-  RemoteState,
-  RemoteStartInput
-} from '../../shared/api'
+import type { LlmEvent, RemotePhase, RemoteState, RemoteStartInput } from '../../shared/api'
 import type { Message } from '../../shared/types'
-import { reconstructTurn } from '../../shared/tool-history'
-import { PartsFold, partsToContent } from '../../shared/parts'
-import { pruneToolMessages, KEEP_RECENT_TOKENS } from '../../shared/context'
-import {
-  clampReasoningEffort,
-  contextBudgetFor,
-  resolveSessionConfig
-} from '../../shared/session-config'
+import { PartsFold } from '../../shared/parts'
 import * as repo from '../db/repo'
-import { listModels } from './models'
-import { pickDefaultModel } from '../../shared/models'
-import { runSessionTurn } from './session-turn'
+import { enqueuePrompt } from './automation'
+import { stopTurn } from './turn-state'
 import { track, trackFeature } from './track'
 import { sessionCwd } from './workspace'
 import {
@@ -62,9 +45,6 @@ const WS_BASE = HTTP_BASE.replace(/^http/, 'ws')
 
 /** Reconnect backoff (ms) after an unexpected host-socket drop; then give up. */
 const RECONNECT_DELAYS_MS = [1_000, 2_000, 5_000, 10_000, 15_000]
-
-/** Reserve for the system prompt (prepended inside runAgentTurn) in the window cut. */
-const SYSTEM_RESERVE_TOKENS = 6_000
 
 /** The mint response from `POST /api/remote/sessions`. */
 interface MintResponse {
@@ -89,12 +69,6 @@ interface Share {
   guests: number
   phase: RemotePhase
   error?: string
-  /** Abort handles for in-flight remote turns, keyed by sessionId (one per session). */
-  turns: Map<string, AbortController>
-  /** Sessions with an in-flight *desktop-driven* turn (via `llm:start`), tracked
-   *  through the relay hooks so a phone prompt queues behind a local turn instead
-   *  of starting a second concurrent one on the same session. */
-  localTurns: Set<string>
   /** Live parts accumulators for in-flight turns, so a guest that joins/switches
    *  mid-turn can be seeded with the reply-so-far (keyed by sessionId). */
   liveTurns: Map<string, PartsFold>
@@ -132,19 +106,6 @@ function broadcast(): void {
   const state = toState()
   for (const win of BrowserWindow.getAllWindows()) {
     if (!win.isDestroyed()) win.webContents.send(CHANNELS.remoteState, state)
-  }
-}
-
-/**
- * Push a phone-driven turn's live event to every open window so the desktop
- * mirrors the reply token-by-token (the local `llm:delta` twin for remote turns).
- * Share-bound: a no-op once `active` is no longer the current share, so a stale
- * turn can't leak deltas into a replaced session.
- */
-function broadcastDeltaFor(active: Share, payload: RemoteDelta): void {
-  if (share !== active) return
-  for (const win of BrowserWindow.getAllWindows()) {
-    if (!win.isDestroyed()) win.webContents.send(CHANNELS.remoteDelta, payload)
   }
 }
 
@@ -314,257 +275,18 @@ function switchSession(sessionId: string): void {
   bump()
 }
 
-// --- Turn assembly (mirrors the renderer's buildChatMessages) --------------
-
-/**
- * Rebuild the chat-completion history for a session within the context budget —
- * the main-process twin of the renderer's `buildChatMessages`. The real system
- * prompt (and any compaction summary) is prepended inside `runAgentTurn`, so it's
- * only reserved for here, not materialized.
- */
-function buildRemoteMessages(
-  sessionId: string,
-  contextBudget: number,
-  outputReserve: number
-): ChatMessage[] {
-  const chat = repo.getChat(sessionId)
-  const since = chat?.contextSummaryAt ?? 0
-  // Group each persisted turn so the window cut can never split an assistant's
-  // tool_calls from the matching role:'tool' results (which would 400 providers).
-  const groups = repo
-    .listMessages(sessionId)
-    .filter((m) => (m.role === 'user' || m.role === 'assistant') && m.createdAt > since)
-    .map(reconstructTurn)
-    .filter((g) => g.length > 0)
-
-  // Prune older tool outputs to a head/tail preview before the cut, then zip back
-  // into groups so tool_calls stay paired with their results.
-  const flatAll = groups.flat()
-  const prunedFlat = pruneToolMessages(flatAll, { keepRecentTokens: KEEP_RECENT_TOKENS })
-  let pk = 0
-  const prunedGroups = groups.map((g) => g.map(() => prunedFlat[pk++]))
-
-  const cap = Math.max(2000, contextBudget - outputReserve - SYSTEM_RESERVE_TOKENS)
-  const estimate = (m: ChatMessage): number =>
-    Math.ceil((m.content.length + (m.toolCalls ? JSON.stringify(m.toolCalls).length : 0)) / 4) +
-    (m.images?.length ?? 0) * 800
-  const groupTokens = (g: ChatMessage[]): number => g.reduce((n, m) => n + estimate(m), 0)
-
-  const kept: ChatMessage[][] = []
-  let used = 0
-  for (let i = prunedGroups.length - 1; i >= 0; i--) {
-    const tokens = groupTokens(prunedGroups[i])
-    if (used + tokens > cap && kept.length > 0) break
-    kept.unshift(prunedGroups[i])
-    used += tokens
-  }
-  const flat = kept.flat()
-  // Normalize the leading edge to a user message (Anthropic requires it and a
-  // dangling assistant/tool would orphan a tool_use). The current prompt is at
-  // the tail, so this only trims stale boundary turns.
-  while (flat.length && flat[0].role !== 'user') flat.shift()
-  return flat
-}
-
-// --- The crux: run a guest's prompt exactly like a local one ---------------
-
-/**
- * Is a turn already in flight for this session — from *either* end? A phone turn
- * lives in `turns`; a desktop turn (via `llm:start`) is tracked in `localTurns`
- * through the relay hooks. Both queue gates consult this so the phone and desktop
- * share one FIFO instead of each only respecting its own in-flight turn.
- */
-function isSessionBusy(active: Share, sessionId: string): boolean {
-  return active.turns.has(sessionId) || active.localTurns.has(sessionId)
-}
-
-/**
- * Handle a prompt typed on the phone. Mirrors the desktop's `submit`: if a turn
- * is already running for this session — from the phone OR the desktop — or prompts
- * are already queued, append it to the shared FIFO instead of starting a second
- * turn. Otherwise run it now. The queue is the same persisted `repo` queue the
- * desktop uses, so the pending list stays identical on both ends.
- */
+/** Phone prompts join the same durable queue as desktop and scheduled prompts. */
 async function handlePrompt(sessionId: string, text: string): Promise<void> {
   const active = share
   if (!active || !text.trim()) return
-  if (!repo.getChat(sessionId)) {
-    sendFrame({ t: 'error', message: 'That session no longer exists.' })
-    return
-  }
-  // A turn is already running for this session (either end) — or prompts are
-  // already queued — so queue this one (FIFO), mirror the updated queue to the
-  // phone(s), and nudge the desktop so its queue view refreshes too. Draining
-  // happens automatically when the current turn ends. (Matches the desktop's
-  // single gate: queue while a turn is in flight or a backlog already exists.)
-  if (isSessionBusy(active, sessionId) || repo.listQueue(sessionId).length > 0) {
-    repo.enqueue(sessionId, text.trim())
-    sendQueue(sessionId)
-    bumpFor(active)
-    return
-  }
-  await runTurn(active, sessionId, text.trim(), false)
-}
-
-/**
- * Run one turn for a guest's prompt, exactly like a local one, then drain the
- * next queued prompt (if any). Called by `handlePrompt` for a fresh prompt and
- * by `drainRemoteQueue` for each dequeued one — neither re-checks the busy guard,
- * so a drained prompt actually runs rather than re-queuing behind itself.
- *
- * `announce` is true for a drained queue item: the phone never echoed it (it only
- * had it in the pending list), so the host sends the user text on `turn:running`
- * for the phone to show its bubble. A direct phone send echoes locally, so it's
- * false there to avoid a double bubble.
- */
-async function runTurn(
-  active: Share,
-  sessionId: string,
-  text: string,
-  announce: boolean
-): Promise<void> {
-  // Serialize turns *per session*: claim the slot synchronously so two quick
-  // prompts can't start concurrent turns on the same session (mirrors the
-  // renderer's guard). Different sessions can still run independently. Also
-  // yields to an in-flight desktop turn (tracked in `localTurns`).
-  if (isSessionBusy(active, sessionId)) {
-    // A turn slipped in first — fall back to queuing so nothing is lost.
-    repo.enqueue(sessionId, text)
-    sendQueue(sessionId)
-    bumpFor(active)
-    return
-  }
-  const controller = new AbortController()
-  active.turns.set(sessionId, controller)
-  // Register the live accumulator up-front so a guest that joins/switches during
-  // this turn (even mid provider-resolution) is seeded with the reply-so-far.
-  const acc = new PartsFold()
-  active.liveTurns.set(sessionId, acc)
-
   try {
-    // Persist the user's message as if typed locally, then nudge the desktop.
-    repo.addMessage({ chatId: sessionId, role: 'user', content: text })
-    bumpFor(active)
-    // Announce the prompt text for a drained queue item so the phone shows its
-    // bubble (a direct send already echoed it locally). `sendQueue` above already
-    // removed it from the pending list, so it moves cleanly from queue → turn.
-    sendFrameFor(active, {
-      t: 'turn',
-      sessionId,
-      state: 'running',
-      userText: announce ? text : undefined
-    })
-    // Mirror the turn start to the desktop so it opens a live bubble now (the
-    // user message was just persisted + bumped above; the reply streams next).
-    broadcastDeltaFor(active, { sessionId, kind: 'turn', state: 'running' })
-
-    // Resolve THIS SESSION's config, exactly as the renderer does - through the
-    // one shared resolver, so a phone turn runs on the model the desktop shows
-    // for that session rather than whatever was last picked globally.
-    const settings = repo.getSettings()
-    const config = resolveSessionConfig(repo.getChat(sessionId), settings)
-    const providers = repo.listConnectedProviders()
-    const provider = providers.find((p) => p.id === config.providerId) ?? providers[0] ?? null
-    if (!provider) {
-      sendFrameFor(active, { t: 'error', message: 'No provider is connected on the desktop.' })
-      return
-    }
-    // Fetch the catalog first so we can pick the provider's latest tool-capable
-    // model when none was explicitly chosen (mirrors the renderer). A hardcoded
-    // id may not exist on this provider, which would 404 the first phone turn.
-    let catalog: ModelInfo[] = []
-    try {
-      catalog = await listModels(provider.id)
-    } catch {
-      // Offline model catalog — fall back to conservative defaults below.
-    }
-    const model =
-      (config.providerId === provider.id ? config.model : null) ||
-      provider.defaultModel ||
-      pickDefaultModel(catalog) ||
-      (provider.id === 'github-copilot' ? 'gpt-4o' : 'gpt-4o-mini')
-    const info = catalog.find((m) => m.id === model)
-    const modelContext = info?.contextLimit ?? 128_000
-    const contextBudget = contextBudgetFor(config.contextLimit, modelContext)
-    const messages = buildRemoteMessages(sessionId, contextBudget, info?.outputLimit ?? 4096)
-
-    const result = await runSessionTurn(
-      {
-        requestId: randomUUID(),
-        sessionId,
-        providerId: provider.id,
-        model,
-        messages,
-        // The session's own mode: a session left in Plan mode stays read-only
-        // when it is driven from the phone.
-        agentId: config.agentId,
-        reasoning: info?.reasoning ?? false,
-        // Same clamp as the desktop send path: the session's effort is sticky,
-        // the model's ladder is not, and an unsupported level 400s the turn.
-        reasoningEffort: clampReasoningEffort(config.reasoningEffort, info?.reasoningEfforts),
-        contextLimit: contextBudget
-      },
-      (event) => {
-        acc.apply(event)
-        sendFrameFor(active, { t: 'delta', sessionId, event })
-        // Fan the same event to the desktop renderer so the PC streams the reply
-        // live, exactly like a local turn (the phone and desktop stay in lockstep).
-        broadcastDeltaFor(active, { sessionId, kind: 'event', event })
-      },
-      controller.signal
-    )
-
-    // Persist the assistant reply (mirrors the renderer's post-stream persistence)
-    // so the desktop transcript updates and the next turn keeps the context.
-    const parts = acc.parts
-    if (!result.ok && !controller.signal.aborted) {
-      parts.push({ type: 'text', text: `_\u26a0 ${result.error ?? 'Model request failed.'}_` })
-    }
-    if (parts.length) {
-      repo.addMessage({
-        chatId: sessionId,
-        role: 'assistant',
-        content: partsToContent(parts),
-        parts
-      })
-    }
-    bumpFor(active)
-  } finally {
-    // Always release the turn slot (even on an unexpected throw) so future
-    // prompts aren't permanently rejected; only clear if we still own it.
-    if (active.turns.get(sessionId) === controller) active.turns.delete(sessionId)
-    if (active.liveTurns.get(sessionId) === acc) active.liveTurns.delete(sessionId)
-    sendFrameFor(active, { t: 'turn', sessionId, state: 'idle' })
-    // Drop the desktop's live bubble; the persisted reply (bumped above) is
-    // reconciled from disk by the renderer's mirror, so this hands off cleanly.
-    broadcastDeltaFor(active, { sessionId, kind: 'turn', state: 'idle' })
-    // A turn stopped by the user shouldn't auto-run the backlog — a phone abort
-    // leaves the queued prompts in place (the phone can drain them with a fresh
-    // send, mirroring the desktop's Stop). Otherwise drain the next queued prompt.
-    if (!controller.signal.aborted) void drainRemoteQueue(active, sessionId)
-  }
-}
-
-/**
- * Run the next pending prompt for a session, chaining until the queue is empty.
- * Each dequeued prompt runs through `runTurn`, which drains again when it ends —
- * so the whole backlog streams to the phone one turn at a time. A no-op if the
- * share was replaced, a turn is already running, or the queue is empty.
- */
-async function drainRemoteQueue(active: Share, sessionId: string): Promise<void> {
-  if (share !== active || isSessionBusy(active, sessionId)) return
-  const items = repo.listQueue(sessionId)
-  if (items.length === 0) {
+    enqueuePrompt(sessionId, text)
     sendQueue(sessionId)
-    return
+    bumpFor(active)
+  } catch (error) {
+    sendFrame({ t: 'error', message: error instanceof Error ? error.message : String(error) })
   }
-  const next = items[0]
-  repo.removeQueueItem(next.id)
-  sendQueue(sessionId)
-  bumpFor(active)
-  await runTurn(active, sessionId, next.content, true)
 }
-
 /**
  * Re-broadcast the shared queue to the phone(s) after a *desktop-side* change
  * (the renderer added/removed/reordered a queued prompt). Called from the queue
@@ -572,6 +294,11 @@ async function drainRemoteQueue(active: Share, sessionId: string): Promise<void>
  */
 export function notifyQueueChanged(): void {
   if (share) sendQueue(share.currentSessionId)
+}
+
+/** Reconcile queued turns and out-of-band bot replies with the phone transcript. */
+export function notifyTranscriptChanged(sessionId: string): void {
+  if (share?.currentSessionId === sessionId) sendSnapshot(sessionId)
 }
 
 // --- Relaying a *desktop-driven* turn to the phone -------------------------
@@ -598,9 +325,6 @@ export interface LocalTurnRelay {
 export function relayLocalTurnStart(sessionId: string, userText?: string): LocalTurnRelay | null {
   const active = share
   if (!active) return null
-  // Mark the session busy so a phone prompt queues behind this desktop turn
-  // instead of starting a second concurrent one (the shared busy gate).
-  active.localTurns.add(sessionId)
   const acc = new PartsFold()
   active.liveTurns.set(sessionId, acc)
   // `userText` mirrors the drained-queue announce path: the phone never echoed a
@@ -627,15 +351,10 @@ export function relayLocalTurnEvent(relay: LocalTurnRelay, event: LlmEvent): voi
  * `finishTurn`); the phone's own authoritative snapshot reconciles it on the next
  * switch/reconnect.
  *
- * We deliberately do NOT drain the shared queue here: the desktop renderer's
- * `finishTurn` already drains it after a local turn (via `drainQueue`), so a
- * prompt the phone queued behind this turn runs as the desktop's next send.
- * Kicking `drainRemoteQueue` too would race that renderer drain into two
- * concurrent turns on the same session.
+ * Queue ownership belongs to automation; relay teardown never drains or cancels it.
  */
 export function relayLocalTurnEnd(relay: LocalTurnRelay): void {
   const { active, sessionId, acc } = relay
-  active.localTurns.delete(sessionId)
   if (active.liveTurns.get(sessionId) === acc) active.liveTurns.delete(sessionId)
   sendFrameFor(active, { t: 'turn', sessionId, state: 'idle' })
 }
@@ -735,14 +454,18 @@ function onFrame(raw: string): void {
       break
     }
     case 'abort': {
-      share.turns.get(share.currentSessionId)?.abort()
+      stopTurn(share.currentSessionId)
       break
     }
     case 'dequeue': {
       // Phone tapped × on a queued prompt — drop it from the shared queue and
       // re-broadcast so both ends update. `bump` refreshes the desktop's view.
       if (typeof frame.id === 'string') {
-        repo.removeQueueItem(frame.id)
+        try {
+          repo.removeQueueItem(frame.id)
+        } catch (error) {
+          sendFrame({ t: 'error', message: error instanceof Error ? error.message : String(error) })
+        }
         sendQueue(share.currentSessionId)
         bump()
       }
@@ -787,9 +510,6 @@ function teardown(): void {
     clearTimeout(active.reconnectTimer)
     active.reconnectTimer = null
   }
-  for (const controller of active.turns.values()) controller.abort()
-  active.turns.clear()
-  active.localTurns.clear()
   active.liveTurns.clear()
   const sock = active.socket
   active.socket = null
@@ -889,8 +609,6 @@ async function startInternal(input: RemoteStartInput): Promise<RemoteState> {
     socket: null,
     guests: 0,
     phase: 'starting',
-    turns: new Map(),
-    localTurns: new Set(),
     liveTurns: new Map(),
     reconnectAttempts: 0,
     reconnectTimer: null,

@@ -290,8 +290,8 @@ export type FeatureId =
   | 'worktree'
   /** The built-in browser was driven. */
   | 'browser'
-  /** A scheduled loop was created. */
-  | 'loop'
+  /** A persistent bot was used. */
+  | 'bot'
   /** The conversation was auto-compacted. */
   | 'compaction'
   /** A session was forked. */
@@ -307,7 +307,7 @@ export const FEATURE_IDS: FeatureId[] = [
   'background_task',
   'worktree',
   'browser',
-  'loop',
+  'bot',
   'compaction',
   'fork',
   'plan_mode'
@@ -365,11 +365,12 @@ const REPORTABLE_TOOLS = new Set<string>([
   'browser_activate_tab',
   'browser_close',
   // Automation
-  'loop_create',
-  'loop_remove',
-  'loop_list',
-  'loop_enable',
-  'loop_disable',
+  'bot_manage',
+  'bot_schedule',
+  'bot_invoke',
+  'project_list',
+  'session_manage',
+  'queue_manage',
   'change_session_metadata',
   // Agents
   'task',

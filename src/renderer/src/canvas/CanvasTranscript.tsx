@@ -6,6 +6,8 @@ import { transcriptCache, layoutTranscript } from './transcript'
 import type { HitAction } from './scene'
 import { promptEntries } from './prompt-history'
 import roxyLogo from '../assets/roxy.png'
+import { useRoxyStore } from '../lib/store'
+import { botAvatarUrl } from '../components/BotAvatar'
 
 export type { CanvasProbe } from './CanvasSurface'
 
@@ -55,6 +57,8 @@ export function CanvasTranscript({
   const [logo, setLogo] = useState(() => decodedLogo)
   const [clock, setClock] = useState(0)
   const prompts = useMemo(() => promptEntries(messages), [messages])
+  const bots = useRoxyStore((s) => s.bots)
+  const ownBot = bots.find((bot) => bot.chatId === chatId)
 
   useEffect(() => () => cache.detach(), [cache])
 
@@ -90,6 +94,9 @@ export function CanvasTranscript({
           ...context,
           messages,
           streaming,
+          botUsername: ownBot?.username,
+          bots,
+          botAvatar: botAvatarUrl,
           canCancel: (part) => {
             if (part.tool === 'task') return Boolean(part.subChatId)
             return (
@@ -101,7 +108,7 @@ export function CanvasTranscript({
         cache
       )
     },
-    [messages, streaming, clock, logo, cache]
+    [messages, streaming, clock, logo, cache, bots, ownBot?.username]
   )
 
   const onAction = (action: HitAction): void => {

@@ -237,47 +237,23 @@ export const TOOLS: ToolDef[] = [
     interruptible: false
   },
 
-  // ---- Automation (recurring loops + this session's metadata) ----
-  {
-    id: 'loop_create',
-    name: 'loop_create',
-    description: 'Create a scheduled loop that re-runs a prompt every N minutes.',
-    category: 'Automation',
-    mutates: true,
+  // ---- Bots and cross-session coordination ----
+  ...[
+    'project_list',
+    'session_manage',
+    'bot_manage',
+    'bot_schedule',
+    'bot_invoke',
+    'queue_manage'
+  ].map((id) => ({
+    id,
+    name: id,
+    description: 'Persistent bots, schedules, and cross-session coordination.',
+    icon: 'Bot',
+    category: 'Automation' as const,
+    mutates: id !== 'project_list',
     interruptible: false
-  },
-  {
-    id: 'loop_remove',
-    name: 'loop_remove',
-    description: 'Delete a loop by name or id.',
-    category: 'Automation',
-    mutates: true,
-    interruptible: false
-  },
-  {
-    id: 'loop_list',
-    name: 'loop_list',
-    description: 'List scheduled loops and whether each is running.',
-    category: 'Automation',
-    mutates: false,
-    interruptible: false
-  },
-  {
-    id: 'loop_enable',
-    name: 'loop_enable',
-    description: 'Resume a paused loop by name or id.',
-    category: 'Automation',
-    mutates: true,
-    interruptible: false
-  },
-  {
-    id: 'loop_disable',
-    name: 'loop_disable',
-    description: 'Pause a running loop by name or id.',
-    category: 'Automation',
-    mutates: true,
-    interruptible: false
-  },
+  })),
   {
     id: 'change_session_metadata',
     name: 'change_session_metadata',

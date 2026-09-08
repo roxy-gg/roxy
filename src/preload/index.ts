@@ -22,6 +22,36 @@ import type { MotionPreference } from '../shared/motion'
  * to an ipcMain.handle channel registered in src/main/ipc/index.ts.
  */
 const roxy: RoxyApi = {
+  bots: {
+    list: () => ipcRenderer.invoke(CHANNELS.botsList),
+    create: (username) => ipcRenderer.invoke(CHANNELS.botsCreate, username),
+    update: (id, patch) => ipcRenderer.invoke(CHANNELS.botsUpdate, id, patch),
+    remove: (id) => ipcRenderer.invoke(CHANNELS.botsRemove, id),
+    jobs: (botId) => ipcRenderer.invoke(CHANNELS.botsJobs, botId),
+    saveJob: (input, id) => ipcRenderer.invoke(CHANNELS.botsSaveJob, input, id),
+    removeJob: (id) => ipcRenderer.invoke(CHANNELS.botsRemoveJob, id),
+    runJob: (id) => ipcRenderer.invoke(CHANNELS.botsRunJob, id),
+    onChanged: (callback) => {
+      const handler = (): void => callback()
+      ipcRenderer.on(CHANNELS.botsChanged, handler)
+      return () => ipcRenderer.removeListener(CHANNELS.botsChanged, handler)
+    }
+  },
+  automation: {
+    snapshot: () => ipcRenderer.invoke(CHANNELS.automationSnapshot),
+    wake: () => ipcRenderer.invoke(CHANNELS.automationWake),
+    onChanged: (callback) => {
+      const handler = (_event: Electron.IpcRendererEvent, chatId: string): void => callback(chatId)
+      ipcRenderer.on(CHANNELS.automationChanged, handler)
+      return () => ipcRenderer.removeListener(CHANNELS.automationChanged, handler)
+    },
+    onDelta: (callback) => {
+      const handler = (_event: Electron.IpcRendererEvent, payload: RemoteDelta): void =>
+        callback(payload)
+      ipcRenderer.on(CHANNELS.automationDelta, handler)
+      return () => ipcRenderer.removeListener(CHANNELS.automationDelta, handler)
+    }
+  },
   settings: {
     getAll: () => ipcRenderer.invoke(CHANNELS.settingsGetAll),
     setActiveProvider: (providerId, model) =>
@@ -152,17 +182,6 @@ const roxy: RoxyApi = {
     export: () => ipcRenderer.invoke(CHANNELS.configExport),
     import: () => ipcRenderer.invoke(CHANNELS.configImport)
   },
-  loops: {
-    list: () => ipcRenderer.invoke(CHANNELS.loopsList),
-    create: (input) => ipcRenderer.invoke(CHANNELS.loopsCreate, input),
-    setEnabled: (id, enabled) => ipcRenderer.invoke(CHANNELS.loopsSetEnabled, id, enabled),
-    remove: (id) => ipcRenderer.invoke(CHANNELS.loopsRemove, id),
-    onTick: (callback) => {
-      const handler = (_event: Electron.IpcRendererEvent, loopId: string): void => callback(loopId)
-      ipcRenderer.on(CHANNELS.loopsTick, handler)
-      return () => ipcRenderer.removeListener(CHANNELS.loopsTick, handler)
-    }
-  },
   tools: {
     run: (sessionId, name, input) => ipcRenderer.invoke(CHANNELS.toolsRun, sessionId, name, input),
     cancel: (callId) => ipcRenderer.invoke(CHANNELS.toolsCancel, callId)
@@ -183,6 +202,7 @@ const roxy: RoxyApi = {
   },
   llm: {
     start: (input) => ipcRenderer.invoke(CHANNELS.llmStart, input),
+    finish: (requestId) => ipcRenderer.invoke(CHANNELS.llmFinish, requestId),
     abort: (requestId) => ipcRenderer.invoke(CHANNELS.llmAbort, requestId),
     abortSession: (sessionId) => ipcRenderer.invoke(CHANNELS.llmAbortSession, sessionId),
     onDelta: (callback) => {

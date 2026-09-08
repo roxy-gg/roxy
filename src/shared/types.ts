@@ -94,9 +94,9 @@ export interface DeviceFlowStart {
 /**
  * Every chat row is a session. Main sessions are the ones a user opens against a
  * workspace; sub sessions are spawned by the harness (e.g. the `task` tool);
- * loop sessions are driven by a scheduled Loop.
+ * bot sessions belong to persistent top-level bots and may have scheduled jobs.
  */
-export type SessionKind = 'main' | 'sub' | 'loop'
+export type SessionKind = 'main' | 'sub' | 'bot'
 
 /** A single item in a session's agent-maintained task checklist. */
 export interface SessionTask {
@@ -269,6 +269,9 @@ export interface Message {
   /** Ordered parts for rich rendering; falls back to a single text part. */
   parts: MessagePart[]
   createdAt: number
+  /** Bot identity is snapshotted so deleting/renaming a bot keeps old replies attributed. */
+  botId?: string
+  botUsername?: string
 }
 
 export interface AddMessageInput {
@@ -276,22 +279,8 @@ export interface AddMessageInput {
   role: MessageRole
   content: string
   parts?: MessagePart[]
-}
-
-// ---- Loops (scheduled agentic prompts) ---------------------------------------
-
-/** A Loop is a prompt that runs on a heartbeat (cron-like) into its own chat. */
-export interface Loop {
-  id: string
-  name: string
-  prompt: string
-  intervalMinutes: number
-  enabled: boolean
-  /** The chat this loop drives — its conversation + manual interventions. */
-  chatId: string
-  lastRunAt: number | null
-  nextRunAt: number
-  createdAt: number
+  botId?: string
+  botUsername?: string
 }
 
 /** Lightweight session status used by the list_sessions / check_session tools. */
@@ -331,7 +320,7 @@ export interface QueueImage {
   name?: string
 }
 
-/** A pending prompt queued on a chat (FIFO). Generic across sessions/loops/subagents. */
+/** A pending prompt queued on a chat (FIFO). Generic across sessions/bots/subagents. */
 export interface QueueItem {
   id: string
   chatId: string
@@ -339,6 +328,15 @@ export interface QueueItem {
   /** Images to send with the prompt when it's dequeued. */
   images?: QueueImage[]
   createdAt: number
+  sourceChatId?: string
+  /** Cross-chat requests may return their result to the source without starting another turn. */
+  replyToChatId?: string
+  /** Bounded across queued handoffs to prevent bot ping-pong. */
+  hops?: number
+  notBefore?: number
+  error?: string
+  /** Claimed items remain durable until their result has been persisted. */
+  state?: 'pending' | 'running' | 'failed'
 }
 
 // ---- Integrations & skills ---------------------------------------------------

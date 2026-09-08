@@ -382,8 +382,15 @@ check(
   )
 )
 check(
-  'loop tools registered',
-  ['loop_list', 'loop_enable', 'loop_disable'].every((id) => Boolean(getTool(id)))
+  'bot tools registered',
+  [
+    'project_list',
+    'session_manage',
+    'bot_manage',
+    'bot_schedule',
+    'bot_invoke',
+    'queue_manage'
+  ].every((id) => Boolean(getTool(id)))
 )
 check(
   'file/bash tools registered',
@@ -407,7 +414,7 @@ check(
 )
 check(
   'instant local tools offer no cancel button',
-  ['read', 'write', 'edit', 'list', 'loop_list', 'bash_list', 'change_session_metadata'].every(
+  ['read', 'write', 'edit', 'list', 'bot_manage', 'bash_list', 'change_session_metadata'].every(
     (id) => !isInterruptibleTool(id)
   )
 )
@@ -435,8 +442,8 @@ check(
     'skill',
     'lsp',
     'browser_close',
-    'loop_create',
-    'loop_remove',
+    'bot_manage',
+    'bot_schedule',
     'change_session_metadata'
   ].every((id) => Boolean(getTool(id)))
 )
@@ -2694,7 +2701,10 @@ console.log('\nremote workspace ipc parity\n')
     'preload unsubscribes from remote:delta',
     preload.includes('removeListener(CHANNELS.remoteDelta')
   )
-  check('main emits remote:delta', service.includes('CHANNELS.remoteDelta'))
+  check(
+    'phone prompts use the main-process queue',
+    service.includes('enqueuePrompt(sessionId, text)')
+  )
 
   // ---- chats:updated parity ----
   // The push that keeps the workstream strip honest. `worktree_path`, `branch`

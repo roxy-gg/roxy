@@ -41,7 +41,7 @@ roxy/
 │   ├── main/               # Electron main process (Node.js)
 │   │   ├── index.ts        # App lifecycle, window creation, service startup
 │   │   ├── harness/        # The agent loop: agent.ts (loop + tool schemas), tools.ts (dispatch)
-│   │   ├── services/       # llm.ts, aisdk.ts, mcp.ts, lsp.ts, skills.ts, browser.ts, loops.ts, …
+│   │   ├── services/       # llm.ts, aisdk.ts, mcp.ts, lsp.ts, skills.ts, browser.ts, automation.ts, …
 │   │   ├── db/             # better-sqlite3 store: schema, migrations, repo
 │   │   └── ipc/            # ipcMain handlers wiring the renderer to the harness/services
 │   ├── preload/            # Secure bridge between main and renderer (window.api)
@@ -108,8 +108,8 @@ The main process runs a single provider-agnostic agent loop; the renderer only s
   ([`services/mcp.ts`](src/main/services/mcp.ts)), language-server diagnostics fed back after edits
   ([`services/lsp.ts`](src/main/services/lsp.ts)), and on-demand `SKILL.md` skills
   ([`services/skills.ts`](src/main/services/skills.ts)). Roxy's own differentiators — the persistent
-  browser toolset ([`services/browser.ts`](src/main/services/browser.ts)) and recurring "loops"
-  ([`services/loops.ts`](src/main/services/loops.ts)) — run through the same loop.
+  browser toolset ([`services/browser.ts`](src/main/services/browser.ts)) and persistent [bots](BOTS.md)
+  ([`services/automation.ts`](src/main/services/automation.ts)) run through the same harness.
 
 ### Remote Workspace
 

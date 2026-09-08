@@ -198,6 +198,7 @@ async function runTurn(
       signal,
       emit
     })
+    if (signal.aborted) return { ok: false, error: 'Stopped.' }
     // The turn's subagents are one-shot — drop any with nothing queued so they
     // don't linger in the sidebar after the work is done. Spared: sub sessions
     // with a still-running background task (Phase 11), one still streaming, and
