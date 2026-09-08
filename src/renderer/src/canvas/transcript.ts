@@ -24,8 +24,12 @@ import { layoutMarkdown, layoutPlainText } from './prose'
 import { layoutToolCard, type ToolCardInput } from './tool-card'
 import { PROMPT_GUTTER } from './prompt-history'
 import { TranscriptWindow } from './transcript-window'
+import type { Bot } from '@shared/bots'
 
 export interface LayoutInput {
+  botUsername?: string
+  bots?: Bot[]
+  botAvatar?: (username: string) => string
   messages: Message[]
   /** The live turn's parts, or null when nothing is streaming. */
   streaming: MessagePart[] | null
@@ -146,7 +150,16 @@ function layoutMessage(
   streaming = false
 ): Block {
   const builder = new Builder(input.metrics, input.theme, counter, input.t)
-  const body = layoutMessageHeader(builder, message.role === 'user', x, y, width)
+  const username = messageBotUsername(input, message)
+  const body = layoutMessageHeader(
+    builder,
+    message.role === 'user',
+    x,
+    y,
+    width,
+    username,
+    username ? input.botAvatar?.(username) : undefined
+  )
   let cursor = body.y
   if (message.role === 'user') {
     cursor += layoutUserBody(builder, message.parts, body.x, cursor, body.width)
@@ -166,12 +179,23 @@ function layoutMessage(
   return { ...builder.finish(message.id, y, height), copyText: () => partsText(message.parts) }
 }
 
+export function messageBotUsername(input: LayoutInput, message: Message): string | undefined {
+  if (message.role !== 'assistant') return undefined
+  return (
+    input.bots?.find((bot) => bot.id === message.botId)?.username ??
+    message.botUsername ??
+    input.botUsername
+  )
+}
+
 export function layoutMessageHeader(
   builder: Builder,
   isUser: boolean,
   x: number,
   y: number,
-  width: number
+  width: number,
+  botUsername?: string,
+  botAvatarSrc?: string
 ): { x: number; y: number; width: number } {
   const palette = builder.palette
   const top = y + SPACE.messagePadY
@@ -198,8 +222,8 @@ export function layoutMessageHeader(
       y: avatarY,
       w: SPACE.avatar,
       h: SPACE.avatar,
-      src: '__roxy__',
-      radius: SPACE.radiusLg,
+      src: botAvatarSrc ?? '__roxy__',
+      radius: botUsername ? SPACE.avatar / 2 : SPACE.radiusLg,
       border: palette.border
     })
   }
@@ -208,7 +232,7 @@ export function layoutMessageHeader(
   builder.text(
     bodyX,
     top,
-    builder.t(isUser ? 'transcript.you' : 'transcript.assistant'),
+    botUsername ? `@${botUsername}` : builder.t(isUser ? 'transcript.you' : 'transcript.assistant'),
     nameFont,
     palette.textMuted
   )

@@ -6,6 +6,8 @@ import { transcriptCache, layoutTranscript } from './transcript'
 import type { HitAction } from './scene'
 import { promptEntries } from './prompt-history'
 import roxyLogo from '../assets/roxy.png'
+import { useRoxyStore } from '../lib/store'
+import { botAvatarUrl } from '../components/BotAvatar'
 
 export type { CanvasProbe } from './CanvasSurface'
 
@@ -55,6 +57,12 @@ export function CanvasTranscript({
   const [logo, setLogo] = useState(() => decodedLogo)
   const [clock, setClock] = useState(0)
   const prompts = useMemo(() => promptEntries(messages), [messages])
+  const bots = useRoxyStore((s) => s.bots)
+  const ownBot = bots.find((bot) => bot.chatId === chatId)
+  // Preserve message references where possible. A rename changes only the
+  // identity cache key, not every part in a long transcript.
+  const identities = bots.map((bot) => `${bot.id}:${bot.username}`).join('|')
+  const identityRef = useRef('')
 
   useEffect(() => () => cache.detach(), [cache])
 
@@ -83,6 +91,11 @@ export function CanvasTranscript({
   const buildScene = useCallback(
     (context: CanvasLayoutContext) => {
       void clock
+      const identityKey = `${chatId}:${identities}`
+      if (identityRef.current !== identityKey) {
+        cache.clear()
+        identityRef.current = identityKey
+      }
       cache.prune(messages)
       if (logo) context.view.images.set('__roxy__', logo)
       return layoutTranscript(
@@ -90,6 +103,9 @@ export function CanvasTranscript({
           ...context,
           messages,
           streaming,
+          botUsername: ownBot?.username,
+          bots,
+          botAvatar: botAvatarUrl,
           canCancel: (part) => {
             if (part.tool === 'task') return Boolean(part.subChatId)
             return (
@@ -101,7 +117,7 @@ export function CanvasTranscript({
         cache
       )
     },
-    [messages, streaming, clock, logo, cache]
+    [messages, streaming, clock, logo, cache, bots, ownBot?.username, chatId, identities]
   )
 
   const onAction = (action: HitAction): void => {

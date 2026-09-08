@@ -6,6 +6,42 @@ import type { Database } from 'better-sqlite3'
  */
 export type Migration = string | ((db: Database) => void)
 
+function botSchema(db: Database): void {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS bots (
+      id TEXT PRIMARY KEY,
+      username TEXT NOT NULL COLLATE NOCASE UNIQUE,
+      instructions TEXT NOT NULL DEFAULT '',
+      chat_id TEXT NOT NULL UNIQUE REFERENCES chats(id) ON DELETE CASCADE,
+      created_at INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS bot_jobs (
+      id TEXT PRIMARY KEY,
+      bot_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      prompt TEXT NOT NULL,
+      schedule TEXT NOT NULL,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      next_run_at INTEGER,
+      last_run_at INTEGER,
+      remaining_runs INTEGER,
+      created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_bot_jobs_due ON bot_jobs(enabled, next_run_at);
+  `)
+  addColumnIfMissing(db, 'messages', 'bot_id', 'TEXT')
+  addColumnIfMissing(db, 'messages', 'bot_username', 'TEXT')
+  addColumnIfMissing(db, 'queue', 'source_chat_id', 'TEXT')
+  addColumnIfMissing(db, 'queue', 'reply_to_chat_id', 'TEXT')
+  addColumnIfMissing(db, 'queue', 'hops', 'INTEGER NOT NULL DEFAULT 0')
+  addColumnIfMissing(db, 'queue', 'not_before', 'INTEGER NOT NULL DEFAULT 0')
+  addColumnIfMissing(db, 'queue', 'state', `TEXT NOT NULL DEFAULT 'pending'`)
+  addColumnIfMissing(db, 'queue', 'error', 'TEXT')
+  addColumnIfMissing(db, 'queue', 'message_id', 'TEXT')
+  addColumnIfMissing(db, 'queue', 'continue_reply', 'INTEGER NOT NULL DEFAULT 0')
+  addColumnIfMissing(db, 'queue', 'schedule_id', 'TEXT')
+}
+
 /** Whether a table already has a column — SQLite can't express this in DDL. */
 export function hasColumn(db: Database, table: string, column: string): boolean {
   const cols = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]
@@ -493,7 +529,68 @@ export const MIGRATIONS: Migration[] = [
       hidden_at   INTEGER NOT NULL,
       PRIMARY KEY (provider_id, model)
     );
-  `
+  `,
+
+  // ---- v24: global bots and main-process scheduled delivery ----
+  (db) => {
+    botSchema(db)
+    const loops = db.prepare('SELECT * FROM loops ORDER BY created_at, id').all() as {
+      id: string
+      name: string
+      prompt: string
+      chat_id: string
+      interval_minutes: number
+      enabled: number
+      next_run_at: number
+      last_run_at: number | null
+      created_at: number
+    }[]
+    const taken = new Set(
+      (db.prepare('SELECT username FROM bots').all() as { username: string }[]).map(
+        (b) => b.username
+      )
+    )
+    for (const loop of loops) {
+      let base = loop.name
+        .toLowerCase()
+        .replace(/[^a-z0-9_-]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 24)
+      if (!/^[a-z]/.test(base) || base.length < 2 || base === 'roxy') base = `bot-${base || 'loop'}`
+      let username = base
+      for (let n = 2; taken.has(username); n++) username = `${base}-${n}`
+      taken.add(username)
+      db.prepare(
+        'INSERT INTO bots(id, username, instructions, chat_id, created_at) VALUES (?, ?, ?, ?, ?)'
+      ).run(
+        loop.id,
+        username,
+        `Migrated from the loop ${loop.name}. Your scheduled task is configured separately.`,
+        loop.chat_id,
+        loop.created_at
+      )
+      db.prepare('UPDATE chats SET kind = ? WHERE id = ?').run('bot', loop.chat_id)
+      db.prepare(
+        `INSERT INTO bot_jobs(id, bot_id, name, prompt, schedule, enabled, next_run_at, last_run_at, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run(
+        loop.id,
+        loop.id,
+        loop.name,
+        loop.prompt,
+        JSON.stringify({
+          kind: 'interval',
+          minutes: Math.max(1, Math.min(525600, loop.interval_minutes || 1))
+        }),
+        loop.enabled,
+        loop.next_run_at,
+        loop.last_run_at,
+        loop.created_at
+      )
+    }
+    // Keep transcripts and queues in place; only the obsolete scheduler rows go away.
+    db.exec(`UPDATE chats SET kind = 'main' WHERE kind = 'loop'; DELETE FROM loops;`)
+  }
 ]
 
 /**
@@ -519,6 +616,7 @@ export const MIGRATIONS: Migration[] = [
  */
 export function repairSchema(db: Database): void {
   db.exec(REPAIR_SCHEMA_SQL)
+  botSchema(db)
   // Columns added by later migrations: CREATE TABLE IF NOT EXISTS won't add
   // them to a table that already exists.
   addColumnIfMissing(db, 'chats', 'worktree_path', 'TEXT')

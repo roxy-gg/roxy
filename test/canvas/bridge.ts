@@ -6,6 +6,7 @@ declare global {
       cancelled: string[]
       logoDecodes: number
       logoPaints: number
+      botPaints: number
       logoFallbacks: number
       releaseLogo: () => void
     }
@@ -24,6 +25,7 @@ window.__canvasTest = {
   cancelled: [],
   logoDecodes: 0,
   logoPaints: 0,
+  botPaints: 0,
   logoFallbacks: 0,
   releaseLogo
 }
@@ -48,6 +50,12 @@ CanvasRenderingContext2D.prototype.drawImage = function (
     this.canvas.closest('[data-canvas-surface]')
   )
     window.__canvasTest.logoPaints++
+  if (
+    image instanceof HTMLImageElement &&
+    image.src.startsWith('data:image/svg+xml,') &&
+    this.canvas.closest('[data-canvas-surface]')
+  )
+    window.__canvasTest.botPaints++
   Reflect.apply(drawImage, this, [image, ...args])
 }
 const fillText = CanvasRenderingContext2D.prototype.fillText

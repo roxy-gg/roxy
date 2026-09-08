@@ -10,6 +10,11 @@ import { AppContextMenu } from '../../src/renderer/src/components/AppContextMenu
 import { DiffViewer } from '../../src/renderer/src/components/diff/DiffViewer'
 import { FIXTURES, STREAMING, LARGE_DIFF, HISTORY_FIXTURES } from './fixtures'
 import { PerformanceHarness } from './PerformanceHarness'
+import { lazy, Suspense } from 'react'
+
+const BotsHarness = lazy(() =>
+  import('./BotsHarness').then((module) => ({ default: module.BotsHarness }))
+)
 
 document.documentElement.dataset.platform = 'win32'
 
@@ -137,6 +142,14 @@ function Harness(): JSX.Element {
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    {new URLSearchParams(location.search).has('performance') ? <PerformanceHarness /> : <Harness />}
+    {new URLSearchParams(location.search).has('bots') ? (
+      <Suspense>
+        <BotsHarness />
+      </Suspense>
+    ) : new URLSearchParams(location.search).has('performance') ? (
+      <PerformanceHarness />
+    ) : (
+      <Harness />
+    )}
   </StrictMode>
 )

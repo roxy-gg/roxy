@@ -7,19 +7,18 @@ import {
   Hammer,
   ListTree,
   Loader2,
-  Repeat,
   RotateCw,
   Settings,
   Square
 } from 'lucide-react'
 import type { Chat } from '@shared/types'
 import { useRoxyStore } from '../lib/store'
-import { useTranslation, Trans } from 'react-i18next'
-import { formatInterval } from '@shared/format'
+import { useTranslation } from 'react-i18next'
 import { cn } from '../lib/cn'
 import { CanvasTranscript } from '../canvas/CanvasTranscript'
 import { Composer } from './Composer'
-import { LoopDetailsPane } from './LoopDetailsPane'
+import { BotSettingsPane } from './BotSettingsPane'
+import { BotAvatar } from './BotAvatar'
 import { SessionInfo } from './SessionInfo'
 import { WorkstreamStrip } from './WorkstreamStrip'
 import { QueuedMessage } from './QueuedMessage'
@@ -69,7 +68,11 @@ export function ChatView(): JSX.Element {
   const streaming = useRoxyStore((s) =>
     s.activeChatId ? (s.streamingChats[s.activeChatId] ?? null) : null
   )
-  const sending = useRoxyStore((s) => (s.activeChatId ? !!s.sendingChats[s.activeChatId] : false))
+  const sending = useRoxyStore((s) =>
+    s.activeChatId
+      ? !!s.sendingChats[s.activeChatId] || !!s.runningAutomation[s.activeChatId]
+      : false
+  )
   const submit = useRoxyStore((s) => s.submit)
   const stop = useRoxyStore((s) => s.stop)
   const queue = useRoxyStore((s) => s.queue)
@@ -77,7 +80,7 @@ export function ChatView(): JSX.Element {
   const selectChat = useRoxyStore((s) => s.selectChat)
   const activeChatId = useRoxyStore((s) => s.activeChatId)
   const chats = useRoxyStore((s) => s.chats)
-  const loops = useRoxyStore((s) => s.loops)
+  const bots = useRoxyStore((s) => s.bots)
   // Subscribe to the STORED array, not a defaulted copy. A selector returning
   // `?? []` builds a new array every call, so zustand's Object.is check never
   // matches and the component re-renders forever ("getSnapshot should be
@@ -101,19 +104,20 @@ export function ChatView(): JSX.Element {
   // Wait for history even when live tokens are available, so arrival paints the complete tail once.
   const loading = !messagesError && messagesChatId !== activeChatId
   const isEmpty = !hasContent && !loading
-  const [loopPaneOpen, setLoopPaneOpen] = useState(false)
+  const [botPaneOpen, setBotPaneOpen] = useState(false)
   const [infoOpen, setInfoOpen] = useState(false)
 
   // The keyed canvas owns bottom-first arrival and resize anchoring. Queue changes must not re-pin it.
   useLayoutEffect(() => {
     setInfoOpen(false)
+    setBotPaneOpen(false)
   }, [activeChatId])
   const activeChat = chats.find((c) => c.id === activeChatId)
   const isSub = activeChat?.kind === 'sub'
   const parentChat = activeChat?.parentId
     ? chats.find((c) => c.id === activeChat.parentId)
     : undefined
-  const activeLoop = loops.find((l) => l.chatId === activeChatId)
+  const activeBot = bots.find((bot) => bot.chatId === activeChatId)
   const sessionTasks = activeChat?.tasks ?? []
   const tasksDone = sessionTasks.filter((t) => t.status === 'completed').length
   // Any session can carry a description + checklist: the `general` subagent has
@@ -145,14 +149,10 @@ export function ChatView(): JSX.Element {
   return (
     <div className="relative flex h-full min-w-0 flex-1 flex-col bg-bg">
       <header className="titlebar reserve-controls-right flex h-12 shrink-0 items-center justify-between gap-3 px-4">
-        {activeLoop ? (
+        {activeBot ? (
           <div className="flex min-w-0 items-center gap-2">
-            <Repeat className="h-4 w-4 shrink-0 text-text-muted" />
-            <span className="shrink-0 text-sm font-medium">{activeChat.title}</span>
-            <span className="truncate text-xs text-text-subtle">
-              {t('chat.loopEvery', { interval: formatInterval(activeLoop.intervalMinutes) })}
-              {activeLoop.enabled ? t('chat.loopRunning') : t('chat.loopPaused')}
-            </span>
+            <BotAvatar username={activeBot.username} size={28} />
+            <span className="truncate text-sm font-medium">@{activeBot.username}</span>
           </div>
         ) : (
           <div className="flex min-w-0 items-center gap-2">
@@ -243,13 +243,13 @@ export function ChatView(): JSX.Element {
           </div>
         )}
         <div className="flex shrink-0 items-center gap-2">
-          {activeLoop && (
+          {activeBot && (
             <button
-              onClick={() => setLoopPaneOpen((o) => !o)}
-              title={t('chat.loopSettings')}
+              onClick={() => setBotPaneOpen((o) => !o)}
+              title={t('bots.settings')}
               className={cn(
                 'press-scale flex h-7 shrink-0 items-center gap-1.5 sq sq-lg rounded-lg px-2 text-xs',
-                loopPaneOpen
+                botPaneOpen
                   ? 'bg-elevated text-text'
                   : 'text-text-muted hover:bg-white/5 hover:text-text'
               )}
@@ -277,22 +277,16 @@ export function ChatView(): JSX.Element {
         // Deliberately blank: a transcript read is a local SQLite query, so it
         // resolves within a frame or two and a spinner would be a flash of
         // chrome rather than information. This branch exists to stop the EMPTY
-        // state (and its loop copy) from claiming the session has no messages
+        // state from claiming the session has no messages
         // before we know that.
         <div className="min-h-0 flex-1" />
       ) : isEmpty ? (
         <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-6 text-center">
-          {activeLoop ? (
-            <p className="max-w-xs text-sm text-text-muted">
-              <Trans
-                i18nKey="chat.loopEmpty"
-                values={{
-                  title: activeChat.title,
-                  interval: formatInterval(activeLoop.intervalMinutes)
-                }}
-                components={{ strong: <span className="font-medium text-text" /> }}
-              />
-            </p>
+          {activeBot ? (
+            <div className="flex flex-col items-center gap-4">
+              <BotAvatar username={activeBot.username} size={56} />
+              <p className="max-w-xs text-sm text-text-muted">{t('bots.intro')}</p>
+            </div>
           ) : (
             <p className="text-sm text-text-muted"></p>
           )}
@@ -361,6 +355,7 @@ export function ChatView(): JSX.Element {
           cancels the DELEGATE (there is no local request here to abort), which
           is what the button visibly means in this view. */}
       <Composer
+        key={activeChatId}
         onSend={submit}
         sending={sending || subagentRunning}
         onStop={
@@ -368,14 +363,10 @@ export function ChatView(): JSX.Element {
         }
       />
 
-      <WorkstreamStrip />
+      {!activeBot && activeChat.kind !== 'bot' && <WorkstreamStrip />}
 
-      {loopPaneOpen && activeLoop && (
-        <LoopDetailsPane
-          loop={activeLoop}
-          chat={activeChat}
-          onClose={() => setLoopPaneOpen(false)}
-        />
+      {botPaneOpen && activeBot && (
+        <BotSettingsPane key={activeBot.id} bot={activeBot} onClose={() => setBotPaneOpen(false)} />
       )}
     </div>
   )

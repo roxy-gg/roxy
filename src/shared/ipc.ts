@@ -1,5 +1,17 @@
 /** IPC channel names shared by the preload bridge and the main-process handlers. */
 export const CHANNELS = {
+  botsList: 'bots:list',
+  botsCreate: 'bots:create',
+  botsUpdate: 'bots:update',
+  botsRemove: 'bots:remove',
+  botsJobs: 'bots:jobs',
+  botsSaveJob: 'bots:saveJob',
+  botsRemoveJob: 'bots:removeJob',
+  botsChanged: 'bots:changed',
+  automationDelta: 'automation:delta',
+  automationSnapshot: 'automation:snapshot',
+  automationChanged: 'automation:changed',
+  automationWake: 'automation:wake',
   settingsGetAll: 'settings:getAll',
   settingsSetActiveProvider: 'settings:setActiveProvider',
   settingsSetActiveAgent: 'settings:setActiveAgent',
@@ -106,13 +118,6 @@ export const CHANNELS = {
   configExport: 'config:export',
   configImport: 'config:import',
 
-  loopsList: 'loops:list',
-  loopsCreate: 'loops:create',
-  loopsSetEnabled: 'loops:setEnabled',
-  loopsRemove: 'loops:remove',
-  /** main -> renderer event when a loop heartbeat fires */
-  loopsTick: 'loops:tick',
-
   toolsRun: 'tools:run',
   /**
    * renderer -> main: cancel ONE running tool call, by the model's call id.
@@ -141,6 +146,7 @@ export const CHANNELS = {
   activityStats: 'activity:stats',
 
   llmStart: 'llm:start',
+  llmFinish: 'llm:finish',
   llmAbort: 'llm:abort',
   /**
    * renderer -> main: stop EVERYTHING in flight for a session.

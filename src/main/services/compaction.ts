@@ -72,7 +72,7 @@ export async function compactChat(
 
   // Most recent ~120k chars (older turns matter less if the convo is enormous).
   const convo = messages
-    .map((m) => `${m.role.toUpperCase()}: ${flatten(m)}`)
+    .map((m) => `${m.botUsername ? `@${m.botUsername}` : m.role.toUpperCase()}: ${flatten(m)}`)
     .join('\n\n')
     .slice(-120_000)
   const prior = existing.contextSummary

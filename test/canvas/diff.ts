@@ -649,4 +649,42 @@ check('a dragged selection retains its source rows across viewport boundaries', 
   assert.ok(next.window!.end >= next.window!.scrollTop + 600)
 })
 
+check('bot replies use a round Facehash and username in both transcript layouts', () => {
+  const own = {
+    ...FIXTURES[1],
+    id: 'own-bot-reply',
+    parts: [{ type: 'text' as const, text: 'Ready.' }]
+  }
+  const attributed = { ...own, id: 'attributed-reply', botId: 'bot-1', botUsername: 'old-name' }
+  const bot = {
+    id: 'bot-1',
+    username: 'helper',
+    instructions: '',
+    chatId: 'bot-chat',
+    createdAt: 0
+  }
+  for (const messages of [[own], [attributed], [...longMessages, attributed]]) {
+    const scene = layoutTranscript(
+      {
+        ...longInput(messages),
+        botUsername: 'helper',
+        bots: [bot],
+        botAvatar: (name) => `data:image/svg+xml,${name}`
+      },
+      new BlockCache()
+    )
+    const last = scene.blocks.at(-1)!
+    const nodes = JSON.stringify(last.nodes)
+    assert.ok(nodes.includes('@helper'))
+    assert.ok(nodes.includes('data:image/svg+xml,'))
+    assert.ok(!nodes.includes('__roxy__'))
+    assert.ok(!nodes.includes('@old-name'))
+  }
+  const live = layoutTranscript(
+    { ...longInput(longMessages), streaming: [], botUsername: 'helper' },
+    new BlockCache()
+  )
+  assert.ok(JSON.stringify(live.blocks.at(-1)!.nodes).includes('@helper'))
+})
+
 console.log(`DIFF/CANVAS MODEL OK - ${checks} checks passed`)

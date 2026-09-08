@@ -13,6 +13,7 @@ import { pathToFileURL } from 'node:url'
 import { app, BrowserWindow } from 'electron'
 
 import * as repo from '../src/main/db/repo'
+import * as bots from '../src/main/db/bots'
 import { getActivityStats } from '../src/main/services/activity'
 import { localDay } from '../src/shared/cost'
 import { closeDb } from '../src/main/db/database'
@@ -705,30 +706,21 @@ async function main(): Promise<void> {
   )
   check('getChat reflects summary', repo.getChat(chat.id)?.contextSummary === 'compact summary')
 
-  // ---- loops ----
-  const loop = repo.createLoop({ name: 'PR watcher', prompt: 'check the PR', intervalMinutes: 5 })
-  check('createLoop (enabled, owns loop-kind chat)', loop.enabled === true)
+  // ---- bots ----
+  const bot = bots.createBot('pr-watcher')
   check(
-    'loop chat is kind=loop',
-    repo.listChats().some((c) => c.id === loop.chatId && c.kind === 'loop')
+    'createBot owns a top-level chat',
+    repo.getChat(bot.chatId)?.kind === 'bot' && repo.getChatWorkspace(bot.chatId) === null
   )
-  check(
-    'dueLoops includes enabled loop',
-    repo.dueLoops(Date.now() + 1000).some((l) => l.id === loop.id)
-  )
-  repo.appendLoopRun(loop.id, 'scheduled prompt', 'heartbeat reply')
-  check('appendLoopRun posts into loop chat', repo.listMessages(loop.chatId).length === 2)
-  const projLoop = repo.createLoop({
-    name: 'P',
-    prompt: 'go',
-    intervalMinutes: 3,
-    workspacePath: ws
+  const job = bots.saveJob({
+    botId: bot.id,
+    name: 'PR watcher',
+    prompt: 'check the PR',
+    schedule: { kind: 'interval', minutes: 5 }
   })
-  check('createLoop scopes to a project workspace', repo.getChatWorkspace(projLoop.chatId) === ws)
-  const dueBefore = repo.dueLoops(Date.now() + 1000).some((l) => l.id === projLoop.id)
-  repo.markLoopRan(projLoop.id)
-  const dueAfter = repo.dueLoops(Date.now() + 1000).some((l) => l.id === projLoop.id)
-  check('markLoopRan advances the schedule', dueBefore === true && dueAfter === false)
+  bots.enqueueDueJobs(job.nextRunAt!)
+  check('scheduled bot prompt is durably queued', repo.listQueue(bot.chatId).length === 1)
+  check('schedule advances after enqueue', bots.listJobs(bot.id)[0].nextRunAt! > job.nextRunAt!)
 
   // ---- sessions status excludes loop chats ----
   const status = repo.listSessionsStatus()
@@ -736,7 +728,7 @@ async function main(): Promise<void> {
     'listSessionsStatus includes the main session',
     status.some((s) => s.id === chat.id)
   )
-  check('listSessionsStatus excludes loop chats', !status.some((s) => s.id === loop.chatId))
+  check('listSessionsStatus excludes bot chats', !status.some((s) => s.id === bot.chatId))
   check('checkSession reports message count', repo.checkSession(chat.id)?.messageCount === 2)
 
   // ---- harness file/bash tools (real fs, sandboxed to ws) ----
@@ -2581,20 +2573,15 @@ async function main(): Promise<void> {
   const escape = await run('read', { path: '../../../etc/hosts' })
   check('path-escape is rejected (sandbox)', !escape.ok)
 
-  // ---- loop tools via runTool ----
-  const ll = await run('loop_list', {})
-  check('loop_list tool', ll.ok && ll.output.includes('PR watcher'))
-  const le = await run('loop_enable', { loop: 'PR watcher' })
+  // ---- bot tools via runTool ----
+  const listedBots = await run('bot_manage', { action: 'list' })
+  check('bot_manage lists bots', listedBots.ok && listedBots.output.includes('pr-watcher'))
+  const disabledJob = await run('bot_schedule', { action: 'update', id: job.id, enabled: false })
+  check('bot_schedule pauses by id', disabledJob.ok && !bots.listJobs(bot.id)[0].enabled)
   check(
-    'loop_enable by name',
-    le.ok && repo.listLoops().find((l) => l.id === loop.id)?.enabled === true
+    'bot tool rejects unknown bot',
+    !(await run('bot_manage', { action: 'read', id: 'nope' })).ok
   )
-  const ld = await run('loop_disable', { loop: loop.id })
-  check(
-    'loop_disable by id',
-    ld.ok && repo.listLoops().find((l) => l.id === loop.id)?.enabled === false
-  )
-  check('loop tool rejects unknown loop', !(await run('loop_disable', { loop: 'nope' })).ok)
 
   // ---- background-task registry (Phase 11: parallel + background subagents) ----
   {

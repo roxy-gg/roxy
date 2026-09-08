@@ -27,18 +27,17 @@ import {
   Trash2
 } from 'lucide-react'
 import { MorphIcon } from 'morphicons/react'
-import type { Chat, Loop } from '@shared/types'
+import type { Chat } from '@shared/types'
 import type { LifecycleView } from '@shared/forge'
 import { isPullRequestPhase } from '@shared/forge'
 import { statusKeyForSession } from '@shared/workstream'
 import { repoCountBadge } from '@shared/repos'
-import { formatInterval } from '@shared/format'
 import { useRoxyStore } from '../lib/store'
 import { api } from '../lib/api'
 import { cn } from '../lib/cn'
 import { ContextMenuRow, ContextMenuSurface, CONTEXT_MENU_PAD, CONTEXT_ROW_H } from './ContextMenu'
 import { TONE_BG, TONE_TEXT_STATIC } from '../lib/lifecycle'
-import { HeartbeatDot } from './LoopsSection'
+import { BotsSection } from './BotsSection'
 import { RemoteWorkspaceDialog } from './RemoteWorkspaceDialog'
 import { BrailleSpinner } from './ThinkingIndicator'
 import { UpdateCard } from './UpdateCard'
@@ -65,7 +64,6 @@ interface Project {
   path: string
   name: string
   sessions: Chat[]
-  loops: Loop[]
 }
 
 /**
@@ -170,8 +168,8 @@ export function Sidebar(): JSX.Element {
   const sendingChats = useRoxyStore((s) => s.sendingChats)
   const stop = useRoxyStore((s) => s.stop)
   const cancelSubagent = useRoxyStore((s) => s.cancelSubagent)
-  const loops = useRoxyStore((s) => s.loops)
-  const removeLoop = useRoxyStore((s) => s.removeLoop)
+  const bots = useRoxyStore((s) => s.bots)
+  const runningAutomation = useRoxyStore((s) => s.runningAutomation)
   const reorderSessions = useRoxyStore((s) => s.reorderSessions)
   const reorderProjects = useRoxyStore((s) => s.reorderProjects)
   const projectOrder = useRoxyStore((s) => s.projectOrder)
@@ -354,19 +352,14 @@ export function Sidebar(): JSX.Element {
       let group = map.get(path)
       if (!group) {
         const name = path.split(/[\\/]/).filter(Boolean).pop() ?? path
-        group = { path, name, sessions: [], loops: [] }
+        group = { path, name, sessions: [] }
         map.set(path, group)
       }
       return group
     }
     for (const c of chats) {
-      if (c.kind !== 'main') continue
+      if (c.kind !== 'main' || bots.some((bot) => bot.chatId === c.id)) continue
       ensure(c.workspacePath ?? '(no folder)').sessions.push(c)
-    }
-    // Loops belong to a project too — group them by their chat's workspace.
-    const chatPath = new Map(chats.map((c) => [c.id, c.workspacePath]))
-    for (const loop of loops) {
-      ensure(chatPath.get(loop.chatId) ?? '(no folder)').loops.push(loop)
     }
     const groups = [...map.values()]
     // Order by the user's saved project order; unknowns (a just-created project
@@ -378,7 +371,7 @@ export function Sidebar(): JSX.Element {
         (rank.get(a.path) ?? Number.MAX_SAFE_INTEGER) -
         (rank.get(b.path) ?? Number.MAX_SAFE_INTEGER)
     )
-  }, [chats, loops, projectOrder])
+  }, [chats, bots, projectOrder])
 
   // Reorder projects so the dragged folder lands before/after the drop target,
   // then persist. Only real folders take part — the '(no folder)' catch-all
@@ -525,6 +518,7 @@ export function Sidebar(): JSX.Element {
             <FolderOpen className="h-4 w-4" />
           </button>
         </div>
+        <BotsSection rail />
         <div className="mb-3 mt-auto flex flex-col items-center gap-1">
           <button
             onClick={() => setRemoteOpen(true)}
@@ -615,6 +609,7 @@ export function Sidebar(): JSX.Element {
         >
           <FolderOpen className="h-4 w-4" /> {t('sidebar.newProject')}
         </button>
+        <BotsSection />
       </div>
 
       <div className="mt-4 flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-3 pb-3">
@@ -703,52 +698,9 @@ export function Sidebar(): JSX.Element {
                     </div>
                     {!isCollapsed && (
                       <>
-                        {project.loops.length > 0 && (
-                          <ul className="mb-0.5 flex flex-col gap-0.5 pl-2">
-                            {project.loops.map((loop) => (
-                              <li key={loop.id}>
-                                <div
-                                  className={cn(
-                                    'group action-rail flex items-center gap-2 sq sq-lg rounded-lg py-1.5 pl-2.5 text-sm transition-colors',
-                                    loop.chatId === activeChatId
-                                      ? 'bg-elevated text-text'
-                                      : 'text-text-muted hover:bg-white/5 hover:text-text'
-                                  )}
-                                >
-                                  <button
-                                    onClick={() => selectChat(loop.chatId)}
-                                    title={loop.name}
-                                    className="min-w-0 flex-1 text-left"
-                                  >
-                                    <span className="block truncate">{loop.name}</span>
-                                    {/* The heartbeat sits in the subtitle, not in a left
-                                        gutter: sessions no longer have that column, and a
-                                        loop title indented past every session title would
-                                        read as nesting that isn't there. It also lands
-                                        against the cadence it actually qualifies. */}
-                                    <span className="flex items-center gap-1.5 text-[11px] text-text-subtle">
-                                      <HeartbeatDot enabled={loop.enabled} />
-                                      <span className="truncate">
-                                        every {formatInterval(loop.intervalMinutes)}
-                                        {loop.enabled ? '' : ' · paused'}
-                                      </span>
-                                    </span>
-                                  </button>
-                                  <button
-                                    onClick={() => removeLoop(loop.id)}
-                                    title={t('sidebar.deleteLoop')}
-                                    className="flex h-6 w-6 shrink-0 items-center justify-center sq sq-md rounded-md text-text-subtle opacity-0 transition-[opacity,color,background-color] hover:bg-white/5 hover:text-danger group-hover:opacity-100"
-                                  >
-                                    <Trash2 className="h-3.5 w-3.5" />
-                                  </button>
-                                </div>
-                              </li>
-                            ))}
-                          </ul>
-                        )}
                         <ul className="mt-0.5 flex flex-col gap-0.5 pl-2">
                           {project.sessions.map((chat) => {
-                            const sending = !!sendingChats[chat.id]
+                            const sending = !!sendingChats[chat.id] || !!runningAutomation[chat.id]
                             const subs = subsByParent.get(chat.id) ?? []
                             const subsOpen = expandedSubs.has(chat.id)
                             // How many of this session's delegates are working

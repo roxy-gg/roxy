@@ -7,7 +7,6 @@ import { clipboardHasContent, runClipboardAction } from '../services/context-men
 import type {
   CookieRow,
   CreateChatInput,
-  CreateLoopInput,
   CreateWorktreeInput,
   CreateWorktreeResult,
   ForkChatInput,
@@ -94,6 +93,17 @@ import {
 import { DEFAULT_THEME_ID, type PlatformId, type ResolvedTheme } from '../../shared/theme'
 import { applyWindowChromeAll } from '../services/window-chrome'
 import { runSessionTurn } from '../services/session-turn'
+import * as bots from '../db/bots'
+import { getDb } from '../db/database'
+import type { BotJobInput } from '../../shared/bots'
+import {
+  automationSnapshot,
+  enqueuePrompt,
+  notifyAutomation,
+  notifyBots,
+  wakeAutomation
+} from '../services/automation'
+import { claimTurn, sessionBusy, stopTurn, resumeQueue } from '../services/turn-state'
 import {
   isTrackingEnabled,
   markActivation,
@@ -108,6 +118,7 @@ import { BUNDLE_FILENAME } from '../../shared/portable'
 
 /** In-flight streamed completions, keyed by requestId, so they can be aborted. */
 const llmControllers = new Map<string, AbortController>()
+const localTurnReleases = new Map<string, { senderId: number; release: () => void }>()
 
 /**
  * Every abortable piece of model work a SESSION currently owns.
@@ -145,6 +156,7 @@ function trackSession(sessionId: string | undefined, controller: AbortController
 
 /** Abort everything in flight for a session (its turn, and any compaction). */
 function abortSession(sessionId: string): void {
+  stopTurn(sessionId)
   for (const controller of sessionControllers.get(sessionId) ?? []) controller.abort()
 }
 
@@ -304,6 +316,8 @@ export function registerIpc(): void {
     repo.setChatConfig(id, patch)
   )
   ipcMain.handle(CHANNELS.chatsRemove, (_e, id: string) => {
+    if (bots.chatBot(id)) throw new Error('Delete bots from their settings, not from a project')
+    abortSession(id)
     // Cancel any background subagents this session launched before it's deleted,
     // so detached work doesn't keep running against a gone parent.
     cancelSessionBackgroundJobs(id)
@@ -704,13 +718,48 @@ export function registerIpc(): void {
     return applyImport(text)
   })
 
-  // ---- loops ----
-  ipcMain.handle(CHANNELS.loopsList, () => repo.listLoops())
-  ipcMain.handle(CHANNELS.loopsCreate, (_e, input: CreateLoopInput) => repo.createLoop(input))
-  ipcMain.handle(CHANNELS.loopsSetEnabled, (_e, id: string, enabled: boolean) =>
-    repo.setLoopEnabled(id, enabled)
+  // ---- bots ----
+  ipcMain.handle(CHANNELS.botsList, () => bots.listBots())
+  ipcMain.handle(CHANNELS.botsCreate, (_e, username: string) => {
+    const bot = bots.createBot(username)
+    notifyBots()
+    return bot
+  })
+  ipcMain.handle(
+    CHANNELS.botsUpdate,
+    (_e, id: string, patch: { username?: string; instructions?: string }) => {
+      const bot = bots.updateBot(id, patch)
+      notifyBots()
+      return bot
+    }
   )
-  ipcMain.handle(CHANNELS.loopsRemove, (_e, id: string) => repo.removeLoop(id))
+  ipcMain.handle(CHANNELS.botsRemove, (_e, id: string) => {
+    const bot = bots.getBot(id)
+    if (bot && sessionBusy(bot.chatId)) throw new Error('Stop the bot before deleting it')
+    if (bot) {
+      cancelSessionBackgroundJobs(bot.chatId)
+      endSubagentRuns(bot.chatId)
+      killSessionBackground(bot.chatId)
+      browser.disposeSession(bot.chatId)
+    }
+    bots.removeBot(id)
+    notifyBots()
+  })
+  ipcMain.handle(CHANNELS.botsJobs, (_e, botId: string) => bots.listJobs(botId))
+  ipcMain.handle(CHANNELS.botsSaveJob, (_e, input: BotJobInput, id?: string) => {
+    const job = bots.saveJob(input, id)
+    notifyBots()
+    return job
+  })
+  ipcMain.handle(CHANNELS.botsRemoveJob, (_e, id: string) => {
+    const job = bots.listJobs().find((entry) => entry.id === id)
+    bots.removeJob(id)
+    notifyBots()
+    const bot = job && bots.getBot(job.botId)
+    if (bot) notifyAutomation(bot.chatId)
+  })
+  ipcMain.handle(CHANNELS.automationSnapshot, () => automationSnapshot())
+  ipcMain.handle(CHANNELS.automationWake, () => wakeAutomation())
 
   // ---- tools ----
   ipcMain.handle(
@@ -720,7 +769,16 @@ export function registerIpc(): void {
       // card and the agent never operate on different trees.
       const cwd = sessionCwd(sessionId)
       // Browser & loop tools don't need a workspace; file/bash tools do.
-      const needsWorkspace = !name.startsWith('browser_') && !name.startsWith('loop_')
+      const needsWorkspace = [
+        'read',
+        'write',
+        'edit',
+        'glob',
+        'grep',
+        'list',
+        'bash',
+        'lsp'
+      ].includes(name)
       if (!cwd && needsWorkspace) {
         return { ok: false, output: 'No workspace is open for this session.' }
       }
@@ -740,22 +798,31 @@ export function registerIpc(): void {
   ipcMain.handle(
     CHANNELS.queueAdd,
     (_e, chatId: string, content: string, images?: QueueImage[]) => {
-      const item = repo.enqueue(chatId, content, images)
+      const item = enqueuePrompt(chatId, content, images)
       remote.notifyQueueChanged()
       return item
     }
   )
   ipcMain.handle(CHANNELS.queueRemove, (_e, id: string) => {
+    const item = getDb().prepare('SELECT chat_id FROM queue WHERE id = ?').get(id) as
+      | { chat_id: string }
+      | undefined
     repo.removeQueueItem(id)
     remote.notifyQueueChanged()
+    if (item) notifyAutomation(item.chat_id)
   })
   ipcMain.handle(CHANNELS.queueReorder, (_e, chatId: string, ids: string[]) => {
     repo.reorderQueue(chatId, ids)
     remote.notifyQueueChanged()
+    notifyAutomation(chatId)
   })
   ipcMain.handle(CHANNELS.queueUpdate, (_e, id: string, content: string, images?: QueueImage[]) => {
     const item = repo.updateQueueItem(id, content, images)
     remote.notifyQueueChanged()
+    if (item) {
+      resumeQueue(item.chatId)
+      notifyAutomation(item.chatId)
+    }
     return item
   })
 
@@ -770,7 +837,35 @@ export function registerIpc(): void {
   // path runs the exact same code. Here we just own the AbortController (for
   // llm:abort) and stream each event to the renderer that started the turn.
   ipcMain.handle(CHANNELS.llmStart, async (event, input: LlmStartInput) => {
+    if (localTurnReleases.has(input.requestId))
+      return { ok: false, error: 'Request ID is already in use.' }
+    if (!repo.getChat(input.sessionId)) return { ok: false, error: 'Session not found.' }
     const controller = new AbortController()
+    const release = claimTurn(input.sessionId, controller)
+    if (!release)
+      return { ok: false, error: 'This session is already running. Queue your message instead.' }
+    let abandoned = false
+    const onDestroyed = (): void => {
+      abandoned = true
+      controller.abort()
+      if (!llmControllers.has(input.requestId)) release()
+      event.sender.removeListener('destroyed', onDestroyed)
+      event.sender.removeListener('did-start-loading', onDestroyed)
+      event.sender.removeListener('render-process-gone', onDestroyed)
+      localTurnReleases.delete(input.requestId)
+    }
+    event.sender.once('destroyed', onDestroyed)
+    event.sender.once('did-start-loading', onDestroyed)
+    event.sender.once('render-process-gone', onDestroyed)
+    localTurnReleases.set(input.requestId, {
+      senderId: event.sender.id,
+      release: () => {
+        event.sender.removeListener('destroyed', onDestroyed)
+        event.sender.removeListener('did-start-loading', onDestroyed)
+        event.sender.removeListener('render-process-gone', onDestroyed)
+        release()
+      }
+    })
     llmControllers.set(input.requestId, controller)
     const untrack = trackSession(input.sessionId, controller)
     // Stop can be pressed in the gap between the renderer asking for the turn
@@ -779,6 +874,9 @@ export function registerIpc(): void {
     if (controller.signal.aborted) {
       llmControllers.delete(input.requestId)
       untrack()
+      release()
+      localTurnReleases.get(input.requestId)?.release()
+      localTurnReleases.delete(input.requestId)
       return { ok: false, error: 'Stopped.' }
     }
     // If this session is shared to a phone, relay the turn there too so the phone
@@ -801,8 +899,15 @@ export function registerIpc(): void {
     } finally {
       llmControllers.delete(input.requestId)
       untrack()
+      if (abandoned) release()
       if (relay) remote.relayLocalTurnEnd(relay)
     }
+  })
+  ipcMain.handle(CHANNELS.llmFinish, (event, requestId: string) => {
+    const pending = localTurnReleases.get(requestId)
+    if (!pending || pending.senderId !== event.sender.id || llmControllers.has(requestId)) return
+    pending.release()
+    localTurnReleases.delete(requestId)
   })
   ipcMain.handle(CHANNELS.llmAbort, (_e, requestId: string) => {
     llmControllers.get(requestId)?.abort()
@@ -873,11 +978,14 @@ export function registerIpc(): void {
       // ahead of the turn it makes room for, and is often the longest thing
       // standing between pressing Stop and anything happening.
       const controller = new AbortController()
+      const release = claimTurn(chatId, controller)
+      if (!release) throw new Error('This session is already running')
       const untrack = trackSession(chatId, controller)
       try {
         return await compactChat(chatId, providerId, model, controller.signal)
       } finally {
         untrack()
+        release()
       }
     }
   )
