@@ -29,7 +29,7 @@ import { layoutPlainText } from './prose'
 import { layoutDiffViewer } from '../components/diff/layout'
 import { createDiffState } from '../components/diff/model'
 import { highlight, tokenColors } from './highlight'
-import { ANSI_BG, ANSI_DEFAULT_FG, ANSI_PROMPT, parseAnsi } from './ansi'
+import { layoutTerminalBody } from './terminal'
 
 /**
  * Tool → icon. Carried over verbatim from the DOM's `TOOL_ICON`, plus entries
@@ -161,7 +161,7 @@ export function layoutToolCard(
     } else if (part.tool === 'read' && part.state === 'done' && body && !part.image) {
       cursor += layoutFileBody(builder, part.title ?? 'file.txt', body, x + 1, cursor, contentWidth)
     } else if (part.tool === 'bash' || part.tool === 'bash_output') {
-      cursor += layoutTerminalBody(builder, body, part.state, x + 1, cursor, contentWidth)
+      cursor += layoutTerminalBody(builder, part, id, input.view, x + 1, cursor, contentWidth)
     } else if (showNested) {
       cursor += layoutNestedBody(builder, input, body, x + 1, cursor, contentWidth)
     } else {
@@ -465,131 +465,6 @@ function layoutFileBody(
       { clip: { x, y: y + 1, w: width, h: height } }
     )
   })
-  return 1 + height
-}
-
-/**
- * Shell output as a terminal pane — prompt line, ANSI body, status footer.
- *
- * Same three-part split as the DOM's TerminalOutput, including the deliberate
- * grey footer: `[exit 1]` in an agent's shell is ordinary (a build run to see
- * what breaks, a grep that misses), and colouring it red made a normal
- * transcript read like a disaster log.
- */
-const FOOTER_RE = /^\[(exit \d+|timed out[\s\S]*|error:[\s\S]*)\]$/
-const FOOTER_COLOR = '#9a9aa3'
-
-function layoutTerminalBody(
-  builder: Builder,
-  text: string,
-  state: 'running' | 'done' | 'error',
-  x: number,
-  y: number,
-  width: number
-): number {
-  const palette = builder.palette
-  let prompt = ''
-  let body = text
-  if (body.startsWith('$ ')) {
-    const nl = body.indexOf('\n')
-    prompt = nl === -1 ? body : body.slice(0, nl)
-    body = nl === -1 ? '' : body.slice(nl + 1)
-  }
-  let footer = ''
-  const split = body.split('\n')
-  const lastLine = split[split.length - 1]
-  if (lastLine && FOOTER_RE.test(lastLine)) {
-    footer = lastLine
-    body = split.slice(0, -1).join('\n')
-  }
-  const trimmed = body.replace(/[\r\n]+$/, '')
-
-  const codeFont = font(FONT_SIZE.small, 400, 'mono')
-  const lineHeight = builder.metrics.lineHeight(codeFont)
-  const rows = trimmed === '' ? [] : parseAnsi(trimmed)
-  const empty = !prompt && !trimmed && !footer
-
-  let lineCount = rows.length
-  if (prompt) lineCount += 1
-  if (footer) lineCount += 1
-  if (empty) lineCount = 1
-
-  const height = Math.min(SIZE.outputMax, lineCount * lineHeight + SPACE.bodyPadY * 2)
-
-  builder.hairline(x, y, width, palette.border)
-  // The terminal keeps its own near-black background in both appearances: a
-  // terminal is a terminal, and the ANSI palette is calibrated against dark.
-  builder.rect(x, y + 1, width, height, 0, ANSI_BG)
-
-  builder.clipped(x, y + 1, width, height, 0, () => {
-    let cursor = y + 1 + SPACE.bodyPadY
-    if (prompt) {
-      builder.push({
-        kind: 'text',
-        x: x + SPACE.bodyPadX,
-        y: cursor,
-        text: prompt,
-        font: codeFont,
-        color: ANSI_PROMPT
-      })
-      cursor += lineHeight
-    }
-    if (rows.length > 0) {
-      builder.push({
-        kind: 'ansi',
-        x: x + SPACE.bodyPadX,
-        y: cursor,
-        w: width - SPACE.bodyPadX * 2,
-        lineHeight,
-        font: codeFont,
-        rows,
-        defaultColor: ANSI_DEFAULT_FG
-      })
-      cursor += rows.length * lineHeight
-    }
-    if (footer) {
-      builder.push({
-        kind: 'text',
-        x: x + SPACE.bodyPadX,
-        y: cursor,
-        text: footer,
-        font: codeFont,
-        color: FOOTER_COLOR
-      })
-    }
-    if (empty) {
-      builder.push({
-        kind: 'text',
-        x: x + SPACE.bodyPadX,
-        y: cursor,
-        text: builder.t(state === 'running' ? 'transcript.running' : 'transcript.noOutput'),
-        font: codeFont,
-        color: FOOTER_COLOR
-      })
-    }
-  })
-
-  // Selectable rows, capped at what is visible.
-  const advance = builder.metrics.advance(codeFont)
-  let selY = y + 1 + SPACE.bodyPadY
-  const bottom = y + 1 + height
-  const addRow = (value: string, color: string): void => {
-    if (selY > bottom) return
-    builder.selectableRow(
-      x + SPACE.bodyPadX,
-      selY,
-      lineHeight,
-      [{ text: value, font: codeFont, color, x: 0, width: advance * value.length, offset: 0 }],
-      value,
-      { clip: { x, y: y + 1, w: width, h: height } }
-    )
-    selY += lineHeight
-  }
-  if (prompt) addRow(prompt, ANSI_PROMPT)
-  for (const row of rows) addRow(row.map((s) => s.text).join(''), ANSI_DEFAULT_FG)
-  if (footer) addRow(footer, FOOTER_COLOR)
-
-  if (state === 'running') builder.animate()
   return 1 + height
 }
 

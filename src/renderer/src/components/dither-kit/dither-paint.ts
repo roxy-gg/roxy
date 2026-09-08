@@ -166,8 +166,3 @@ export function bloomLayerStyle(input: BloomInput, active: boolean): BloomStyle 
 export const easeInOutCubic = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2)
 export const easeOutCubic = (t: number) => 1 - (1 - t) ** 3
 export const clamp01 = (t: number) => (t < 0 ? 0 : t > 1 ? 1 : t)
-
-/** Whether the OS asks for reduced motion (snap + steady stars). */
-export function prefersReducedMotion() {
-  return window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches ?? false
-}

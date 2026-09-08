@@ -2,6 +2,7 @@
 
 - `npm run canvas` opens interactive transcript, diff, and prompt-navigation fixtures on port 3114.
 - `npm run smoke:canvas` starts that server and checks real Electron mouse/keyboard behavior with temporary user data.
+- `npm run smoke:animation` verifies the saved On/System/Reduced motion preference, progress pixels changing over time, hide/show recovery, and streamed-text cadence with Chromium's normal throttling enabled. Uses temporary SQLite/user data, never your app settings.
 - `npm run smoke:diff` runs the pure geometry, diff, text-selection, and viewport-windowing checks.
 - `npm run perf:canvas` records switch-to-first-paint times and a Chromium CPU profile for fresh main/agent history snapshots. It fails if a switch exceeds 500 ms or if the initial viewport materializes more than 500 text rows.
 

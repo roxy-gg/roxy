@@ -32,6 +32,7 @@ export interface PaintContext {
   scrollTop: number
   viewportHeight: number
   now: number
+  reducedMotion?: boolean
   /** The region under the pointer, so it can be washed. */
   hovered: HitRegion | null
   /** Decoded images by src (the transcript keeps the cache). */
@@ -188,14 +189,25 @@ function paintNode(node: Node, paint: PaintContext, pen: Pen): void {
       return
 
     case 'spinner':
-      drawSpinner(ctx, node.x, node.y, node.size, node.color, paint.now)
+      ctx.save()
+      if (paint.reducedMotion) ctx.globalAlpha *= pulseAlpha(paint.now)
+      drawSpinner(ctx, node.x, node.y, node.size, node.color, paint.reducedMotion ? 0 : paint.now)
+      ctx.restore()
       pen.invalidate()
       return
 
     case 'braille':
+      ctx.save()
+      if (paint.reducedMotion) ctx.globalAlpha *= pulseAlpha(paint.now)
       pen.setFont(fontCss(node.font, theme))
       pen.setFill(node.color)
-      ctx.fillText(brailleFrame(paint.now), node.x, node.y + baselineOffset(node.font))
+      ctx.fillText(
+        brailleFrame(paint.reducedMotion ? 0 : paint.now),
+        node.x,
+        node.y + baselineOffset(node.font)
+      )
+      ctx.restore()
+      pen.invalidate()
       return
 
     case 'image':

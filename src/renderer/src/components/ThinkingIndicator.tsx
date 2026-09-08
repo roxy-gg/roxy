@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { cn } from '../lib/cn'
+import { useMotion } from '../lib/motion'
 
 /**
  * A single-character braille spinner — a minimal, infinitely-looping loading
@@ -14,14 +15,19 @@ const FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '
  * it (size/color) via `className`.
  */
 export function BrailleSpinner({ className }: { className?: string }): JSX.Element {
+  const { reduced } = useMotion()
   const [i, setI] = useState(0)
   useEffect(() => {
+    if (reduced) return
     const spin = setInterval(() => setI((n) => (n + 1) % FRAMES.length), 90)
     return () => clearInterval(spin)
-  }, [])
+  }, [reduced])
   return (
-    <span className={cn('select-none font-mono leading-none', className)} aria-hidden>
-      {FRAMES[i]}
+    <span
+      className={cn('select-none font-mono leading-none', reduced && 'animate-pulse', className)}
+      aria-hidden
+    >
+      {FRAMES[reduced ? 0 : i]}
     </span>
   )
 }

@@ -196,6 +196,15 @@ async function main(): Promise<void> {
   // Auto-workstream defaults ON and is stored only when disabled, so existing
   // installs are opted in without a migration.
   check('auto-workstream defaults on', repo.getSettings().autoWorkstream === true)
+  check('motion defaults on', repo.getSettings().motion === 'on')
+  repo.setMotion('reduced')
+  check('reduced motion persists', repo.getSettings().motion === 'reduced')
+  repo.setMotion('system')
+  check('system motion persists', repo.getSettings().motion === 'system')
+  repo.setMotion('on')
+  check('normal motion restores the default', repo.getSettings().motion === 'on')
+  repo.setMotion('unknown' as never)
+  check('unknown motion values fall back to On', repo.getSettings().motion === 'on')
   repo.setAutoWorkstream(false)
   check('setAutoWorkstream(false) persists', repo.getSettings().autoWorkstream === false)
   repo.setAutoWorkstream(true)

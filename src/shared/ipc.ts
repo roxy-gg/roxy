@@ -8,6 +8,8 @@ export const CHANNELS = {
   settingsSetAutoWorkstream: 'settings:setAutoWorkstream',
   settingsSetBranchPrefix: 'settings:setBranchPrefix',
   settingsSetLanguage: 'settings:setLanguage',
+  settingsSetMotion: 'settings:setMotion',
+  settingsMotionChanged: 'settings:motionChanged',
   settingsCompleteOnboarding: 'settings:completeOnboarding',
   settingsReset: 'settings:reset',
   // Anonymous usage tracking. Its own pair of channels rather than a field on

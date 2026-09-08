@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { ArrowRight } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { DitherGradient } from '../../components/DitherGradient'
+import { useMotion } from '../../lib/motion'
 
 /**
  * Cycled on the welcome screen. `lang` picks the right font fallbacks and tells
@@ -38,14 +39,16 @@ const HOLD_MS = 3400
  * a greeting that drifts between languages, and a single way forward.
  */
 export function WelcomeStep({ onContinue }: { onContinue: () => void }): JSX.Element {
+  const { reduced } = useMotion()
   const { t } = useTranslation()
   const [index, setIndex] = useState(0)
   const [visible, setVisible] = useState(true)
 
   useEffect(() => {
-    // Honour the OS setting — a word swapping on a timer is exactly the kind
-    // of motion this covers. Reduced motion keeps the first greeting still.
-    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return
+    if (reduced) {
+      setVisible(true)
+      return
+    }
 
     let swap: ReturnType<typeof setTimeout>
     const hold = setTimeout(() => {
@@ -62,7 +65,7 @@ export function WelcomeStep({ onContinue }: { onContinue: () => void }): JSX.Ele
       clearTimeout(hold)
       clearTimeout(swap)
     }
-  }, [index])
+  }, [index, reduced])
 
   const greeting = GREETINGS[index]
 
@@ -83,7 +86,9 @@ export function WelcomeStep({ onContinue }: { onContinue: () => void }): JSX.Ele
               opacity: visible ? 1 : 0,
               // Barely-there drift, so it reads as a breeze rather than a slide.
               transform: visible ? 'translateY(0)' : 'translateY(6px)',
-              transition: `opacity ${FADE_MS}ms cubic-bezier(0.4, 0, 0.2, 1), transform ${FADE_MS}ms cubic-bezier(0.4, 0, 0.2, 1)`,
+              transition: reduced
+                ? 'none'
+                : `opacity ${FADE_MS}ms cubic-bezier(0.4, 0, 0.2, 1), transform ${FADE_MS}ms cubic-bezier(0.4, 0, 0.2, 1)`,
               // Promote to its own layer so the fade composites on the GPU and
               // never re-rasterizes the text against the canvases behind it.
               willChange: 'opacity, transform'

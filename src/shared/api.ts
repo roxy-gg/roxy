@@ -3,6 +3,7 @@
  * Implemented in src/preload/index.ts, handled in src/main/ipc/*.
  */
 import type { Language } from './i18n'
+import type { MotionPreference } from './motion'
 import type {
   AddMessageInput,
   AppSettings,
@@ -719,6 +720,9 @@ export interface RoxyApi {
     setBranchPrefix(prefix: string): Promise<AppSettings>
     /** Set the UI language. An unknown code falls back to English. */
     setLanguage(language: Language): Promise<AppSettings>
+    setMotion(motion: MotionPreference): Promise<AppSettings>
+    /** Keep the app and its browser toolbar in sync; never changes OS preferences. */
+    onMotionChanged(callback: (motion: MotionPreference) => void): () => void
     completeOnboarding(): Promise<AppSettings>
     reset(): Promise<void>
     /**
