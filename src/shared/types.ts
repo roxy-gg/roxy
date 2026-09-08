@@ -435,7 +435,33 @@ export interface AppSettings {
    * been deleted resolves back to the default rather than failing.
    */
   activeThemeId: string | null
+  /**
+   * Notify when a turn finishes: chime and OS toast together, or nothing.
+   *
+   * One switch, not three. Separate sound / toast / when controls were three
+   * ways of asking the same question, and their combinations (toast but no
+   * sound, sound only when unfocused) are noise next to "tell me when it's
+   * done". Staying quiet while you are already watching is not a preference
+   * either - it is what the feature should always do, so it lives in
+   * `shouldNotify` rather than in settings.
+   */
+  notifyOnComplete: boolean
 }
+
+/**
+ * Playback level for the notification chime, 0..1.
+ *
+ * Fixed rather than user-adjustable: the chime is mastered at -6 dBFS, so this
+ * lands it at about -9 dBFS - audible over an editor without being startling.
+ * 0.7 matches VS Code's `accessibility.signalOptions.volume` default of 70,
+ * which is the closest comparable (an editor's own completion chime, played
+ * through the same HTMLAudioElement path).
+ *
+ * Per-app volume belongs to the OS on Windows (the Volume Mixer). macOS has no
+ * such control, so if this ever proves wrong for people the fix is to change
+ * the number here, not to hand everyone a slider to solve it themselves.
+ */
+export const NOTIFY_VOLUME = 0.7
 
 export interface AppVersions {
   app: string

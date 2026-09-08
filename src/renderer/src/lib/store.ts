@@ -41,6 +41,7 @@ import {
 import { uniqueSlug } from '@shared/slugs'
 import { shouldAutoWorkstream, statusKeyForSession } from '@shared/workstream'
 import { api } from './api'
+import { notifyTurnComplete } from './notify'
 import type { ComposerImage } from './images'
 import type {
   GitStatusView,
@@ -221,6 +222,7 @@ interface RoxyStore {
   setAutoWorkstream: (enabled: boolean) => Promise<void>
   setTelemetryEnabled: (enabled: boolean) => Promise<void>
   setBranchPrefix: (prefix: string) => Promise<void>
+  setNotifyOnComplete: (enabled: boolean) => Promise<void>
   setLanguage: (language: Language) => Promise<void>
   selectChat: (id: string) => Promise<void>
   clearActive: () => void
@@ -366,6 +368,7 @@ const asChatId = (value: unknown): string | undefined =>
   typeof value === 'string' ? value : undefined
 
 let loopTickSubscribed = false
+let notifyActivatedSubscribed = false
 let llmDeltaSubscribed = false
 let taskUpdateSubscribed = false
 let remoteStateSubscribed = false
@@ -1006,6 +1009,17 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
     // Warm the usage/cost dashboard for the titlebar pill (best-effort, async).
     void get().refreshUsage()
 
+    if (!notifyActivatedSubscribed) {
+      notifyActivatedSubscribed = true
+      api.notifications.onActivated(async (chatId) => {
+        // The session may have been deleted between the toast and the click, and
+        // selectChat on a missing id would blank the view for no reason.
+        if (!get().chats.some((c) => c.id === chatId)) await get().refreshChats()
+        if (!get().chats.some((c) => c.id === chatId)) return
+        await get().selectChat(chatId)
+      })
+    }
+
     if (!loopTickSubscribed) {
       loopTickSubscribed = true
       api.loops.onTick(async (loopId) => {
@@ -1570,6 +1584,10 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
     set({ settings })
   },
 
+  setNotifyOnComplete: async (enabled) => {
+    set({ settings: await api.settings.setNotifyOnComplete(enabled) })
+  },
+
   selectChat: async (id) => {
     // Per-chat send state survives switching — just swap which chat is shown.
     // Clear messages/queue first so the previous chat's content never flashes.
@@ -1910,7 +1928,24 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
         await get().selectChat(chatId)
       }
       // Don't auto-run the next queued prompt when the user stopped this turn.
-      if (!wasStopped) await get().drainQueue(chatId)
+      //
+      // The notification is decided BEFORE draining: `drainQueue` awaits the
+      // whole chain it starts, so anything placed after that await runs once
+      // per queued prompt as the recursion unwinds - a queue of five would fire
+      // five notifications, all at the end. Checking the queue first means only
+      // the turn that leaves the session genuinely idle announces itself.
+      //
+      // A stopped turn stays silent either way: the user is already here, they
+      // just pressed the button.
+      if (!wasStopped) {
+        const pending = await api.queue.list(chatId)
+        const notifySettings = get().settings
+        if (pending.length === 0 && notifySettings) {
+          const title = get().chats.find((c) => c.id === chatId)?.title
+          notifyTurnComplete(notifySettings, title ?? '', chatId)
+        }
+        await get().drainQueue(chatId)
+      }
     }
 
     clearStop()
