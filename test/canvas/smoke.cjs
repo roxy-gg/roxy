@@ -12,6 +12,8 @@ const temp = require('node:fs').mkdtempSync(path.join(os.tmpdir(), 'roxy-canvas-
 app.setPath('userData', temp)
 app.commandLine.appendSwitch('disable-renderer-backgrounding')
 const wait = (ms = 80) => new Promise((resolve) => setTimeout(resolve, ms))
+const settle = () =>
+  evaluate('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
 const check = (name, value) => {
   assert.ok(value, name)
   checks++
@@ -23,6 +25,12 @@ const probe = (code) =>
   evaluate(
     `(() => { const probe = window.__canvasTranscript; const scene = probe.scene(); const el = document.querySelector('[data-canvas-surface]'); ${code} })()`
   )
+const railCentered = () =>
+  evaluate(`(() => {
+  const rail = document.querySelector('[data-prompt-history]').getBoundingClientRect();
+  const viewport = document.querySelector('[data-canvas-viewport]').getBoundingClientRect();
+  return Math.abs(rail.top + rail.height / 2 - viewport.top - viewport.height / 2) < 1;
+})()`)
 
 let buttons = 0
 async function mouse(type, x, y, button = 'left', extra = {}) {
@@ -39,7 +47,7 @@ async function mouse(type, x, y, button = 'left', extra = {}) {
     clickCount: type === 'mouseMove' ? 0 : 1,
     ...extra
   })
-  await wait()
+  await settle()
 }
 async function click(x, y, button = 'left') {
   await mouse('mouseMove', x, y)
@@ -66,15 +74,36 @@ async function activate(filter) {
   await click(point.x, point.y)
 }
 async function key(keyCode, modifiers = []) {
-  keyCode =
-    { ArrowDown: 'Down', ArrowUp: 'Up', ArrowLeft: 'Left', ArrowRight: 'Right', Enter: 'Return' }[
-      keyCode
-    ] ?? keyCode
-  win.webContents.sendInputEvent({ type: 'keyDown', keyCode, modifiers })
-  if (keyCode === 'Return')
-    win.webContents.sendInputEvent({ type: 'char', keyCode: '\r', modifiers })
-  win.webContents.sendInputEvent({ type: 'keyUp', keyCode, modifiers })
-  await wait()
+  if (!win.webContents.debugger.isAttached()) win.webContents.debugger.attach('1.3')
+  const code = keyCode.length === 1 ? `Key${keyCode.toUpperCase()}` : keyCode
+  const virtualKey =
+    {
+      Enter: 13,
+      Escape: 27,
+      Home: 36,
+      End: 35,
+      ArrowDown: 40,
+      ArrowUp: 38,
+      PageDown: 34,
+      PageUp: 33
+    }[keyCode] ?? keyCode.toUpperCase().charCodeAt(0)
+  const mask = modifiers.reduce(
+    (value, name) => value | ({ control: 2, meta: 4, shift: 8, alt: 1 }[name] ?? 0),
+    0
+  )
+  const params = { key: keyCode, code, windowsVirtualKeyCode: virtualKey, modifiers: mask }
+  await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent', {
+    type: 'rawKeyDown',
+    ...params
+  })
+  if (keyCode === 'Enter')
+    await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent', {
+      type: 'char',
+      ...params,
+      text: '\r'
+    })
+  await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent', { type: 'keyUp', ...params })
+  await settle()
 }
 async function menuAction(label) {
   const point = await evaluate(
@@ -307,6 +336,8 @@ async function run() {
     'release over another control does not activate',
     await probe(`return scene.height === ${height}`)
   )
+
+  await terminalCards()
 
   await activate(`r.action.type === 'toggle' && r.action.id === 'm2/5'`)
   await wait(1500)
@@ -609,7 +640,10 @@ async function promptHistory() {
       `document.querySelectorAll('[data-prompt-id]').length===2 && !document.querySelector('[data-prompt-id="m2"]')`
     )
   )
+  check('prompt rail is vertically centered for short histories', await railCentered())
   await clickDom('#tail')
+  // Motion defaults to On: let the previously active marker settle to its idle opacity.
+  await wait(180)
   check(
     'latest prompt is active on arrival at the tail',
     await evaluate(
@@ -739,6 +773,7 @@ async function promptHistory() {
       `const buttons=document.querySelectorAll('[data-prompt-id]');buttons.length>0&&buttons.length<=18`
     )
   )
+  check('long prompt rails are centered within the chat viewport', await railCentered())
   check(
     'long history keeps the latest marker in view',
     await evaluate(`!!document.querySelector('[data-prompt-id="history-user-79"][aria-current]')`)
@@ -854,6 +889,7 @@ async function promptHistory() {
     'narrow history rail keeps chat free of horizontal overflow',
     await probe('return el.scrollWidth===el.clientWidth')
   )
+  check('prompt rail stays centered after a narrow resize', await railCentered())
   check(
     'narrow preview remains inside the window',
     await evaluate(
@@ -865,9 +901,11 @@ async function promptHistory() {
     (await win.webContents.capturePage()).toPNG()
   )
   if (!win.webContents.debugger.isAttached()) win.webContents.debugger.attach('1.3')
+  await evaluate(`window.roxy.settings.setMotion('system')`)
   await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', {
     features: [{ name: 'prefers-reduced-motion', value: 'reduce' }]
   })
+  await wait(80)
   check(
     'rail respects reduced motion',
     await evaluate(
@@ -875,6 +913,7 @@ async function promptHistory() {
     )
   )
   win.webContents.debugger.detach()
+  await evaluate(`window.roxy.settings.setMotion('on')`)
   await clickDom('#session')
   check(
     'session switch dismisses stale prompt previews',
@@ -886,6 +925,146 @@ async function promptHistory() {
     await evaluate(`!document.querySelector('[data-prompt-history]')`)
   )
   check('prompt navigation produces no renderer errors', errors.length === 0)
+}
+
+async function terminalCards() {
+  const originalSize = win.getContentSize()
+  await clickDom('#terminal-cards')
+  await activate(`r.action.type==='toggle' && r.action.id==='terminal-session/0'`)
+  check(
+    'one-line bash card has no empty terminal-sized panel',
+    await probe(`
+    const r=scene.blocks.flatMap(b=>b.scrollRegions).find(r=>r.id==='terminal-session/0');
+    return r.h < 50 && r.h===r.contentHeight && r.contentWidth===r.w;
+  `)
+  )
+  check('single-marker prompt rail is centered', await railCentered())
+  await activate(`r.action.type==='toggle' && r.action.id==='terminal-session/1'`)
+  check(
+    'full bash command wraps inside its card',
+    await probe(`
+    const r=scene.blocks.flatMap(b=>b.scrollRegions).find(r=>r.id==='terminal-session/1');
+    const lines=scene.blocks.flatMap(b=>b.selectable).filter(l=>l.clip?.y===r.y);
+    return r.h < 150 && lines.length > 2 && lines.every(l=>l.runs.every(run=>l.x+run.x+run.width <= r.x+r.w-11)) &&
+      lines.map(l=>l.text).join('').includes('full-session-switch-benchmark.json');
+  `)
+  )
+  check(
+    'Windows bash output remains visible rather than blank',
+    await probe(`
+    return scene.blocks.flatMap(b=>b.selectable).some(l=>l.text.includes('Copied the database and saved'));
+  `)
+  )
+  const command = await probe(
+    `return scene.blocks.flatMap(b=>b.scrollRegions).find(r=>r.id==='terminal-session/1').copyActions.find(a=>a.label==='Copy command').text`
+  )
+  const commandPoint = await probe(
+    `const r=scene.blocks.flatMap(b=>b.scrollRegions).find(r=>r.id==='terminal-session/1'); const b=el.getBoundingClientRect(); return{x:b.x+r.x+30,y:b.y+r.y-el.scrollTop+15};`
+  )
+  await click(commandPoint.x, commandPoint.y, 'right')
+  await menuAction('Copy command')
+  check(
+    'copy command includes the complete unwrapped source',
+    await evaluate(`window.__canvasTest.copied.at(-1)===${JSON.stringify(command)}`)
+  )
+  await click(commandPoint.x, commandPoint.y, 'right')
+  await menuAction('Copy output')
+  check(
+    'copy output preserves the Windows output without ANSI escapes',
+    await evaluate(
+      `window.__canvasTest.copied.at(-1)==='Copied the database and saved the benchmark.'`
+    )
+  )
+  await fs.mkdir(path.resolve(__dirname, '../.out'), { recursive: true })
+  await fs.writeFile(
+    path.resolve(__dirname, '../.out/bash-compact.png'),
+    (await win.webContents.capturePage()).toPNG()
+  )
+
+  await activate(`r.action.type==='toggle' && r.action.id==='terminal-session/2'`)
+  check(
+    'large bash logs use a bounded vertical viewport',
+    await probe(`
+    const r=scene.blocks.flatMap(b=>b.scrollRegions).find(r=>r.id==='terminal-session/2');
+    return r.h===288 && r.contentHeight>2000 && r.contentWidth===r.w && el.scrollWidth===el.clientWidth;
+  `)
+  )
+  const logPoint = await probe(
+    `const r=scene.blocks.flatMap(b=>b.scrollRegions).find(r=>r.id==='terminal-session/2'); const b=el.getBoundingClientRect();return{x:b.x+r.x+60,y:b.y+r.y-el.scrollTop+120};`
+  )
+  await click(logPoint.x, logPoint.y)
+  const outerTop = await probe('return el.scrollTop')
+  await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', {
+    type: 'mouseWheel',
+    x: logPoint.x,
+    y: logPoint.y,
+    deltaX: 0,
+    deltaY: 250
+  })
+  await wait(150)
+  check(
+    'bash wheel scroll stays inside the output card',
+    await probe(`
+    return scene.blocks.flatMap(b=>b.scrollRegions).find(r=>r.id==='terminal-session/2').top > 0 && Math.abs(el.scrollTop-${outerTop})<1;
+  `)
+  )
+  await key('End')
+  check(
+    'last bash output row and exit status are reachable',
+    await probe(`
+    const r=scene.blocks.flatMap(b=>b.scrollRegions).find(r=>r.id==='terminal-session/2');
+    const lines=scene.blocks.flatMap(b=>b.selectable).filter(l=>l.clip?.y===r.y);
+    const footer=lines.at(-1);
+    return r.top===r.contentHeight-r.h && footer.text==='[exit 0]' && footer.y>=r.y && footer.y+footer.height<=r.y+r.h;
+  `)
+  )
+  await click(logPoint.x, logPoint.y, 'right')
+  await menuAction('Copy output')
+  check(
+    'copy long bash output includes both first and last rows',
+    await evaluate(`
+    const text=window.__canvasTest.copied.at(-1);text.includes('log row 0') && text.includes('log row 119') && text.endsWith('[exit 0]');
+  `)
+  )
+  const thumb = await probe(
+    `const r=scene.blocks.flatMap(b=>b.scrollRegions).find(r=>r.id==='terminal-session/2');const b=el.getBoundingClientRect();return{x:b.x+r.x+r.w-5,top:b.y+r.y-el.scrollTop+4,bottom:b.y+r.y-el.scrollTop+r.h-4};`
+  )
+  await mouse('mouseDown', thumb.x, thumb.bottom)
+  await mouse('mouseMove', thumb.x, thumb.top)
+  await mouse('mouseUp', thumb.x, thumb.top)
+  check(
+    'bash output scrollbar is draggable',
+    await probe(
+      `return scene.blocks.flatMap(b=>b.scrollRegions).find(r=>r.id==='terminal-session/2').top===0`
+    )
+  )
+
+  await activate(`r.action.type==='toggle' && r.action.id==='terminal-session/3'`)
+  await activate(`r.action.type==='toggle' && r.action.id==='terminal-session/3/0'`)
+  check(
+    'subagent bash commands use the same wrapping and compact layout',
+    await probe(`
+    const r=scene.blocks.flatMap(b=>b.scrollRegions).find(r=>r.id==='terminal-session/3/0');
+    return r.h<160 && r.contentWidth===r.w;
+  `)
+  )
+  win.setContentSize(420, 780)
+  await wait(150)
+  await target(`r.action.type==='toggle' && r.action.id==='terminal-session/1'`)
+  check(
+    'long bash commands remain readable in a narrow window',
+    await probe(`
+    const r=scene.blocks.flatMap(b=>b.scrollRegions).find(r=>r.id==='terminal-session/1');
+    return r.contentWidth===r.w && el.scrollWidth===el.clientWidth && scene.blocks.flatMap(b=>b.selectable).filter(l=>l.clip?.y===r.y).every(l=>l.runs.every(run=>l.x+run.x+run.width<=r.x+r.w-11));
+  `)
+  )
+  check('centered prompt rail follows composer height', await railCentered())
+  await fs.writeFile(
+    path.resolve(__dirname, '../.out/bash-narrow.png'),
+    (await win.webContents.capturePage()).toPNG()
+  )
+  win.setContentSize(...originalSize)
+  await clickDom('#terminal-cards')
 }
 
 app.whenReady().then(async () => {

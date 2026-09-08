@@ -300,3 +300,62 @@ export const HISTORY_FIXTURES: Message[] = Array.from({ length: 80 }, (_, index)
     )
   ]
 }).flat()
+
+export const LONG_COMMAND =
+  'Copy-Item "$env:APPDATA\\roxy\\roxy.db" "$env:TEMP\\roxy-probe.db" -Force; ' +
+  'node perf-probe/measure-session-switches.cjs --label "canvas startup benchmark" --output "$env:TEMP\\full-session-switch-benchmark.json"'
+export const TERMINAL_FIXTURES: Message[] = [
+  message('terminal-user', 'user', [{ type: 'text', text: 'Check these command results.' }], 1),
+  message(
+    'terminal-session',
+    'assistant',
+    [
+      {
+        type: 'tool',
+        tool: 'bash',
+        state: 'done',
+        title: 'pwd',
+        input: { command: 'pwd' },
+        output: '$ pwd\n' + '\u001b[0m\r\n'.repeat(40)
+      },
+      {
+        type: 'tool',
+        tool: 'bash',
+        state: 'done',
+        title: LONG_COMMAND,
+        input: { command: LONG_COMMAND },
+        output: `$ ${LONG_COMMAND}\n\u001b[32mCopied the database and saved the benchmark.\u001b[0m\r\n`
+      },
+      {
+        type: 'tool',
+        tool: 'bash_output',
+        state: 'done',
+        title: 'bg_1',
+        output:
+          '[bg_1 exited (exit 0)]\r\n' +
+          Array.from(
+            { length: 120 },
+            (_, i) => `\u001b[32mlog row ${i}\u001b[0m\t${'long output detail '.repeat(10)}`
+          ).join('\r\n') +
+          '\r\n[exit 0]\r\n'
+      },
+      {
+        type: 'tool',
+        tool: 'task',
+        state: 'done',
+        title: 'Inspect command',
+        children: [
+          {
+            type: 'tool',
+            tool: 'bash',
+            state: 'done',
+            title: LONG_COMMAND,
+            input: { command: LONG_COMMAND },
+            output: `$ ${LONG_COMMAND}\nok\r\n`
+          }
+        ]
+      }
+    ],
+    2
+  )
+]

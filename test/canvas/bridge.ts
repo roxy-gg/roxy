@@ -1,3 +1,5 @@
+import { normalizeMotion, type MotionPreference } from '../../src/shared/motion'
+
 declare global {
   interface Window {
     __canvasTest: {
@@ -9,6 +11,7 @@ declare global {
       botPaints: number
       logoFallbacks: number
       releaseLogo: () => void
+      motionSaveFails: boolean
     }
   }
 }
@@ -27,8 +30,10 @@ window.__canvasTest = {
   logoPaints: 0,
   botPaints: 0,
   logoFallbacks: 0,
-  releaseLogo
+  releaseLogo,
+  motionSaveFails: false
 }
+const motionListeners = new Set<(motion: MotionPreference) => void>()
 
 // Delay decode independently of the load event to exercise message churn and cached-image remounts.
 const decode = HTMLImageElement.prototype.decode
@@ -65,6 +70,20 @@ CanvasRenderingContext2D.prototype.fillText = function (text: string, ...args: n
   Reflect.apply(fillText, this, [text, ...args])
 }
 window.roxy = {
+  settings: {
+    getAll: async () => ({ motion: normalizeMotion(localStorage.getItem('roxy.test.motion')) }),
+    setMotion: async (value: MotionPreference) => {
+      if (window.__canvasTest.motionSaveFails) throw new Error('Test motion write failure')
+      const motion = normalizeMotion(value)
+      localStorage.setItem('roxy.test.motion', motion)
+      for (const listener of motionListeners) listener(motion)
+      return { motion }
+    },
+    onMotionChanged: (listener: (motion: MotionPreference) => void) => {
+      motionListeners.add(listener)
+      return () => motionListeners.delete(listener)
+    }
+  },
   system: {
     openExternal: async (url: string) => {
       window.__canvasTest.opened.push(url)

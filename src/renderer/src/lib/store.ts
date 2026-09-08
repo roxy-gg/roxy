@@ -39,6 +39,8 @@ import {
 import { uniqueSlug } from '@shared/slugs'
 import { shouldAutoWorkstream, statusKeyForSession } from '@shared/workstream'
 import { api } from './api'
+import { applyMotion, motionSnapshot, type MotionPreference } from './motion'
+import { createStreamPublisher, type StreamPublisher } from './stream-publisher'
 import type { ComposerImage } from './images'
 import type {
   GitStatusView,
@@ -223,6 +225,7 @@ interface RoxyStore {
   setTelemetryEnabled: (enabled: boolean) => Promise<void>
   setBranchPrefix: (prefix: string) => Promise<void>
   setLanguage: (language: Language) => Promise<void>
+  setMotion: (preference: MotionPreference) => Promise<void>
   selectChat: (id: string) => Promise<void>
   clearActive: () => void
   newSession: () => Promise<void>
@@ -462,69 +465,6 @@ async function enqueuePrompt(
 }
 
 /**
- * Publish a session's live parts at most once per animation frame.
- *
- * All three streaming paths (a local send, a mirrored phone turn, a subagent's
- * own session) used to write `streamingChats[id]` synchronously on every delta.
- * A fast model emits those far quicker than the display can show them, so the
- * transcript re-rendered several hundred times a second — re-parsing the turn's
- * markdown and re-measuring the scroll column each time — and every render past
- * the first in a frame was discarded without ever being painted. That was the
- * bulk of the "the app is laggy while it streams" problem.
- *
- * Coalescing is lossless here because the parts array is CUMULATIVE: each delta
- * produces a complete new snapshot of the turn, so the newest one already
- * contains every skipped update.
- *
- * `null` (turn over) is published synchronously and cancels anything pending.
- * It's the one update whose ordering matters: the persisted message is appended
- * right after, and a frame landing later would resurrect the live bubble on top
- * of it — a visibly duplicated reply.
- */
-interface StreamPublisher {
-  (parts: MessagePart[] | null): void
-  /** Drop a scheduled frame without publishing it (the chat went away). */
-  cancel(): void
-}
-
-function createStreamPublisher(chatId: string): StreamPublisher {
-  let pending: MessagePart[] | null = null
-  let frame = 0
-  const publish = (parts: MessagePart[] | null): void =>
-    useRoxyStore.setState((s) => {
-      const next = { ...s.streamingChats }
-      if (parts === null) delete next[chatId]
-      else next[chatId] = parts
-      return { streamingChats: next }
-    })
-  const cancel = (): void => {
-    if (frame) cancelAnimationFrame(frame)
-    frame = 0
-    pending = null
-  }
-  const publisher = (parts: MessagePart[] | null): void => {
-    if (parts === null) {
-      cancel()
-      publish(null)
-      return
-    }
-    // Only the payload is replaced; the already-scheduled frame picks up
-    // whichever snapshot was last. Re-scheduling would land on the same frame
-    // boundary anyway, so this is a rate limit rather than a debounce — the
-    // first delta of a turn still paints on the very next frame.
-    pending = parts
-    if (frame) return
-    frame = requestAnimationFrame(() => {
-      frame = 0
-      if (pending) publish(pending)
-      pending = null
-    })
-  }
-  publisher.cancel = cancel
-  return publisher
-}
-
-/**
  * One publisher per streaming session. Coalescing only works if consecutive
  * deltas reach the SAME publisher, and two of the three paths (remote mirror,
  * subagent) run as event handlers that are re-entered per delta and so cannot
@@ -539,7 +479,14 @@ const streamPublishers = new Map<string, StreamPublisher>()
 function publishStream(chatId: string, parts: MessagePart[] | null): void {
   let publisher = streamPublishers.get(chatId)
   if (!publisher) {
-    publisher = createStreamPublisher(chatId)
+    publisher = createStreamPublisher((parts) =>
+      useRoxyStore.setState((s) => {
+        const next = { ...s.streamingChats }
+        if (parts === null) delete next[chatId]
+        else next[chatId] = parts
+        return { streamingChats: next }
+      })
+    )
     streamPublishers.set(chatId, publisher)
   }
   publisher(parts)
@@ -1642,6 +1589,19 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
   setBranchPrefix: async (prefix) => {
     const settings = await api.settings.setBranchPrefix(prefix)
     set({ settings })
+  },
+
+  setMotion: async (preference) => {
+    const previous = motionSnapshot().preference
+    applyMotion(preference)
+    try {
+      const settings = await api.settings.setMotion(preference)
+      applyMotion(settings.motion)
+      set((s) => ({ settings: s.settings ? { ...s.settings, motion: settings.motion } : settings }))
+    } catch (error) {
+      applyMotion(previous)
+      throw error
+    }
   },
 
   selectChat: async (id) => {

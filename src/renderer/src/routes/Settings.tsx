@@ -26,6 +26,7 @@ import { ProviderLogo } from '../lib/providerLogos'
 import { SubscriptionAccounts } from '../components/SubscriptionSetup'
 import { ModelVisibility } from '../components/ModelVisibility'
 import { useRoxyStore } from '../lib/store'
+import { MotionSettings } from '../components/MotionSettings'
 
 /** The section heading repeated down the page. */
 const SECTION_HEADING = 'mb-3 text-xs font-semibold uppercase tracking-wide text-text-subtle'
@@ -42,6 +43,7 @@ export default function Settings(): JSX.Element {
   const setTelemetryEnabled = useRoxyStore((s) => s.setTelemetryEnabled)
   const setBranchPrefix = useRoxyStore((s) => s.setBranchPrefix)
   const setLanguage = useRoxyStore((s) => s.setLanguage)
+  const setMotion = useRoxyStore((s) => s.setMotion)
   const [prefix, setPrefix] = useState('')
   const prefixError = branchPrefixError(prefix)
   // Pinned once per mount: a preview that reshuffled on every keystroke
@@ -133,6 +135,7 @@ export default function Settings(): JSX.Element {
   return (
     <PageShell title={t('settings.title')} onBack={() => navigate('/')}>
       <ActivitySection />
+      <MotionSettings onChange={setMotion} />
 
       <section className="mb-8">
         <h2 className={SECTION_HEADING}>{t('settings.providers.heading')}</h2>

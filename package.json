@@ -51,6 +51,7 @@
     "i18n:translate": "node script/i18n-translate.mjs",
     "canvas": "vite --config test/canvas/vite.config.mjs",
     "smoke:canvas": "electron test/canvas/smoke.cjs",
+    "smoke:animation": "electron test/canvas/animation.cjs",
     "perf:canvas": "electron test/canvas/performance.cjs",
     "smoke:diff": "esbuild test/canvas/diff.ts --bundle --platform=node --format=cjs --packages=external --outfile=test/.out/diff.cjs && node test/.out/diff.cjs"
   },

@@ -24,6 +24,7 @@ import {
 import { CanvasMenu, type CanvasMenuItem } from './CanvasMenu'
 import { openLink } from './links'
 import { diffPatch } from '../components/diff/model'
+import { prefersReducedMotion, subscribeMotion } from '../lib/motion'
 import { PromptHistoryRail } from './PromptHistoryRail'
 import { activePrompt, PROMPT_OFFSET, type PromptAnchor, type PromptEntry } from './prompt-history'
 
@@ -130,6 +131,7 @@ export function CanvasSurface({
   const drawRef = useRef<(position?: boolean) => void>(() => {})
   const layoutRef = useRef<(targetId?: string) => void>(() => {})
   const mounted = useRef(false)
+  const reducedMotion = useRef(false)
   const syntaxPending = useRef(new WeakSet<object>())
   const debug = useRef<CanvasProbe['debug']>({
     frames: 0,
@@ -241,12 +243,26 @@ export function CanvasSurface({
 
   useLayoutEffect(() => {
     mounted.current = true
+    reducedMotion.current = prefersReducedMotion()
+    const resume = (): void => {
+      cancelAnimationFrame(frame.current)
+      frame.current = 0
+      if (!document.hidden) requestPaint()
+    }
+    const motionChanged = (): void => {
+      reducedMotion.current = prefersReducedMotion()
+      resume()
+    }
+    const stopMotion = subscribeMotion(motionChanged)
+    document.addEventListener('visibilitychange', resume)
     return () => {
       mounted.current = false
+      stopMotion()
+      document.removeEventListener('visibilitychange', resume)
       cancelAnimationFrame(frame.current)
       frame.current = 0
     }
-  }, [])
+  }, [requestPaint])
 
   useLayoutEffect(() => {
     const draw = (position = false): void => {
@@ -343,7 +359,8 @@ export function CanvasSurface({
         metrics,
         scrollTop: el.scrollTop,
         viewportHeight: size.height,
-        now: matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : performance.now(),
+        now: performance.now(),
+        reducedMotion: reducedMotion.current,
         hovered: hovered.current,
         selection: selection.current,
         images: view.current.images
@@ -352,11 +369,8 @@ export function CanvasSurface({
         debug.current.firstPaint.at = performance.now()
       if (import.meta.env.DEV) debug.current.paintMs += performance.now() - paintStarted
       debug.current.frames++
-      if (
-        hasAnimation(scene.current, el.scrollTop, size.height) &&
-        !matchMedia('(prefers-reduced-motion: reduce)').matches
-      )
-        requestPaint()
+      // Reduced motion removes rotation, not the essential indication that work is continuing.
+      if (!document.hidden && hasAnimation(scene.current, el.scrollTop, size.height)) requestPaint()
     }
     drawRef.current = draw
     const layout = (targetId?: string): void => {

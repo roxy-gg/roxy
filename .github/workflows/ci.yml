@@ -135,6 +135,12 @@ jobs:
           ELECTRON_DISABLE_SANDBOX: '1'
         run: xvfb-run --auto-servernum npm run perf:canvas
 
+      - name: Canvas animation clock and streaming cadence
+        if: runner.os == 'Linux'
+        env:
+          ELECTRON_DISABLE_SANDBOX: '1'
+        run: xvfb-run --auto-servernum npm run smoke:animation
+
       - name: Multi-repo suite (composite worktrees, real git)
         run: npm run smoke:multirepo
 

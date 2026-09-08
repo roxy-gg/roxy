@@ -370,6 +370,15 @@
     "openPort": "Open localhost:{{port}} in this session's browser"
   },
   "settings": {
+    "motion": {
+      "heading": "Appearance",
+      "label": "Motion",
+      "description": "Choose how Roxy animates. On keeps normal animations enabled without changing your operating system settings. Reduced removes movement while keeping gentle progress feedback. Streaming speed is unchanged.",
+      "on": "On (default)",
+      "system": "Follow system",
+      "reduced": "Reduced",
+      "saveFailed": "Couldn't save the motion preference. Try again."
+    },
     "title": "Settings",
     "providers": {
       "heading": "Providers",
@@ -626,6 +635,8 @@
     "report": "Report",
     "copy": "copy",
     "copyCode": "Copy code",
+    "copyCommand": "Copy command",
+    "copyOutput": "Copy output",
     "copyNewContents": "Copy the new contents",
     "expand": "Expand",
     "collapse": "Collapse",

@@ -1,6 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import { CHANNELS } from '../../shared/ipc'
 import type { Language } from '../../shared/i18n'
+import { DEFAULT_MOTION, type MotionPreference } from '../../shared/motion'
 import type { SessionConfigPatch } from '../../shared/session-config'
 import type { ClipboardAction } from '../../shared/context-menu'
 import { clipboardHasContent, runClipboardAction } from '../services/context-menu'
@@ -219,6 +220,13 @@ export function registerIpc(): void {
   ipcMain.handle(CHANNELS.settingsSetLanguage, (_e, language: Language) =>
     repo.setLanguage(language)
   )
+  ipcMain.handle(CHANNELS.settingsSetMotion, (_e, motion: MotionPreference) => {
+    const settings = repo.setMotion(motion)
+    for (const window of BrowserWindow.getAllWindows())
+      if (!window.isDestroyed())
+        window.webContents.send(CHANNELS.settingsMotionChanged, settings.motion)
+    return settings
+  })
   ipcMain.handle(CHANNELS.settingsSetBranchPrefix, (_e, prefix: string) =>
     repo.setBranchPrefix(prefix)
   )
@@ -232,7 +240,10 @@ export function registerIpc(): void {
     for (const id of CLIPROXY_PROVIDER_IDS) {
       await cliproxy.disconnect(id).catch(() => undefined)
     }
-    return repo.resetAll()
+    repo.resetAll()
+    for (const window of BrowserWindow.getAllWindows())
+      if (!window.isDestroyed())
+        window.webContents.send(CHANNELS.settingsMotionChanged, DEFAULT_MOTION)
   })
 
   // Telemetry lives outside the settings table (see services/track), so it gets

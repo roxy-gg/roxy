@@ -5,6 +5,7 @@
  */
 import type { RepoLink } from './repos'
 import type { Language } from './i18n'
+import type { MotionPreference } from './motion'
 
 // ---- Providers ---------------------------------------------------------------
 
@@ -424,6 +425,8 @@ export interface AppSettings {
    * would surprise anyone who works in English inside a Spanish desktop.
    */
   language: Language
+  /** App-only motion preference. Normal animations are on unless explicitly changed. */
+  motion: MotionPreference
   /**
    * Which theme paints the UI. Null means the built-in default.
    *

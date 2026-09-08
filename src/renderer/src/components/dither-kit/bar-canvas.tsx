@@ -2,14 +2,8 @@
 
 import { useEffect, useRef } from 'react'
 import { useChart } from './chart-context'
-import {
-  backingSize,
-  bloomLayerStyle,
-  clamp01,
-  easeOutCubic,
-  paintColumn,
-  prefersReducedMotion
-} from './dither-paint'
+import { backingSize, bloomLayerStyle, clamp01, easeOutCubic, paintColumn } from './dither-paint'
+import { useMotion } from '../../lib/motion'
 
 type Bars = { top: number[]; base: number[] } // per data index, in backing rows
 
@@ -25,6 +19,7 @@ const STAGGER = 0.55
  * hovered category lifts while the rest dim.
  */
 export function BarCanvas() {
+  const { reduced: reduce } = useMotion()
   const ctx = useChart()
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const bloomRef = useRef<HTMLCanvasElement>(null)
@@ -72,7 +67,6 @@ export function BarCanvas() {
       bloomCanvas.height = rows
     }
 
-    const reduce = prefersReducedMotion()
     const animate = state.current.animate && !reduce
     const duration = state.current.animationDuration
     const fx = cols / Math.max(width, 1)
@@ -181,7 +175,7 @@ export function BarCanvas() {
 
     raf = requestAnimationFrame(draw)
     return () => cancelAnimationFrame(raf)
-  }, [cols, rows, width])
+  }, [cols, rows, width, reduce])
 
   const bloomActive = ctx.bloomOnHover ? ctx.isMouseInChart || ctx.hovered : true
   const bloom = bloomLayerStyle(ctx.bloom, bloomActive)
