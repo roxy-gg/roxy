@@ -60,7 +60,19 @@ const DEFAULT_WIDTH = 288
 const SWEEP_MS = 30_000
 const WIDTH_KEY = 'roxy.sidebar.width'
 const COLLAPSED_KEY = 'roxy.sidebar.collapsed'
+const COLLAPSED_PROJECTS_KEY = 'roxy.sidebar.collapsedProjects'
 const clampWidth = (n: number): number => Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, n))
+
+const storedCollapsedProjects = (): Set<string> => {
+  try {
+    const paths: unknown = JSON.parse(localStorage.getItem(COLLAPSED_PROJECTS_KEY) ?? '[]')
+    return new Set(
+      Array.isArray(paths) ? paths.filter((path): path is string => typeof path === 'string') : []
+    )
+  } catch {
+    return new Set()
+  }
+}
 
 interface Project {
   path: string
@@ -169,7 +181,7 @@ export function Sidebar(): JSX.Element {
   const reorderSessions = useRoxyStore((s) => s.reorderSessions)
   const reorderProjects = useRoxyStore((s) => s.reorderProjects)
   const projectOrder = useRoxyStore((s) => s.projectOrder)
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
+  const [collapsed, setCollapsed] = useState<Set<string>>(storedCollapsedProjects)
   const [expandedSubs, setExpandedSubs] = useState<Set<string>>(new Set())
   const [width, setWidth] = useState<number>(() => {
     const v = Number(localStorage.getItem(WIDTH_KEY))
@@ -194,6 +206,9 @@ export function Sidebar(): JSX.Element {
   useEffect(() => {
     localStorage.setItem(COLLAPSED_KEY, railed ? '1' : '0')
   }, [railed])
+  useEffect(() => {
+    localStorage.setItem(COLLAPSED_PROJECTS_KEY, JSON.stringify([...collapsed]))
+  }, [collapsed])
 
   // Double-click a session name to rename it inline. Enter / click-away saves,
   // Escape cancels. `cancelRef` lets the shared blur handler tell the two apart.
