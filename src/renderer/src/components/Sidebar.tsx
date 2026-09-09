@@ -59,18 +59,29 @@ const DEFAULT_WIDTH = 288
  */
 const SWEEP_MS = 30_000
 const WIDTH_KEY = 'roxy.sidebar.width'
-const COLLAPSED_KEY = 'roxy.sidebar.collapsed'
-const COLLAPSED_PROJECTS_KEY = 'roxy.sidebar.collapsedProjects'
+const RAIL_COLLAPSED_KEY = 'roxy.sidebar.collapsed'
+const COLLAPSED_PROJECTS_KEY = 'roxy.sidebar.projects.v1'
+const EXPANDED_SUBAGENTS_KEY = 'roxy.sidebar.subagents.v1'
 const clampWidth = (n: number): number => Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, n))
 
-const storedCollapsedProjects = (): Set<string> => {
+const storedSet = (key: string): Set<string> => {
   try {
-    const paths: unknown = JSON.parse(localStorage.getItem(COLLAPSED_PROJECTS_KEY) ?? '[]')
+    const values: unknown = JSON.parse(localStorage.getItem(key) ?? '[]')
     return new Set(
-      Array.isArray(paths) ? paths.filter((path): path is string => typeof path === 'string') : []
+      Array.isArray(values)
+        ? values.filter((value): value is string => typeof value === 'string')
+        : []
     )
   } catch {
     return new Set()
+  }
+}
+
+const storeSet = (key: string, values: Iterable<string>): void => {
+  try {
+    localStorage.setItem(key, JSON.stringify([...values]))
+  } catch {
+    // Sidebar expansion is a preference, not a requirement.
   }
 }
 
@@ -181,13 +192,17 @@ export function Sidebar(): JSX.Element {
   const reorderSessions = useRoxyStore((s) => s.reorderSessions)
   const reorderProjects = useRoxyStore((s) => s.reorderProjects)
   const projectOrder = useRoxyStore((s) => s.projectOrder)
-  const [collapsed, setCollapsed] = useState<Set<string>>(storedCollapsedProjects)
-  const [expandedSubs, setExpandedSubs] = useState<Set<string>>(new Set())
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => storedSet(COLLAPSED_PROJECTS_KEY))
+  const [expandedSubs, setExpandedSubs] = useState<Set<string>>(() =>
+    storedSet(EXPANDED_SUBAGENTS_KEY)
+  )
   const [width, setWidth] = useState<number>(() => {
     const v = Number(localStorage.getItem(WIDTH_KEY))
     return Number.isFinite(v) && v >= MIN_WIDTH && v <= MAX_WIDTH ? v : DEFAULT_WIDTH
   })
-  const [railed, setRailed] = useState<boolean>(() => localStorage.getItem(COLLAPSED_KEY) === '1')
+  const [railed, setRailed] = useState<boolean>(
+    () => localStorage.getItem(RAIL_COLLAPSED_KEY) === '1'
+  )
   // The open right-click menu: which session, and where the cursor was.
   const [contextMenu, setContextMenu] = useState<{ chat: Chat; x: number; y: number } | null>(null)
   const [remoteOpen, setRemoteOpen] = useState(false)
@@ -204,11 +219,8 @@ export function Sidebar(): JSX.Element {
     localStorage.setItem(WIDTH_KEY, String(width))
   }, [width])
   useEffect(() => {
-    localStorage.setItem(COLLAPSED_KEY, railed ? '1' : '0')
+    localStorage.setItem(RAIL_COLLAPSED_KEY, railed ? '1' : '0')
   }, [railed])
-  useEffect(() => {
-    localStorage.setItem(COLLAPSED_PROJECTS_KEY, JSON.stringify([...collapsed]))
-  }, [collapsed])
 
   // Double-click a session name to rename it inline. Enter / click-away saves,
   // Escape cancels. `cancelRef` lets the shared blur handler tell the two apart.
@@ -389,6 +401,14 @@ export function Sidebar(): JSX.Element {
     )
   }, [chats, loops, projectOrder])
 
+  useEffect(() => {
+    const live = new Set(projects.map((project) => project.path))
+    storeSet(
+      COLLAPSED_PROJECTS_KEY,
+      [...collapsed].filter((path) => live.has(path))
+    )
+  }, [collapsed, projects])
+
   // Reorder projects so the dragged folder lands before/after the drop target,
   // then persist. Only real folders take part — the '(no folder)' catch-all
   // isn't a registered project, so it always stays pinned at the bottom.
@@ -497,6 +517,13 @@ export function Sidebar(): JSX.Element {
     }
     return map
   }, [chats])
+
+  useEffect(() => {
+    storeSet(
+      EXPANDED_SUBAGENTS_KEY,
+      [...expandedSubs].filter((id) => subsByParent.has(id))
+    )
+  }, [expandedSubs, subsByParent])
 
   const toggleSubs = (id: string): void =>
     setExpandedSubs((prev) => {
