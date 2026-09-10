@@ -61,27 +61,16 @@ const SWEEP_MS = 30_000
 const WIDTH_KEY = 'roxy.sidebar.width'
 const RAIL_COLLAPSED_KEY = 'roxy.sidebar.collapsed'
 const COLLAPSED_PROJECTS_KEY = 'roxy.sidebar.projects.v1'
-const EXPANDED_SUBAGENTS_KEY = 'roxy.sidebar.subagents.v1'
 const clampWidth = (n: number): number => Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, n))
 
-const storedSet = (key: string): Set<string> => {
+const storedCollapsedProjects = (): Set<string> => {
   try {
-    const values: unknown = JSON.parse(localStorage.getItem(key) ?? '[]')
+    const paths: unknown = JSON.parse(localStorage.getItem(COLLAPSED_PROJECTS_KEY) ?? '[]')
     return new Set(
-      Array.isArray(values)
-        ? values.filter((value): value is string => typeof value === 'string')
-        : []
+      Array.isArray(paths) ? paths.filter((p): p is string => typeof p === 'string') : []
     )
   } catch {
     return new Set()
-  }
-}
-
-const storeSet = (key: string, values: Iterable<string>): void => {
-  try {
-    localStorage.setItem(key, JSON.stringify([...values]))
-  } catch {
-    // Sidebar expansion is a preference, not a requirement.
   }
 }
 
@@ -192,10 +181,8 @@ export function Sidebar(): JSX.Element {
   const reorderSessions = useRoxyStore((s) => s.reorderSessions)
   const reorderProjects = useRoxyStore((s) => s.reorderProjects)
   const projectOrder = useRoxyStore((s) => s.projectOrder)
-  const [collapsed, setCollapsed] = useState<Set<string>>(() => storedSet(COLLAPSED_PROJECTS_KEY))
-  const [expandedSubs, setExpandedSubs] = useState<Set<string>>(() =>
-    storedSet(EXPANDED_SUBAGENTS_KEY)
-  )
+  const [collapsed, setCollapsed] = useState<Set<string>>(storedCollapsedProjects)
+  const [expandedSubs, setExpandedSubs] = useState<Set<string>>(new Set())
   const [width, setWidth] = useState<number>(() => {
     const v = Number(localStorage.getItem(WIDTH_KEY))
     return Number.isFinite(v) && v >= MIN_WIDTH && v <= MAX_WIDTH ? v : DEFAULT_WIDTH
@@ -402,11 +389,15 @@ export function Sidebar(): JSX.Element {
   }, [chats, loops, projectOrder])
 
   useEffect(() => {
-    const live = new Set(projects.map((project) => project.path))
-    storeSet(
-      COLLAPSED_PROJECTS_KEY,
-      [...collapsed].filter((path) => live.has(path))
-    )
+    const live = new Set(projects.map((p) => p.path))
+    try {
+      localStorage.setItem(
+        COLLAPSED_PROJECTS_KEY,
+        JSON.stringify([...collapsed].filter((p) => live.has(p)))
+      )
+    } catch {
+      // Sidebar expansion is a preference, not a requirement.
+    }
   }, [collapsed, projects])
 
   // Reorder projects so the dragged folder lands before/after the drop target,
@@ -517,13 +508,6 @@ export function Sidebar(): JSX.Element {
     }
     return map
   }, [chats])
-
-  useEffect(() => {
-    storeSet(
-      EXPANDED_SUBAGENTS_KEY,
-      [...expandedSubs].filter((id) => subsByParent.has(id))
-    )
-  }, [expandedSubs, subsByParent])
 
   const toggleSubs = (id: string): void =>
     setExpandedSubs((prev) => {
