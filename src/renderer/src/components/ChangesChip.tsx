@@ -73,7 +73,7 @@ export function ChangesChip({
     }
   }, [sessionId, open, onCounts])
 
-  if (!sessionId || !counts?.files) return null
+  if (!sessionId) return null
 
   return (
     <button
@@ -88,9 +88,9 @@ export function ChangesChip({
       )}
     >
       <FileDiff className="h-3.5 w-3.5" />
-      {counts.additions > 0 && <span className="text-success">+{counts.additions}</span>}
-      {counts.deletions > 0 && <span className="text-danger">-{counts.deletions}</span>}
-      {counts.additions === 0 && counts.deletions === 0 ? (
+      {!!counts?.additions && <span className="text-success">+{counts.additions}</span>}
+      {!!counts?.deletions && <span className="text-danger">-{counts.deletions}</span>}
+      {counts && counts.additions === 0 && counts.deletions === 0 ? (
         <span className="text-text-subtle">{t('review.files', { count: counts.files })}</span>
       ) : null}
     </button>
