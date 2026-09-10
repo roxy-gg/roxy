@@ -236,8 +236,8 @@
     "title": "MCP-серверы"
   },
   "models": {
-    "copilotUnavailable": "No available GitHub Copilot model is selected. Choose an enabled model, or check your account's model access and connection, then try again.",
     "allHidden": "Все модели скрыты. Верните некоторые в <settings>Настройки → Модели</settings>.",
+    "copilotUnavailable": "No available GitHub Copilot model is selected. Choose an enabled model, or check your account's model access and connection, then try again.",
     "loadFailed": "Не удалось загрузить модели с models.dev — вы все еще можете отправлять запросы с текущей моделью.",
     "loading": "Загрузка моделей…",
     "noMatch": "Нет моделей, соответствующих «{{query}}».",
@@ -330,6 +330,42 @@
     "tryAgain": "Попробовать снова",
     "viewing": "Просмотр",
     "waitingForPhone": "Ожидание подключения вашего телефона…"
+  },
+  "review": {
+    "binary": "Binary or very large file - not shown.",
+    "chipTitle": "Review these changes",
+    "diffReadFailed": "Could not read this file",
+    "discardFile": "Discard this file's changes",
+    "emptyBranch": "This branch matches its base",
+    "emptyCommit": "That commit changed nothing",
+    "emptyStaged": "Nothing staged",
+    "emptyUnstaged": "No uncommitted changes",
+    "fileUpdateFailed": "Could not update this file",
+    "files_one": "{{count}} file",
+    "files_other": "{{count}} files",
+    "loadFailed": "Could not read changes",
+    "loadingDiff": "Loading diff...",
+    "noSession": "Open this from a session to review its changes",
+    "pickCommit": "Pick a commit",
+    "pickCommitPlaceholder": "Pick a commit...",
+    "reading": "Reading changes...",
+    "refresh": "Refresh",
+    "revertConfirm": "Sure?",
+    "scope": {
+      "branch": "Branch",
+      "branchHint": "Everything on this branch",
+      "commit": "Commit",
+      "commitHint": "A single commit",
+      "staged": "Staged",
+      "stagedHint": "What's in the index",
+      "unstaged": "Uncommitted",
+      "unstagedHint": "Edited but not staged"
+    },
+    "stage": "Stage",
+    "stageAll": "Stage all",
+    "unstage": "Unstage",
+    "unstageAll": "Unstage all",
+    "updateFailed": "Could not update changes"
   },
   "services": {
     "done": "{{count}} завершено",

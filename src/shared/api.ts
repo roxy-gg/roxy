@@ -324,6 +324,62 @@ export interface MultiSyncOutcome {
   error?: string
 }
 
+/** Which set of Git changes the review pane is showing. */
+export type GitReviewScope = 'unstaged' | 'staged' | 'branch' | 'commit'
+
+/** How many commits the picker requests, and the largest limit main accepts. */
+export const REVIEW_COMMITS = 30
+export const REVIEW_COMMITS_MAX = 100
+
+/** How a file came to be in the review. */
+export type ReviewFileStatus = 'added' | 'modified' | 'deleted' | 'renamed' | 'copied' | 'untracked'
+
+/** One changed file, as listed in the review pane. */
+export interface ReviewFile {
+  /** Repo-relative path, using Git's forward-slash spelling. */
+  path: string
+  /** Previous path, set for renames and copies. */
+  oldPath?: string
+  status: ReviewFileStatus
+  additions: number
+  deletions: number
+  /** Binary or too large to render safely. */
+  binary: boolean
+  /** Repository name in a multi-repo session. */
+  repo?: string
+}
+
+/** Both sides of one file, ready for the canvas diff viewer. */
+export interface ReviewDiff {
+  path: string
+  before: string
+  after: string
+  binary: boolean
+}
+
+/** A commit offered in the review pane's commit picker. */
+export interface ReviewCommit {
+  sha: string
+  subject: string
+  author: string
+  /** ISO 8601. */
+  date: string
+  /** Repository name in a multi-repo session. */
+  repo?: string
+}
+
+/** Which repository and scope a review operation targets. */
+export interface ReviewTarget {
+  sessionId: string
+  scope: GitReviewScope
+  /** Required to disambiguate a file in a multi-repo session. */
+  repo?: string
+  /** Required by commit scope. */
+  commit?: string
+  /** Previous path for a rename/copy diff. */
+  oldPath?: string
+}
+
 export interface PruneWorktreesResult {
   ok: boolean
   candidates: { path: string; branch: string | null }[]
@@ -1175,6 +1231,15 @@ export interface RoxyApi {
      * `dryRun:false` to actually delete them.
      */
     pruneWorktrees(cwd: string, dryRun?: boolean): Promise<PruneWorktreesResult>
+  }
+  /** Session-keyed Git changes and mutations used by the review pane. */
+  review: {
+    files(target: ReviewTarget): Promise<ReviewFile[]>
+    diff(target: ReviewTarget, file: string): Promise<ReviewDiff | null>
+    commits(sessionId: string, repo?: string, limit?: number): Promise<ReviewCommit[]>
+    stage(target: ReviewTarget, files: string[]): Promise<{ ok: boolean; error?: string }>
+    unstage(target: ReviewTarget, files: string[]): Promise<{ ok: boolean; error?: string }>
+    revert(target: ReviewTarget, files: string[]): Promise<{ ok: boolean; error?: string }>
   }
   remote: {
     /** Mint a room on roxy.gg + open the host relay socket for a session. */

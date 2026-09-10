@@ -254,6 +254,13 @@ export const CHANNELS = {
   gitPruneWorktrees: 'git:prune-worktrees',
   gitRenameBranch: 'git:rename-branch',
 
+  reviewFiles: 'review:files',
+  reviewDiff: 'review:diff',
+  reviewCommits: 'review:commits',
+  reviewStage: 'review:stage',
+  reviewUnstage: 'review:unstage',
+  reviewRevert: 'review:revert',
+
   /** Forge = the git host (GitHub/Azure DevOps/GitLab/Bitbucket) behind `origin`. */
   forgeStatus: 'forge:status',
   forgePush: 'forge:push',

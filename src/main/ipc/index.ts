@@ -19,6 +19,10 @@ import type {
   LlmStartInput,
   McpServerView,
   RemoteStartInput,
+  ReviewCommit,
+  ReviewDiff,
+  ReviewFile,
+  ReviewTarget,
   SkillView,
   SkillWriteInput,
   SyncOutcome,
@@ -1168,6 +1172,109 @@ export function registerIpc(): void {
   ipcMain.handle(CHANNELS.gitPruneWorktrees, (_e, cwd: string, dryRun?: boolean) =>
     pruneWorktrees(cwd, { dryRun: dryRun ?? true, force: true })
   )
+
+  type ReviewRepo = { name?: string; cwd: string }
+
+  /** Resolve only repositories that belong to the requested session. */
+  const reviewRepos = (sessionId: string, repoName?: string): ReviewRepo[] => {
+    if (!sessionId) return []
+    const links = reposForSession(sessionId)
+    if (links.length) {
+      const selected = repoName ? links.filter((link) => link.name === repoName) : links
+      return selected.map((link) => ({ name: link.name, cwd: link.worktreePath }))
+    }
+    // A repo name on a single-repo session is invalid rather than a path escape
+    // hatch. The cwd itself is resolved from the session row in main.
+    if (repoName) return []
+    const cwd = sessionCwd(sessionId)
+    return cwd ? [{ cwd }] : []
+  }
+
+  /** Review mutations are trusted main-window actions, never browser content. */
+  const requireMainWindow = (event: Electron.IpcMainInvokeEvent): void => {
+    if (browser.keyForContents(event.sender)) throw new Error('Review action denied.')
+  }
+
+  ipcMain.handle(
+    CHANNELS.reviewFiles,
+    async (event, target: ReviewTarget): Promise<ReviewFile[]> => {
+      requireMainWindow(event)
+      if (!target?.sessionId || !target.scope) return []
+      const groups = await Promise.all(
+        reviewRepos(target.sessionId, target.repo).map(async ({ name, cwd }) => {
+          const files = await git.reviewFiles(cwd, target.scope, target.commit)
+          return name ? files.map((file) => ({ ...file, repo: name })) : files
+        })
+      )
+      return groups.flat()
+    }
+  )
+
+  ipcMain.handle(
+    CHANNELS.reviewDiff,
+    async (event, target: ReviewTarget, file: string): Promise<ReviewDiff | null> => {
+      requireMainWindow(event)
+      const selected = reviewRepos(target?.sessionId, target?.repo)
+      if (selected.length !== 1) return null
+      return git.reviewDiff(selected[0].cwd, target.scope, file, target.commit, target.oldPath)
+    }
+  )
+
+  ipcMain.handle(
+    CHANNELS.reviewCommits,
+    async (
+      event,
+      sessionId: string,
+      repoName?: string,
+      limit?: number
+    ): Promise<ReviewCommit[]> => {
+      requireMainWindow(event)
+      const count = git.clampCommitLimit(limit)
+      const groups = await Promise.all(
+        reviewRepos(sessionId, repoName).map(async ({ name, cwd }) => {
+          const commits = await git.reviewCommits(cwd, count)
+          return name ? commits.map((commit) => ({ ...commit, repo: name })) : commits
+        })
+      )
+      return groups
+        .flat()
+        .sort((a, b) => b.date.localeCompare(a.date))
+        .slice(0, count)
+    }
+  )
+
+  const mutateReviewRepos = async (
+    target: ReviewTarget,
+    files: string[],
+    action: (cwd: string, paths: string[]) => Promise<{ ok: boolean; error?: string }>
+  ): Promise<{ ok: boolean; error?: string }> => {
+    const selected = reviewRepos(target?.sessionId, target?.repo)
+    if (!selected.length) return { ok: false, error: 'No repository for this session.' }
+    if (selected.length > 1 && files.length)
+      return { ok: false, error: 'Choose a repository before changing individual files.' }
+    const errors: string[] = []
+    for (const item of selected) {
+      const result = await action(item.cwd, files)
+      if (!result.ok) errors.push(`${item.name ? `${item.name}: ` : ''}${result.error ?? 'Failed'}`)
+    }
+    return errors.length ? { ok: false, error: errors.join('\n') } : { ok: true }
+  }
+
+  ipcMain.handle(CHANNELS.reviewStage, (event, target: ReviewTarget, files: string[]) => {
+    requireMainWindow(event)
+    return mutateReviewRepos(target, files, git.stageFiles)
+  })
+  ipcMain.handle(CHANNELS.reviewUnstage, (event, target: ReviewTarget, files: string[]) => {
+    requireMainWindow(event)
+    return mutateReviewRepos(target, files, git.unstageFiles)
+  })
+  ipcMain.handle(CHANNELS.reviewRevert, (event, target: ReviewTarget, files: string[]) => {
+    requireMainWindow(event)
+    if (target.scope !== 'unstaged' && target.scope !== 'staged')
+      return { ok: false, error: 'This review scope cannot be reverted.' }
+    const scope = target.scope
+    return mutateReviewRepos(target, files, (cwd, paths) => git.revertFiles(cwd, paths, scope))
+  })
 
   // ---- forge (the git host behind `origin`: PR state for the branch) ----
   // Same degrade-never-throw contract as the git handlers above: no remote, an

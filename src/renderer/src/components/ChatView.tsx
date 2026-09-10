@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useState } from 'react'
+import { useEffect, useLayoutEffect, useState, type ReactNode } from 'react'
 import {
   Check,
   ChevronRight,
@@ -61,7 +61,7 @@ import roxy from '../assets/roxy.png'
  * painter.
  */
 
-export function ChatView(): JSX.Element {
+export function ChatView({ headerActions }: { headerActions?: ReactNode }): JSX.Element {
   const { t } = useTranslation()
   const messages = useRoxyStore((s) => s.messages)
   const messagesChatId = useRoxyStore((s) => s.messagesChatId)
@@ -257,6 +257,7 @@ export function ChatView(): JSX.Element {
               <Settings className="h-3.5 w-3.5" /> {t('chat.settings')}
             </button>
           )}
+          {headerActions}
           <UsageMeter />
         </div>
       </header>

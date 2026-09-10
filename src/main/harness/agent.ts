@@ -510,6 +510,19 @@ function gatherMcpRecords(cwd: string): McpServerRecord[] {
 /** OpenAI function schemas for the workspace/browser tools (the base toolset). */
 const BASE_SCHEMAS = [
   fn(
+    'code_review',
+    'Show the active Git diff for the workspace. Unstaged includes untracked text files. Use this when the user asks you to review changes.',
+    {
+      scope: {
+        type: 'string',
+        enum: ['unstaged', 'staged', 'branch', 'commit'],
+        description: 'Review scope (default "unstaged").'
+      },
+      commit: str('Commit or ref. Required when scope is "commit".')
+    },
+    []
+  ),
+  fn(
     'read',
     'Read a file from the workspace.',
     { path: str('File path, relative to the workspace.') },
@@ -2148,6 +2161,8 @@ function toolTitle(name: string, input: Record<string, unknown>): string {
       return s(input.title) || s(input.name) || 'session metadata'
     case 'skill':
       return s(input.name)
+    case 'code_review':
+      return s(input.commit) || s(input.scope) || 'unstaged'
     default:
       return isMcpTool(name) ? mcpToolTitle(name) : ''
   }
