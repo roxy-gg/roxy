@@ -2,6 +2,9 @@ import { randomUUID } from 'node:crypto'
 import { resolveSeed } from '../../shared/providers'
 import { normalizeServerConfig, type McpServerConfig, type McpServerRecord } from '../../shared/mcp'
 import { DEFAULT_BRANCH_PREFIX, normalizeBranchPrefix } from '../../shared/branch'
+import { DEFAULT_LANGUAGE, normalizeLanguage } from '../../shared/i18n'
+import type { Language } from '../../shared/i18n'
+import { DEFAULT_MOTION, normalizeMotion, type MotionPreference } from '../../shared/motion'
 import type {
   AddMessageInput,
   AppSettings,
@@ -112,7 +115,6 @@ export function getSettings(): AppSettings {
         : 'high'
     })(),
     contextLimit: map.get('context_limit') ? Number(map.get('context_limit')) : null,
-    webSearchApiKey: map.get('web_search_api_key') ?? null,
     // Defaults ON, so the absence of a row means enabled. Written only when
     // someone turns it OFF ('0'), which keeps existing installs opted in
     // without a migration.
@@ -120,6 +122,12 @@ export function getSettings(): AppSettings {
     // `?? DEFAULT` and not `|| DEFAULT`: an EMPTY string is a deliberate
     // "no prefix", and must survive a round trip through settings.
     branchPrefix: map.get('branch_prefix') ?? DEFAULT_BRANCH_PREFIX,
+    // Normalised on the way OUT as well as in: a row written by an older build
+    // (or a language later dropped from the app) must degrade to English rather
+    // than leave the UI rendering raw keys.
+    language: normalizeLanguage(map.get('language')),
+    motion: normalizeMotion(map.get('motion')),
+    activeThemeId: map.get('active_theme_id') ?? null,
     dictationMode: map.get('dictation_mode') === 'accurate' ? 'accurate' : 'fast',
     dictationPolish: map.get('dictation_polish') === '1'
   }
@@ -209,15 +217,28 @@ export function setBranchPrefix(prefix: string): AppSettings {
   return getSettings()
 }
 
-export function setAutoWorkstream(enabled: boolean): AppSettings {
-  // Store only the OFF state; see getSettings for why.
-  setSetting('auto_workstream', enabled ? null : '0')
+export function setLanguage(language: Language): AppSettings {
+  const lang = normalizeLanguage(language)
+  // English is the default, so it clears the row instead of writing one - the
+  // absence of a row and an explicit 'en' must not drift apart.
+  setSetting('language', lang === DEFAULT_LANGUAGE ? null : lang)
   return getSettings()
 }
 
-export function setWebSearchApiKey(key: string | null): AppSettings {
-  const trimmed = key?.trim()
-  setSetting('web_search_api_key', trimmed ? trimmed : null)
+export function setActiveThemeId(id: string | null): AppSettings {
+  setSetting('active_theme_id', id)
+  return getSettings()
+}
+
+export function setMotion(value: MotionPreference): AppSettings {
+  const motion = normalizeMotion(value)
+  setSetting('motion', motion === DEFAULT_MOTION ? null : motion)
+  return getSettings()
+}
+
+export function setAutoWorkstream(enabled: boolean): AppSettings {
+  // Store only the OFF state; see getSettings for why.
+  setSetting('auto_workstream', enabled ? null : '0')
   return getSettings()
 }
 
@@ -246,6 +267,7 @@ export function resetAll(): void {
        DELETE FROM chats;
        DELETE FROM recent_models;
        DELETE FROM pinned_models;
+       DELETE FROM hidden_models;
        DELETE FROM credentials;
        DELETE FROM providers;
        DELETE FROM integrations;
@@ -415,6 +437,56 @@ export function listPinnedModels(): { providerId: string; model: string }[] {
   const rows = getDb()
     .prepare('SELECT provider_id, model FROM pinned_models ORDER BY pinned_at ASC')
     .all() as { provider_id: string; model: string }[]
+  return rows.map((r) => ({ providerId: r.provider_id, model: r.model }))
+}
+
+/**
+ * Hide/unhide a model in the picker. Display-only: a session already on the
+ * model keeps running it, since removing it from a menu must not reroute work.
+ */
+export function setModelHidden(providerId: string, model: string, hidden: boolean): void {
+  const db = getDb()
+  if (hidden) {
+    db.prepare(
+      'INSERT OR IGNORE INTO hidden_models(provider_id, model, hidden_at) VALUES(?, ?, ?)'
+    ).run(providerId, model, Date.now())
+    // A pin would keep it atop the list it was just removed from.
+    db.prepare('DELETE FROM pinned_models WHERE provider_id = ? AND model = ?').run(
+      providerId,
+      model
+    )
+  } else {
+    db.prepare('DELETE FROM hidden_models WHERE provider_id = ? AND model = ?').run(
+      providerId,
+      model
+    )
+  }
+}
+
+/** Replace one provider's hidden set in a single transaction (bulk hide/show). */
+export function setProviderHiddenModels(providerId: string, models: string[]): void {
+  const db = getDb()
+  const now = Date.now()
+  const tx = db.transaction(() => {
+    db.prepare('DELETE FROM hidden_models WHERE provider_id = ?').run(providerId)
+    const insert = db.prepare(
+      'INSERT OR IGNORE INTO hidden_models(provider_id, model, hidden_at) VALUES(?, ?, ?)'
+    )
+    const unpin = db.prepare('DELETE FROM pinned_models WHERE provider_id = ? AND model = ?')
+    for (const model of models) {
+      insert.run(providerId, model, now)
+      unpin.run(providerId, model)
+    }
+  })
+  tx()
+}
+
+/** Every hidden model across every provider. */
+export function listHiddenModels(): { providerId: string; model: string }[] {
+  const rows = getDb().prepare('SELECT provider_id, model FROM hidden_models').all() as {
+    provider_id: string
+    model: string
+  }[]
   return rows.map((r) => ({ providerId: r.provider_id, model: r.model }))
 }
 

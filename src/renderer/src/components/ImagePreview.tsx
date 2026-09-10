@@ -156,7 +156,7 @@ export function ImagePreview({
           <div
             // pointer-events-none: the preview sits in the cursor's path, and a
             // hover layer that can itself be hovered creates flicker loops.
-            className="animate-pop-in pointer-events-none fixed z-50 overflow-hidden sq-frame sq-xl sq-fill-elevated sq-ring sq-ring-strong rounded-xl border border-border-strong bg-elevated p-1 shadow-2xl"
+            className="animate-pop-in pointer-events-none fixed z-50 overflow-hidden sq-frame sq-xl sq-fill-elevated sq-ring sq-ring-strong edge edge-strong edge-panel rounded-xl border border-border-strong bg-elevated p-1 shadow-float"
             style={{
               left: placement.left,
               top: placement.top,

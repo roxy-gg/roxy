@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
+import type { TFunction } from 'i18next'
 import { Check, ClipboardPaste, Copy, Plus, RotateCw, Search, Trash2, X } from 'lucide-react'
 import type { CookieRow } from '@shared/api'
 import { api } from '../lib/api'
@@ -26,14 +28,16 @@ function idOf(c: CookieRow): string {
 }
 
 /** "in 3 days" / "expired" / "session" â€” the only part of a cookie people scan for. */
-function expiryLabel(c: CookieRow): string {
-  if (c.session || !c.expirationDate) return 'Session'
+function expiryLabel(c: CookieRow, t: TFunction): string {
+  if (c.session || !c.expirationDate) return t('cookies.expirySession')
   const ms = c.expirationDate * 1000 - Date.now()
-  if (ms <= 0) return 'Expired'
+  if (ms <= 0) return t('cookies.expiryExpired')
   const days = Math.round(ms / 86_400_000)
-  if (days >= 1) return `${days}d`
+  if (days >= 1) return t('cookies.expiryDays', { n: days })
   const hours = Math.round(ms / 3_600_000)
-  return hours >= 1 ? `${hours}h` : `${Math.max(1, Math.round(ms / 60_000))}m`
+  return hours >= 1
+    ? t('cookies.expiryHours', { n: hours })
+    : t('cookies.expiryMinutes', { n: Math.max(1, Math.round(ms / 60_000)) })
 }
 
 /**
@@ -55,6 +59,7 @@ export function CookiePanel({
   action?: React.ReactNode
   className?: string
 }): JSX.Element {
+  const { t } = useTranslation()
   const [rows, setRows] = useState<CookieRow[]>([])
   const [query, setQuery] = useState('')
   const [openId, setOpenId] = useState<string | null>(null)
@@ -104,7 +109,7 @@ export function CookiePanel({
     const err = await api.cookies.set(row)
     if (err) setNote({ kind: 'err', text: err })
     else {
-      setNote({ kind: 'ok', text: `Saved ${row.name}` })
+      setNote({ kind: 'ok', text: t('cookies.savedCookie', { name: row.name }) })
       setOpenId(null)
     }
     await refresh()
@@ -131,9 +136,13 @@ export function CookiePanel({
         r.failed
           ? {
               kind: 'err',
-              text: `Imported ${r.imported}, ${r.failed} failed: ${r.errors[0] ?? ''}`
+              text: t('cookies.importPartial', {
+                imported: r.imported,
+                failed: r.failed,
+                error: r.errors[0] ?? ''
+              })
             }
-          : { kind: 'ok', text: `Imported ${r.imported} cookie${r.imported === 1 ? '' : 's'}.` }
+          : { kind: 'ok', text: t('cookies.imported', { count: r.imported }) }
       )
       if (r.imported) {
         setImportText('')
@@ -147,7 +156,7 @@ export function CookiePanel({
 
   const clearAll = async (): Promise<void> => {
     const n = await api.cookies.clear(host)
-    setNote({ kind: 'ok', text: `Deleted ${n} cookie${n === 1 ? '' : 's'}.` })
+    setNote({ kind: 'ok', text: t('cookies.deleted', { count: n }) })
     await refresh()
   }
 
@@ -160,12 +169,12 @@ export function CookiePanel({
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder={host ? `Cookies for ${host}` : 'Search all cookies'}
+            placeholder={host ? t('cookies.searchForHost', { host }) : t('cookies.searchAll')}
             spellCheck={false}
             className="h-7 w-full rounded-md border border-border bg-surface-2 pl-7 pr-2 text-xs outline-none placeholder:text-text-subtle focus:border-accent"
           />
         </div>
-        <IconBtn onClick={() => void refresh()} title="Refresh" busy={busy}>
+        <IconBtn onClick={() => void refresh()} title={t('cookies.refresh')} busy={busy}>
           <RotateCw className="h-3.5 w-3.5" />
         </IconBtn>
         <IconBtn
@@ -174,23 +183,27 @@ export function CookiePanel({
             setRows((r) => [c, ...r])
             setOpenId(idOf(c))
           }}
-          title="Add cookie"
+          title={t('cookies.addCookie')}
         >
           <Plus className="h-3.5 w-3.5" />
         </IconBtn>
-        <IconBtn onClick={() => void copyAll()} title="Copy as Cookie-Editor JSON">
+        <IconBtn onClick={() => void copyAll()} title={t('cookies.copyAsJson')}>
           {copied ? (
             <Check className="h-3.5 w-3.5 text-success" />
           ) : (
             <Copy className="h-3.5 w-3.5" />
           )}
         </IconBtn>
-        <IconBtn onClick={() => setImporting((v) => !v)} title="Import JSON" active={importing}>
+        <IconBtn
+          onClick={() => setImporting((v) => !v)}
+          title={t('cookies.importJson')}
+          active={importing}
+        >
           <ClipboardPaste className="h-3.5 w-3.5" />
         </IconBtn>
         <IconBtn
           onClick={() => void clearAll()}
-          title={host ? `Delete all for ${host}` : 'Delete all'}
+          title={host ? t('cookies.deleteAllForHost', { host }) : t('cookies.deleteAll')}
           danger
         >
           <Trash2 className="h-3.5 w-3.5" />
@@ -203,15 +216,15 @@ export function CookiePanel({
           <textarea
             value={importText}
             onChange={(e) => setImportText(e.target.value)}
-            placeholder='Paste Cookie-Editor / EditThisCookie JSON â€” [{ "name": "session", "value": "â€¦", "domain": ".example.com" }]'
+            placeholder={t('cookies.importPlaceholder')}
             spellCheck={false}
             rows={4}
             className="w-full resize-y rounded-md border border-border bg-surface p-2 font-mono text-[11px] outline-none placeholder:text-text-subtle focus:border-accent"
           />
           <div className="mt-1.5 flex justify-end gap-1.5">
-            <SmallBtn onClick={() => setImporting(false)}>Cancel</SmallBtn>
+            <SmallBtn onClick={() => setImporting(false)}>{t('common.cancel')}</SmallBtn>
             <SmallBtn onClick={() => void runImport()} primary disabled={!importText.trim()}>
-              Import
+              {t('cookies.import')}
             </SmallBtn>
           </div>
         </div>
@@ -232,7 +245,7 @@ export function CookiePanel({
       <div className="min-h-0 flex-1 overflow-y-auto">
         {shown.length === 0 ? (
           <p className="px-3 py-6 text-center text-xs text-text-subtle">
-            {rows.length ? 'No cookies match that search.' : 'No cookies here yet.'}
+            {rows.length ? t('cookies.noMatch') : t('cookies.empty')}
           </p>
         ) : (
           shown.map((c) => {
@@ -268,6 +281,7 @@ function CookieItem({
   onSave: (next: CookieRow) => void
   onDelete: () => void
 }): JSX.Element {
+  const { t } = useTranslation()
   const [draft, setDraft] = useState<CookieRow>(cookie)
   const nameRef = useRef<HTMLInputElement>(null)
 
@@ -290,19 +304,19 @@ function CookieItem({
         className="flex cursor-default items-center gap-2 px-2.5 py-1.5 hover:bg-surface-2/60"
       >
         <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-text">
-          {cookie.name || <span className="text-text-subtle italic">new cookie</span>}
+          {cookie.name || <span className="text-text-subtle italic">{t('cookies.newCookie')}</span>}
         </span>
         <span className="min-w-0 max-w-[45%] flex-1 truncate font-mono text-[11px] text-text-subtle">
           {cookie.value}
         </span>
-        <span className="shrink-0 text-[10px] text-text-subtle">{expiryLabel(cookie)}</span>
+        <span className="shrink-0 text-[10px] text-text-subtle">{expiryLabel(cookie, t)}</span>
         <button
           type="button"
           onClick={(e) => {
             e.stopPropagation()
             onDelete()
           }}
-          title="Delete cookie"
+          title={t('cookies.deleteCookie')}
           className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-text-subtle hover:bg-danger/15 hover:text-danger"
         >
           <X className="h-3 w-3" />
@@ -311,7 +325,7 @@ function CookieItem({
 
       {open && (
         <div className="grid gap-2 bg-surface-2/40 px-2.5 pb-2.5 pt-2 sm:grid-cols-2">
-          <Field label="Name">
+          <Field label={t('cookies.fieldName')}>
             <input
               ref={nameRef}
               value={draft.name}
@@ -319,14 +333,14 @@ function CookieItem({
               className={fieldCls}
             />
           </Field>
-          <Field label="Domain">
+          <Field label={t('cookies.fieldDomain')}>
             <input
               value={draft.domain}
               onChange={(e) => patch({ domain: e.target.value })}
               className={fieldCls}
             />
           </Field>
-          <Field label="Value" wide>
+          <Field label={t('cookies.fieldValue')} wide>
             <textarea
               value={draft.value}
               onChange={(e) => patch({ value: e.target.value })}
@@ -334,26 +348,26 @@ function CookieItem({
               className={cn(fieldCls, 'resize-y')}
             />
           </Field>
-          <Field label="Path">
+          <Field label={t('cookies.fieldPath')}>
             <input
               value={draft.path}
               onChange={(e) => patch({ path: e.target.value })}
               className={fieldCls}
             />
           </Field>
-          <Field label="SameSite">
+          <Field label={t('cookies.fieldSameSite')}>
             <select
               value={draft.sameSite}
               onChange={(e) => patch({ sameSite: e.target.value as CookieRow['sameSite'] })}
               className={fieldCls}
             >
-              <option value="unspecified">Unspecified</option>
-              <option value="lax">Lax</option>
-              <option value="strict">Strict</option>
-              <option value="no_restriction">None</option>
+              <option value="unspecified">{t('cookies.sameSiteUnspecified')}</option>
+              <option value="lax">{t('cookies.sameSiteLax')}</option>
+              <option value="strict">{t('cookies.sameSiteStrict')}</option>
+              <option value="no_restriction">{t('cookies.sameSiteNone')}</option>
             </select>
           </Field>
-          <Field label="Expires" wide>
+          <Field label={t('cookies.fieldExpires')} wide>
             <div className="flex items-center gap-2">
               <input
                 type="datetime-local"
@@ -370,32 +384,36 @@ function CookieItem({
                 className={cn(fieldCls, 'flex-1 disabled:opacity-40')}
               />
               <Toggle
-                label="Session"
+                label={t('cookies.toggleSession')}
                 checked={draft.session}
                 onChange={(v) => patch({ session: v })}
               />
             </div>
           </Field>
           <div className="col-span-full flex flex-wrap items-center gap-x-4 gap-y-1.5">
-            <Toggle label="Secure" checked={draft.secure} onChange={(v) => patch({ secure: v })} />
             <Toggle
-              label="HttpOnly"
+              label={t('cookies.toggleSecure')}
+              checked={draft.secure}
+              onChange={(v) => patch({ secure: v })}
+            />
+            <Toggle
+              label={t('cookies.toggleHttpOnly')}
               checked={draft.httpOnly}
               onChange={(v) => patch({ httpOnly: v })}
             />
             <Toggle
-              label="Host only"
+              label={t('cookies.toggleHostOnly')}
               checked={draft.hostOnly}
               onChange={(v) => patch({ hostOnly: v })}
             />
             <div className="ml-auto flex gap-1.5">
-              <SmallBtn onClick={onToggle}>Cancel</SmallBtn>
+              <SmallBtn onClick={onToggle}>{t('common.cancel')}</SmallBtn>
               <SmallBtn
                 onClick={() => onSave(draft)}
                 primary
                 disabled={!draft.name || !draft.domain}
               >
-                Save
+                {t('common.save')}
               </SmallBtn>
             </div>
           </div>

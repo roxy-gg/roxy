@@ -1,5 +1,7 @@
 import { create } from 'zustand'
 import { DEFAULT_AGENT_ID, getAgent } from '@shared/agents'
+import type { Language } from '@shared/i18n'
+import i18n, { applyLanguage } from '../i18n'
 import type {
   AppSettings,
   Chat,
@@ -28,7 +30,7 @@ import { PROMPT_TEXT, AGENT_PROMPT_TEXT } from '@shared/prompt-text'
 import { reconstructTurn, REPLAY_OUTPUT_CAP } from '@shared/tool-history'
 import { PartsFold, partsToContent } from '@shared/parts'
 import { isOverflow, pruneToolMessages, KEEP_RECENT_TOKENS } from '@shared/context'
-import { pickDefaultModel } from '@shared/models'
+import { resolveProviderModel } from '@shared/models'
 import {
   clampReasoningEffort,
   contextBudgetFor,
@@ -39,6 +41,8 @@ import {
 import { uniqueSlug } from '@shared/slugs'
 import { shouldAutoWorkstream, statusKeyForSession } from '@shared/workstream'
 import { api } from './api'
+import { applyMotion, motionSnapshot, type MotionPreference } from './motion'
+import { createStreamPublisher, type StreamPublisher } from './stream-publisher'
 import type { ComposerImage } from './images'
 import type {
   GitStatusView,
@@ -48,7 +52,7 @@ import type {
   SyncOutcome,
   WorktreeView
 } from '@shared/api'
-import { aggregateRepoStatus } from '@shared/repos'
+import { aggregateLifecycle, aggregateRepoStatus, describeCompositeLifecycle } from '@shared/repos'
 import type { ForgeStatusView } from '@shared/forge'
 
 interface RoxyStore {
@@ -60,13 +64,13 @@ interface RoxyStore {
    */
   telemetryEnabled: boolean
   providers: ConnectedProvider[]
-  /** models.dev model lists per provider id (lazy-loaded + cached). */
+  /** Provider model lists; Copilot availability is refreshed from the account. */
   modelCatalog: Record<string, ModelInfo[]>
   /**
    * Providers whose catalog has been REQUESTED and settled, however it settled.
    *
-   * Distinct from `modelCatalog` having a key, because an empty result is not
-   * cached (a starting-up proxy has to be retried). Without this the picker
+   * Distinct from `modelCatalog` having a key, because empty public/proxy lists
+   * are retried rather than cached. Without this the picker
    * cannot tell "still fetching" from "genuinely has no models", and blanked
    * the whole menu behind whichever provider was slowest.
    */
@@ -76,9 +80,15 @@ interface RoxyStore {
   /**
    * A deliberate, user-curated shortlist of models - pinned models show above
    * everything else in the picker, across all providers. Unlike `recentModels`
-   * this never reshuffles on its own; only `togglePinnedModel` changes it.
+   * this never reshuffles on its own; only `setModelPinned` changes it.
    */
   pinnedModels: { providerId: string; model: string }[]
+  /**
+   * Models omitted from the picker, as `providerId:model` keys. A Set, not the
+   * array `pinnedModels` uses: membership is queried once per row over a long
+   * list, and there is no order to preserve.
+   */
+  hiddenModels: Set<string>
   chats: Chat[]
   activeChatId: string | null
   messages: Message[]
@@ -201,13 +211,20 @@ interface RoxyStore {
   /** Load the pinned-model shortlist once (cached until toggled). */
   ensurePinnedModels: () => Promise<void>
   /** Pin or unpin a model in the shortlist; updates the cache optimistically. */
-  togglePinnedModel: (providerId: string, model: string, pinned: boolean) => Promise<void>
+  setModelPinned: (providerId: string, model: string, pinned: boolean) => Promise<void>
+  /** Load the hidden-model deny-list once (cached until toggled). */
+  ensureHiddenModels: () => Promise<void>
+  /** Hide or show one model in the picker. Hiding also unpins it. */
+  setModelHidden: (providerId: string, model: string, hidden: boolean) => Promise<void>
+  /** Replace one provider's entire hidden set — Hide all / Show all, in one write. */
+  setProviderHiddenModels: (providerId: string, models: string[]) => Promise<void>
   setReasoningEffort: (level: ReasoningEffort) => Promise<void>
   setContextLimit: (limit: number | null) => Promise<void>
-  setWebSearchApiKey: (key: string | null) => Promise<void>
   setAutoWorkstream: (enabled: boolean) => Promise<void>
   setTelemetryEnabled: (enabled: boolean) => Promise<void>
   setBranchPrefix: (prefix: string) => Promise<void>
+  setLanguage: (language: Language) => Promise<void>
+  setMotion: (preference: MotionPreference) => Promise<void>
   setDictationMode: (mode: 'fast' | 'accurate') => Promise<void>
   setDictationPolish: (enabled: boolean) => Promise<void>
   selectChat: (id: string) => Promise<void>
@@ -308,6 +325,14 @@ interface RoxyStore {
    */
   pullAllRepos: (chatId: string) => Promise<MultiSyncOutcome>
   resetAllRepos: (chatId: string) => Promise<MultiSyncOutcome>
+  /**
+   * Push EVERY repo of a multi-repo session.
+   *
+   * Separate from `pushBranch` for the same reason `pullAllRepos` is separate
+   * from `pullBranch`: four repos produce four outcomes, and there is no single
+   * `ok` that is true when three pushed and one was rejected.
+   */
+  pushAllRepos: (chatId: string) => Promise<MultiSyncOutcome>
   /** Hard-reset onto the upstream, stashing uncommitted work first. */
   resetBranch: (chatId: string) => Promise<SyncOutcome>
   /** Load the worktrees + branches for a project (menu open). */
@@ -356,8 +381,6 @@ let chatsUpdatedSubscribed = false
 const deltaHandlers = new Map<string, (event: LlmEvent) => void>()
 /** The active llm request id per chat, so stop() can abort the right stream. */
 const chatRequests = new Map<string, string>()
-/** Cross-render cache of models.dev lists so we fetch each provider once. */
-const modelCatalogCache = new Map<string, ModelInfo[]>()
 /**
  * In-flight `ensureModels` calls, keyed by provider.
  *
@@ -370,71 +393,10 @@ const modelCatalogCache = new Map<string, ModelInfo[]>()
 const modelCatalogInflight = new Map<string, Promise<void>>()
 /** Loaded once per app session — `ensurePinnedModels` is called from every ModelPicker mount. */
 let pinnedModelsLoaded = false
+/** Same, for the hidden-model deny-list — every ModelPicker and Settings mount asks. */
+let hiddenModelsLoaded = false
 /** Set when a remote turn lands while a local send streams into the shared chat. */
 const remoteMirror = { deferred: false }
-
-/**
- * Publish a session's live parts at most once per animation frame.
- *
- * All three streaming paths (a local send, a mirrored phone turn, a subagent's
- * own session) used to write `streamingChats[id]` synchronously on every delta.
- * A fast model emits those far quicker than the display can show them, so the
- * transcript re-rendered several hundred times a second — re-parsing the turn's
- * markdown and re-measuring the scroll column each time — and every render past
- * the first in a frame was discarded without ever being painted. That was the
- * bulk of the "the app is laggy while it streams" problem.
- *
- * Coalescing is lossless here because the parts array is CUMULATIVE: each delta
- * produces a complete new snapshot of the turn, so the newest one already
- * contains every skipped update.
- *
- * `null` (turn over) is published synchronously and cancels anything pending.
- * It's the one update whose ordering matters: the persisted message is appended
- * right after, and a frame landing later would resurrect the live bubble on top
- * of it — a visibly duplicated reply.
- */
-interface StreamPublisher {
-  (parts: MessagePart[] | null): void
-  /** Drop a scheduled frame without publishing it (the chat went away). */
-  cancel(): void
-}
-
-function createStreamPublisher(chatId: string): StreamPublisher {
-  let pending: MessagePart[] | null = null
-  let frame = 0
-  const publish = (parts: MessagePart[] | null): void =>
-    useRoxyStore.setState((s) => {
-      const next = { ...s.streamingChats }
-      if (parts === null) delete next[chatId]
-      else next[chatId] = parts
-      return { streamingChats: next }
-    })
-  const cancel = (): void => {
-    if (frame) cancelAnimationFrame(frame)
-    frame = 0
-    pending = null
-  }
-  const publisher = (parts: MessagePart[] | null): void => {
-    if (parts === null) {
-      cancel()
-      publish(null)
-      return
-    }
-    // Only the payload is replaced; the already-scheduled frame picks up
-    // whichever snapshot was last. Re-scheduling would land on the same frame
-    // boundary anyway, so this is a rate limit rather than a debounce — the
-    // first delta of a turn still paints on the very next frame.
-    pending = parts
-    if (frame) return
-    frame = requestAnimationFrame(() => {
-      frame = 0
-      if (pending) publish(pending)
-      pending = null
-    })
-  }
-  publisher.cancel = cancel
-  return publisher
-}
 
 /**
  * One publisher per streaming session. Coalescing only works if consecutive
@@ -451,7 +413,14 @@ const streamPublishers = new Map<string, StreamPublisher>()
 function publishStream(chatId: string, parts: MessagePart[] | null): void {
   let publisher = streamPublishers.get(chatId)
   if (!publisher) {
-    publisher = createStreamPublisher(chatId)
+    publisher = createStreamPublisher((parts) =>
+      useRoxyStore.setState((s) => {
+        const next = { ...s.streamingChats }
+        if (parts === null) delete next[chatId]
+        else next[chatId] = parts
+        return { streamingChats: next }
+      })
+    )
     streamPublishers.set(chatId, publisher)
   }
   publisher(parts)
@@ -510,43 +479,80 @@ async function pollStatusInto(
   set: (fn: (s: RoxyStore) => Partial<RoxyStore>) => void,
   key: string,
   chatId: string,
-  chats: Chat[]
+  chats: Chat[],
+  /** `projectRepos` from the store: which project folders are folders OF repos. */
+  projectRepos: Record<string, boolean>
 ): Promise<void> {
   const chat = chats.find((c) => c.id === chatId)
   const owner =
     chat?.kind === 'sub' && chat.parentId ? chats.find((c) => c.id === chat.parentId) : chat
 
-  if (owner?.repos?.length) {
+  // Asked for every session in a multi-repo PROJECT, not just one whose links
+  // already exist. A workstream is materialized lazily on the first turn, so a
+  // brand-new multi-repo session has no links for the whole pre-turn window -
+  // and answering "not composite" for it was what left the strip with a bare
+  // "branch pending" and no working sync buttons. The main process resolves
+  // that case to the project's own checkouts; an empty array still means "not
+  // multi-repo", so a single-repo session falls straight through.
+  if (owner?.repos?.length || (owner?.workspacePath && projectRepos[owner.workspacePath])) {
     const repos = await api.git.statusMulti(owner.id)
     // Empty means the session isn't composite after all (its links were
     // cleared) - leave the last known state rather than blanking the row.
-    if (!repos.length) return
-    const agg = aggregateRepoStatus(repos)
-    // The PR chip has no single answer across N repos. Show the first repo that
-    // has one and let the panel enumerate the rest; a chip that silently picks
-    // a winner is better than no chip, but the panel is where the truth is.
-    const lead = repos.find((r) => r.isRepo && r.forge)?.forge ?? null
-    set((s) => ({
-      repoStatus: { ...s.repoStatus, [key]: repos },
-      gitStatus: {
-        ...s.gitStatus,
-        [key]: {
-          // The composite directory isn't a repo, but the WORKSTREAM is
-          // repo-backed, and that is what this flag gates in the UI.
-          isRepo: agg.repoCount > 0,
-          root: key,
-          branch: agg.branch,
-          dirty: agg.dirty,
-          changed: agg.changed,
-          ahead: agg.ahead,
-          behind: agg.behind,
-          hasUpstream: repos.some((r) => r.hasUpstream),
-          defaultBranch: repos.find((r) => r.defaultBranch)?.defaultBranch ?? null
-        }
-      },
-      forgeStatus: lead ? { ...s.forgeStatus, [key]: lead } : s.forgeStatus
-    }))
-    return
+    if (repos.length) {
+      const agg = aggregateRepoStatus(repos)
+      // The chip describes the WHOLE workstream, folded from every repo - see
+      // `aggregateLifecycle`. It used to show the first repo that had a forge
+      // answer and let it speak for the rest, so three-pushed-one-local read as
+      // `pushed` and the repo that still needed work was invisible.
+      const composite = aggregateLifecycle(
+        repos.map((r) => ({
+          name: r.name,
+          isRepo: r.isRepo,
+          lifecycle: r.forge?.lifecycle ?? null
+        }))
+      )
+      const lead = composite
+        ? (repos.find((r) => r.isRepo && r.forge?.lifecycle.phase === composite.phase)?.forge ??
+          repos.find((r) => r.isRepo && r.forge)?.forge ??
+          null)
+        : null
+      set((s) => ({
+        repoStatus: { ...s.repoStatus, [key]: repos },
+        gitStatus: {
+          ...s.gitStatus,
+          [key]: {
+            // The composite directory isn't a repo, but the WORKSTREAM is
+            // repo-backed, and that is what this flag gates in the UI.
+            isRepo: agg.repoCount > 0,
+            root: key,
+            branch: agg.branch,
+            dirty: agg.dirty,
+            changed: agg.changed,
+            ahead: agg.ahead,
+            behind: agg.behind,
+            hasUpstream: repos.some((r) => r.hasUpstream),
+            defaultBranch: repos.find((r) => r.defaultBranch)?.defaultBranch ?? null
+          }
+        },
+        forgeStatus:
+          lead && composite
+            ? {
+                ...s.forgeStatus,
+                [key]: {
+                  ...lead,
+                  lifecycle: {
+                    ...lead.lifecycle,
+                    ...describeCompositeLifecycle(composite, lead.lifecycle),
+                    action: composite.action
+                  }
+                }
+              }
+            : s.forgeStatus
+      }))
+      return
+    }
+    // Fall through: the project scan said multi-repo but this session resolved
+    // to no repos at all. The single-repo path below is the honest fallback.
   }
 
   // One round trip for both. `forge.status` is cheap by construction: it
@@ -860,15 +866,18 @@ function syncOwner(get: () => RoxyStore, chatId: string): { chat: Chat } | { err
 async function syncAllRepos(
   get: () => RoxyStore,
   chatId: string,
-  mode: 'pull' | 'reset'
+  mode: 'pull' | 'reset' | 'push'
 ): Promise<MultiSyncOutcome> {
   const owner = syncOwner(get, chatId)
   if ('error' in owner) return { repos: [], error: owner.error }
 
-  const r =
+  const call =
     mode === 'pull'
-      ? await api.forge.pullMulti(owner.chat.id)
-      : await api.forge.resetMulti(owner.chat.id)
+      ? api.forge.pullMulti
+      : mode === 'reset'
+        ? api.forge.resetMulti
+        : api.forge.pushMulti
+  const r = await call(owner.chat.id)
   await get().refreshGitStatus(owner.chat.id)
   return r
 }
@@ -884,6 +893,7 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
   modelsTried: {},
   recentModels: {},
   pinnedModels: [],
+  hiddenModels: new Set<string>(),
   chats: [],
   activeChatId: null,
   messages: [],
@@ -920,7 +930,30 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
       api.projects.listOrder(),
       api.settings.getTelemetry()
     ])
-    set({ settings, providers, chats, loops, projectOrder, telemetryEnabled, ready: true })
+    // A factory reset truncates these tables and re-bootstraps, so the load
+    // guards have to fall with them or the picker keeps filtering on a
+    // deny-list the database no longer has.
+    pinnedModelsLoaded = false
+    hiddenModelsLoaded = false
+    // Before `ready` flips: the splash is still up, so switching the catalog
+    // here means the first painted frame is already in the right language
+    // rather than flashing English and re-rendering.
+    await applyLanguage(settings.language)
+    modelCatalogInflight.clear()
+    set({
+      settings,
+      providers,
+      chats,
+      loops,
+      projectOrder,
+      telemetryEnabled,
+      modelCatalog: {},
+      modelsTried: {},
+      recentModels: {},
+      pinnedModels: [],
+      hiddenModels: new Set(),
+      ready: true
+    })
     // Warm the usage/cost dashboard for the titlebar pill (best-effort, async).
     void get().refreshUsage()
 
@@ -1093,7 +1126,19 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
       api.providers.listConnected(),
       api.settings.getAll()
     ])
-    set({ providers, settings })
+    // A reconnect can keep the same provider id while changing the account.
+    // Invalidate pending responses too, so an old account cannot refill the UI.
+    modelCatalogInflight.delete('github-copilot')
+    set((s) => {
+      const modelCatalog = { ...s.modelCatalog }
+      const modelsTried = { ...s.modelsTried }
+      delete modelCatalog['github-copilot']
+      delete modelsTried['github-copilot']
+      return { providers, settings, modelCatalog, modelsTried }
+    })
+    if (providers.some((p) => p.id === 'github-copilot')) {
+      await get().ensureModels('github-copilot')
+    }
   },
 
   reorderProviders: async (ids) => {
@@ -1166,8 +1211,16 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
       }
     }
     if (!get().gitAvailable) return
+    // Probe the project's shape before the first poll. `pollStatusInto` needs it
+    // to know a session belongs to a folder OF repos, and a session whose
+    // workstream is still pending has no links to say so on its own - without
+    // this the very first poll takes the single-repo path and the strip shows a
+    // bare "branch pending" until something else happens to probe. Cached after
+    // the first call, so this is one filesystem scan per project per app run.
+    const chatNow = get().chats.find((c) => c.id === chatId)
+    if (chatNow?.workspacePath) await get().ensureProjectRepos(chatNow.workspacePath)
     try {
-      await pollStatusInto(set, key, chatId, get().chats)
+      await pollStatusInto(set, key, chatId, get().chats, get().projectRepos)
     } catch {
       // Best-effort: a transient git failure leaves the last known state.
     }
@@ -1218,9 +1271,20 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
       // anyway, and firing N spawns at once on a machine with a dozen sessions is
       // a visible stall on the very interaction (opening the app) this is meant
       // to be invisible during.
+      // Same probe as `refreshGitStatus`, once per distinct project rather than
+      // per session: the sweep is what keeps the SIDEBAR current, and without
+      // this every multi-repo row there would fold to the single-repo path.
+      for (const workspace of new Set(
+        get()
+          .chats.map((c) => c.workspacePath)
+          .filter((p): p is string => !!p)
+      )) {
+        await get().ensureProjectRepos(workspace)
+      }
+
       for (const [key, chatId] of keys) {
         try {
-          await pollStatusInto(set, key, chatId, get().chats)
+          await pollStatusInto(set, key, chatId, get().chats, get().projectRepos)
         } catch {
           // Best-effort per session: a deleted worktree must not stop the sweep
           // and leave every row below it blank.
@@ -1250,6 +1314,7 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
 
   pullAllRepos: (chatId) => syncAllRepos(get, chatId, 'pull'),
   resetAllRepos: (chatId) => syncAllRepos(get, chatId, 'reset'),
+  pushAllRepos: (chatId) => syncAllRepos(get, chatId, 'push'),
 
   refreshWorktrees: async (workspacePath) => {
     if (!workspacePath || !get().gitAvailable) return
@@ -1331,36 +1396,36 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
   },
 
   ensureModels: async (providerId) => {
+    const accountAware = providerId === 'github-copilot'
+    if (accountAware && !get().providers.some((p) => p.id === providerId)) return
     const existing = get().modelCatalog[providerId]
-    if (existing && existing.length > 0) return
-    const cached = modelCatalogCache.get(providerId)
-    if (cached && cached.length > 0) {
-      set((s) => ({ modelCatalog: { ...s.modelCatalog, [providerId]: cached } }))
-      return
-    }
+    // Main owns Copilot's short TTL. Never keep its first success forever here.
+    if (!accountAware && existing && existing.length > 0) return
     // Share one round trip between every caller that asks in the same tick.
     const pending = modelCatalogInflight.get(providerId)
     if (pending) return pending
-    const load = (async () => {
+    const load = Promise.resolve().then(async () => {
       try {
         const list = await api.models.list(providerId)
-        // Only cache non-empty lists. If the proxy or connection is starting up,
-        // we want to try again on the next mount/action rather than caching an
-        // empty list forever.
-        if (list.length > 0) {
-          modelCatalogCache.set(providerId, list)
+        if (modelCatalogInflight.get(providerId) !== load) return
+        // Copilot's empty list revokes old entries. Other providers still retry
+        // empty lists when a proxy or connection is starting up.
+        if (accountAware || list.length > 0) {
           set((s) => ({ modelCatalog: { ...s.modelCatalog, [providerId]: list } }))
         }
       } catch {
-        // Leave the catalog untouched - the picker shows the provider as empty
-        // and the next mount retries.
+        if (accountAware && modelCatalogInflight.get(providerId) === load) {
+          set((s) => ({ modelCatalog: { ...s.modelCatalog, [providerId]: [] } }))
+        }
       } finally {
         // Mark the attempt either way, so the picker can stop showing a
         // provider as "loading" once it has actually been asked.
-        modelCatalogInflight.delete(providerId)
-        set((s) => ({ modelsTried: { ...s.modelsTried, [providerId]: true } }))
+        if (modelCatalogInflight.get(providerId) === load) {
+          modelCatalogInflight.delete(providerId)
+          set((s) => ({ modelsTried: { ...s.modelsTried, [providerId]: true } }))
+        }
       }
-    })()
+    })
     modelCatalogInflight.set(providerId, load)
     return load
   },
@@ -1378,7 +1443,7 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
     set({ pinnedModels: pinned })
   },
 
-  togglePinnedModel: async (providerId, model, pinned) => {
+  setModelPinned: async (providerId, model, pinned) => {
     // Optimistic: the picker toggles instantly, no round trip flicker.
     set((s) => ({
       pinnedModels: pinned
@@ -1386,6 +1451,51 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
         : s.pinnedModels.filter((p) => !(p.providerId === providerId && p.model === model))
     }))
     await api.models.setPinned(providerId, model, pinned)
+  },
+
+  ensureHiddenModels: async () => {
+    if (hiddenModelsLoaded) return
+    hiddenModelsLoaded = true
+    const hidden = await api.models.hidden()
+    set({ hiddenModels: new Set(hidden.map((h) => `${h.providerId}:${h.model}`)) })
+  },
+
+  setModelHidden: async (providerId, model, hidden) => {
+    const key = `${providerId}:${model}`
+    set((s) => {
+      const next = new Set(s.hiddenModels)
+      if (hidden) next.add(key)
+      else next.delete(key)
+      // Mirrors the main process, which unpins on hide.
+      return {
+        hiddenModels: next,
+        ...(hidden
+          ? {
+              pinnedModels: s.pinnedModels.filter(
+                (p) => !(p.providerId === providerId && p.model === model)
+              )
+            }
+          : {})
+      }
+    })
+    await api.models.setHidden(providerId, model, hidden)
+  },
+
+  setProviderHiddenModels: async (providerId, models) => {
+    const hiding = new Set(models)
+    set((s) => {
+      // Replaces this provider's set only; other providers' keys survive.
+      const next = new Set<string>()
+      for (const key of s.hiddenModels) if (!key.startsWith(`${providerId}:`)) next.add(key)
+      for (const model of hiding) next.add(`${providerId}:${model}`)
+      return {
+        hiddenModels: next,
+        pinnedModels: s.pinnedModels.filter(
+          (p) => !(p.providerId === providerId && hiding.has(p.model))
+        )
+      }
+    })
+    await api.models.setProviderHidden(providerId, models)
   },
 
   setReasoningEffort: async (level) => {
@@ -1409,6 +1519,15 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
     set({ telemetryEnabled: next })
   },
 
+  setLanguage: async (language) => {
+    // Apply FIRST, persist second. The click already told us what the user
+    // wants; making the UI wait on a database round trip just makes the picker
+    // feel broken. A failed write is a stale row, not a stuck interface.
+    await applyLanguage(language)
+    const settings = await api.settings.setLanguage(language)
+    set({ settings })
+  },
+
   setBranchPrefix: async (prefix) => {
     const settings = await api.settings.setBranchPrefix(prefix)
     set({ settings })
@@ -1424,9 +1543,17 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
     set({ settings })
   },
 
-  setWebSearchApiKey: async (key) => {
-    const settings = await api.settings.setWebSearchApiKey(key)
-    set({ settings })
+  setMotion: async (preference) => {
+    const previous = motionSnapshot().preference
+    applyMotion(preference)
+    try {
+      const settings = await api.settings.setMotion(preference)
+      applyMotion(settings.motion)
+      set((s) => ({ settings: s.settings ? { ...s.settings, motion: settings.motion } : settings }))
+    } catch (error) {
+      applyMotion(previous)
+      throw error
+    }
   },
 
   selectChat: async (id) => {
@@ -1841,11 +1968,19 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
       // has to type a model name for a connected provider to just work.
       // Only trust the session's model when it belongs to the provider we
       // actually resolved, so a stale pin can never cross providers.
-      const model =
-        (config.providerId === provider.id ? config.model : null) ||
-        provider.defaultModel ||
-        pickDefaultModel(catalog) ||
-        (provider.id === 'github-copilot' ? 'gpt-4o' : 'gpt-4o-mini')
+      const model = resolveProviderModel(
+        provider,
+        catalog,
+        config.providerId === provider.id ? config.model : null
+      )
+      if (!model || stopped()) {
+        if (!stopped()) {
+          parts = [...parts, { type: 'text', text: i18n.t('models.copilotUnavailable') }]
+          setStreaming(parts)
+        }
+        await finishTurn()
+        return
+      }
       const info = catalog.find((m) => m.id === model)
       const modelContext = info?.contextLimit ?? 128_000
       const contextBudget = contextBudgetFor(config.contextLimit, modelContext)
@@ -2098,11 +2233,12 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
     const provider = providers.find((p) => p.id === config.providerId) ?? providers[0] ?? null
     if (!provider || !(provider.hasCredential || provider.auth === 'none')) return
     await get().ensureModels(provider.id)
-    const model =
-      (config.providerId === provider.id ? config.model : null) ||
-      provider.defaultModel ||
-      pickDefaultModel(get().modelCatalog[provider.id] ?? []) ||
-      (provider.id === 'github-copilot' ? 'gpt-4o' : 'gpt-4o-mini')
+    const model = resolveProviderModel(
+      provider,
+      get().modelCatalog[provider.id] ?? [],
+      config.providerId === provider.id ? config.model : null
+    )
+    if (!model) return
     set((s) => ({ compactingChats: { ...s.compactingChats, [chatId]: true } }))
     try {
       await api.context.compact(chatId, provider.id, model)

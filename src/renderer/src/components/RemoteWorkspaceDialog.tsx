@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { QRCodeSVG } from 'qrcode.react'
+import { useTranslation } from 'react-i18next'
 import { Check, Copy, Loader2, MonitorSmartphone, ShieldCheck, Smartphone, X } from 'lucide-react'
 import { useRoxyStore } from '../lib/store'
 import { Button } from './ui'
@@ -13,6 +14,7 @@ import { Button } from './ui'
  * only **Stop sharing** tears down the room + revokes the tokens.
  */
 export function RemoteWorkspaceDialog({ onClose }: { onClose: () => void }): JSX.Element {
+  const { t } = useTranslation()
   const remote = useRoxyStore((s) => s.remote)
   const activeChatId = useRoxyStore((s) => s.activeChatId)
   const chats = useRoxyStore((s) => s.chats)
@@ -24,7 +26,7 @@ export function RemoteWorkspaceDialog({ onClose }: { onClose: () => void }): JSX
 
   // The session the phone is currently viewing (it can switch between all of them).
   const viewingName =
-    chats.find((c) => c.id === (remote.sessionId ?? activeChatId))?.title ?? 'this session'
+    chats.find((c) => c.id === (remote.sessionId ?? activeChatId))?.title ?? t('remote.thisSession')
 
   // On open, sync the real sharing status first (a share may already be live
   // from before this window loaded), then auto-start only if still idle.
@@ -89,19 +91,16 @@ export function RemoteWorkspaceDialog({ onClose }: { onClose: () => void }): JSX
           </div>
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
-              <h2 className="text-base font-semibold">Remote Workspace</h2>
+              <h2 className="text-base font-semibold">{t('remote.title')}</h2>
               {(remote.phase === 'live' || remote.phase === 'offline') && (
                 <LiveBadge phase={remote.phase} />
               )}
             </div>
-            <p className="mt-0.5 truncate text-xs text-text-muted">
-              Take your whole workspace to your phone — scan, enter the PIN, and switch between any
-              session from anywhere.
-            </p>
+            <p className="mt-0.5 truncate text-xs text-text-muted">{t('remote.subtitle')}</p>
           </div>
           <button
             onClick={onClose}
-            title="Close (keeps sharing)"
+            title={t('remote.close')}
             className="press-scale flex h-7 w-7 shrink-0 items-center justify-center sq sq-lg rounded-lg text-text-muted hover:bg-white/5 hover:text-text"
           >
             <X className="h-4 w-4" />
@@ -134,11 +133,9 @@ export function RemoteWorkspaceDialog({ onClose }: { onClose: () => void }): JSX
         {/* Footer */}
         {sharing && (
           <div className="flex items-center justify-between gap-2 border-t border-border px-5 py-3">
-            <span className="text-[11px] text-text-subtle">
-              The link + PIN stop working the moment you stop sharing.
-            </span>
+            <span className="text-[11px] text-text-subtle">{t('remote.linkDiesOnStop')}</span>
             <Button variant="danger" size="sm" onClick={() => void stop()} disabled={stopping}>
-              {stopping ? 'Stopping…' : 'Stop sharing'}
+              {stopping ? t('remote.stopping') : t('remote.stopSharing')}
             </Button>
           </div>
         )}
@@ -149,11 +146,12 @@ export function RemoteWorkspaceDialog({ onClose }: { onClose: () => void }): JSX
 
 /** Green "Live" / amber "Reconnecting" pill next to the title. */
 function LiveBadge({ phase }: { phase: 'live' | 'offline' }): JSX.Element {
+  const { t } = useTranslation()
   if (phase === 'offline') {
     return (
       <span className="inline-flex items-center gap-1.5 rounded-full border border-warning/30 bg-warning/10 px-2 py-0.5 text-[10px] font-medium text-warning">
         <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-warning" />
-        Reconnecting
+        {t('remote.reconnecting')}
       </span>
     )
   }
@@ -163,7 +161,7 @@ function LiveBadge({ phase }: { phase: 'live' | 'offline' }): JSX.Element {
         <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-success opacity-70" />
         <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-success" />
       </span>
-      Live
+      {t('remote.live')}
     </span>
   )
 }
@@ -184,6 +182,7 @@ function ShareView({
   copied: boolean
   onCopy: () => void
 }): JSX.Element {
+  const { t } = useTranslation()
   return (
     <div className="flex flex-col items-center gap-4">
       {/* QR — rendered locally, nothing leaves the machine. */}
@@ -197,25 +196,23 @@ function ShareView({
         )}
       </div>
 
-      <p className="text-center text-xs text-text-muted">
-        Scan with your phone camera, or open the link:
-      </p>
+      <p className="text-center text-xs text-text-muted">{t('remote.scanOrOpen')}</p>
 
       {/* Safe URL + copy */}
       <div className="flex w-full items-center gap-2 sq sq-lg sq-ring rounded-lg border border-border bg-surface-2 px-3 py-2">
         <span className="min-w-0 flex-1 truncate font-mono text-xs text-text-muted">{url}</span>
         <button
           onClick={onCopy}
-          title="Copy link"
+          title={t('remote.copyLink')}
           className="press-scale flex h-6 shrink-0 items-center gap-1 sq sq-md rounded-md px-2 text-[11px] font-medium text-text-muted hover:bg-white/5 hover:text-text"
         >
           {copied ? (
             <>
-              <Check className="h-3.5 w-3.5 text-success" /> Copied
+              <Check className="h-3.5 w-3.5 text-success" /> {t('remote.copied')}
             </>
           ) : (
             <>
-              <Copy className="h-3.5 w-3.5" /> Copy
+              <Copy className="h-3.5 w-3.5" /> {t('remote.copy')}
             </>
           )}
         </button>
@@ -224,7 +221,7 @@ function ShareView({
       {/* PIN — the second factor, shown big. */}
       <div className="flex w-full flex-col items-center gap-2 sq sq-xl sq-ring rounded-xl border border-border bg-surface-2 py-4">
         <span className="text-[11px] font-medium uppercase tracking-wide text-text-subtle">
-          Enter this PIN on your phone
+          {t('remote.enterPin')}
         </span>
         <Pin pin={pin} />
       </div>
@@ -235,16 +232,16 @@ function ShareView({
           <>
             <span className="inline-flex items-center gap-1.5 font-medium text-success">
               <Smartphone className="h-3.5 w-3.5" />
-              {guests} device{guests === 1 ? '' : 's'} connected
+              {t('remote.devicesConnected', { count: guests })}
             </span>
             <span className="text-[11px] text-text-subtle">
-              Viewing <span className="text-text-muted">{viewingName}</span>
+              {t('remote.viewing')} <span className="text-text-muted">{viewingName}</span>
             </span>
           </>
         ) : (
           <span className="inline-flex items-center gap-1.5 text-text-muted">
             <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-text-subtle" />
-            Waiting for your phone to connect…
+            {t('remote.waitingForPhone')}
           </span>
         )}
       </div>
@@ -252,8 +249,7 @@ function ShareView({
       {/* Privacy reassurance — the core of the security model, at a glance. */}
       <p className="inline-flex items-center gap-1.5 text-center text-[11px] leading-snug text-text-subtle">
         <ShieldCheck className="h-3.5 w-3.5 shrink-0 text-success/80" />
-        Your code and files stay on this computer — only the chat is relayed, over an encrypted
-        link.
+        {t('remote.privacy')}
       </p>
     </div>
   )
@@ -277,56 +273,55 @@ function Pin({ pin }: { pin?: string }): JSX.Element {
 }
 
 function StartingState(): JSX.Element {
+  const { t } = useTranslation()
   return (
     <div className="flex flex-col items-center gap-3 py-10 text-center">
       <Loader2 className="h-7 w-7 animate-spin text-accent" />
-      <p className="text-sm font-medium">Starting your Remote Workspace…</p>
-      <p className="text-xs text-text-muted">Creating a secure room and dialing the relay.</p>
+      <p className="text-sm font-medium">{t('remote.startingTitle')}</p>
+      <p className="text-xs text-text-muted">{t('remote.startingBody')}</p>
     </div>
   )
 }
 
 function IdleState({ onStart }: { onStart: () => void }): JSX.Element {
+  const { t } = useTranslation()
   return (
     <div className="flex flex-col items-center gap-4 py-8 text-center">
       <div className="flex h-12 w-12 items-center justify-center sq sq-2xl rounded-2xl bg-accent/15 text-accent">
         <MonitorSmartphone className="h-6 w-6" />
       </div>
-      <p className="max-w-xs text-sm text-text-muted">
-        Share this session to your phone with a secure link + PIN. Your code and files never leave
-        your machine — the phone is just a remote control.
-      </p>
+      <p className="max-w-xs text-sm text-text-muted">{t('remote.idleBody')}</p>
       <Button variant="primary" onClick={onStart}>
-        Start sharing
+        {t('remote.startSharing')}
       </Button>
     </div>
   )
 }
 
 function EmptyState(): JSX.Element {
+  const { t } = useTranslation()
   return (
     <div className="flex flex-col items-center gap-3 py-10 text-center">
       <div className="flex h-12 w-12 items-center justify-center sq sq-2xl rounded-2xl bg-white/5 text-text-muted">
         <MonitorSmartphone className="h-6 w-6" />
       </div>
-      <p className="text-sm font-medium">No session open</p>
-      <p className="max-w-xs text-xs text-text-muted">
-        Open or create a session first, then share it to your phone from here.
-      </p>
+      <p className="text-sm font-medium">{t('remote.noSessionTitle')}</p>
+      <p className="max-w-xs text-xs text-text-muted">{t('remote.noSessionBody')}</p>
     </div>
   )
 }
 
 function ErrorState({ message, onRetry }: { message?: string; onRetry: () => void }): JSX.Element {
+  const { t } = useTranslation()
   return (
     <div className="flex flex-col items-center gap-3 py-8 text-center">
       <div className="flex h-12 w-12 items-center justify-center sq sq-2xl rounded-2xl bg-danger/10 text-danger">
         <X className="h-6 w-6" />
       </div>
-      <p className="text-sm font-medium">Couldn’t start sharing</p>
-      <p className="max-w-xs text-xs text-text-muted">{message ?? 'Something went wrong.'}</p>
+      <p className="text-sm font-medium">{t('remote.errorTitle')}</p>
+      <p className="max-w-xs text-xs text-text-muted">{message ?? t('remote.errorFallback')}</p>
       <Button variant="secondary" onClick={onRetry}>
-        Try again
+        {t('remote.tryAgain')}
       </Button>
     </div>
   )

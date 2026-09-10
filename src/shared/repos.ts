@@ -35,6 +35,7 @@
  * No Node, no Electron, no DB: this file is unit-tested by `npm run smoke:shared`.
  * The filesystem half (`discoverRepos`) lives in `main/services/workspace.ts`.
  */
+import type { LifecycleAction, LifecyclePhase, LifecycleTone, LifecycleView } from './forge'
 
 /** Minimal `path` surface, injected so this module stays platform-agnostic. */
 export interface RepoPathOps {
@@ -403,14 +404,14 @@ export interface SyncResultLite {
  */
 export function summarizeSync(
   results: SyncResultLite[],
-  mode: 'pull' | 'reset'
+  mode: 'pull' | 'reset' | 'push'
 ): { text: string; failed: boolean } {
   if (!results.length) return { text: 'Nothing to sync.', failed: false }
 
   const failed = results.filter((r) => !r.ok)
   const moved = results.filter((r) => r.ok && r.updated)
   const stashed = results.filter((r) => r.ok && r.stashed)
-  const verb = mode === 'pull' ? 'Updated' : 'Reset'
+  const verb = mode === 'pull' ? 'Updated' : mode === 'reset' ? 'Reset' : 'Pushed'
 
   if (failed.length) {
     const names = failed.map((r) => r.name).join(', ')
@@ -422,7 +423,13 @@ export function summarizeSync(
   }
 
   if (!moved.length) {
-    return { text: `All ${results.length} already up to date.`, failed: false }
+    return {
+      text:
+        mode === 'push'
+          ? `All ${results.length} already pushed.`
+          : `All ${results.length} already up to date.`,
+      failed: false
+    }
   }
 
   const scope = moved.length === results.length ? `all ${results.length}` : `${moved.length}`
@@ -432,6 +439,152 @@ export function summarizeSync(
   return {
     text: `${verb} ${scope} ${moved.length === 1 ? 'repo' : 'repos'}.${stash}`,
     failed: false
+  }
+}
+
+// ---------------------------------------------------------------------------
+// The chip: N repos, one honest label
+// ---------------------------------------------------------------------------
+
+/** Just enough of a repo's forge state to fold into the composite chip. */
+export interface RepoLifecycleLite {
+  name: string
+  isRepo: boolean
+  /** This repo's own lifecycle, or null when the forge hasn't answered. */
+  lifecycle: { phase: LifecyclePhase; action: LifecycleAction | null } | null
+}
+
+/**
+ * The lifecycle chip for a workstream spanning N repos.
+ *
+ * The old behaviour was to show the FIRST repo that had a forge answer and let
+ * it speak for the rest, which is wrong in the direction that matters: a
+ * workstream with three repos pushed and one still local rendered `pushed`, and
+ * the one repo that actually needed pushing was invisible. Worse, the panel's
+ * primary button then acted on that one repo's `cwd` alone, so "Push" pushed a
+ * quarter of the work and the chip stayed put.
+ *
+ * So the chip reports the LEAST-ADVANCED repo instead. It is the only choice
+ * that keeps the label a promise rather than a sample:
+ *
+ *   - the label answers "is this workstream done?", and the honest answer for
+ *     3-of-4 is "no";
+ *   - the action it offers is therefore always one that has something to do,
+ *     and `pushMulti`/`pullMulti` sweep every repo that needs it;
+ *   - it can only ever under-claim progress, never over-claim it. A chip that
+ *     says `local` when one repo is unpushed costs a redundant click; one that
+ *     says `merged` when a repo never got pushed loses work.
+ *
+ * `count` is what lets the UI say `2/4 local` rather than a bare `local`, which
+ * is the difference between "nothing is pushed" and "most of it is".
+ */
+export interface CompositeLifecycle {
+  /** The least-advanced phase across live repos. */
+  phase: LifecyclePhase
+  /** How many repos sit at that phase. */
+  count: number
+  /** Total live repos, so the UI can render `2/4`. */
+  total: number
+  /** The action for `phase`, or null when there is nothing to offer. */
+  action: LifecycleAction | null
+  /** Repos at `phase`, in display order - named in the tooltip. */
+  repos: string[]
+  /** True when the repos are NOT all at the same phase. */
+  mixed: boolean
+}
+
+/**
+ * Lifecycle phases from least to most advanced.
+ *
+ * This is the order the chip folds over, so it is the definition of "least
+ * advanced" and worth being explicit about rather than deriving from the union.
+ *
+ * `diverged` sorts FIRST - ahead of `unpublished` - because it is the only
+ * phase that cannot be resolved by any button in the panel. A workstream with
+ * one diverged repo needs a human to merge or rebase it, and burying that under
+ * a cheerful `#42` from the other three is how the diverged one gets forgotten
+ * until a push is rejected.
+ */
+const PHASE_ORDER: readonly LifecyclePhase[] = [
+  'diverged',
+  'unpublished',
+  'ahead',
+  'behind',
+  'synced',
+  'draft',
+  'open',
+  'closed',
+  'merged'
+]
+
+/** Where a phase sits on the road to merged. Unknown phases sort last. */
+function phaseRank(phase: LifecyclePhase): number {
+  const i = PHASE_ORDER.indexOf(phase)
+  return i === -1 ? PHASE_ORDER.length : i
+}
+
+/**
+ * Fold N per-repo lifecycles into the one the chip shows.
+ *
+ * Repos the forge hasn't answered for yet are treated as `unpublished` rather
+ * than skipped: that is what git alone knows about them, and skipping would let
+ * a slow lookup briefly promote the chip to `merged` before demoting it again -
+ * exactly the flicker the single-repo chip is written to avoid.
+ *
+ * Returns null when no repo is live, which the caller renders as no chip at all.
+ */
+export function aggregateLifecycle(repos: RepoLifecycleLite[]): CompositeLifecycle | null {
+  const live = repos.filter((r) => r.isRepo)
+  if (!live.length) return null
+
+  const phaseOf = (r: RepoLifecycleLite): LifecyclePhase => r.lifecycle?.phase ?? 'unpublished'
+  let worst = phaseOf(live[0])
+  for (const r of live) {
+    if (phaseRank(phaseOf(r)) < phaseRank(worst)) worst = phaseOf(r)
+  }
+
+  const at = live.filter((r) => phaseOf(r) === worst)
+  // Take the action from a repo actually AT the reported phase, so the button
+  // and the label can never describe different repos.
+  const action = at.find((r) => r.lifecycle?.action)?.lifecycle?.action ?? null
+
+  return {
+    phase: worst,
+    count: at.length,
+    total: live.length,
+    action,
+    repos: at.map((r) => r.name),
+    mixed: at.length !== live.length
+  }
+}
+
+/**
+ * The composite chip's label and tooltip, built from one repo's rendering of the
+ * same phase.
+ *
+ * Reuses the single-repo `LifecycleView` rather than re-deriving the words:
+ * `branchLifecycle` already owns the vocabulary (`local`, `pushed`, `#42`), and
+ * a second copy here would drift the moment one of them gained a phase.
+ *
+ * The label gains a `2/4` prefix ONLY when the repos disagree. A workstream
+ * whose repos are all `local` says `local`, exactly as a single repo does -
+ * the count is there to expose disagreement, not to decorate agreement.
+ */
+export function describeCompositeLifecycle(
+  composite: CompositeLifecycle,
+  base: LifecycleView
+): { label: string; tone: LifecycleTone; title: string } {
+  if (!composite.mixed) {
+    return {
+      label: base.label,
+      tone: base.tone,
+      title: `${base.title} - all ${composite.total} repos`
+    }
+  }
+  return {
+    label: `${composite.count}/${composite.total} ${base.label}`,
+    tone: base.tone,
+    title: `${base.title}: ${composite.repos.join(', ')}`
   }
 }
 

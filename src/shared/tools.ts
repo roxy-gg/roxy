@@ -28,7 +28,7 @@ export interface ToolDef {
    * This gates the per-call cancel button, and the rule is honesty: a button
    * that does nothing is worse than no button. It is true only for the tools
    * whose dispatch actually honors `ctx.signal` — either by killing the work
-   * (`bash` kills the process tree, `webfetch`/`websearch` abort the request,
+   * (`bash` kills the process tree, `webfetch` aborts the request,
    * `grep`/`glob` break out of their scan) or by making the TURN stop waiting on
    * work that cannot itself be interrupted (the `untilAborted` calls: Electron
    * `webContents`, the language server, an MCP round trip).
@@ -142,14 +142,6 @@ export const TOOLS: ToolDef[] = [
     category: 'Web',
     mutates: false,
     // A dead host holds the socket open until the timeout; the fetch takes our signal.
-    interruptible: true
-  },
-  {
-    id: 'websearch',
-    name: 'websearch',
-    description: 'Search the web for fresh context beyond the training cutoff.',
-    category: 'Web',
-    mutates: false,
     interruptible: true
   },
 

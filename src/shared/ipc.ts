@@ -5,11 +5,13 @@ export const CHANNELS = {
   settingsSetActiveAgent: 'settings:setActiveAgent',
   settingsSetReasoningEffort: 'settings:setReasoningEffort',
   settingsSetContextLimit: 'settings:setContextLimit',
-  settingsSetWebSearchApiKey: 'settings:setWebSearchApiKey',
   settingsSetAutoWorkstream: 'settings:setAutoWorkstream',
   settingsSetBranchPrefix: 'settings:setBranchPrefix',
+  settingsSetLanguage: 'settings:setLanguage',
+  settingsSetMotion: 'settings:setMotion',
   settingsSetDictationMode: 'settings:setDictationMode',
   settingsSetDictationPolish: 'settings:setDictationPolish',
+  settingsMotionChanged: 'settings:motionChanged',
   settingsCompleteOnboarding: 'settings:completeOnboarding',
   settingsReset: 'settings:reset',
   // Anonymous usage tracking. Its own pair of channels rather than a field on
@@ -64,6 +66,24 @@ export const CHANNELS = {
   skillsUpdate: 'skills:update',
   skillsRemove: 'skills:remove',
   skillsInstall: 'skills:install',
+
+  /**
+   * Themes -- user-authored `theme.json` files that re-point the app's CSS
+   * custom properties. `themesResolve` returns the properties to set on the
+   * root element, which is what actually restyles the UI.
+   */
+  themesList: 'themes:list',
+  themesRefresh: 'themes:refresh',
+  themesRead: 'themes:read',
+  themesResolve: 'themes:resolve',
+  themesSave: 'themes:save',
+  themesCreate: 'themes:create',
+  themesRemove: 'themes:remove',
+  themesReveal: 'themes:reveal',
+  /** Persist the active theme; also broadcasts so every window follows. */
+  themesSetActive: 'themes:setActive',
+  /** main -> renderer: the active theme changed (or its file was edited). */
+  themesChanged: 'themes:changed',
 
   systemGetVersions: 'system:getVersions',
   systemOpenExternal: 'system:openExternal',
@@ -175,6 +195,9 @@ export const CHANNELS = {
   modelsRecent: 'models:recent',
   modelsPinned: 'models:pinned',
   modelsSetPinned: 'models:setPinned',
+  modelsHidden: 'models:hidden',
+  modelsSetHidden: 'models:setHidden',
+  modelsSetProviderHidden: 'models:setProviderHidden',
 
   contextCompact: 'context:compact',
   /** Load project instruction files (AGENTS.md/CLAUDE.md/CONTEXT.md) for a cwd. */
@@ -250,6 +273,7 @@ export const CHANNELS = {
   /** Multi-repo variants: these take a SESSION id, not a path. */
   forgePullMulti: 'forge:pull-multi',
   forgeResetMulti: 'forge:reset-multi',
+  forgePushMulti: 'forge:push-multi',
   forgeCreateUrl: 'forge:create-url',
   forgeListHosts: 'forge:list-hosts',
   forgeSetHostKind: 'forge:set-host-kind',

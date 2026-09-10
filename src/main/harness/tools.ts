@@ -12,23 +12,16 @@ import type { ToolDiff, ToolResult, SessionTask } from '../../shared/types'
 import type { WebFetchFormat } from '../../shared/web'
 import {
   BROWSER_UA,
-  EXA_MCP_URL,
   WEBFETCH_MAX_BYTES,
   WEBFETCH_OUTPUT_CAP,
   WEBFETCH_TIMEOUT_DEFAULT,
   WEBFETCH_TIMEOUT_MAX,
-  WEBSEARCH_MAX_BYTES,
-  WEBSEARCH_NO_RESULTS,
-  WEBSEARCH_TIMEOUT,
   acceptHeader,
-  buildExaRequestBody,
-  clampResults,
   convertWebContent,
   isImageMime,
   isTextualMime,
   mimeFromContentType,
-  normalizeFetchUrl,
-  parseExaResponse
+  normalizeFetchUrl
 } from '../../shared/web'
 import * as browser from '../services/browser'
 import * as lsp from '../services/lsp'
@@ -231,13 +224,6 @@ export async function runTool(
           str(input.url),
           str(input.format),
           input.timeout,
-          ctx.onChunk,
-          ctx.signal
-        )
-      case 'websearch':
-        return await runWebSearch(
-          str(input.query),
-          input.numResults ?? input.count,
           ctx.onChunk,
           ctx.signal
         )
@@ -1092,83 +1078,6 @@ function linkAbort(signal: AbortSignal | undefined, controller: AbortController)
   const onAbort = (): void => controller.abort()
   signal.addEventListener('abort', onAbort, { once: true })
   return () => signal.removeEventListener('abort', onAbort)
-}
-
-/**
- * Search the web via Exa's public MCP endpoint. Works keyless (rate-limited);
- * an optional Exa API key (Settings → Web search, or the EXA_API_KEY env var)
- * lifts the limits. Fails gracefully with a clear message when the network or
- * the provider is unavailable.
- */
-async function runWebSearch(
-  query: string,
-  numResults: unknown,
-  onChunk?: (chunk: string) => void,
-  signal?: AbortSignal
-): Promise<ToolResult> {
-  if (!query.trim()) return { ok: false, output: 'websearch: missing "query"' }
-  const count = clampResults(numResults)
-  const apiKey = webSearchApiKey()
-  const endpoint = ((): string => {
-    if (!apiKey) return EXA_MCP_URL
-    const u = new URL(EXA_MCP_URL)
-    u.searchParams.set('exaApiKey', apiKey)
-    return u.toString()
-  })()
-  onChunk?.(`Searching the web for "${query}"…`)
-
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), WEBSEARCH_TIMEOUT * 1000)
-  const unlink = linkAbort(signal, controller)
-  try {
-    const res = await fetch(endpoint, {
-      method: 'POST',
-      signal: controller.signal,
-      headers: {
-        'Content-Type': 'application/json',
-        Accept: 'application/json, text/event-stream',
-        'User-Agent': BROWSER_UA
-      },
-      body: buildExaRequestBody(query, count)
-    })
-    if (!res.ok) {
-      return {
-        ok: false,
-        output:
-          `Web search failed — HTTP ${res.status} ${res.statusText}`.trim() +
-          (res.status === 429
-            ? '\nRate limited. Add an Exa API key in Settings → Web search to raise the limit.'
-            : '')
-      }
-    }
-    const body = await readCapped(res, WEBSEARCH_MAX_BYTES)
-    const text = parseExaResponse(body)
-    return { ok: true, output: text ? capText(text, WEBFETCH_OUTPUT_CAP) : WEBSEARCH_NO_RESULTS }
-  } catch (e) {
-    if (signal?.aborted) return { ok: false, output: TOOL_ABORTED }
-    if (controller.signal.aborted) {
-      return { ok: false, output: `Web search timed out after ${WEBSEARCH_TIMEOUT}s.` }
-    }
-    return {
-      ok: false,
-      output: `Web search failed — ${e instanceof Error ? e.message : String(e)}`
-    }
-  } finally {
-    clearTimeout(timer)
-    unlink()
-  }
-}
-
-/** The optional Exa key: user setting first, then the EXA_API_KEY env var. */
-function webSearchApiKey(): string | undefined {
-  try {
-    const fromSettings = repo.getSettings().webSearchApiKey
-    if (fromSettings && fromSettings.trim()) return fromSettings.trim()
-  } catch {
-    // repo may be unavailable in non-Electron contexts — fall back to env.
-  }
-  const fromEnv = process.env.EXA_API_KEY
-  return fromEnv && fromEnv.trim() ? fromEnv.trim() : undefined
 }
 
 function clampTimeout(v: unknown): number {

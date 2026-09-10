@@ -95,6 +95,12 @@ const REPAIR_SCHEMA_SQL = /* sql */ `
         pinned_at   INTEGER NOT NULL,
         PRIMARY KEY (provider_id, model)
       );
+  CREATE TABLE IF NOT EXISTS hidden_models (
+        provider_id TEXT NOT NULL,
+        model       TEXT NOT NULL,
+        hidden_at   INTEGER NOT NULL,
+        PRIMARY KEY (provider_id, model)
+      );
   CREATE TABLE IF NOT EXISTS projects (
         path       TEXT PRIMARY KEY,
         sort_order INTEGER NOT NULL,
@@ -460,7 +466,34 @@ export const MIGRATIONS: Migration[] = [
   // their behaviour is bit-for-bit unchanged. See shared/repos.ts.
   (db) => {
     addColumnIfMissing(db, 'chats', 'repos', 'TEXT')
-  }
+  },
+
+  // ---- v22: drop the dead Exa web-search key ----
+  // The `websearch` tool and its optional Exa API key are gone; the browser
+  // tools cover search. Nothing reads `web_search_api_key` any more, so the row
+  // is inert — but it is a CREDENTIAL, and a dead credential sitting in the
+  // settings table is still a credential sitting in the settings table. It
+  // survives in backups and in anything that dumps the DB, for a feature the
+  // user can no longer see or turn off. Delete it.
+  //
+  // Data, not structure, so it belongs here and not in `repairSchema` (which is
+  // deliberately structure-only and runs on every open). One DELETE, once.
+  /* sql */ `
+    DELETE FROM settings WHERE key = 'web_search_api_key';
+  `,
+
+  // ---- v23: hidden models ----
+  // A gateway reports 300-600 models; a pin promotes one, a row here drops it
+  // from the picker. A deny-list rather than an allow-list, so models a
+  // provider adds later still reach the picker instead of waiting to be ticked.
+  /* sql */ `
+    CREATE TABLE IF NOT EXISTS hidden_models (
+      provider_id TEXT NOT NULL,
+      model       TEXT NOT NULL,
+      hidden_at   INTEGER NOT NULL,
+      PRIMARY KEY (provider_id, model)
+    );
+  `
 ]
 
 /**

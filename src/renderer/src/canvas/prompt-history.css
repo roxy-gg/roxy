@@ -1,0 +1,140 @@
+.prompt-history {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  right: 12px;
+  width: 28px;
+  z-index: 20;
+}
+
+.prompt-history-list {
+  overflow: hidden auto;
+  scrollbar-width: none;
+  overscroll-behavior: contain;
+  scroll-behavior: auto;
+}
+.prompt-history-list::-webkit-scrollbar {
+  display: none;
+}
+
+.prompt-history-marker {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  width: 28px;
+  padding-right: 4px;
+  border-radius: 5px;
+  background: transparent;
+  outline-offset: -2px;
+}
+.prompt-history-marker > span {
+  width: 18px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--color-text-subtle);
+  opacity: 0.45;
+  transform: scaleX(0.55);
+  transform-origin: right center;
+  transition:
+    transform 150ms var(--ease-out-quart),
+    opacity 150ms ease-out;
+}
+.prompt-history-marker[aria-current] > span {
+  background: var(--color-text-muted);
+  opacity: 0.85;
+  transform: scaleX(0.78);
+}
+.prompt-history-marker:focus-visible {
+  outline: 1px solid var(--color-accent);
+}
+.prompt-history-marker:focus-visible > span,
+.prompt-history-marker[data-preview] > span {
+  background: var(--color-text);
+  opacity: 1;
+  transform: scaleX(1);
+}
+.prompt-history-marker:active > span {
+  transform: scaleX(0.9);
+}
+@media (hover: hover) and (pointer: fine) {
+  .prompt-history:hover .prompt-history-marker > span {
+    opacity: 0.7;
+  }
+  .prompt-history .prompt-history-marker:is(:hover, [data-preview], :focus-visible) > span {
+    background: var(--color-text);
+    opacity: 1;
+    transform: scaleX(1);
+  }
+}
+.prompt-history[data-keyboard] .prompt-history-marker > span {
+  transition: none;
+}
+
+.prompt-history-fade {
+  position: absolute;
+  inset-inline: 0;
+  height: 8px;
+  pointer-events: none;
+}
+.prompt-history-fade-top {
+  top: 0;
+  background: linear-gradient(to bottom, var(--color-bg), transparent);
+}
+.prompt-history-fade-bottom {
+  bottom: 0;
+  background: linear-gradient(to top, var(--color-bg), transparent);
+}
+
+.prompt-history-preview {
+  position: fixed;
+  z-index: 45;
+  width: min(300px, calc(100vw - 64px));
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-elevated);
+  color: var(--color-text);
+  opacity: 1;
+  transform: scale(1);
+  transition:
+    opacity 150ms ease-out,
+    transform 150ms var(--ease-out-quart);
+  @starting-style {
+    opacity: 0;
+    transform: scale(0.98);
+  }
+}
+.prompt-history-preview[data-instant] {
+  transition: none;
+}
+.prompt-history-summary {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  margin: 0;
+  font-size: 12px;
+  line-height: 18px;
+}
+.prompt-history-caption {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  margin-top: 5px;
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--color-text-subtle);
+}
+.prompt-history-caption > span {
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+[data-motion='reduced'] .prompt-history-marker > span,
+[data-motion='reduced'] .prompt-history-preview {
+  transition: none;
+}

@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import { Repeat, X } from 'lucide-react'
 import type { Chat, Loop } from '@shared/types'
 import { formatInterval } from '@shared/format'
@@ -58,16 +59,17 @@ export function LoopDetailsPane({
   chat: Chat
   onClose: () => void
 }): JSX.Element {
+  const { t } = useTranslation()
   return (
     <aside className="absolute bottom-0 right-0 top-12 z-30 flex w-80 flex-col border-l border-border bg-surface shadow-2xl">
       <div className="flex h-10 shrink-0 items-center justify-between border-b border-border px-4">
         <div className="flex items-center gap-2">
           <Repeat className="h-3.5 w-3.5 text-text-muted" />
-          <span className="text-sm font-medium">Loop settings</span>
+          <span className="text-sm font-medium">{t('chat.loopSettings')}</span>
         </div>
         <button
           onClick={onClose}
-          title="Close"
+          title={t('loops.close')}
           className="press-scale flex h-6 w-6 items-center justify-center sq sq-lg rounded-lg text-text-muted hover:bg-white/5 hover:text-text"
         >
           <X className="h-4 w-4" />
@@ -82,7 +84,10 @@ export function LoopDetailsPane({
             <span
               className={cn('h-2 w-2 rounded-full', loop.enabled ? 'bg-success' : 'bg-text-subtle')}
             />
-            {loop.enabled ? 'Running' : 'Paused'} · every {formatInterval(loop.intervalMinutes)}
+            {t('loops.everyInterval', {
+              state: loop.enabled ? t('loops.running') : t('loops.paused'),
+              interval: formatInterval(loop.intervalMinutes)
+            })}
           </span>
         </Row>
 

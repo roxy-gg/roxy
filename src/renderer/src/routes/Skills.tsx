@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useTranslation, Trans } from 'react-i18next'
 import {
   Download,
   FileText,
@@ -19,12 +20,13 @@ import { PageShell } from '../components/PageShell'
 import { ConfigBackup } from '../components/ConfigBackup'
 
 export default function Skills(): JSX.Element {
+  const { t } = useTranslation()
   const navigate = useNavigate()
 
   return (
     <PageShell
-      title="Skills & Tools"
-      subtitle="Specialized SKILL.md workflows Roxy loads on demand, plus the built-in tools it can call."
+      title={t('skills.title')}
+      subtitle={t('skills.subtitle')}
       onBack={() => navigate('/')}
     >
       <div className="flex flex-col gap-9">
@@ -37,15 +39,19 @@ export default function Skills(): JSX.Element {
 
 /** The real tools Roxy's agent can call, grouped by category (see `@shared/tools`). */
 function BuiltInTools(): JSX.Element {
+  const { t } = useTranslation()
   return (
     <div className="flex flex-col gap-7">
       <div>
         <h2 className="text-xs font-semibold uppercase tracking-wide text-text-subtle">
-          Built-in tools
+          {t('skills.builtInTools')}
         </h2>
         <p className="mt-1 text-xs text-text-muted">
-          The {TOOLS.length} tools Roxy&apos;s agent can call directly. Plan mode is limited to the
-          read-only subset; <Badge>writes</Badge> marks a tool that can change files or state.
+          <Trans
+            i18nKey="skills.builtInToolsBody"
+            values={{ count: TOOLS.length }}
+            components={[<Badge key="w">{t('skills.writes')}</Badge>]}
+          />
         </p>
       </div>
       {TOOL_CATEGORIES.map((category) => (
@@ -74,6 +80,7 @@ interface SkillDraft {
 
 /** The real, filesystem-discovered skills (SKILL.md files under the user's global roots). */
 function DiscoveredSkills(): JSX.Element {
+  const { t } = useTranslation()
   const [skills, setSkills] = useState<SkillView[]>([])
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
@@ -115,7 +122,7 @@ function DiscoveredSkills(): JSX.Element {
     <section>
       <div className="mb-3 flex items-center justify-between">
         <h2 className="text-xs font-semibold uppercase tracking-wide text-text-subtle">
-          Discovered skills
+          {t('skills.discovered')}
         </h2>
         <div className="flex items-center gap-1">
           <Button
@@ -128,7 +135,7 @@ function DiscoveredSkills(): JSX.Element {
             className="gap-1.5"
           >
             <Download className="h-3.5 w-3.5" />
-            Add from URL
+            {t('skills.addFromUrl')}
           </Button>
           <Button
             size="sm"
@@ -140,7 +147,7 @@ function DiscoveredSkills(): JSX.Element {
             className="gap-1.5"
           >
             <Plus className="h-3.5 w-3.5" />
-            New skill
+            {t('skills.newSkill')}
           </Button>
           <Button
             size="sm"
@@ -150,16 +157,17 @@ function DiscoveredSkills(): JSX.Element {
             className="gap-1.5"
           >
             <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`} />
-            Rescan
+            {t('skills.rescan')}
           </Button>
           <ConfigBackup onImported={() => void refresh()} />
         </div>
       </div>
 
       <p className="mb-3 text-xs text-text-muted">
-        Skills are reusable <code className="text-text-subtle">SKILL.md</code> playbooks the model
-        can load on demand. Skills created or installed here are global (saved under{' '}
-        <code className="text-text-subtle">~/.roxy/skills</code>) and available in every workspace.
+        <Trans
+          i18nKey="skills.discoveredBody"
+          components={{ code: <code className="text-text-subtle" /> }}
+        />
       </p>
 
       {installing && (
@@ -185,7 +193,7 @@ function DiscoveredSkills(): JSX.Element {
       )}
 
       {loading ? (
-        <p className="text-xs text-text-muted">Scanning for skills…</p>
+        <p className="text-xs text-text-muted">{t('skills.scanning')}</p>
       ) : skills.length === 0 ? (
         !draft && !installing && <EmptySkills />
       ) : (
@@ -216,6 +224,7 @@ function InstallFromUrl({
   onCancel: () => void
   onInstalled: (list: SkillView[]) => void
 }): JSX.Element {
+  const { t } = useTranslation()
   const [source, setSource] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -224,7 +233,7 @@ function InstallFromUrl({
   const install = async (): Promise<void> => {
     const src = source.trim()
     if (!src) {
-      setError('Paste a GitHub repo (owner/repo) or a SKILL.md URL.')
+      setError(t('skills.installNeedSource'))
       return
     }
     setBusy(true)
@@ -233,13 +242,13 @@ function InstallFromUrl({
     try {
       const res = await api.skills.install(src)
       if (!res.ok) {
-        setError(res.error ?? 'Nothing was installed.')
+        setError(res.error ?? t('skills.installNothing'))
         return
       }
       setDone(res.installed.map((s) => s.name))
       onInstalled(res.skills)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to install.')
+      setError(err instanceof Error ? err.message : t('skills.installFailed'))
     } finally {
       setBusy(false)
     }
@@ -247,11 +256,12 @@ function InstallFromUrl({
 
   return (
     <div className="mb-4 sq sq-xl sq-ring rounded-xl border border-border bg-surface p-4">
-      <h3 className="mb-1 text-sm font-medium text-text">Add a skill from a URL</h3>
+      <h3 className="mb-1 text-sm font-medium text-text">{t('skills.installTitle')}</h3>
       <p className="mb-3 text-xs text-text-muted">
-        A GitHub <code className="text-text-subtle">owner/repo</code>, a github.com repo/tree/blob
-        URL, or a direct <code className="text-text-subtle">https://…/SKILL.md</code>. Installs
-        every skill it finds (repo root and <code className="text-text-subtle">skills/</code>).
+        <Trans
+          i18nKey="skills.installBody"
+          components={{ code: <code className="text-text-subtle" /> }}
+        />
       </p>
       <div className="space-y-3">
         <Input
@@ -260,26 +270,26 @@ function InstallFromUrl({
           onKeyDown={(e) => {
             if (e.key === 'Enter' && !busy) void install()
           }}
-          placeholder="e.g. vercel-labs/agent-skills"
+          placeholder={t('skills.installPlaceholder')}
           autoFocus
         />
         {error && <p className="text-xs text-danger">{error}</p>}
         {done && (
           <p className="text-xs text-success">
-            Installed {done.length} skill{done.length === 1 ? '' : 's'}: {done.join(', ')}
+            {t('skills.installedCount', { count: done.length, names: done.join(', ') })}
           </p>
         )}
         <div className="flex items-center justify-end gap-2">
           <Button size="sm" variant="ghost" onClick={onCancel} disabled={busy}>
-            {done ? 'Close' : 'Cancel'}
+            {done ? t('common.close') : t('common.cancel')}
           </Button>
           <Button size="sm" onClick={install} disabled={busy} className="gap-1.5">
             {busy ? (
-              'Installing…'
+              t('skills.installing')
             ) : (
               <>
                 <Download className="h-3.5 w-3.5" />
-                Install
+                {t('skills.install')}
               </>
             )}
           </Button>
@@ -301,6 +311,7 @@ function SkillEditor({
   onCancel: () => void
   onSaved: (list: SkillView[]) => void
 }): JSX.Element {
+  const { t } = useTranslation()
   const [name, setName] = useState(draft.name)
   const [description, setDescription] = useState(draft.description)
   const [body, setBody] = useState(draft.body)
@@ -311,19 +322,19 @@ function SkillEditor({
   const save = async (): Promise<void> => {
     const trimmedName = name.trim()
     if (!trimmedName) {
-      setError('A skill needs a name.')
+      setError(t('skills.errNoName'))
       return
     }
     if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(trimmedName)) {
-      setError('Name may only contain letters, numbers, dots, dashes and underscores.')
+      setError(t('skills.errBadName'))
       return
     }
     if (!isEdit && existing.some((s) => s.name.toLowerCase() === trimmedName.toLowerCase())) {
-      setError('A skill with that name already exists.')
+      setError(t('skills.errDuplicate'))
       return
     }
     if (!body.trim()) {
-      setError('Add some instructions in the body.')
+      setError(t('skills.errNoBody'))
       return
     }
     setSaving(true)
@@ -333,7 +344,7 @@ function SkillEditor({
       const list = isEdit ? await api.skills.update(input) : await api.skills.create(input)
       onSaved(list)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to save the skill.')
+      setError(err instanceof Error ? err.message : t('skills.errSaveFailed'))
     } finally {
       setSaving(false)
     }
@@ -342,43 +353,49 @@ function SkillEditor({
   return (
     <div className="mb-4 sq sq-xl sq-ring rounded-xl border border-border bg-surface p-4">
       <h3 className="mb-3 text-sm font-medium text-text">
-        {isEdit ? `Edit “${draft.name}”` : 'New skill'}
+        {isEdit ? t('skills.editTitle', { name: draft.name }) : t('skills.newSkill')}
       </h3>
       <div className="space-y-3">
         <div>
-          <label className="mb-1 block text-xs text-text-muted">Name</label>
+          <label className="mb-1 block text-xs text-text-muted">{t('skills.fieldName')}</label>
           <Input
             value={name}
             onChange={(e) => setName(e.target.value)}
             disabled={isEdit}
-            placeholder="e.g. release-notes"
+            placeholder={t('skills.fieldNamePlaceholder')}
           />
         </div>
         <div>
-          <label className="mb-1 block text-xs text-text-muted">Description</label>
+          <label className="mb-1 block text-xs text-text-muted">
+            {t('skills.fieldDescription')}
+          </label>
           <Input
             value={description}
             onChange={(e) => setDescription(e.target.value)}
-            placeholder="One line the model uses to decide when to load this skill"
+            placeholder={t('skills.fieldDescriptionPlaceholder')}
           />
         </div>
         <div>
-          <label className="mb-1 block text-xs text-text-muted">Instructions (Markdown)</label>
+          <label className="mb-1 block text-xs text-text-muted">{t('skills.fieldBody')}</label>
           <Textarea
             value={body}
             onChange={(e) => setBody(e.target.value)}
             rows={8}
-            placeholder="Step-by-step guidance the model pulls in when it loads this skill…"
+            placeholder={t('skills.fieldBodyPlaceholder')}
             className="font-mono text-xs"
           />
         </div>
         {error && <p className="text-xs text-danger">{error}</p>}
         <div className="flex items-center justify-end gap-2">
           <Button size="sm" variant="ghost" onClick={onCancel} disabled={saving}>
-            Cancel
+            {t('common.cancel')}
           </Button>
           <Button size="sm" onClick={save} disabled={saving}>
-            {saving ? 'Saving…' : isEdit ? 'Save changes' : 'Create skill'}
+            {saving
+              ? t('skills.saving')
+              : isEdit
+                ? t('skills.saveChanges')
+                : t('skills.createSkill')}
           </Button>
         </div>
       </div>
@@ -395,6 +412,7 @@ function DiscoveredSkillCard({
   onEdit: () => void
   onRemove: () => void
 }): JSX.Element {
+  const { t } = useTranslation()
   const [confirming, setConfirming] = useState(false)
   return (
     <div className="group flex items-start gap-3 sq sq-xl sq-ring rounded-xl border border-border bg-surface p-4">
@@ -423,12 +441,12 @@ function DiscoveredSkillCard({
         </p>
         {confirming && (
           <div className="mt-2 flex items-center gap-2">
-            <span className="text-xs text-danger">Delete this skill?</span>
+            <span className="text-xs text-danger">{t('skills.confirmDelete')}</span>
             <Button size="sm" variant="ghost" onClick={() => setConfirming(false)}>
-              Cancel
+              {t('common.cancel')}
             </Button>
             <Button size="sm" variant="danger" onClick={onRemove}>
-              Delete
+              {t('common.delete')}
             </Button>
           </div>
         )}
@@ -437,14 +455,14 @@ function DiscoveredSkillCard({
         <div className="flex shrink-0 items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
           <button
             onClick={onEdit}
-            title="Edit"
+            title={t('common.edit')}
             className="press-scale flex h-7 w-7 items-center justify-center sq sq-lg rounded-lg text-text-muted hover:bg-white/5 hover:text-text"
           >
             <Pencil className="h-3.5 w-3.5" />
           </button>
           <button
             onClick={() => setConfirming(true)}
-            title="Delete"
+            title={t('common.delete')}
             className="press-scale flex h-7 w-7 items-center justify-center sq sq-lg rounded-lg text-text-muted hover:bg-white/5 hover:text-danger"
           >
             <Trash2 className="h-3.5 w-3.5" />
@@ -456,28 +474,29 @@ function DiscoveredSkillCard({
 }
 
 function EmptySkills(): JSX.Element {
+  const { t } = useTranslation()
   return (
     <div className="sq sq-xl sq-ring sq-dashed rounded-xl border border-dashed border-border bg-surface/50 p-5 text-xs text-text-muted">
-      <p className="text-text">No skills discovered yet.</p>
+      <p className="text-text">{t('skills.emptyTitle')}</p>
       <p className="mt-2">
-        A skill is a <code className="text-text">SKILL.md</code> file whose frontmatter{' '}
-        <code className="text-text">name</code> + <code className="text-text">description</code>{' '}
-        tell Roxy when to load it. Roxy discovers them from:
+        <Trans i18nKey="skills.emptyBody" components={{ code: <code className="text-text" /> }} />
       </p>
       <ul className="mt-2 list-disc space-y-1 pl-5">
         <li>
-          <code className="text-text">~/.roxy/skills/&lt;name&gt;/SKILL.md</code> — your global
-          skills
+          <Trans
+            i18nKey="skills.emptyGlobal"
+            components={{ code: <code className="text-text" /> }}
+          />
         </li>
         <li>
-          <code className="text-text">.roxy/skills/&lt;name&gt;/SKILL.md</code> — inside a project
-          (also reads <code className="text-text">.claude/skills</code> and{' '}
-          <code className="text-text">.agents/skills</code>)
+          <Trans
+            i18nKey="skills.emptyProject"
+            components={{ code: <code className="text-text" /> }}
+          />
         </li>
       </ul>
       <p className="mt-2">
-        When a task matches, Roxy calls the <code className="text-text">skill</code> tool to pull
-        that skill&apos;s full instructions into context.
+        <Trans i18nKey="skills.emptyFooter" components={{ code: <code className="text-text" /> }} />
       </p>
     </div>
   )

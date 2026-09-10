@@ -1,12 +1,12 @@
 /**
- * Pure, dependency-free web helpers shared by the `webfetch` + `websearch`
- * tools (github.com/sst/opencode's webfetch/websearch, MIT — reimplemented here
- * without the Effect/turndown stack so the logic stays testable in the pure-Node
- * smoke harness and never leaks heavy deps into the renderer bundle).
+ * Pure, dependency-free web helpers shared by the `webfetch` tool
+ * (github.com/sst/opencode's webfetch, MIT — reimplemented here without the
+ * Effect/turndown stack so the logic stays testable in the pure-Node smoke
+ * harness and never leaks heavy deps into the renderer bundle).
  *
  * The main process (src/main/harness/tools.ts) does the actual I/O (native
- * `fetch`); everything here is pure string/URL work: URL normalization, HTML →
- * markdown/text conversion, and Exa MCP request/response shaping.
+ * `fetch`); everything here is pure string/URL work: URL normalization and
+ * HTML → markdown/text conversion.
  */
 
 export type WebFetchFormat = 'markdown' | 'text' | 'html'
@@ -21,14 +21,6 @@ export const WEBFETCH_TIMEOUT_MAX = 120
 /** A real-browser UA — many sites 403 an unknown agent. */
 export const BROWSER_UA =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
-
-/** Exa's public MCP endpoint — works keyless (rate-limited); a key lifts limits. */
-export const EXA_MCP_URL = 'https://mcp.exa.ai/mcp'
-export const WEBSEARCH_MAX_BYTES = 512 * 1024
-export const WEBSEARCH_TIMEOUT = 30
-export const WEBSEARCH_DEFAULT_RESULTS = 8
-export const WEBSEARCH_MAX_RESULTS = 20
-export const WEBSEARCH_NO_RESULTS = 'No search results found. Try a different query.'
 
 /**
  * Validate + normalize a URL for fetching: upgrade bare `http:` to `https:`,
@@ -275,60 +267,4 @@ export function convertWebContent(
   const isHtml = contentType.toLowerCase().includes('html')
   if (!isHtml || format === 'html') return content
   return format === 'markdown' ? htmlToMarkdown(content) : htmlToText(content)
-}
-
-/** The JSON-RPC body for an Exa MCP `web_search_exa` call. */
-export function buildExaRequestBody(query: string, numResults: number): string {
-  return JSON.stringify({
-    jsonrpc: '2.0',
-    id: 1,
-    method: 'tools/call',
-    params: {
-      name: 'web_search_exa',
-      arguments: { query, numResults }
-    }
-  })
-}
-
-/** Clamp a requested result count into the allowed range. */
-export function clampResults(n: unknown): number {
-  const v = typeof n === 'number' ? n : Number(n)
-  if (!Number.isFinite(v) || v <= 0) return WEBSEARCH_DEFAULT_RESULTS
-  return Math.min(Math.floor(v), WEBSEARCH_MAX_RESULTS)
-}
-
-/**
- * Pull the text payload out of an Exa MCP response. The endpoint answers either
- * with a plain JSON body or an SSE stream of `data: {…}` lines; in both cases the
- * useful text lives at `result.content[].text`. Returns undefined when empty.
- */
-export function parseExaResponse(body: string): string | undefined {
-  const fromPayload = (payload: string): string | undefined => {
-    const trimmed = payload.trim()
-    if (!trimmed.startsWith('{')) return undefined
-    let parsed: unknown
-    try {
-      parsed = JSON.parse(trimmed)
-    } catch {
-      return undefined
-    }
-    const content = (parsed as { result?: { content?: unknown } })?.result?.content
-    if (!Array.isArray(content)) return undefined
-    const texts = content
-      .map((item) =>
-        item && typeof item === 'object' ? (item as { text?: unknown }).text : undefined
-      )
-      .filter((t): t is string => typeof t === 'string' && t.length > 0)
-    return texts.length ? texts.join('\n\n') : undefined
-  }
-
-  const direct = fromPayload(body)
-  if (direct) return direct
-
-  for (const line of body.split('\n')) {
-    if (!line.startsWith('data:')) continue
-    const data = fromPayload(line.slice(5))
-    if (data) return data
-  }
-  return undefined
 }

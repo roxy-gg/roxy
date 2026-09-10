@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useTranslation } from 'react-i18next'
 import { ArrowRight } from 'lucide-react'
 import { useRoxyStore } from '../lib/store'
 import { api } from '../lib/api'
@@ -11,6 +12,7 @@ import { ProviderStep } from './onboarding/ProviderStep'
 type Step = 'welcome' | 'provider'
 
 export default function Onboarding(): JSX.Element {
+  const { t } = useTranslation()
   const navigate = useNavigate()
   const providers = useRoxyStore((s) => s.providers)
   const bootstrap = useRoxyStore((s) => s.bootstrap)
@@ -58,12 +60,10 @@ export default function Onboarding(): JSX.Element {
 
       <footer className="flex h-16 shrink-0 items-center justify-between border-t border-border px-6">
         <span className="text-xs text-text-subtle">
-          {canFinish
-            ? 'Nice — you can add more providers anytime in Settings.'
-            : 'Add an AI provider to get started.'}
+          {canFinish ? t('onboarding.footerReady') : t('onboarding.footerNeedsProvider')}
         </span>
         <Button variant="primary" onClick={finish} disabled={!canFinish || finishing}>
-          {finishing ? 'Finishing…' : 'Continue'}
+          {finishing ? t('onboarding.finishing') : t('onboarding.continue')}
           <ArrowRight className="h-4 w-4" />
         </Button>
       </footer>

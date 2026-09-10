@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Brain, Check, ChevronsUpDown, Clock, Pin, Search, Wrench } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+import { Trans, useTranslation } from 'react-i18next'
 import { buildModelIndex, buildModelRows } from '../lib/modelRows'
+import { modelLabel, resolveProviderModel } from '@shared/models'
 import { useRoxyStore } from '../lib/store'
 import { resolveSessionConfig } from '@shared/session-config'
 import { ProviderLogo } from '../lib/providerLogos'
@@ -12,7 +15,7 @@ import { cn } from '../lib/cn'
 /**
  * A cute, searchable model picker: the active provider's logo + model on the
  * trigger, and a popover grouped by every connected provider (with its icon)
- * listing the real models models.dev knows about. A PINNED section (a
+ * listing the models currently available from each provider. A PINNED section (a
  * deliberate, user-curated shortlist — for people juggling many providers or
  * a provider with a huge catalog) sits above everything when non-empty,
  * followed by a LATEST section per provider showing its last five distinct
@@ -95,6 +98,8 @@ function useWindow(
 }
 
 export function ModelPicker(): JSX.Element {
+  const navigate = useNavigate()
+  const { t } = useTranslation()
   const providers = useRoxyStore((s) => s.providers)
   const settings = useRoxyStore((s) => s.settings)
   // Only the ACTIVE chat's config matters here, and it is the sole reason this
@@ -109,7 +114,9 @@ export function ModelPicker(): JSX.Element {
   const ensureModels = useRoxyStore((s) => s.ensureModels)
   const ensureRecentModels = useRoxyStore((s) => s.ensureRecentModels)
   const ensurePinnedModels = useRoxyStore((s) => s.ensurePinnedModels)
-  const togglePinnedModel = useRoxyStore((s) => s.togglePinnedModel)
+  const hiddenModels = useRoxyStore((s) => s.hiddenModels)
+  const ensureHiddenModels = useRoxyStore((s) => s.ensureHiddenModels)
+  const setModelPinned = useRoxyStore((s) => s.setModelPinned)
 
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
@@ -133,16 +140,25 @@ export function ModelPicker(): JSX.Element {
   // another one, and labelling that fallback with the old model would claim a
   // pairing the turn will not actually use (the send path picks the fallback
   // provider's own default instead).
-  const activeModel = activeProvider?.id === config.providerId ? config.model : null
+  const selectedModel = activeProvider?.id === config.providerId ? config.model : null
+  const activeModel =
+    activeProvider?.id === 'github-copilot'
+      ? resolveProviderModel(activeProvider, models[activeProvider.id] ?? [], selectedModel)
+      : selectedModel
 
   // Lazy-load every connected provider's models and recents into shared caches.
   useEffect(() => {
     void ensurePinnedModels()
+    void ensureHiddenModels()
     providers.forEach((p) => {
       void ensureModels(p.id)
       void ensureRecentModels(p.id)
     })
-  }, [providers, ensureModels, ensureRecentModels, ensurePinnedModels])
+  }, [providers, ensureModels, ensureRecentModels, ensurePinnedModels, ensureHiddenModels])
+
+  useEffect(() => {
+    if (open) void ensureModels('github-copilot')
+  }, [open, ensureModels])
 
   // Close on outside click / Escape.
   useEffect(() => {
@@ -190,9 +206,10 @@ export function ModelPicker(): JSX.Element {
         recent: recentModels,
         pinned: pinnedModels,
         index,
-        query
+        query,
+        hidden: hiddenModels
       }),
-    [providers, models, recentModels, pinnedModels, index, query]
+    [providers, models, recentModels, pinnedModels, index, query, hiddenModels]
   )
 
   /**
@@ -219,11 +236,22 @@ export function ModelPicker(): JSX.Element {
   // behind whichever provider answered last.
   const loading = providers.length > 0 && providers.some((p) => !models[p.id] && !modelsTried[p.id])
 
+  // An empty menu now has two causes; reporting a load failure for a list the
+  // user emptied themselves sends them debugging nothing.
+  const allHidden = useMemo(
+    () => rows.length === 0 && Object.values(models).some((list) => list.length > 0),
+    [rows.length, models]
+  )
+
+  // Stripped the same way as the rows below, so the trigger and the row the
+  // user just clicked read identically instead of the trigger re-adding a vendor.
   const triggerLabel = useMemo(() => {
-    if (!activeModel) return 'Select a model'
+    if (!activeModel) return t('models.selectModel')
     if (!activeProvider) return activeModel
-    return index.get(`${activeProvider.id}:${activeModel}`)?.info.name ?? activeModel
-  }, [activeModel, activeProvider, index])
+    const name = index.get(`${activeProvider.id}:${activeModel}`)?.info.name
+    return name ? modelLabel(activeProvider.id, name, activeModel) : activeModel
+    // `t` is in the deps so the placeholder re-resolves on a language switch.
+  }, [activeModel, activeProvider, index, t])
 
   const pick = useCallback(
     async (providerId: string, modelId: string): Promise<void> => {
@@ -240,13 +268,13 @@ export function ModelPicker(): JSX.Element {
   const togglePin = useCallback(
     (e: React.MouseEvent, providerId: string, modelId: string, pinned: boolean): void => {
       e.stopPropagation()
-      void togglePinnedModel(providerId, modelId, !pinned)
+      void setModelPinned(providerId, modelId, !pinned)
     },
-    [togglePinnedModel]
+    [setModelPinned]
   )
 
   if (providers.length === 0) {
-    return <span className="px-1 text-xs text-text-subtle">No provider connected</span>
+    return <span className="px-1 text-xs text-text-subtle">{t('models.noProvider')}</span>
   }
 
   const visible: JSX.Element[] = []
@@ -291,7 +319,7 @@ export function ModelPicker(): JSX.Element {
         <span
           role="button"
           tabIndex={-1}
-          title={row.pinned ? 'Unpin model' : 'Pin model'}
+          title={row.pinned ? t('models.unpin') : t('models.pin')}
           onClick={(e) => togglePin(e, row.providerId, row.modelId, row.pinned)}
           className={cn(
             'shrink-0 rounded p-0.5 transition hover:bg-white/10',
@@ -316,7 +344,7 @@ export function ModelPicker(): JSX.Element {
 
       {open && (
         <div
-          className="animate-pop-in absolute bottom-full z-50 mb-2 flex flex-col overflow-hidden sq-frame sq-xl sq-fill-elevated sq-ring rounded-xl border border-border bg-elevated shadow-2xl origin-bottom-left"
+          className="animate-pop-in absolute bottom-full z-50 mb-2 flex flex-col overflow-hidden sq-frame sq-xl sq-fill-elevated sq-ring edge edge-strong edge-panel rounded-xl border border-border bg-elevated shadow-float origin-bottom-left"
           style={anchor}
         >
           <div className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-2">
@@ -325,7 +353,7 @@ export function ModelPicker(): JSX.Element {
               autoFocus
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search models…"
+              placeholder={t('models.search')}
               className="w-full bg-transparent text-xs text-text outline-none placeholder:text-text-subtle"
             />
           </div>
@@ -344,15 +372,37 @@ export function ModelPicker(): JSX.Element {
               </>
             )}
             {rows.length === 0 && loading && (
-              <div className="px-3 py-3 text-xs text-text-subtle">Loading models…</div>
+              <div className="px-3 py-3 text-xs text-text-subtle">{t('models.loading')}</div>
             )}
             {rows.length === 0 && !loading && q && (
-              <div className="px-3 py-3 text-xs text-text-subtle">No models match “{query}”.</div>
-            )}
-            {rows.length === 0 && !loading && !q && (
               <div className="px-3 py-3 text-xs text-text-subtle">
-                Couldn&apos;t load models from models.dev — you can still send with the current
-                model.
+                {t('models.noMatch', { query })}
+              </div>
+            )}
+            {rows.length === 0 && !loading && !q && allHidden && (
+              <div className="px-3 py-3 text-xs text-text-subtle">
+                <Trans
+                  i18nKey="models.allHidden"
+                  components={{
+                    settings: (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setOpen(false)
+                          navigate('/settings')
+                        }}
+                        className="text-accent hover:underline"
+                      />
+                    )
+                  }}
+                />
+              </div>
+            )}
+            {rows.length === 0 && !loading && !q && !allHidden && (
+              <div className="px-3 py-3 text-xs text-text-subtle">
+                {providers.every((p) => p.id === 'github-copilot')
+                  ? t('models.copilotUnavailable')
+                  : t('models.loadFailed')}
               </div>
             )}
           </div>

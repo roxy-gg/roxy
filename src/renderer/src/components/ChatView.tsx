@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useState } from 'react'
 import {
   Check,
   ChevronRight,
@@ -14,9 +14,10 @@ import {
 } from 'lucide-react'
 import type { Chat } from '@shared/types'
 import { useRoxyStore } from '../lib/store'
+import { useTranslation, Trans } from 'react-i18next'
 import { formatInterval } from '@shared/format'
 import { cn } from '../lib/cn'
-import { MessageBubble } from './MessageBubble'
+import { CanvasTranscript } from '../canvas/CanvasTranscript'
 import { Composer } from './Composer'
 import { LoopDetailsPane } from './LoopDetailsPane'
 import { SessionInfo } from './SessionInfo'
@@ -35,24 +36,33 @@ import { Button } from './ui'
 import roxy from '../assets/roxy.png'
 
 /**
- * Render only the most recent N messages; scrolling near the top reveals PAGE
- * more. Older turns stay in the DB, they are just not in the DOM.
+ * The transcript renders to a CANVAS, not to the DOM.
  *
- * This cap exists because a single message is not cheap: an agent turn can carry
- * dozens of tool cards, each with its own syntax-highlighted diff or terminal
- * output, and the whole transcript is markdown re-parsed by Streamdown on every
- * render. A few hundred of those is a visibly janky pane.
+ * The DOM version's cost grew with how much conversation EXISTED rather than
+ * with how much of it you could see. A single agent turn can carry dozens of
+ * tool cards, each with its own borders, its own scroll container and a
+ * syntax-highlighted body living in a shadow root, and every streamed token
+ * re-rendered the live turn and re-laid out the page around it. It needed a hard
+ * 30-message window just to stay usable -- which is why an ordinary session
+ * showed "showing the last 30 of N" while its own content did not even fill the
+ * viewport.
  *
- * 8 was too aggressive though — it is fewer turns than fit on a 1440p screen, so
- * an ordinary session showed the "showing the last 8 of N" notice while its own
- * content did not even fill the viewport, and any scroll up immediately paged.
- * 30 still bounds the worst case while covering essentially every session you
- * actually scroll through by hand.
+ * The canvas renderer is retained-mode: layout runs when content actually
+ * changes, paint touches only the blocks the viewport intersects, and a settled
+ * message's layout is cached by REFERENCE (its parts array never changes once
+ * written to SQLite) so a streaming turn never re-measures the history above it.
+ *
+ * Large histories retain a height index for every message, but only nearby
+ * parts are measured into scene nodes. This includes long single-turn agent
+ * transcripts: opening a session must not re-layout thousands of old steps.
+ *
+ * The renderer lives in src/renderer/src/canvas/ -- text measurement, the
+ * markdown and syntax-highlighting layers, the tool-card layouts, and the
+ * painter.
  */
-const VISIBLE_MESSAGES = 30
-const PAGE = 30
 
 export function ChatView(): JSX.Element {
+  const { t } = useTranslation()
   const messages = useRoxyStore((s) => s.messages)
   const messagesChatId = useRoxyStore((s) => s.messagesChatId)
   const messagesError = useRoxyStore((s) => s.messagesError)
@@ -85,186 +95,19 @@ export function ChatView(): JSX.Element {
   )
   const cancelSubagent = useRoxyStore((s) => s.cancelSubagent)
   const cancelBackgroundTask = useRoxyStore((s) => s.cancelBackgroundTask)
+  const cancelToolCall = useRoxyStore((s) => s.cancelToolCall)
 
   const hasContent = messages.length > 0 || (streaming !== null && streaming.length > 0)
-  // `messages` is cleared the instant you click a session and refilled only after
-  // the round trip, so an empty array on its own says nothing about whether the
-  // session HAS messages. Trusting it painted the empty state over every switch.
-  const loading = !hasContent && !messagesError && messagesChatId !== activeChatId
+  // Wait for history even when live tokens are available, so arrival paints the complete tail once.
+  const loading = !messagesError && messagesChatId !== activeChatId
   const isEmpty = !hasContent && !loading
-  // The transcript has resolved one way or another (content, empty, or failed),
-  // so the scroll effects below have something real to measure. Computed up here
-  // rather than beside the JSX because the arrival pin depends on it.
-  const transcriptReady = !loading
-
-  const scrollRef = useRef<HTMLDivElement>(null)
-  // Follow the conversation only while you're already at the bottom. If you've
-  // scrolled up to read history, new messages/stream chunks must NOT yank you
-  // back down — resume following once you scroll back to the end.
-  const stickToBottom = useRef(true)
-  // The chat we have already jumped to the end of. Cleared on every switch, so
-  // until it matches `activeChatId` the pane is still "arriving" and the tail
-  // effect below owns the offset outright.
-  const arrivedChatId = useRef<string | null>(null)
-  // The last offset WE wrote. A scroll event replaying our own write must not be
-  // mistaken for the user scrolling away (see `onScroll`).
-  const pinnedTop = useRef(-1)
   const [loopPaneOpen, setLoopPaneOpen] = useState(false)
   const [infoOpen, setInfoOpen] = useState(false)
-  // Show only the latest N; scrolling up loads older ones a page at a time.
-  const [visibleCount, setVisibleCount] = useState(VISIBLE_MESSAGES)
-  const restoreHeight = useRef<number | null>(null)
-  // Which chat `restoreHeight` was measured in — a height from another session
-  // is meaningless and must not be applied.
-  const restoreChatId = useRef<string | null>(null)
 
-  /** Jump to the newest message, recording the offset as ours. */
-  const pinToBottom = useCallback((): void => {
-    const el = scrollRef.current
-    if (!el) return
-    const top = el.scrollHeight - el.clientHeight
-    pinnedTop.current = top
-    el.scrollTop = top
-  }, [])
-
-  const onScroll = (): void => {
-    const el = scrollRef.current
-    if (!el) return
-    // Before the arrival pin lands, every scroll event here is our own doing:
-    // the outgoing transcript unmounting collapses scrollHeight and the browser
-    // clamps scrollTop to 0. Reading that back as "the user scrolled to the top"
-    // is what left switches parked at the top — it cleared `stickToBottom` for a
-    // session you had not even seen yet, so nothing ever pinned it, and at
-    // scrollTop 0 it also paged in another 30 messages on the way past.
-    if (arrivedChatId.current !== activeChatId) return
-    // Landing exactly on the offset we last wrote counts as "still following"
-    // even if the arithmetic below would say otherwise: the event is delivered a
-    // beat after the write, and a turn that grew in between would look like a
-    // gap the user had opened by hand. The ResizeObserver re-pins that growth.
-    stickToBottom.current =
-      el.scrollTop === pinnedTop.current || el.scrollHeight - el.scrollTop - el.clientHeight < 80
-    // Near the top with more history → reveal another page, preserving position.
-    if (el.scrollTop < 80 && visibleCount < messages.length) {
-      restoreHeight.current = el.scrollHeight
-      restoreChatId.current = activeChatId
-      setVisibleCount((c) => Math.min(messages.length, c + PAGE))
-    }
-  }
-
-  // Switching chats starts you pinned to the latest message + collapses details.
-  //
-  // This runs on LAYOUT and deliberately does NOT touch `scrollTop`. It used to
-  // do both after paint (`useEffect` + `scrollTop = 0`), which is a race it lost
-  // every time: the new transcript arrives a commit LATER than the switch, so
-  // the reset ran after the tail effect had already pinned and stomped the pin
-  // back to zero — and the scroll event that write produced then cleared
-  // `stickToBottom`, so nothing pinned again. That is the whole "switching to a
-  // session lands at the top" bug. Marking the session "not arrived" instead
-  // hands the offset to the tail effect below, which lands it whenever the
-  // content actually shows up, in whatever order the effects happen to run.
+  // The keyed canvas owns bottom-first arrival and resize anchoring. Queue changes must not re-pin it.
   useLayoutEffect(() => {
-    stickToBottom.current = true
-    arrivedChatId.current = null
-    pinnedTop.current = -1
-    // Drop any pending prepend-anchor: it holds the previous session's
-    // scrollHeight, and applying that delta to the new one throws the offset
-    // somewhere arbitrary.
-    restoreHeight.current = null
-    restoreChatId.current = null
     setInfoOpen(false)
-    setVisibleCount(VISIBLE_MESSAGES)
   }, [activeChatId])
-
-  // Keep the scroll anchored when older messages prepend (no jump to the top).
-  // Guarded on the chat the measurement was taken in — `visibleCount` also
-  // changes on a session switch, which would otherwise replay a stale delta.
-  useEffect(() => {
-    const el = scrollRef.current
-    if (el && restoreHeight.current !== null && restoreChatId.current === activeChatId) {
-      el.scrollTop += el.scrollHeight - restoreHeight.current
-    }
-    restoreHeight.current = null
-    restoreChatId.current = null
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visibleCount])
-
-  // Follow the tail.
-  //
-  // Runs on layout (not after paint) so the jump is never a visible frame, and
-  // re-pins on the next frame as well: a turn's content keeps growing AFTER this
-  // commit — images decode, `lazy()` diff/file views resolve, Streamdown re-lays
-  // out — and a single scrollTo lands short of the real bottom every time.
-  //
-  // The first pin after a switch is unconditional. `stickToBottom` cannot be
-  // trusted yet at that point: the outgoing transcript unmounting fires a scroll
-  // to 0 which, before this, was read as the user scrolling up.
-  useLayoutEffect(() => {
-    if (!scrollRef.current) return
-    if (arrivedChatId.current !== activeChatId) {
-      // Still waiting on this session's transcript — nothing to land on yet.
-      // This effect re-runs when it arrives.
-      if (!transcriptReady) return
-      arrivedChatId.current = activeChatId
-    } else if (!stickToBottom.current) return
-    pinToBottom()
-    const frame = requestAnimationFrame(() => {
-      if (stickToBottom.current) pinToBottom()
-    })
-    return () => cancelAnimationFrame(frame)
-  }, [messages, streaming, activeChatId, transcriptReady, pinToBottom])
-
-  // Content that settles late (a decoded screenshot is the common one) resizes
-  // the column well after any frame we could schedule, so watch it rather than
-  // guessing a delay.
-  //
-  // Attached by ref callback and kept for the column's lifetime. This used to be
-  // built inside the tail effect above, whose deps include `streaming` — a fresh
-  // array on EVERY streamed delta — so a live turn tore down and rebuilt a
-  // ResizeObserver on each one, every rebuild firing an immediate observation
-  // and forcing layout. That was a large share of the streaming jank.
-  const resizeObserver = useRef<ResizeObserver | null>(null)
-  const setContentNode = useCallback(
-    (node: HTMLDivElement | null): void => {
-      resizeObserver.current?.disconnect()
-      resizeObserver.current = null
-      if (!node) return
-      const observer = new ResizeObserver(() => {
-        if (stickToBottom.current) pinToBottom()
-      })
-      observer.observe(node)
-      resizeObserver.current = observer
-    },
-    [pinToBottom]
-  )
-  useEffect(() => () => resizeObserver.current?.disconnect(), [])
-
-  // Re-pin when the SCROLLPORT resizes, not just its content.
-  //
-  // Everything stacked below the transcript takes its height out of this pane's
-  // `flex-1`: the queue appearing, expanding or collapsing, the composer
-  // auto-growing as you type, the workstream strip. The browser does not adjust
-  // `scrollTop` for that, and both directions are visibly wrong:
-  //
-  //   shrinking (queue opens) — the max scroll offset grows, so an offset that
-  //     WAS the bottom is now short of it and the last messages slide out of
-  //     view. Reads as the queue shoving the transcript upward.
-  //   growing (queue collapses) — the reclaimed height appears BELOW the last
-  //     message as dead space, because the offset never moves back down. Reads
-  //     as the collapsed queue still holding its space.
-  //
-  // Kept separate from the effect above on purpose: this one is installed once
-  // and must keep observing across queue toggles, which change neither
-  // `messages` nor `streaming` and so would never re-run that effect.
-  useLayoutEffect(() => {
-    const el = scrollRef.current
-    if (!el) return
-    const observer = new ResizeObserver(() => {
-      if (stickToBottom.current) el.scrollTop = el.scrollHeight
-    })
-    observer.observe(el)
-    return () => observer.disconnect()
-  }, [])
-
   const activeChat = chats.find((c) => c.id === activeChatId)
   const isSub = activeChat?.kind === 'sub'
   const parentChat = activeChat?.parentId
@@ -289,12 +132,10 @@ export function ChatView(): JSX.Element {
             alt="Roxy"
             className="h-16 w-16 rounded-2xl object-cover shadow-lg ring-1 ring-border"
           />
-          <h1 className="mt-5 text-xl font-semibold">Open a workspace</h1>
-          <p className="mt-1.5 max-w-xs text-sm text-text-muted">
-            Pick a folder to start an agent session.
-          </p>
+          <h1 className="mt-5 text-xl font-semibold">{t('chat.emptyTitle')}</h1>
+          <p className="mt-1.5 max-w-xs text-sm text-text-muted">{t('chat.emptyBody')}</p>
           <Button variant="primary" className="mt-5" onClick={newSession}>
-            <FolderOpen className="h-4 w-4" /> Open folder
+            <FolderOpen className="h-4 w-4" /> {t('chat.openFolder')}
           </Button>
         </div>
       </div>
@@ -309,8 +150,8 @@ export function ChatView(): JSX.Element {
             <Repeat className="h-4 w-4 shrink-0 text-text-muted" />
             <span className="shrink-0 text-sm font-medium">{activeChat.title}</span>
             <span className="truncate text-xs text-text-subtle">
-              every {formatInterval(activeLoop.intervalMinutes)} ·{' '}
-              {activeLoop.enabled ? 'running' : 'paused'}
+              {t('chat.loopEvery', { interval: formatInterval(activeLoop.intervalMinutes) })}
+              {activeLoop.enabled ? t('chat.loopRunning') : t('chat.loopPaused')}
             </span>
           </div>
         ) : (
@@ -327,7 +168,7 @@ export function ChatView(): JSX.Element {
               parentChat && (
                 <button
                   onClick={() => void selectChat(parentChat.id)}
-                  title={`Back to ${parentChat.title}`}
+                  title={t('chat.backTo', { title: parentChat.title })}
                   className="flex min-w-0 items-center gap-1 truncate text-xs text-text-subtle transition-colors hover:text-text"
                 >
                   <CornerUpLeft className="h-3 w-3 shrink-0" />
@@ -345,19 +186,19 @@ export function ChatView(): JSX.Element {
               // simply uninterruptible from its own view.
               <button
                 onClick={() => void cancelSubagent(activeChatId)}
-                title="Cancel this subagent"
+                title={t('chat.cancelSubagent')}
                 className="press-scale group flex shrink-0 items-center gap-1 sq sq-md rounded-md bg-accent/10 px-1.5 py-0.5 text-[11px] text-accent transition-colors hover:bg-accent/20"
               >
                 <Loader2 className="h-3 w-3 animate-spin group-hover:hidden" />
                 <Square className="hidden h-2.5 w-2.5 fill-current group-hover:block" />
-                <span className="group-hover:hidden">working</span>
-                <span className="hidden group-hover:inline">cancel</span>
+                <span className="group-hover:hidden">{t('chat.working')}</span>
+                <span className="hidden group-hover:inline">{t('chat.cancel')}</span>
               </button>
             )}
             {hasSessionInfo && (
               <button
                 onClick={() => setInfoOpen((o) => !o)}
-                title="Description & tasks"
+                title={t('chat.descriptionAndTasks')}
                 className={cn(
                   'flex shrink-0 items-center gap-1 sq sq-md rounded-md px-1.5 py-0.5 text-[11px] transition-colors',
                   infoOpen
@@ -391,9 +232,7 @@ export function ChatView(): JSX.Element {
                     void cancelBackgroundTask(activeChatId, t.jobId)
                   }
                 }}
-                title={`Cancel ${backgroundTaskCount} background subagent${
-                  backgroundTaskCount === 1 ? '' : 's'
-                }`}
+                title={t('chat.cancelBackground', { count: backgroundTaskCount })}
                 className="press-scale group flex shrink-0 items-center gap-1 sq sq-md rounded-md bg-accent/10 px-1.5 py-0.5 text-[11px] text-accent transition-colors hover:bg-accent/20"
               >
                 <Loader2 className="h-3 w-3 animate-spin group-hover:hidden" />
@@ -407,7 +246,7 @@ export function ChatView(): JSX.Element {
           {activeLoop && (
             <button
               onClick={() => setLoopPaneOpen((o) => !o)}
-              title="Loop settings"
+              title={t('chat.loopSettings')}
               className={cn(
                 'press-scale flex h-7 shrink-0 items-center gap-1.5 sq sq-lg rounded-lg px-2 text-xs',
                 loopPaneOpen
@@ -415,7 +254,7 @@ export function ChatView(): JSX.Element {
                   : 'text-text-muted hover:bg-white/5 hover:text-text'
               )}
             >
-              <Settings className="h-3.5 w-3.5" /> Settings
+              <Settings className="h-3.5 w-3.5" /> {t('chat.settings')}
             </button>
           )}
           <UsageMeter />
@@ -424,79 +263,49 @@ export function ChatView(): JSX.Element {
 
       {infoOpen && <SessionInfo chat={activeChat} />}
 
-      <div
-        ref={scrollRef}
-        onScroll={onScroll}
-        // overflow-anchor is off because this pane does its own scroll math:
-        // paging in older messages measures scrollHeight and re-applies the
-        // delta by hand. Chromium's anchoring would apply its own correction on
-        // top of that, and the two together overshoot.
-        style={{ overflowAnchor: 'none' }}
-        className="flex min-h-0 flex-1 flex-col overflow-y-auto"
-      >
-        {messagesError ? (
-          // A failed load used to be indistinguishable from an empty session:
-          // silent, blank, and with no way back other than clicking away and
-          // returning. Name it and make it recoverable.
-          <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
+      {messagesError ? (
+        // A failed load used to be indistinguishable from an empty session:
+        // silent, blank, and with no way back other than clicking away and
+        // returning. Name it and make it recoverable.
+        <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
+          <p className="max-w-xs text-sm text-text-muted">{t('chat.loadFailed')}</p>
+          <Button variant="ghost" onClick={() => void selectChat(activeChat.id)}>
+            <RotateCw className="h-4 w-4" /> {t('common.retry')}
+          </Button>
+        </div>
+      ) : loading ? (
+        // Deliberately blank: a transcript read is a local SQLite query, so it
+        // resolves within a frame or two and a spinner would be a flash of
+        // chrome rather than information. This branch exists to stop the EMPTY
+        // state (and its loop copy) from claiming the session has no messages
+        // before we know that.
+        <div className="min-h-0 flex-1" />
+      ) : isEmpty ? (
+        <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-6 text-center">
+          {activeLoop ? (
             <p className="max-w-xs text-sm text-text-muted">
-              Couldn&apos;t load this session&apos;s messages.
+              <Trans
+                i18nKey="chat.loopEmpty"
+                values={{
+                  title: activeChat.title,
+                  interval: formatInterval(activeLoop.intervalMinutes)
+                }}
+                components={{ strong: <span className="font-medium text-text" /> }}
+              />
             </p>
-            <Button variant="ghost" onClick={() => void selectChat(activeChat.id)}>
-              <RotateCw className="h-4 w-4" /> Retry
-            </Button>
-          </div>
-        ) : loading ? (
-          // Deliberately blank: a transcript read is a local SQLite query, so it
-          // resolves within a frame or two and a spinner would be a flash of
-          // chrome rather than information. This branch exists to stop the EMPTY
-          // state (and its loop copy) from claiming the session has no messages
-          // before we know that.
-          <div className="h-full" />
-        ) : isEmpty ? (
-          <div className="flex h-full flex-col items-center justify-center px-6 text-center">
-            {activeLoop ? (
-              <p className="max-w-xs text-sm text-text-muted">
-                Loop <span className="font-medium text-text">{activeChat.title}</span> runs every{' '}
-                {formatInterval(activeLoop.intervalMinutes)}. First heartbeat soon — or type to
-                intervene.
-              </p>
-            ) : (
-              <p className="text-sm text-text-muted"></p>
-            )}
-          </div>
-        ) : (
-          // mt-auto bottom-aligns a SHORT transcript.
-          //
-          // A new or brief session does not fill the pane, and a top-aligned
-          // column left everything below the last message as empty background --
-          // measured at 488px on a two-message session, which reads as a broken
-          // layout rather than breathing room. Pinning to the bottom cannot fix
-          // it: with nothing to scroll, scrollTop is already 0.
-          //
-          // mt-auto absorbs that slack while the column is shorter than the
-          // scrollport and resolves to 0 the moment it overflows, so long
-          // transcripts are untouched. Deliberately NOT justify-end on the
-          // parent: that clips overflow at the TOP in Chromium, which would put
-          // paged-in history out of reach. w-full because a flex child would
-          // otherwise shrink-to-fit and mx-auto would no longer center it.
-          //
-          // pb clears the fade below: at max scroll the last line has to end
-          // ABOVE the gradient, otherwise the final message always looks dimmed.
-          <div ref={setContentNode} className="mx-auto mt-auto w-full max-w-3xl px-4 pb-6 pt-4">
-            {messages.length > visibleCount && (
-              <p className="mb-3 text-center text-xs text-text-subtle">
-                Scroll up to load older — showing the last {visibleCount} of {messages.length}
-              </p>
-            )}
-            {messages.slice(-visibleCount).map((message) => (
-              <MessageBubble key={message.id} role={message.role} parts={message.parts} />
-            ))}
-            {streaming !== null && <MessageBubble role="assistant" parts={streaming} streaming />}
-          </div>
-        )}
-      </div>
-
+          ) : (
+            <p className="text-sm text-text-muted"></p>
+          )}
+        </div>
+      ) : (
+        <CanvasTranscript
+          messages={messages}
+          streaming={streaming}
+          chatId={activeChatId}
+          onCancelSubagent={(subChatId) => void cancelSubagent(subChatId)}
+          onCancelTool={(callId) => void cancelToolCall(callId)}
+        />
+      )}
       {/* The transcript used to end on a hard clip: the scrollport edge sliced
           text mid-glyph, straight into the composer’s flat gutter, and the two
           together read as a black bar cutting the pane in half. This is a
@@ -525,13 +334,13 @@ export function ChatView(): JSX.Element {
               <QueueSection defaultOpen>
                 <QueueSectionTrigger>
                   <QueueSectionLabel
-                    label="Queued"
+                    label={t('chat.queued')}
                     count={queue.length}
                     icon={<ListTree className="h-3.5 w-3.5 text-text-subtle" />}
                   />
                   {sending && (
                     <span className="ml-auto text-[10px] text-text-subtle">
-                      runs after this reply
+                      {t('chat.runsAfterReply')}
                     </span>
                   )}
                 </QueueSectionTrigger>
@@ -587,6 +396,7 @@ export function ChatView(): JSX.Element {
  * is fiddly, so the whole thing is one click.
  */
 function WorkspacePath({ chat }: { chat: Chat }): JSX.Element | null {
+  const { t } = useTranslation()
   const path = chat.worktreePath ?? chat.workspacePath
   const [copied, setCopied] = useState(0)
 
@@ -616,13 +426,14 @@ function WorkspacePath({ chat }: { chat: Chat }): JSX.Element | null {
   // the tooltip has to say so - on its own it names a directory that contains
   // none of the code directly and is not even a git repository.
   const repos = chat.repos ?? []
-  const detail = repos.length > 1 ? `\nContains: ${repos.map((r) => r.name).join(', ')}` : ''
+  const detail =
+    repos.length > 1 ? t('chat.pathContains', { names: repos.map((r) => r.name).join(', ') }) : ''
 
   return (
     <button
       onClick={() => void copy()}
       // The label is truncated, so the tooltip carries the full path.
-      title={`${path}${detail}\nClick to copy`}
+      title={t('chat.pathTooltip', { path, detail })}
       className="press-scale relative flex min-w-0 items-center sq sq-md rounded-md px-1 py-0.5 text-xs text-text-subtle hover:bg-white/5 hover:text-text-muted"
     >
       {/* The path fades rather than unmounting, so the button keeps its width
@@ -647,7 +458,7 @@ function WorkspacePath({ chat }: { chat: Chat }): JSX.Element | null {
         )}
       >
         <Check className="h-3 w-3 shrink-0" />
-        Copied
+        {t('chat.copied')}
       </span>
     </button>
   )

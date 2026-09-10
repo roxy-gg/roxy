@@ -2,6 +2,8 @@
  * The typed contract exposed to the renderer as `window.roxy`.
  * Implemented in src/preload/index.ts, handled in src/main/ipc/*.
  */
+import type { Language } from './i18n'
+import type { MotionPreference } from './motion'
 import type {
   AddMessageInput,
   AppSettings,
@@ -30,6 +32,7 @@ import type { ForgeStatusView, ForgeHostView, ForgeKind } from './forge'
 import type { RepoLayout } from './repos'
 import type { SessionConfigPatch } from './session-config'
 import type { ClipboardAction } from './context-menu'
+import type { ResolvedTheme, ThemeView } from './theme'
 import type {
   DictationPolishInput,
   DictationStartInput,
@@ -77,6 +80,30 @@ export interface SkillWriteInput {
   body?: string
   /** Where to write it â€” defaults to 'global' from the Skills page (no workspace context). */
   scope?: 'workspace' | 'global'
+}
+
+/** The themes the app knows about, plus any problems found while scanning. */
+export interface ThemeListResult {
+  themes: ThemeView[]
+  /** The id currently applied. */
+  activeId: string
+  /** Where the app writes themes it creates -- shown in the UI so files are findable. */
+  directory: string
+  /** Files that failed to parse, or tokens that were dropped, during the scan. */
+  warnings: { file: string; message: string }[]
+}
+
+/** Outcome of a theme write (save / create / delete). */
+export interface ThemeSaveResult {
+  ok: boolean
+  /** The id written -- create() may pick a different one to avoid a collision. */
+  id?: string
+  /** Why the write failed; a validation message fit to show the author. */
+  error?: string
+  /** Non-fatal problems (unknown token, unsafe value) -- the theme still saved. */
+  warnings?: string[]
+  /** The refreshed list, so the caller can update its view in one round trip. */
+  themes?: ThemeView[]
 }
 
 /** Outcome of installing skill(s) from a remote source (`skills.install`). */
@@ -179,6 +206,18 @@ export interface RepoStatusView {
   name: string
   /** The repo's own worktree for this session (`<composite>/<name>`). */
   worktreePath: string
+  /**
+   * True when this is the PROJECT's own checkout rather than a worktree of it,
+   * because the session's workstream hasn't been materialized yet.
+   *
+   * Worktrees are created lazily on the first turn, so a multi-repo session
+   * spends the whole pre-turn window with no links of its own - and the repos
+   * it is really sitting in are the project's, shared with the user's editor
+   * and every other session there. The UI has to say so before offering to
+   * reset one: the same button means "throw away this session's scratch work"
+   * in a worktree and "throw away whatever is in my editor" here.
+   */
+  pending: boolean
   isRepo: boolean
   branch: string | null
   dirty: boolean
@@ -683,11 +722,15 @@ export interface RoxyApi {
     setActiveAgent(agentId: string): Promise<AppSettings>
     setReasoningEffort(level: ReasoningEffort): Promise<AppSettings>
     setContextLimit(limit: number | null): Promise<AppSettings>
-    setWebSearchApiKey(key: string | null): Promise<AppSettings>
     setAutoWorkstream(enabled: boolean): Promise<AppSettings>
     setBranchPrefix(prefix: string): Promise<AppSettings>
+    /** Set the UI language. An unknown code falls back to English. */
+    setLanguage(language: Language): Promise<AppSettings>
+    setMotion(motion: MotionPreference): Promise<AppSettings>
     setDictationMode(mode: 'fast' | 'accurate'): Promise<AppSettings>
     setDictationPolish(enabled: boolean): Promise<AppSettings>
+    /** Keep the app and its browser toolbar in sync; never changes OS preferences. */
+    onMotionChanged(callback: (motion: MotionPreference) => void): () => void
     completeOnboarding(): Promise<AppSettings>
     reset(): Promise<void>
     /**
@@ -781,6 +824,37 @@ export interface RoxyApi {
      * skills by default (or workspace when a cwd is given).
      */
     install(source: string, cwd?: string): Promise<SkillInstallResult>
+  }
+  themes: {
+    /** Built-in themes followed by user themes found on disk. */
+    list(): Promise<ThemeListResult>
+    /** Re-scan the theme directories (drops the cache) and return the fresh list. */
+    refresh(): Promise<ThemeListResult>
+    /** A theme's raw JSON source, for the editor. Null if it doesn't exist. */
+    read(id: string): Promise<string | null>
+    /**
+     * The CSS custom properties for a theme, ready to apply. Passing null
+     * resolves whichever theme is currently active.
+     */
+    resolve(id?: string | null): Promise<ResolvedTheme>
+    /** Validate and write a theme's JSON. Returns errors rather than throwing. */
+    save(id: string, source: string): Promise<ThemeSaveResult>
+    /** Create a new theme, or duplicate rom, under a fresh id. */
+    create(input: { name: string; from?: string }): Promise<ThemeSaveResult>
+    /** Delete a user theme; built-ins are protected. */
+    remove(id: string): Promise<ThemeSaveResult>
+    /**
+     * Show a theme's folder in the OS file manager. Pass an empty id to open
+     * the themes directory itself (a built-in has no file to reveal).
+     */
+    reveal(id: string): Promise<void>
+    /** Persist the active theme and broadcast it to every window. */
+    setActive(id: string): Promise<ResolvedTheme>
+    /**
+     * Subscribe to theme changes made elsewhere -- another window switching
+     * theme, or a save that re-resolves the active one. Returns an unsubscribe fn.
+     */
+    onChanged(callback: (theme: ResolvedTheme) => void): () => void
   }
   system: {
     getVersions(): Promise<AppVersions>
@@ -953,6 +1027,12 @@ export interface RoxyApi {
     pinned(): Promise<{ providerId: string; model: string }[]>
     /** Pin/unpin one model - a deliberate shortlist, unlike the MRU `recent` list. */
     setPinned(providerId: string, model: string, pinned: boolean): Promise<void>
+    /** Every model the user has hidden, across every provider. */
+    hidden(): Promise<{ providerId: string; model: string }[]>
+    /** Hide/show one model in the picker. Hiding also unpins it. */
+    setHidden(providerId: string, model: string, hidden: boolean): Promise<void>
+    /** Replace one provider's entire hidden set (Hide all / Show all). */
+    setProviderHidden(providerId: string, models: string[]): Promise<void>
   }
   context: {
     /** Summarize a chat's history into a compaction summary; returns the chat. */
@@ -1051,6 +1131,14 @@ export interface RoxyApi {
     pullMulti(sessionId: string): Promise<MultiSyncOutcome>
     /** Reset EVERY repo of a multi-repo session. See `pullMulti`. */
     resetMulti(sessionId: string): Promise<MultiSyncOutcome>
+    /**
+     * Push EVERY repo of a multi-repo session.
+     *
+     * The counterpart of `push` for a composite workstream, and not optional:
+     * pushing one repo of four leaves the work unpublished and the chip
+     * unchanged, which reads as a button that did nothing.
+     */
+    pushMulti(sessionId: string): Promise<MultiSyncOutcome>
     /** The host's "create a pull request" URL, pre-filled for this branch. */
     createUrl(cwd: string): Promise<string | null>
     /**

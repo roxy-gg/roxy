@@ -13,6 +13,7 @@
  * directly in test/shared.ts instead of being eyeballed in a running app.
  */
 import type { ModelInfo } from '../../../shared/api'
+import { modelLabel } from '../../../shared/models'
 
 /** The subset of a connected provider this list needs. */
 export interface RowProvider {
@@ -36,6 +37,7 @@ export interface ModelRow {
   providerId: string
   providerName: string
   modelId: string
+  /** What to render: the catalog name, with any vendor prefix already stripped. */
   label: string
   info: ModelInfo | undefined
   pinned: boolean
@@ -83,8 +85,13 @@ export function buildModelRows(input: {
   pinned: { providerId: string; model: string }[]
   index: Map<string, IndexEntry>
   query: string
+  /**
+   * `providerId:model` keys to omit. Filtered here rather than in the catalog,
+   * so Settings can still list everything a provider offers.
+   */
+  hidden: ReadonlySet<string>
 }): Row[] {
-  const { providers, catalogs, recent, pinned, index, query } = input
+  const { providers, catalogs, recent, pinned, index, query, hidden } = input
   const q = query.trim().toLowerCase()
   const pinnedKeys = new Set(pinned.map((p) => `${p.providerId}:${p.model}`))
   const out: Row[] = []
@@ -104,7 +111,7 @@ export function buildModelRows(input: {
       providerId,
       providerName,
       modelId,
-      label: label ?? hit?.info.name ?? modelId,
+      label: modelLabel(providerId, label ?? hit?.info.name ?? modelId, modelId),
       info: hit?.info,
       pinned: pinnedKeys.has(`${providerId}:${modelId}`)
     }
@@ -117,7 +124,14 @@ export function buildModelRows(input: {
       const provider = providers.find((pr) => pr.id === p.providerId)
       // Skip a pin whose provider was disconnected, or whose model is no longer
       // in the catalog - it would render as a row that cannot be selected.
-      if (!provider || !index.has(`${p.providerId}:${p.model}`)) return []
+      // Hiding unpins, so this pair is transient — but hidden must win, or it
+      // renders atop the list it was removed from.
+      if (
+        !provider ||
+        !index.has(`${p.providerId}:${p.model}`) ||
+        hidden.has(`${p.providerId}:${p.model}`)
+      )
+        return []
       return [modelRow('pin', p.providerId, provider.name, p.model)]
     })
     if (rows.length > 0) {
@@ -127,7 +141,7 @@ export function buildModelRows(input: {
   }
 
   for (const p of providers) {
-    const catalog = catalogs[p.id] ?? []
+    const catalog = (catalogs[p.id] ?? []).filter((m) => !hidden.has(`${p.id}:${m.id}`))
     const list = q
       ? catalog.filter((m) => index.get(`${p.id}:${m.id}`)?.haystack.includes(q))
       : catalog
@@ -136,7 +150,12 @@ export function buildModelRows(input: {
     const latest = q
       ? []
       : (recent[p.id] ?? []).filter(
-          (r) => !pinnedKeys.has(`${p.id}:${r.model}`) && index.has(`${p.id}:${r.model}`)
+          (r) =>
+            !pinnedKeys.has(`${p.id}:${r.model}`) &&
+            index.has(`${p.id}:${r.model}`) &&
+            // Recents are history and still list a hidden model, which would
+            // otherwise keep reappearing under Latest.
+            !hidden.has(`${p.id}:${r.model}`)
         )
     if (list.length === 0 && latest.length === 0) continue
 

@@ -40,7 +40,7 @@ export const AGENTS: AgentDef[] = [
     mode: 'primary',
     hidden: false,
     color: '#3fb950',
-    tools: ['read', 'grep', 'glob', 'list', 'bash', 'webfetch', 'websearch', 'skill'],
+    tools: ['read', 'grep', 'glob', 'list', 'bash', 'webfetch', 'skill'],
     promptFile: 'plan.txt'
   },
   {
@@ -60,7 +60,7 @@ export const AGENTS: AgentDef[] = [
     mode: 'subagent',
     hidden: false,
     color: '#f0883e',
-    tools: ['grep', 'glob', 'list', 'bash', 'webfetch', 'websearch', 'read', 'skill'],
+    tools: ['grep', 'glob', 'list', 'bash', 'webfetch', 'read', 'skill'],
     promptFile: 'agent-explore.txt'
   },
   {

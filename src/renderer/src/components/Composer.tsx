@@ -7,6 +7,7 @@ import {
   type DragEvent,
   type KeyboardEvent
 } from 'react'
+import { useTranslation } from 'react-i18next'
 import { ArrowUp, Mic, Plus, Sparkles, Square, Undo2, X } from 'lucide-react'
 import { ModelPicker } from './ModelPicker'
 import { ContextMeter, ContextPicker, ThinkingPicker, AgentPicker } from './InferenceControls'
@@ -29,6 +30,7 @@ export function Composer({
   sending?: boolean
   onStop?: () => void
 }): JSX.Element {
+  const { t } = useTranslation()
   const [value, setValue] = useState('')
   const [images, setImages] = useState<ComposerImage[]>([])
   const [dragging, setDragging] = useState(false)
@@ -126,7 +128,7 @@ export function Composer({
     const capture = captureRef.current
     captureRef.current = null
     void capture?.stop()
-    setDictationError(dictationState.error || 'Local dictation stopped unexpectedly.')
+    setDictationError(dictationState.error || t('composer.dictationStopped'))
   }, [dictationState])
 
   useEffect(() => {
@@ -172,7 +174,7 @@ export function Composer({
       requestRef.current = null
       const message =
         error instanceof DOMException && error.name === 'NotAllowedError'
-          ? 'Microphone permission was denied.'
+          ? t('composer.microphoneDenied')
           : error instanceof Error
             ? error.message
             : String(error)
@@ -309,7 +311,7 @@ export function Composer({
     if (!text || polishing) return
     const provider = providers.find((candidate) => candidate.id === config.providerId)
     if (!provider || !config.model) {
-      setDictationError('Select a connected chat model before polishing.')
+      setDictationError(t('composer.polishNeedsModel'))
       return
     }
     setPolishing(true)
@@ -335,9 +337,7 @@ export function Composer({
         currentConfig.model !== sourceModel
       ) {
         setRawTranscript(null)
-        setDictationError(
-          'The draft changed while Polish was running, so its result was discarded.'
-        )
+        setDictationError(t('composer.polishDiscarded'))
         return
       }
       valueRef.current = next
@@ -437,10 +437,20 @@ export function Composer({
         // `sq-ring` repaints the border inside the squircle, so the color has to
         // travel as `--sq-ring` alongside each `border-*`. The drag ring is an
         // inset one so it follows the curve rather than boxing the corners.
-        className={`mx-auto max-w-3xl sq-frame sq-2xl sq-ring sq-fill-surface-2 rounded-2xl border bg-surface-2 transition ${
+        //
+        // `edge` gives it the translucent, top-lit border, and `shadow-raised`
+        // -- not `float` -- because the composer is anchored to the bottom of
+        // the pane, not hovering over it. A float-weight shadow on a full-width
+        // element that never moves reads as a permanent dark band under the box
+        // rather than as depth. The edge already separates it from the
+        // conversation; the shadow only has to sit it down.
+        //
+        // On focus the hairline brightens rather than changing hue: the box is
+        // already the focus of the screen, so a colored ring on it is noise.
+        className={`mx-auto max-w-3xl sq-frame sq-2xl sq-ring sq-fill-surface-2 edge edge-panel shadow-raised rounded-2xl border bg-surface-2 transition ${
           dragging
             ? 'border-accent [--sq-ring:var(--color-accent)] inset-ring-1 inset-ring-accent/40'
-            : 'border-border focus-within:border-border-strong focus-within:[--sq-ring:var(--color-border-strong)]'
+            : 'border-border focus-within:border-border-strong focus-within:[--sq-ring:var(--edge-strong)]'
         }`}
       >
         {images.length > 0 && (
@@ -460,7 +470,7 @@ export function Composer({
                 <button
                   type="button"
                   onClick={() => removeImage(img.id)}
-                  title="Remove image"
+                  title={t('composer.removeImage')}
                   className="press-scale absolute right-0.5 top-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-black/70 text-white opacity-0 transition-opacity group-hover:opacity-100"
                 >
                   <X className="h-2.5 w-2.5" />
@@ -477,9 +487,9 @@ export function Composer({
           placeholder={
             sending
               ? onStop
-                ? 'Queue a follow-up… (Esc to stop)'
-                : 'Queue a follow-up…'
-              : 'Ask Roxy anything… (paste or drop images)'
+                ? t('composer.queuePlaceholderStop')
+                : t('composer.queuePlaceholder')
+              : t('composer.placeholder')
           }
           onChange={(e) => {
             const next = e.target.value
@@ -503,7 +513,7 @@ export function Composer({
             {listening ? (
               <>
                 <span className="h-2 w-2 animate-pulse rounded-full bg-red-500 motion-reduce:animate-none" />
-                <span className="font-medium text-text">Local dictation</span>
+                <span className="font-medium text-text">{t('composer.localDictation')}</span>
                 <span className="text-text-muted">
                   {Math.floor(elapsed / 60)}:{String(elapsed % 60).padStart(2, '0')}
                 </span>
@@ -512,62 +522,62 @@ export function Composer({
                   onClick={() => void finishDictation(false)}
                   className="ml-auto rounded px-1.5 py-0.5 text-text hover:bg-white/5"
                 >
-                  Stop
+                  {t('composer.stopDictation')}
                 </button>
                 <button
                   type="button"
                   onClick={endVoiceConversation}
                   className="rounded px-1.5 py-0.5 text-text-muted hover:bg-white/5 hover:text-text"
                 >
-                  End
+                  {t('composer.endVoice')}
                 </button>
               </>
             ) : voiceMode && voicePhase === 'thinking' ? (
               <>
-                <span className="text-text-muted">Voice conversation · Roxy is thinking…</span>
+                <span className="text-text-muted">{t('composer.voiceThinking')}</span>
                 <button
                   type="button"
                   onClick={toggleVoiceConversation}
                   className="ml-auto rounded px-1.5 py-0.5 text-text hover:bg-white/5"
                 >
-                  Interrupt
+                  {t('composer.interrupt')}
                 </button>
                 <button
                   type="button"
                   onClick={endVoiceConversation}
                   className="rounded px-1.5 py-0.5 text-text-muted hover:bg-white/5 hover:text-text"
                 >
-                  End
+                  {t('composer.endVoice')}
                 </button>
               </>
             ) : voiceMode && voicePhase === 'speaking' ? (
               <>
-                <span className="font-medium text-accent">Roxy is speaking</span>
+                <span className="font-medium text-accent">{t('composer.voiceSpeaking')}</span>
                 <button
                   type="button"
                   onClick={toggleVoiceConversation}
                   className="ml-auto rounded px-1.5 py-0.5 text-text hover:bg-white/5"
                 >
-                  Interrupt
+                  {t('composer.interrupt')}
                 </button>
                 <button
                   type="button"
                   onClick={endVoiceConversation}
                   className="rounded px-1.5 py-0.5 text-text-muted hover:bg-white/5 hover:text-text"
                 >
-                  End
+                  {t('composer.endVoice')}
                 </button>
               </>
             ) : dictationState?.status === 'downloading-runtime' ||
               dictationState?.status === 'downloading-model' ? (
               <span className="text-text-muted">
-                Downloading free local dictation… {dictationState.progress}%
+                {t('composer.dictationDownloading', { percent: dictationState.progress })}
               </span>
             ) : dictationState?.status === 'starting' || dictationState?.status === 'stopping' ? (
               <span className="text-text-muted">
                 {dictationState.status === 'starting'
-                  ? 'Loading local speech model…'
-                  : 'Finishing transcript…'}
+                  ? t('composer.dictationLoading')
+                  : t('composer.dictationFinishing')}
               </span>
             ) : (
               <span className="text-red-400">{dictationError || dictationState?.error}</span>
@@ -584,7 +594,7 @@ export function Composer({
             <button
               type="button"
               onClick={() => fileRef.current?.click()}
-              title="Attach images"
+              title={t('composer.attachImages')}
               className="press-scale flex h-6 shrink-0 items-center justify-center sq sq-md rounded-md px-1.5 text-text-muted hover:bg-white/5 hover:text-text"
             >
               <Plus className="h-3.5 w-3.5" />
@@ -596,12 +606,12 @@ export function Composer({
               title={
                 voiceMode
                   ? listening
-                    ? 'Stop voice conversation'
-                    : 'Interrupt and speak'
-                  : 'Start hands-free voice conversation'
+                    ? t('composer.stopVoiceTitle')
+                    : t('composer.interruptVoiceTitle')
+                  : t('composer.startVoiceTitle')
               }
               aria-label={
-                voiceMode ? 'Interrupt or stop voice conversation' : 'Start voice conversation'
+                voiceMode ? t('composer.stopVoiceAria') : t('composer.startVoiceAria')
               }
               className={`press-scale flex h-6 shrink-0 items-center justify-center sq sq-md rounded-md px-1.5 hover:bg-white/5 disabled:opacity-40 ${
                 voiceMode ? 'bg-red-500/15 text-red-400' : 'text-text-muted hover:text-text'
@@ -614,11 +624,11 @@ export function Composer({
                 type="button"
                 onClick={() => void polish()}
                 disabled={polishing}
-                title="Polish transcript with the selected chat model (may use provider tokens)"
+                title={t('composer.polishTitle')}
                 className="press-scale flex h-6 items-center gap-1 rounded-md px-1.5 text-[11px] text-text-muted hover:bg-white/5 hover:text disabled:opacity-40"
               >
                 <Sparkles className="h-3 w-3" />
-                {polishing ? 'Polishing…' : 'Polish'}
+                {polishing ? t('composer.polishing') : t('composer.polish')}
               </button>
             )}
             {rawTranscript !== null && !dictationBusy && (
@@ -630,11 +640,11 @@ export function Composer({
                   setRawTranscript(null)
                   requestAnimationFrame(autoGrow)
                 }}
-                title="Restore raw transcript"
+                title={t('composer.restoreTranscript')}
                 className="press-scale flex h-6 items-center gap-1 rounded-md px-1.5 text-[11px] text-text-muted hover:bg-white/5 hover:text"
               >
                 <Undo2 className="h-3 w-3" />
-                Undo polish
+                {t('composer.undoPolish')}
               </button>
             )}
             <ModelPicker />
@@ -646,7 +656,7 @@ export function Composer({
           {showStop ? (
             <button
               onClick={onStop}
-              title="Stop (Esc)"
+              title={t('composer.stop')}
               className="press-scale flex h-8 w-8 shrink-0 items-center justify-center sq sq-lg rounded-lg bg-white text-black hover:bg-white/90"
             >
               <Square className="h-3 w-3 fill-current" />
@@ -655,7 +665,7 @@ export function Composer({
             <button
               onClick={submit}
               disabled={!canSend || dictationBusy || !!partialRef.current}
-              title={sending ? 'Add to queue' : 'Send'}
+              title={sending ? t('composer.addToQueue') : t('composer.send')}
               className="press-scale flex h-8 w-8 shrink-0 items-center justify-center sq sq-lg rounded-lg bg-white text-black hover:bg-white/90 disabled:opacity-30"
             >
               <ArrowUp className="h-4 w-4" />

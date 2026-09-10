@@ -19,12 +19,22 @@ import workletSource from './squircle-worklet.js?raw'
  * worklet receives a parsed `CSSUnitValue`/color instead of a raw token string,
  * and each has an initial value so an element that only sets `--sq-r` still gets a
  * sane ring color.
+ *
+ * Registration order is not significant, but the SET is: `paint()` only re-runs
+ * when a property listed in the painter's `inputProperties` changes, so anything
+ * added there has to be registered here or it will be read once and then go
+ * stale on hover.
  */
 const PROPS: { name: string; syntax: string; initialValue: string }[] = [
   { name: '--sq-r', syntax: '<length>', initialValue: '8px' },
   { name: '--sq-dash', syntax: '<length>', initialValue: '0px' },
   { name: '--sq-ring', syntax: '<color>', initialValue: 'transparent' },
-  { name: '--sq-fill', syntax: '<color>', initialValue: 'transparent' }
+  { name: '--sq-fill', syntax: '<color>', initialValue: 'transparent' },
+  // The top-lit edge highlight, and how far down it fades. Registering the span
+  // as a `<length>` (not a number) means the worklet receives it already
+  // resolved to px, and both animate because they are registered at all.
+  { name: '--sq-bevel', syntax: '<color>', initialValue: 'transparent' },
+  { name: '--sq-bevel-span', syntax: '<length>', initialValue: '0px' }
 ]
 
 let started = false

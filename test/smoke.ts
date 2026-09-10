@@ -10,7 +10,7 @@ import { existsSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { app } from 'electron'
+import { app, BrowserWindow } from 'electron'
 
 import * as repo from '../src/main/db/repo'
 import { getActivityStats } from '../src/main/services/activity'
@@ -25,6 +25,22 @@ import {
   restartService
 } from '../src/main/harness'
 import { sessionCwd } from '../src/main/services/workspace'
+import {
+  createTheme,
+  deleteTheme,
+  listThemes,
+  refreshThemes,
+  resolveThemeById,
+  themeWarnings,
+  writeTheme
+} from '../src/main/services/themes'
+import {
+  OVERLAY_HEIGHT,
+  applyWindowChrome,
+  backgroundColorFor,
+  initialOverlay,
+  symbolColorFor
+} from '../src/main/services/window-chrome'
 import Database from 'better-sqlite3'
 import { MIGRATIONS, repairSchema } from '../src/main/db/migrations'
 import * as git from '../src/main/services/git'
@@ -101,7 +117,13 @@ import {
   abortableDelay,
   MODEL_FATAL_ATTEMPTS
 } from '../src/main/harness/agent'
-import { COPILOT_EDITOR_HEADERS, ModelHttpError } from '../src/main/services/llm'
+import {
+  COPILOT_EDITOR_HEADERS,
+  invalidateCopilotToken,
+  ModelHttpError,
+  openaiEndpoint
+} from '../src/main/services/llm'
+import { invalidateCopilotModels, listModels } from '../src/main/services/models'
 import { getUsageStats } from '../src/main/services/usage'
 import { consumeAiSdkStream } from '../src/main/services/aisdk'
 import { APICallError } from 'ai'
@@ -180,6 +202,15 @@ async function main(): Promise<void> {
   // Auto-workstream defaults ON and is stored only when disabled, so existing
   // installs are opted in without a migration.
   check('auto-workstream defaults on', repo.getSettings().autoWorkstream === true)
+  check('motion defaults on', repo.getSettings().motion === 'on')
+  repo.setMotion('reduced')
+  check('reduced motion persists', repo.getSettings().motion === 'reduced')
+  repo.setMotion('system')
+  check('system motion persists', repo.getSettings().motion === 'system')
+  repo.setMotion('on')
+  check('normal motion restores the default', repo.getSettings().motion === 'on')
+  repo.setMotion('unknown' as never)
+  check('unknown motion values fall back to On', repo.getSettings().motion === 'on')
   repo.setAutoWorkstream(false)
   check('setAutoWorkstream(false) persists', repo.getSettings().autoWorkstream === false)
   repo.setAutoWorkstream(true)
@@ -207,11 +238,51 @@ async function main(): Promise<void> {
   check('setContextLimit persists', repo.getSettings().contextLimit === 1_000_000)
   repo.setContextLimit(null)
   check('setContextLimit clears', repo.getSettings().contextLimit === null)
-  check('web search key default null', repo.getSettings().webSearchApiKey === null)
-  repo.setWebSearchApiKey('exa_test_key')
-  check('setWebSearchApiKey persists', repo.getSettings().webSearchApiKey === 'exa_test_key')
-  repo.setWebSearchApiKey('   ')
-  check('setWebSearchApiKey blanks to null', repo.getSettings().webSearchApiKey === null)
+  check('language defaults to English', repo.getSettings().language === 'en')
+  repo.setLanguage('es')
+  check('setLanguage persists', repo.getSettings().language === 'es')
+  // English is the default and clears its row, so it must still READ as 'en'
+  // rather than falling through to whatever was there before.
+  repo.setLanguage('en')
+  check('setLanguage back to the default persists', repo.getSettings().language === 'en')
+  // A row written by a newer build, or a language since removed, must degrade
+  // to English instead of leaving the UI rendering raw keys.
+  repo.setLanguage('kl' as never)
+  check('an unknown language falls back to English', repo.getSettings().language === 'en')
+  repo.setLanguage('es-MX' as never)
+  check('a regional tag folds to its base language', repo.getSettings().language === 'es')
+  repo.setLanguage('en')
+
+  // ---- hidden models (v22: the picker deny-list) ----
+  // Against the real DB because the behaviour lives in SQL: hiding unpins.
+  repo.setModelPinned('openai', 'gpt-5', true)
+  repo.setModelHidden('openai', 'gpt-5', true)
+  check(
+    'setModelHidden records the model',
+    repo.listHiddenModels().some((h) => h.providerId === 'openai' && h.model === 'gpt-5')
+  )
+  check(
+    'hiding a model also unpins it',
+    !repo.listPinnedModels().some((p) => p.providerId === 'openai' && p.model === 'gpt-5')
+  )
+  repo.setModelHidden('openai', 'gpt-5', true)
+  check('hiding twice does not duplicate the row', repo.listHiddenModels().length === 1)
+  repo.setModelHidden('openai', 'gpt-5', false)
+  check('unhiding removes the model', repo.listHiddenModels().length === 0)
+  // Bulk replace is scoped per provider.
+  repo.setProviderHiddenModels('openai', ['a', 'b', 'c'])
+  repo.setProviderHiddenModels('anthropic', ['claude-x'])
+  repo.setProviderHiddenModels('openai', ['a'])
+  const bulkHidden = repo.listHiddenModels()
+  check(
+    'setProviderHiddenModels replaces only its own provider',
+    bulkHidden.length === 2 &&
+      bulkHidden.some((h) => h.providerId === 'openai' && h.model === 'a') &&
+      bulkHidden.some((h) => h.providerId === 'anthropic' && h.model === 'claude-x')
+  )
+  repo.setProviderHiddenModels('openai', [])
+  repo.setProviderHiddenModels('anthropic', [])
+  check('setProviderHiddenModels([]) clears a provider', repo.listHiddenModels().length === 0)
 
   // ---- per-session inference config ----
   //
@@ -735,12 +806,6 @@ async function main(): Promise<void> {
     'webfetch rejects a malformed url',
     !badUrl.ok && badUrl.output.toLowerCase().includes('valid'),
     badUrl.output
-  )
-  const emptyQuery = await run('websearch', { query: '' })
-  check(
-    'websearch rejects an empty query',
-    !emptyQuery.ok && emptyQuery.output.includes('missing'),
-    emptyQuery.output
   )
 
   // ---- disk-backed tool-output store (Phase 9.3) ----
@@ -1325,6 +1390,62 @@ async function main(): Promise<void> {
         (db.prepare('PRAGMA table_info(chats)').all() as { name: string }[]).filter(
           (c) => c.name === 'worktree_path'
         ).length === 1
+      )
+      db.close()
+    }
+
+    // ---- v22: the dead Exa key is deleted on upgrade ----
+    // The real scenario, not a synthetic one: someone who actually typed a key
+    // into the old "Web search" settings box, then upgrades. The credential is
+    // for a feature that no longer exists and that they can no longer see, so
+    // leaving it in the settings table (and in every backup of it) is not
+    // acceptable. Drive the ladder exactly as database.ts does.
+    {
+      const db = new Database(path.join(healDir, 'v22.db'))
+      // Stop one rung short, at v21 — the last release that still had the box.
+      // Located by what the step DOES, not by its position: later migrations
+      // land on top of it and "the last rung" stops meaning the Exa one.
+      const exaStep = MIGRATIONS.findIndex(
+        (m) => typeof m === 'string' && m.includes('web_search_api_key')
+      )
+      check('migration v22: the Exa cleanup step is still in the ladder', exaStep !== -1)
+      const priorSteps = MIGRATIONS.slice(0, exaStep)
+      for (const step of priorSteps) {
+        if (typeof step === 'string') db.exec(step)
+        else step(db)
+      }
+      db.pragma(`user_version = ${priorSteps.length}`)
+      db.prepare('INSERT INTO settings(key, value) VALUES(?, ?)').run(
+        'web_search_api_key',
+        'exa_live_secret'
+      )
+      // A neighbouring row proves the DELETE is aimed, not a blanket wipe.
+      db.prepare('INSERT INTO settings(key, value) VALUES(?, ?)').run('active_model', 'gpt-5')
+      const keyOf = (k: string): string | undefined =>
+        (db.prepare('SELECT value AS v FROM settings WHERE key = ?').get(k) as { v: string })?.v
+      check(
+        'migration v22: the old key is present before upgrading',
+        keyOf('web_search_api_key') === 'exa_live_secret'
+      )
+
+      // The remaining rungs, applied the way database.ts applies them.
+      for (let v = priorSteps.length; v < MIGRATIONS.length; v++) {
+        const step = MIGRATIONS[v]
+        if (typeof step === 'string') db.exec(step)
+        else step(db)
+        db.pragma(`user_version = ${v + 1}`)
+      }
+
+      check(
+        'migration v22: upgrading deletes the stored Exa key',
+        keyOf('web_search_api_key') === undefined
+      )
+      check('migration v22: other settings are untouched', keyOf('active_model') === 'gpt-5')
+      // repairSchema runs on every open and must never resurrect it.
+      repairSchema(db)
+      check(
+        'migration v22: the repair step does not bring it back',
+        keyOf('web_search_api_key') === undefined
       )
       db.close()
     }
@@ -3723,6 +3844,263 @@ async function main(): Promise<void> {
     check('browser tools', false, e instanceof Error ? e.message : String(e))
   }
 
+  // ---- Copilot discovery follows the signed-in account and live policies ----
+  {
+    const realFetch = globalThis.fetch
+    const realNow = Date.now
+    let now = realNow()
+    Date.now = () => now
+    const exchanges: string[] = []
+    const requests: { url: string; auth: string; method: string }[] = []
+    const capabilities = {
+      type: 'chat',
+      limits: { max_context_window_tokens: 128_000, max_output_tokens: 16_384 },
+      supports: { tool_calls: true, reasoning_effort: ['low', 'high'] }
+    }
+    const enabled = {
+      id: 'test-new-model',
+      name: 'New Model',
+      model_picker_enabled: true,
+      policy: { state: 'enabled' },
+      capabilities,
+      supported_endpoints: ['/responses']
+    }
+    let body: unknown = {
+      data: [
+        enabled,
+        { ...enabled, id: 'blocked', policy: { state: 'disabled' } },
+        { ...enabled, id: 'unconfigured', policy: {} },
+        { ...enabled, id: 'future-policy', policy: { state: 'pending' } },
+        { ...enabled, id: 'hidden', model_picker_enabled: false },
+        { ...enabled, id: 'internal', model_picker_enabled: undefined },
+        { ...enabled, id: 'embedding', capabilities: { type: 'embeddings' } },
+        { ...enabled, id: 'wrong-api', supported_endpoints: ['/messages'] },
+        { ...enabled, id: 'no-policy', policy: undefined, is_chat_default: true },
+        {
+          ...enabled,
+          id: 'plain-chat',
+          capabilities: { type: 'chat', supports: {} },
+          supported_endpoints: undefined
+        }
+      ]
+    }
+    let status = 200
+    let unauthorized = false
+    let networkError = false
+    const pending: { release?: (response: Response) => void } = {}
+    let paused = false
+    globalThis.fetch = async (input, init) => {
+      const url = String(input)
+      const auth = new Headers(init?.headers).get('Authorization') ?? ''
+      if (url === 'https://api.github.com/copilot_internal/v2/token') {
+        exchanges.push(auth)
+        return Response.json({
+          token: `copilot-${auth.slice('token '.length)}`,
+          expires_at: Math.floor(Date.now() / 1000) + 3600,
+          endpoints: {
+            api:
+              auth === 'token test-account-a'
+                ? 'https://api.business.githubcopilot.com/'
+                : 'https://api.enterprise.githubcopilot.com/'
+          }
+        })
+      }
+      requests.push({ url, auth, method: init?.method ?? 'GET' })
+      if (!url.endsWith('.githubcopilot.com/models')) {
+        throw new Error(`Unexpected Copilot test request: ${url}`)
+      }
+      if (networkError) throw new TypeError('fetch failed')
+      if (unauthorized) {
+        unauthorized = false
+        return Response.json({}, { status: 401 })
+      }
+      if (paused)
+        return new Promise<Response>((resolve) => {
+          pending.release = resolve
+        })
+      return Response.json(body, { status })
+    }
+    try {
+      repo.storeCopilotCredential('test-account-a')
+      const a = await openaiEndpoint('github-copilot')
+      check('Copilot: exchanges the stored OAuth token', exchanges[0] === 'token test-account-a')
+      check(
+        'Copilot: requests use the exchanged token',
+        a.headers.Authorization === 'Bearer copilot-test-account-a'
+      )
+      await openaiEndpoint('github-copilot')
+      check('Copilot: a live token is reused for the same account', exchanges.length === 1)
+      check(
+        'Copilot: inference uses the assigned tenant API host',
+        a.url === 'https://api.business.githubcopilot.com/chat/completions'
+      )
+      const responses = await openaiEndpoint('github-copilot', { responses: true, vision: true })
+      check(
+        'Copilot: responses and vision use the same tenant',
+        responses.url === 'https://api.business.githubcopilot.com/responses' &&
+          responses.headers['Copilot-Vision-Request'] === 'true'
+      )
+
+      const [models, concurrent] = await Promise.all([
+        listModels('github-copilot'),
+        listModels('github-copilot')
+      ])
+      check(
+        'Copilot: concurrent discovery is deduplicated',
+        requests.length === 1 && models === concurrent
+      )
+      check(
+        'Copilot: discovery uses tenant host and exchanged token',
+        requests[0].url === 'https://api.business.githubcopilot.com/models' &&
+          requests[0].auth === 'Bearer copilot-test-account-a'
+      )
+      check(
+        'Copilot: only enabled, picker-visible chat models on supported APIs survive',
+        models.map((m) => m.id).join(',') === 'no-policy,test-new-model,plain-chat'
+      )
+      check(
+        'Copilot: models unknown to models.dev retain live capabilities and limits',
+        models[1].name === 'New Model' &&
+          models[1].toolCall &&
+          models[1].reasoning &&
+          models[1].reasoningEfforts?.join(',') === 'low,high' &&
+          models[1].contextLimit === 128_000 &&
+          models[1].outputLimit === 16_384
+      )
+      check(
+        'Copilot: absent capability flags are not invented',
+        !models[2].toolCall && !models[2].reasoning
+      )
+      await listModels('github-copilot')
+      check('Copilot: opening several pickers reuses a fresh list', requests.length === 1)
+
+      body = { data: [{ ...enabled, id: 'just-enabled' }] }
+      now += 60_001
+      const refreshed = await listModels('github-copilot')
+      check(
+        'Copilot: expiry removes revoked models and discovers newly enabled models',
+        refreshed.length === 1 && refreshed[0].id === 'just-enabled' && requests.length === 2
+      )
+
+      now += 60_001
+      status = 403
+      check(
+        'Copilot: denied discovery does not reuse stale or public models',
+        (await listModels('github-copilot')).length === 0
+      )
+      status = 200
+      now += 60_001
+      body = { data: [] }
+      check(
+        'Copilot: an empty tenant list stays empty',
+        (await listModels('github-copilot')).length === 0
+      )
+      now += 60_001
+      body = { unexpected: [] }
+      check(
+        'Copilot: malformed discovery fails closed',
+        (await listModels('github-copilot')).length === 0
+      )
+      now += 60_001
+      body = { data: [enabled] }
+      networkError = true
+      check(
+        'Copilot: an offline tenant never falls back to models.dev',
+        (await listModels('github-copilot')).length === 0
+      )
+      networkError = false
+      now += 60_001
+      unauthorized = true
+      const beforeRetry = exchanges.length
+      check(
+        'Copilot: a rejected short-lived token is refreshed and retried',
+        (await listModels('github-copilot')).length === 1 && exchanges.length === beforeRetry + 1
+      )
+
+      repo.storeCopilotCredential('test-account-b')
+      const beforeSwitch = exchanges.length
+      const b = await openaiEndpoint('github-copilot')
+      check(
+        'Copilot: switching accounts never reuses the previous token',
+        exchanges.length === beforeSwitch + 1 &&
+          b.headers.Authorization === 'Bearer copilot-test-account-b'
+      )
+      body = { data: [{ ...enabled, id: 'account-b-model' }] }
+      const accountB = await listModels('github-copilot')
+      check(
+        'Copilot: switching accounts bypasses the previous model cache',
+        accountB[0]?.id === 'account-b-model'
+      )
+      check(
+        'Copilot: the new account uses its own tenant endpoint',
+        requests.at(-1)?.url === 'https://api.enterprise.githubcopilot.com/models'
+      )
+
+      paused = true
+      now += 60_001
+      const stale = listModels('github-copilot')
+      while (!pending.release) await new Promise((resolve) => setTimeout(resolve, 0))
+      repo.storeCopilotCredential('test-account-a')
+      paused = false
+      body = { data: [{ ...enabled, id: 'account-a-model' }] }
+      const accountA = await listModels('github-copilot')
+      pending.release(Response.json({ data: [{ ...enabled, id: 'stale-account-b-model' }] }))
+      check(
+        'Copilot: an old account response is discarded after switching',
+        (await stale).length === 0
+      )
+      check(
+        'Copilot: an old response cannot overwrite the new account cache',
+        (await listModels('github-copilot')) === accountA
+      )
+
+      const previousRelease = pending.release
+      paused = true
+      now += 60_001
+      const invalidated = listModels('github-copilot')
+      while (pending.release === previousRelease) {
+        await new Promise((resolve) => setTimeout(resolve, 0))
+      }
+      invalidateCopilotModels()
+      paused = false
+      body = { data: [{ ...enabled, id: 'reconnected-model' }] }
+      const reconnected = await listModels('github-copilot')
+      pending.release(Response.json({ data: [enabled] }))
+      check(
+        'Copilot: reconnecting the same account discards in-flight discovery',
+        (await invalidated).length === 0 && (await listModels('github-copilot')) === reconnected
+      )
+
+      repo.disconnectProvider('github-copilot')
+      const beforeDisconnect = exchanges.length + requests.length
+      let disconnected = false
+      try {
+        await openaiEndpoint('github-copilot')
+      } catch {
+        disconnected = true
+      }
+      check('Copilot: disconnect cannot keep using a cached token', disconnected)
+      check(
+        'Copilot: disconnect hides the cached models',
+        (await listModels('github-copilot')).length === 0
+      )
+      check(
+        'Copilot: disconnect makes no network request',
+        exchanges.length + requests.length === beforeDisconnect
+      )
+      check(
+        'Copilot: discovery never enables a policy or consults the public catalog',
+        requests.every((r) => r.method === 'GET' && r.url.endsWith('.githubcopilot.com/models'))
+      )
+    } finally {
+      Date.now = realNow
+      globalThis.fetch = realFetch
+      invalidateCopilotModels()
+      invalidateCopilotToken()
+      repo.disconnectProvider('github-copilot')
+    }
+  }
+
   // ---- overnight resilience: transient model failures don't kill the run ----
   // There's no cap on tool-call count (the loop runs `for (;;)`); the real
   // overnight risk is a transient provider blip throwing out of the model stream.
@@ -4531,6 +4909,242 @@ async function main(): Promise<void> {
     delete process.env.ROXY_TRACK_ENDPOINT
   } catch (e) {
     check('usage tracking', false, e instanceof Error ? e.message : String(e))
+  }
+
+  // ---- themes on disk (config-driven theming) ----
+  //
+  // shared.ts covers the pure logic (parsing, validation, resolution). What can
+  // only be verified against a real filesystem is the part that decides whether
+  // a hand-authored file actually reaches the UI: discovery, precedence between
+  // roots, and the write/delete paths.
+  try {
+    const themesRoot = path.join(tmp, 'themes')
+
+    // A theme authored by hand, in the folder layout the docs describe.
+    await fs.mkdir(path.join(themesRoot, 'ocean'), { recursive: true })
+    await fs.writeFile(
+      path.join(themesRoot, 'ocean', 'theme.json'),
+      JSON.stringify({
+        id: 'ocean',
+        name: 'Ocean',
+        appearance: 'dark',
+        colors: { bg: '#001018', accent: '#22d3ee' },
+        fonts: { mono: 'Fira Code' }
+      }),
+      'utf8'
+    )
+    // The other accepted shape: a bare <id>.json dropped straight into a root.
+    await fs.writeFile(
+      path.join(themesRoot, 'plain.json'),
+      JSON.stringify({ id: 'plain', name: 'Plain', colors: { bg: '#111' } }),
+      'utf8'
+    )
+    // Junk must not take the scan down with it.
+    await fs.writeFile(path.join(themesRoot, 'broken.json'), '{not json', 'utf8')
+
+    refreshThemes()
+    const listed = await listThemes()
+    check(
+      'themes: a hand-authored theme.json is discovered',
+      listed.some((t) => t.id === 'ocean' && t.source === 'user'),
+      listed.map((t) => t.id).join(',')
+    )
+    check(
+      'themes: a bare <id>.json is discovered too',
+      listed.some((t) => t.id === 'plain')
+    )
+    check(
+      'themes: built-ins are always present and marked as such',
+      listed.some((t) => t.id === 'roxy-dark' && t.source === 'builtin') &&
+        listed.some((t) => t.id === 'roxy-light')
+    )
+    check(
+      'themes: a malformed file is reported, not fatal',
+      themeWarnings().some((w) => w.file.includes('broken.json')),
+      JSON.stringify(themeWarnings())
+    )
+    check(
+      'themes: the picker gets swatches to render',
+      (listed.find((t) => t.id === 'ocean')?.swatches.bg ?? '') === '#001018'
+    )
+
+    // Resolution is what the renderer actually applies.
+    const resolved = await resolveThemeById('ocean', 'win32')
+    check(
+      'themes: a user theme resolves to CSS custom properties',
+      resolved.vars['--color-bg'] === '#001018' && resolved.vars['--color-accent'] === '#22d3ee',
+      JSON.stringify(resolved.vars['--color-bg'])
+    )
+    check(
+      'themes: tokens it never mentioned still come from the default',
+      resolved.vars['--color-text'] === '#ededed'
+    )
+    check(
+      'themes: a code font survives the round trip to disk',
+      resolved.vars['--font-mono']?.includes('Fira Code') === true,
+      String(resolved.vars['--font-mono'])
+    )
+    check(
+      'themes: an unknown id falls back to the default rather than failing',
+      (await resolveThemeById('does-not-exist', 'win32')).vars['--color-bg'] === '#0a0a0a'
+    )
+
+    // Writes.
+    const created = await createTheme({ name: 'My Theme' })
+    check('themes: create writes a new theme', created.ok && created.id === 'my-theme')
+    check(
+      'themes: the created file is on disk where the UI says it is',
+      existsSync(path.join(themesRoot, 'my-theme', 'theme.json'))
+    )
+    const dup = await createTheme({ name: 'My Theme' })
+    check(
+      'themes: creating the same name twice does not overwrite the first',
+      dup.ok && dup.id === 'my-theme-2',
+      JSON.stringify(dup)
+    )
+    const fromBuiltin = await createTheme({ name: 'Light Copy', from: 'roxy-light' })
+    const copied = fromBuiltin.ok ? await resolveThemeById(fromBuiltin.id, 'win32') : null
+    check(
+      'themes: duplicating a built-in copies its palette',
+      copied?.vars['--color-bg'] === '#ffffff',
+      JSON.stringify(copied?.vars['--color-bg'])
+    )
+    check(
+      'themes: a duplicate keeps the polarity of what it copied',
+      copied?.vars['--color-white'] === '#18181b',
+      JSON.stringify(copied?.vars['--color-white'])
+    )
+
+    // A theme found OUTSIDE the app's own folder must be rewritten in place,
+    // not forked into userData where the copy would shadow the original.
+    const savedPlain = await writeTheme(
+      JSON.stringify({ id: 'plain', name: 'Plain', colors: { bg: '#222' } }),
+      { id: 'plain' }
+    )
+    check('themes: saving an existing theme succeeds', savedPlain.ok)
+    check(
+      'themes: a theme is rewritten where it was found, not duplicated',
+      !existsSync(path.join(themesRoot, 'plain', 'theme.json')) &&
+        JSON.parse(await fs.readFile(path.join(themesRoot, 'plain.json'), 'utf8')).colors.bg ===
+          '#222'
+    )
+
+    check(
+      'themes: a built-in id cannot be overwritten',
+      !(await writeTheme(JSON.stringify({ id: 'roxy-dark', name: 'Hijack' }), { id: 'roxy-dark' }))
+        .ok
+    )
+    check('themes: a built-in cannot be deleted', !(await deleteTheme('roxy-dark')).ok)
+
+    const removed = await deleteTheme('my-theme')
+    check('themes: delete removes a user theme', removed.ok)
+    check('themes: its folder is gone from disk', !existsSync(path.join(themesRoot, 'my-theme')))
+    refreshThemes()
+    check(
+      'themes: a deleted theme leaves the list',
+      !(await listThemes()).some((t) => t.id === 'my-theme')
+    )
+
+    // A user file claiming a built-in id would make the default unreachable
+    // from the picker, so it is refused at discovery.
+    await fs.mkdir(path.join(themesRoot, 'roxy-dark'), { recursive: true })
+    await fs.writeFile(
+      path.join(themesRoot, 'roxy-dark', 'theme.json'),
+      JSON.stringify({ id: 'roxy-dark', name: 'Impostor', colors: { bg: '#f00' } }),
+      'utf8'
+    )
+    refreshThemes()
+    const shadowed = await listThemes()
+    check(
+      'themes: a user theme cannot shadow a built-in id',
+      shadowed.filter((t) => t.id === 'roxy-dark').length === 1 &&
+        shadowed.find((t) => t.id === 'roxy-dark')?.source === 'builtin',
+      JSON.stringify(shadowed.filter((t) => t.id === 'roxy-dark'))
+    )
+    check(
+      'themes: the default still resolves to its real palette',
+      (await resolveThemeById('roxy-dark', 'win32')).vars['--color-bg'] === '#0a0a0a'
+    )
+
+    // The active theme is persisted as an id only.
+    repo.setActiveThemeId('ocean')
+    check(
+      'themes: the active id persists in settings',
+      repo.getSettings().activeThemeId === 'ocean'
+    )
+    repo.setActiveThemeId(null)
+    check('themes: clearing it returns to the default', repo.getSettings().activeThemeId === null)
+  } catch (e) {
+    check('themes', false, e instanceof Error ? e.message : String(e))
+  }
+
+  // ---- native window chrome (the OS-drawn window controls) ----
+  //
+  // The minimise / maximise / close buttons are painted by the OS ABOVE the
+  // page, so no stylesheet reaches them. Getting this wrong is very visible --
+  // a dark block in the corner of a light theme -- and it cannot be caught by
+  // the CSS-level tests, so the colour derivation is pinned here.
+  try {
+    const dark = await resolveThemeById('roxy-dark', 'win32')
+    const light = await resolveThemeById('roxy-light', 'win32')
+
+    check(
+      'chrome: the overlay is transparent, never a flat colour',
+      initialOverlay(48).color === 'rgba(1, 0, 0, 0)',
+      String(initialOverlay(48).color)
+    )
+    // electron#51014: a FULLY transparent black silently falls back to the
+    // default opaque frame colour, which is the exact bug being fixed.
+    check(
+      'chrome: the overlay avoids the rgba(0,0,0,0) fallback bug',
+      initialOverlay(48).color !== 'rgba(0, 0, 0, 0)'
+    )
+    check(
+      'chrome: the overlay height matches the app header',
+      initialOverlay(OVERLAY_HEIGHT.main).height === 48 &&
+        initialOverlay(OVERLAY_HEIGHT.browser).height === 40
+    )
+    // The glyphs are the one part still painted by the OS, so they must track
+    // the theme or they go invisible on one polarity.
+    check(
+      'chrome: control glyphs follow the theme text colour',
+      symbolColorFor(dark) === '#9a9aa3' && symbolColorFor(light) === '#5c5c66',
+      symbolColorFor(dark) + ' / ' + symbolColorFor(light)
+    )
+    check(
+      'chrome: the pre-paint background follows the theme',
+      backgroundColorFor(dark) === '#0a0a0a' && backgroundColorFor(light) === '#ffffff',
+      backgroundColorFor(dark) + ' / ' + backgroundColorFor(light)
+    )
+    // The OS parses these itself and understands only literal colours.
+    check(
+      'chrome: never hands the OS a var() or color-mix() it cannot parse',
+      [symbolColorFor(dark), symbolColorFor(light), backgroundColorFor(dark)].every(
+        (c) => !c.includes('var(') && !c.includes('color-mix')
+      )
+    )
+    check(
+      'chrome: applying to a destroyed window is a no-op, not a crash',
+      (() => {
+        const w = new BrowserWindow({ show: false })
+        w.destroy()
+        applyWindowChrome(w, dark)
+        return true
+      })()
+    )
+    check(
+      'chrome: a window with no overlay is tolerated',
+      (() => {
+        // Constructed WITHOUT titleBarOverlay: setTitleBarOverlay throws here,
+        // and that must not take a theme change down with it.
+        const w = new BrowserWindow({ show: false })
+        applyWindowChrome(w, light)
+        w.destroy()
+        return true
+      })()
+    )
+  } catch (e) {
+    check('chrome', false, e instanceof Error ? e.message : String(e))
   }
 
   closeDb()
