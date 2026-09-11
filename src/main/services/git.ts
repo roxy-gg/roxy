@@ -22,6 +22,7 @@
  */
 import { spawn } from 'node:child_process'
 import { promises as fs, realpathSync } from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import { app } from 'electron'
 import { slugToBranchSegment } from '../../shared/slugs'
@@ -32,7 +33,15 @@ import {
   placeholderBranchName
 } from '../../shared/branch'
 import * as repo from '../db/repo'
-import type { RepoSyncTarget } from '../../shared/api'
+import {
+  REVIEW_COMMITS,
+  REVIEW_COMMITS_MAX,
+  type GitReviewScope,
+  type RepoSyncTarget,
+  type ReviewCommit,
+  type ReviewDiff,
+  type ReviewFile
+} from '../../shared/api'
 
 /** How long any single git command may run before it's killed. */
 const GIT_TIMEOUT_MS = 30_000
@@ -165,7 +174,12 @@ function serialize<T>(key: string, task: () => Promise<T>): Promise<T> {
  * Run one git command. Never throws — a missing binary, a non-zero exit and a
  * timeout all come back as `{ ok: false }` with whatever stderr git produced.
  */
-function execGit(args: string[], cwd: string, timeoutMs = GIT_TIMEOUT_MS): Promise<GitResult> {
+function execGit(
+  args: string[],
+  cwd: string,
+  timeoutMs = GIT_TIMEOUT_MS,
+  env?: NodeJS.ProcessEnv
+): Promise<GitResult> {
   return new Promise((resolve) => {
     let child: ReturnType<typeof spawn>
     try {
@@ -182,7 +196,8 @@ function execGit(args: string[], cwd: string, timeoutMs = GIT_TIMEOUT_MS): Promi
           GIT_TERMINAL_PROMPT: '0',
           GIT_OPTIONAL_LOCKS: '0',
           GIT_EDITOR: 'true',
-          GCM_INTERACTIVE: 'never'
+          GCM_INTERACTIVE: 'never',
+          ...env
         }
       })
     } catch (e) {
@@ -226,8 +241,18 @@ function execGit(args: string[], cwd: string, timeoutMs = GIT_TIMEOUT_MS): Promi
 }
 
 /** Run a git command serialized against everything else touching this repo. */
-function git(args: string[], cwd: string, timeoutMs?: number): Promise<GitResult> {
+export function git(args: string[], cwd: string, timeoutMs?: number): Promise<GitResult> {
   return serialize(cwd, () => execGit(args, cwd, timeoutMs))
+}
+
+/** Run Git with a controlled environment, still serialized with normal commands. */
+function gitWithEnv(
+  args: string[],
+  cwd: string,
+  env: NodeJS.ProcessEnv,
+  timeoutMs?: number
+): Promise<GitResult> {
+  return serialize(cwd, () => execGit(args, cwd, timeoutMs, env))
 }
 
 // ---------------------------------------------------------------------------
@@ -751,6 +776,522 @@ export async function resetToUpstream(cwd: string): Promise<SyncResult> {
     return { ok: false, error: cleanGitError(r, 'Reset failed'), upstream: ref.ref, stashed }
   }
   return { ok: true, upstream: ref.ref, updated: true, stashed }
+}
+
+// ---------------------------------------------------------------------------
+// Reviewing changes
+// ---------------------------------------------------------------------------
+
+const MAX_DIFF_BYTES = 400_000
+const BINARY_SNIFF_BYTES = 8_000
+const EMPTY_TREE_SHA = '4b825dc642cb6eb9a060e54bf8d69288fbee4904'
+
+/** The two revisions compared by a review scope. Empty string means the index. */
+export async function revsForScope(
+  cwd: string,
+  scope: GitReviewScope,
+  commit?: string
+): Promise<{ from: string; to: string | null } | null> {
+  const root = await repoRoot(cwd)
+  return root ? revsForScopeAtRoot(root, scope, commit) : null
+}
+
+async function revsForScopeAtRoot(
+  root: string,
+  scope: GitReviewScope,
+  commit?: string
+): Promise<{ from: string; to: string | null } | null> {
+  switch (scope) {
+    case 'unstaged':
+      return { from: '', to: null }
+    case 'staged':
+      return { from: (await resolveCommit(root)) ?? EMPTY_TREE_SHA, to: '' }
+    case 'branch': {
+      const base = await mergeBaseForWorkstream(root)
+      // Branch review is committed history only. Comparing the merge-base to
+      // the worktree would silently mix staged and unstaged edits into the
+      // branch tab (and into the code_review tool).
+      return base ? { from: base, to: 'HEAD' } : null
+    }
+    case 'commit': {
+      const sha = await validCommit(root, commit)
+      if (!sha) return null
+      const parent = await git(['rev-parse', '--verify', '--end-of-options', `${sha}^`], root)
+      return {
+        from:
+          parent.ok && /^[0-9a-f]{40}$/i.test(parent.stdout.trim())
+            ? parent.stdout.trim()
+            : EMPTY_TREE_SHA,
+        to: sha
+      }
+    }
+  }
+}
+
+async function mergeBaseForWorkstream(cwd: string): Promise<string | null> {
+  const branch = await currentBranch(cwd)
+  const base = (branch ? await baseBranchFor(cwd, branch) : null) ?? (await defaultBranch(cwd))
+  if (!base) return null
+  for (const ref of [`origin/${base}`, base]) {
+    const r = await git(['merge-base', ref, 'HEAD'], cwd)
+    const sha = r.stdout.trim()
+    if (r.ok && sha) return sha
+  }
+  return null
+}
+
+/** Arguments after `git diff` for a review range. */
+export function diffRange(revs: { from: string; to: string | null }): string[] {
+  if (revs.to === null) return revs.from === '' ? [] : [revs.from]
+  if (revs.to === '') return ['--cached', revs.from]
+  return [revs.from, revs.to]
+}
+
+/** Changed files and line counts for one review scope. */
+export async function reviewFiles(
+  cwd: string,
+  scope: GitReviewScope,
+  commit?: string
+): Promise<ReviewFile[]> {
+  if (!cwd || !(await isGitAvailable())) return []
+  const root = await repoRoot(cwd)
+  return root ? reviewFilesAtRoot(root, scope, commit) : []
+}
+
+async function reviewFilesAtRoot(
+  root: string,
+  scope: GitReviewScope,
+  commit?: string
+): Promise<ReviewFile[]> {
+  const revs = await revsForScopeAtRoot(root, scope, commit)
+  if (!revs) return []
+  const range = diffRange(revs)
+  const [names, nums] = await Promise.all([
+    git(['diff', '--name-status', '-z', '--find-renames', '--find-copies', ...range], root),
+    git(['diff', '--numstat', '-z', '--find-renames', '--find-copies', ...range], root)
+  ])
+  if (!names.ok) return []
+  const counts = parseNumstat(nums.ok ? nums.stdout : '')
+  const files = parseNameStatus(names.stdout).map((file) => ({
+    ...file,
+    ...(counts.get(file.path) ?? { additions: 0, deletions: 0, binary: false })
+  }))
+  if (scope === 'unstaged') files.push(...(await untrackedEntries(root)))
+  return files
+}
+
+/** Keep a caller-supplied path lexically inside the repository checkout. */
+function reviewPath(cwd: string, file: string): string | null {
+  if (!file || file.includes('\0')) return null
+  const abs = path.resolve(cwd, file)
+  const rel = path.relative(cwd, abs)
+  return rel.startsWith('..') || path.isAbsolute(rel) ? null : abs
+}
+
+/** Reject parent symlinks that leave the checkout. The leaf may itself be a symlink. */
+async function safeWorktreePath(cwd: string, file: string): Promise<string | null> {
+  const abs = reviewPath(cwd, file)
+  if (!abs) return null
+  try {
+    const [root, parent] = await Promise.all([fs.realpath(cwd), fs.realpath(path.dirname(abs))])
+    const rel = path.relative(root, parent)
+    if (rel.startsWith('..') || path.isAbsolute(rel)) return null
+    return path.join(parent, path.basename(abs))
+  } catch {
+    return null
+  }
+}
+
+async function validCommit(cwd: string, commit: string | undefined): Promise<string | null> {
+  if (!commit) return null
+  const r = await git(['rev-parse', '--verify', '--end-of-options', `${commit}^{commit}`], cwd)
+  const sha = r.stdout.trim()
+  return r.ok && /^[0-9a-f]{40}$/i.test(sha) ? sha : null
+}
+
+function parseNameStatus(out: string): ReviewFile[] {
+  const parts = out.split('\0').filter(Boolean)
+  const files: ReviewFile[] = []
+  for (let i = 0; i < parts.length; i++) {
+    const kind = parts[i][0]
+    if (kind === 'R' || kind === 'C') {
+      const oldPath = parts[++i]
+      const newPath = parts[++i]
+      if (!newPath) break
+      files.push({
+        path: newPath,
+        oldPath,
+        status: kind === 'R' ? 'renamed' : 'copied',
+        additions: 0,
+        deletions: 0,
+        binary: false
+      })
+      continue
+    }
+    const file = parts[++i]
+    if (!file) break
+    files.push({
+      path: file,
+      status: kind === 'A' ? 'added' : kind === 'D' ? 'deleted' : 'modified',
+      additions: 0,
+      deletions: 0,
+      binary: false
+    })
+  }
+  return files
+}
+
+function parseNumstat(
+  out: string
+): Map<string, { additions: number; deletions: number; binary: boolean }> {
+  const counts = new Map<string, { additions: number; deletions: number; binary: boolean }>()
+  const parts = out.split('\0').filter(Boolean)
+  for (let i = 0; i < parts.length; i++) {
+    const match = /^(-|\d+)\t(-|\d+)\t(.*)$/.exec(parts[i])
+    if (!match) continue
+    const [, addRaw, delRaw, tail] = match
+    let file = tail
+    if (tail === '') {
+      i += 2
+      file = parts[i]
+    }
+    if (!file) break
+    counts.set(file, {
+      additions: addRaw === '-' ? 0 : Number(addRaw),
+      deletions: delRaw === '-' ? 0 : Number(delRaw),
+      binary: addRaw === '-' && delRaw === '-'
+    })
+  }
+  return counts
+}
+
+async function untrackedEntries(cwd: string): Promise<ReviewFile[]> {
+  const r = await git(['ls-files', '--others', '--exclude-standard', '-z'], cwd)
+  if (!r.ok) return []
+  return Promise.all(
+    r.stdout
+      .split('\0')
+      .filter(Boolean)
+      .map(async (file): Promise<ReviewFile> => {
+        const text = await readWorktreeFile(cwd, file)
+        return {
+          path: file,
+          status: 'untracked',
+          additions: text === null ? 0 : countLines(text),
+          deletions: 0,
+          binary: text === null
+        }
+      })
+  )
+}
+
+function countLines(text: string): number {
+  if (!text) return 0
+  const lines = text.split('\n').length
+  return text.endsWith('\n') ? lines - 1 : lines
+}
+
+/** Full before/after contents for a file. `oldPath` supplies a rename's source. */
+export async function reviewDiff(
+  cwd: string,
+  scope: GitReviewScope,
+  file: string,
+  commit?: string,
+  oldPath?: string
+): Promise<ReviewDiff | null> {
+  if (!cwd || !file) return null
+  const root = await repoRoot(cwd)
+  if (!root || !reviewPath(root, file) || (oldPath !== undefined && !reviewPath(root, oldPath)))
+    return null
+  const revs = await revsForScopeAtRoot(root, scope, commit)
+  if (!revs) return null
+  const sourcePath = oldPath ?? file
+  const untracked = scope === 'unstaged' && (await isUntracked(root, file))
+  const before = untracked ? '' : await fileAt(root, revs.from, sourcePath)
+  const after =
+    revs.to === null ? await readWorktreeFile(root, file) : await fileAt(root, revs.to, file)
+  if (before === null || after === null) return { path: file, before: '', after: '', binary: true }
+  return {
+    path: file,
+    before: normalizeEol(before),
+    after: normalizeEol(after),
+    binary: false
+  }
+}
+
+function normalizeEol(text: string): string {
+  return text.includes('\r') ? text.replace(/\r\n?/g, '\n') : text
+}
+
+async function isUntracked(cwd: string, file: string): Promise<boolean> {
+  if (!reviewPath(cwd, file)) return false
+  const r = await git(['ls-files', '--others', '--exclude-standard', '-z', '--', file], cwd)
+  return r.ok && r.stdout.split('\0').includes(file)
+}
+
+async function isTracked(cwd: string, file: string): Promise<boolean> {
+  if (!reviewPath(cwd, file)) return false
+  const indexed = await git(['ls-files', '--error-unmatch', '--', file], cwd)
+  if (indexed.ok) return true
+  const committed = await git(['ls-tree', '-r', '--name-only', '-z', 'HEAD', '--', file], cwd)
+  return committed.ok && committed.stdout.split('\0').includes(file)
+}
+
+async function fileAt(cwd: string, rev: string, file: string): Promise<string | null> {
+  const r = await git(['show', '--end-of-options', `${rev}:${file}`], cwd)
+  if (!r.ok) return ''
+  return renderable(r.stdout)
+}
+
+async function readWorktreeFile(cwd: string, file: string): Promise<string | null> {
+  const abs = await safeWorktreePath(cwd, file)
+  if (!abs) return null
+  try {
+    const stat = await fs.lstat(abs)
+    if (stat.isSymbolicLink()) return null
+    const buf = await fs.readFile(abs)
+    if (buf.length > MAX_DIFF_BYTES) return null
+    if (buf.subarray(0, BINARY_SNIFF_BYTES).includes(0)) return null
+    return buf.toString('utf8')
+  } catch {
+    return ''
+  }
+}
+
+function renderable(text: string): string | null {
+  if (Buffer.byteLength(text) > MAX_DIFF_BYTES) return null
+  if (text.slice(0, BINARY_SNIFF_BYTES).includes('\0')) return null
+  return text
+}
+
+/**
+ * Write the current tracked + untracked, non-ignored workspace into Git's
+ * object database without changing the real index. A copied index avoids
+ * re-hashing unchanged tracked files on every poll. The returned tree survives
+ * commits, staging and restarts, making it a stable session baseline.
+ */
+export async function snapshotWorktreeTree(cwd: string): Promise<string | null> {
+  if (!cwd || !(await isGitAvailable())) return null
+  const root = await repoRoot(cwd)
+  if (!root) return null
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'roxy-review-index-'))
+  const index = path.join(dir, 'index')
+  const env = { GIT_INDEX_FILE: index }
+  try {
+    const sourceIndex = await git(['rev-parse', '--git-path', 'index'], root)
+    const sourcePath = sourceIndex.stdout.trim()
+    let copied = false
+    if (sourceIndex.ok && sourcePath) {
+      const absolute = path.isAbsolute(sourcePath) ? sourcePath : path.resolve(root, sourcePath)
+      copied = await fs
+        .copyFile(absolute, index)
+        .then(() => true)
+        .catch(() => false)
+    }
+    if (!copied) {
+      const empty = await gitWithEnv(['read-tree', '--empty'], root, env)
+      if (!empty.ok) return null
+    }
+    const add = await gitWithEnv(['add', '-A', '--ignore-errors', '--', '.'], root, env)
+    if (!add.ok) return null
+    const tree = await gitWithEnv(['write-tree'], root, env)
+    const sha = tree.stdout.trim()
+    return tree.ok && /^[0-9a-f]{40}$/i.test(sha) ? sha : null
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true }).catch(() => undefined)
+  }
+}
+
+/** Keep an otherwise-unreachable snapshot tree alive behind a private ref. */
+export async function setReviewBaselineRef(
+  cwd: string,
+  ref: string,
+  tree: string
+): Promise<boolean> {
+  if (!/^refs\/roxy\/sessions\/[A-Za-z0-9._/-]+$/.test(ref)) return false
+  const root = await repoRoot(cwd)
+  if (!root || !/^[0-9a-f]{40}$/i.test(tree)) return false
+  return (await git(['update-ref', ref, tree], root)).ok
+}
+
+export async function deleteReviewBaselineRef(cwd: string, ref: string): Promise<void> {
+  if (!/^refs\/roxy\/sessions\/[A-Za-z0-9._/-]+$/.test(ref)) return
+  const root = await repoRoot(cwd)
+  if (root) await git(['update-ref', '-d', ref], root)
+}
+
+/** Changed files between a persisted session baseline tree and the current workspace. */
+export async function reviewFilesFromTree(cwd: string, from: string): Promise<ReviewFile[]> {
+  if (!/^[0-9a-f]{40}$/i.test(from)) return []
+  const root = await repoRoot(cwd)
+  const current = root ? await snapshotWorktreeTree(root) : null
+  if (!root || !current) return []
+  const [names, nums] = await Promise.all([
+    git(['diff', '--name-status', '-z', '--find-renames', '--find-copies', from, current], root),
+    git(['diff', '--numstat', '-z', '--find-renames', '--find-copies', from, current], root)
+  ])
+  if (!names.ok) return []
+  const counts = parseNumstat(nums.ok ? nums.stdout : '')
+  return parseNameStatus(names.stdout).map((file) => ({
+    ...file,
+    ...(counts.get(file.path) ?? { additions: 0, deletions: 0, binary: false })
+  }))
+}
+
+/** Full before/after contents for one session-scoped file. */
+export async function reviewDiffFromTree(
+  cwd: string,
+  from: string,
+  file: string,
+  oldPath?: string
+): Promise<ReviewDiff | null> {
+  if (!/^[0-9a-f]{40}$/i.test(from) || !file) return null
+  const root = await repoRoot(cwd)
+  if (!root || !reviewPath(root, file) || (oldPath !== undefined && !reviewPath(root, oldPath)))
+    return null
+  const before = await fileAt(root, from, oldPath ?? file)
+  const after = await readWorktreeFile(root, file)
+  if (before === null || after === null) return { path: file, before: '', after: '', binary: true }
+  return {
+    path: file,
+    before: normalizeEol(before),
+    after: normalizeEol(after),
+    binary: false
+  }
+}
+
+export function clampCommitLimit(limit: number | undefined): number {
+  return Math.min(Math.max(Math.trunc(Number(limit) || REVIEW_COMMITS), 1), REVIEW_COMMITS_MAX)
+}
+
+export async function reviewCommits(cwd: string, limit = REVIEW_COMMITS): Promise<ReviewCommit[]> {
+  if (!cwd || !(await isGitAvailable())) return []
+  const root = await repoRoot(cwd)
+  if (!root) return []
+  const r = await git(
+    ['log', `-${clampCommitLimit(limit)}`, '--format=%H%x00%s%x00%an%x00%aI'],
+    root
+  )
+  if (!r.ok) return []
+  return r.stdout
+    .split('\n')
+    .filter((line) => line.trim() !== '')
+    .map((line) => {
+      const [sha, subject, author, date] = line.split('\0')
+      return { sha, subject: subject ?? '', author: author ?? '', date: date ?? '' }
+    })
+    .filter((commit) => !!commit.sha)
+}
+
+export async function stageFiles(
+  cwd: string,
+  files: string[]
+): Promise<{ ok: boolean; error?: string }> {
+  const root = await repoRoot(cwd)
+  if (!root) return { ok: false, error: 'Not a repository.' }
+  if (files.length && files.some((file) => !reviewPath(root, file)))
+    return { ok: false, error: 'Path escapes repository.' }
+  const r = await git(files.length ? ['add', '--', ...files] : ['add', '-A'], root)
+  return r.ok ? { ok: true } : { ok: false, error: cleanGitError(r, 'Could not stage') }
+}
+
+export async function unstageFiles(
+  cwd: string,
+  files: string[]
+): Promise<{ ok: boolean; error?: string }> {
+  const root = await repoRoot(cwd)
+  if (!root) return { ok: false, error: 'Not a repository.' }
+  if (files.length && files.some((file) => !reviewPath(root, file)))
+    return { ok: false, error: 'Path escapes repository.' }
+  const hasHead = !!(await resolveCommit(root))
+  const args = hasHead
+    ? files.length
+      ? ['restore', '--staged', '--', ...files]
+      : ['restore', '--staged', ':/']
+    : files.length
+      ? ['rm', '--cached', '-f', '--', ...files]
+      : ['rm', '--cached', '-r', '-f', '--', '.']
+  const r = await git(args, root)
+  return r.ok ? { ok: true } : { ok: false, error: cleanGitError(r, 'Could not unstage') }
+}
+
+/**
+ * Discard visible changes. Unstaged restores from the index, preserving staged
+ * content. Staged discards only the indexed delta and never writes the
+ * worktree, so overlapping unstaged edits and staged additions/deletions/
+ * renames remain recoverable as unstaged or untracked work.
+ */
+export async function revertFiles(
+  cwd: string,
+  files: string[],
+  scope: Extract<GitReviewScope, 'unstaged' | 'staged'> = 'unstaged'
+): Promise<{ ok: boolean; error?: string }> {
+  if (!files.length) return { ok: true }
+  const root = await repoRoot(cwd)
+  if (!root) return { ok: false, error: 'Not a repository.' }
+  if (files.some((file) => !reviewPath(root, file)))
+    return { ok: false, error: 'Path escapes repository.' }
+
+  const paths = [...new Set(files)]
+  if (scope === 'staged') return revertStagedFiles(root, paths)
+
+  const tracked: string[] = []
+  const untracked: string[] = []
+  for (const file of paths) {
+    if (await isTracked(root, file)) tracked.push(file)
+    else if (await isUntracked(root, file)) untracked.push(file)
+  }
+
+  if (tracked.length) {
+    // The index is deliberately the source: discarding worktree edits must
+    // not erase an earlier staged version of the same path. This also works
+    // before the repository has its first commit.
+    const result = await git(['restore', '--worktree', '--', ...tracked], root)
+    if (!result.ok) return { ok: false, error: cleanGitError(result, 'Could not revert changes') }
+  }
+
+  for (const file of untracked) {
+    try {
+      const abs = await safeWorktreePath(root, file)
+      if (!abs) return { ok: false, error: 'Path escapes repository.' }
+      await fs.rm(abs, { recursive: true, force: true })
+    } catch (error) {
+      return {
+        ok: false,
+        error: error instanceof Error ? error.message : 'Could not delete file'
+      }
+    }
+  }
+  return { ok: true }
+}
+
+async function revertStagedFiles(
+  root: string,
+  files: string[]
+): Promise<{ ok: boolean; error?: string }> {
+  const hasHead = !!(await resolveCommit(root))
+  // Snapshot the staged status first and restrict the operation to entries
+  // that are actually part of that delta. Besides avoiding pathspec failures
+  // for unrelated untracked inputs, this captures both sides of a rename even
+  // when a caller supplied only one of them.
+  const requested = new Set(files)
+  const affected = new Set<string>()
+  for (const file of await reviewFilesAtRoot(root, 'staged')) {
+    if (!requested.has(file.path) && (!file.oldPath || !requested.has(file.oldPath))) continue
+    affected.add(file.path)
+    if (file.oldPath) affected.add(file.oldPath)
+  }
+  if (!affected.size) return { ok: true }
+
+  // Crucially, neither command writes the worktree. A staged addition becomes
+  // untracked, a staged deletion becomes an unstaged deletion, and a staged
+  // rename leaves its current paths/content exactly where they are.
+  const args = hasHead
+    ? ['restore', '--source=HEAD', '--staged', '--', ...affected]
+    : ['rm', '--cached', '-r', '-f', '--', ...affected]
+  const result = await git(args, root)
+  if (!result.ok) return { ok: false, error: cleanGitError(result, 'Could not revert changes') }
+  return { ok: true }
 }
 
 // ---------------------------------------------------------------------------

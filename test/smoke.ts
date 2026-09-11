@@ -1305,7 +1305,15 @@ async function main(): Promise<void> {
 
     // Every table the app depends on must come back, not just the ones a
     // previously-reported bug happened to name.
-    for (const table of ['projects', 'usage', 'queue', 'mcp_servers', 'settings', 'activity']) {
+    for (const table of [
+      'projects',
+      'usage',
+      'queue',
+      'mcp_servers',
+      'settings',
+      'activity',
+      'session_review_baselines'
+    ]) {
       const db = healthy()
       db.exec(`DROP TABLE ${table}`)
       check(`self-heal: ${table} is missing before repair`, !tablesOf(db).includes(table))
@@ -1441,6 +1449,31 @@ async function main(): Promise<void> {
       )
       db.close()
     }
+  }
+
+  // ---- session review baselines ----
+  {
+    const session = repo.createChat({ title: 'Review baseline', workspacePath: tmp })
+    const baseline = repo.addSessionReviewBaseline({
+      sessionId: session.id,
+      repoKey: 'main',
+      repoRoot: tmp,
+      baselineTree: 'a'.repeat(40),
+      baselineRef: `refs/roxy/sessions/${session.id}/main`
+    })
+    check(
+      'session review baseline persists',
+      repo.getSessionReviewBaseline(session.id, 'main')?.baselineTree === baseline.baselineTree
+    )
+    check(
+      'session review baselines list by owner',
+      repo.listSessionReviewBaselines(session.id).length === 1
+    )
+    repo.removeChat(session.id)
+    check(
+      'session review baselines cascade on chat deletion',
+      repo.listSessionReviewBaselines(session.id).length === 0
+    )
   }
 
   // ---- sessionCwd (the one working-directory resolver) ----

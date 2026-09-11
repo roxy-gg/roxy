@@ -123,6 +123,16 @@ jobs:
           SMOKE_TIMEOUT_MS: '300000'
         run: npm run smoke:app
 
+      - name: Review suite (Linux, via virtual display)
+        if: runner.os == 'Linux'
+        env:
+          ELECTRON_DISABLE_SANDBOX: '1'
+        run: xvfb-run --auto-servernum npm run smoke:review
+
+      - name: Review suite
+        if: runner.os != 'Linux'
+        run: npm run smoke:review
+
       - name: Canvas interactions (real Chromium input and clipboard menus)
         if: runner.os == 'Linux'
         env:

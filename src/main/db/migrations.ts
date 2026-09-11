@@ -101,6 +101,15 @@ const REPAIR_SCHEMA_SQL = /* sql */ `
         hidden_at   INTEGER NOT NULL,
         PRIMARY KEY (provider_id, model)
       );
+  CREATE TABLE IF NOT EXISTS session_review_baselines (
+        session_id    TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+        repo_key      TEXT NOT NULL,
+        repo_root     TEXT NOT NULL,
+        baseline_tree TEXT NOT NULL,
+        baseline_ref  TEXT NOT NULL,
+        created_at    INTEGER NOT NULL,
+        PRIMARY KEY (session_id, repo_key)
+      );
   CREATE TABLE IF NOT EXISTS projects (
         path       TEXT PRIMARY KEY,
         sort_order INTEGER NOT NULL,
@@ -492,6 +501,20 @@ export const MIGRATIONS: Migration[] = [
       model       TEXT NOT NULL,
       hidden_at   INTEGER NOT NULL,
       PRIMARY KEY (provider_id, model)
+    );
+  `,
+
+  // ---- v24: durable per-session review baselines ----
+  // One Git tree per repository records the workspace before the first turn.
+  /* sql */ `
+    CREATE TABLE session_review_baselines (
+      session_id    TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+      repo_key      TEXT NOT NULL,
+      repo_root     TEXT NOT NULL,
+      baseline_tree TEXT NOT NULL,
+      baseline_ref  TEXT NOT NULL,
+      created_at    INTEGER NOT NULL,
+      PRIMARY KEY (session_id, repo_key)
     );
   `
 ]

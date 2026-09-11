@@ -27,6 +27,7 @@ import { ensureDevPort } from './ports'
 import { startBackground, killSessionBackground } from '../harness'
 import { activeBackgroundSubChatIds, hasActiveBackgroundJobs } from './background-tasks'
 import { emitSessionsUpdated } from './session-events'
+import { ensureSessionReviewBaselines } from './session-review'
 import type { WorktreeIntent } from '../../shared/types'
 
 /**
@@ -148,6 +149,16 @@ export async function materializePendingWorktree(chatId: string): Promise<Materi
     branch: result.branch ?? null,
     repos: result.repos ?? null
   })
+
+  // Capture the pristine checkout before setup or the agent can modify it.
+  const baselineRepos = result.repos?.length
+    ? result.repos.map((link) => ({ key: link.name, name: link.name, cwd: link.worktreePath }))
+    : [{ key: result.worktreePath, cwd: result.worktreePath }]
+  try {
+    await ensureSessionReviewBaselines(chatId, baselineRepos)
+  } catch (e) {
+    console.warn('[review] could not capture the worktree baseline:', e)
+  }
 
   // Give the session its own dev port before the setup script runs, so an
   // install that builds against a port sees the right one. Allocation failure

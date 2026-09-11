@@ -24,8 +24,10 @@ import {
   normalizeFetchUrl
 } from '../../shared/web'
 import * as browser from '../services/browser'
+import * as gitService from '../services/git'
 import * as lsp from '../services/lsp'
 import * as repo from '../db/repo'
+import { discoverRepos } from '../services/workspace'
 import { isManagedToolOutputPath } from '../services/tool-output-store'
 import { renderDiagnosticsBlock } from '../../shared/lsp'
 import {
@@ -173,6 +175,7 @@ interface BgProc {
 }
 const bgProcs = new Map<string, BgProc>()
 let bgCounter = 0
+const MAX_REVIEW_PATCH = 50_000
 
 export async function runTool(
   name: string,
@@ -194,6 +197,8 @@ export async function runTool(
         return runBashOutput(str(input.id ?? input.process), owningSessionId(ctx))
       case 'bash_kill':
         return runBashKill(str(input.id ?? input.process), owningSessionId(ctx))
+      case 'code_review':
+        return await runCodeReview(str(input.scope), str(input.commit), ctx)
       case 'read':
         return await runRead(str(input.path ?? input.file), ctx.cwd)
       case 'write':
@@ -299,6 +304,139 @@ export async function runTool(
     if (isAbort(e) || ctx.signal?.aborted) return { ok: false, output: TOOL_ABORTED }
     return { ok: false, output: e instanceof Error ? e.message : String(e) }
   }
+}
+
+async function runCodeReview(scope: string, commit: string, ctx: ToolContext): Promise<ToolResult> {
+  const resolvedScope = scope || 'unstaged'
+  if (!['unstaged', 'staged', 'branch', 'commit'].includes(resolvedScope)) {
+    return { ok: false, output: 'Invalid review scope.' }
+  }
+  if (resolvedScope === 'commit' && !commit) {
+    return { ok: false, output: 'Commit scope requires a commit.' }
+  }
+  if (!(await gitService.isGitAvailable())) {
+    return { ok: false, output: 'Git is not available in this workspace.' }
+  }
+
+  return untilAborted(ctx.signal, async () => {
+    const typedScope = resolvedScope as import('../../shared/api').GitReviewScope
+    const targets = resolveCodeReviewRepos(ctx)
+    if (!targets.length) return { ok: false, output: 'Git is not available in this workspace.' }
+
+    const multi = targets.length > 1
+    const sections: string[] = []
+    let validRanges = 0
+    for (const target of targets) {
+      const heading = multi ? `## Repository: ${target.name}\n` : ''
+      const root = target.cwd ? await gitService.repoRoot(target.cwd) : null
+      if (!root) {
+        sections.push(`${heading}Error: repository is unavailable.`)
+        continue
+      }
+      const revs = await gitService.revsForScope(root, typedScope, commit || undefined)
+      if (!revs) {
+        const detail =
+          typedScope === 'commit'
+            ? `commit ${commit} does not exist in this repository.`
+            : 'no valid commit range found for this scope.'
+        sections.push(`${heading}Error: ${detail}`)
+        continue
+      }
+      const r = await gitService.git(
+        [
+          'diff',
+          '--patch',
+          '--binary',
+          '--find-renames',
+          '--find-copies',
+          ...gitService.diffRange(revs)
+        ],
+        root
+      )
+      if (!r.ok) {
+        sections.push(`${heading}Error: failed to generate diff.`)
+        continue
+      }
+      validRanges++
+
+      let output = r.stdout
+      if (typedScope === 'unstaged') {
+        const untracked = (await gitService.reviewFiles(root, 'unstaged')).filter(
+          (file) => file.status === 'untracked'
+        )
+        for (const file of untracked) {
+          const diff = await gitService.reviewDiff(root, 'unstaged', file.path)
+          if (!diff || diff.binary) {
+            output += `\nUntracked binary or large file: ${file.path}\n`
+            continue
+          }
+          const body = diff.after
+            .split('\n')
+            .map((line) => `+${line}`)
+            .join('\n')
+          output += `\ndiff --git a/${file.path} b/${file.path}\nnew file mode 100644\n--- /dev/null\n+++ b/${file.path}\n@@ -0,0 +1,${file.additions} @@\n${body}\n`
+        }
+      }
+      sections.push(`${heading}${output.trim() ? output : 'No changes found.'}`)
+    }
+
+    if (typedScope === 'commit' && validRanges === 0) {
+      return {
+        ok: false,
+        output: `Commit ${commit} was not found in any repository.\n\n${sections.join('\n\n')}`
+      }
+    }
+    const output = sections.join('\n\n')
+    return {
+      ok: true,
+      output:
+        output.length > MAX_REVIEW_PATCH
+          ? `${output.slice(0, MAX_REVIEW_PATCH)}\n... (diff truncated due to length)`
+          : output
+    }
+  })
+}
+
+interface CodeReviewRepo {
+  name: string
+  cwd: string
+}
+
+interface CodeReviewOwner {
+  repos?: { name: string; worktreePath: string }[] | null
+  workspacePath?: string | null
+}
+
+/** Pure selection half, exposed so multi-repo routing can be unit tested. */
+export function codeReviewReposForOwner(
+  owner: CodeReviewOwner | undefined,
+  cwd: string,
+  discover: typeof discoverRepos = discoverRepos
+): CodeReviewRepo[] {
+  if (owner?.repos?.length) {
+    return owner.repos.map((link) => ({ name: link.name, cwd: link.worktreePath }))
+  }
+  if (owner?.workspacePath) {
+    const discovered = discover(owner.workspacePath)
+    if (discovered.layout === 'multi') {
+      return discovered.roots.map((repoCwd) => ({ name: path.basename(repoCwd), cwd: repoCwd }))
+    }
+  }
+  return cwd ? [{ name: path.basename(cwd), cwd }] : []
+}
+
+/** Resolve the repositories owned by a tool's root session without IPC. */
+export function resolveCodeReviewRepos(
+  ctx: Pick<ToolContext, 'cwd' | 'sessionId'>
+): CodeReviewRepo[] {
+  if (!ctx.sessionId) return codeReviewReposForOwner(undefined, ctx.cwd)
+  try {
+    const root = repo.getChat(repo.rootSessionId(ctx.sessionId))
+    return codeReviewReposForOwner(root, ctx.cwd)
+  } catch {
+    // Tests and keyless callers may not have initialized the database.
+  }
+  return codeReviewReposForOwner(undefined, ctx.cwd)
 }
 
 /** Whether a thrown value is an abort (ours, or a fetch/DOM AbortError). */
