@@ -302,6 +302,70 @@ async function main(): Promise<void> {
       'code_review includes untracked text files'
     )
 
+    await fs.rm(path.join(cwd, 'untracked space.txt'))
+    const originalIndex = await fs.readFile(path.join(cwd, '.git', 'index'))
+    const baseline = await review.snapshotWorktreeTree(cwd)
+    check(!!baseline, 'session baseline snapshots the current worktree')
+    check(
+      Buffer.compare(originalIndex, await fs.readFile(path.join(cwd, '.git', 'index'))) === 0,
+      'session baseline does not modify the real index'
+    )
+    await write(cwd, 'session file.txt', 'first\nsecond\n')
+    const sessionFiles = baseline ? await review.reviewFilesFromTree(cwd, baseline) : []
+    check(
+      sessionFiles.some(
+        (file) =>
+          file.path === 'session file.txt' && file.status === 'added' && file.additions === 2
+      ),
+      'session review includes new worktree files'
+    )
+    const sessionDiff = baseline
+      ? await review.reviewDiffFromTree(cwd, baseline, 'session file.txt')
+      : null
+    check(
+      sessionDiff?.before === '' && sessionDiff.after === 'first\nsecond\n',
+      'session diff renders a newly added file'
+    )
+    await command(cwd, 'add', '--', 'session file.txt')
+    await command(cwd, 'commit', '-m', 'session commit')
+    check(
+      baseline
+        ? (await review.reviewFilesFromTree(cwd, baseline)).some(
+            (file) => file.path === 'session file.txt'
+          )
+        : false,
+      'session changes remain visible after commit'
+    )
+    const afterCommit = await review.snapshotWorktreeTree(cwd)
+    check(
+      afterCommit === (await command(cwd, 'rev-parse', 'HEAD^{tree}')),
+      'session snapshot matches committed HEAD when the worktree is clean'
+    )
+
+    const dirtyBaseline = await review.snapshotWorktreeTree(cwd)
+    await write(cwd, 'preexisting dirty.txt', 'already here\n')
+    const dirtyStart = await review.snapshotWorktreeTree(cwd)
+    await write(cwd, 'created later.txt', 'later\n')
+    const sinceDirtyStart = dirtyStart ? await review.reviewFilesFromTree(cwd, dirtyStart) : []
+    check(
+      !sinceDirtyStart.some((file) => file.path === 'preexisting dirty.txt') &&
+        sinceDirtyStart.some((file) => file.path === 'created later.txt'),
+      'session baseline excludes changes that predated the session'
+    )
+    check(!!dirtyBaseline, 'session snapshots also work from a dirty repository')
+    await fs.rm(path.join(cwd, 'preexisting dirty.txt'))
+    await fs.rm(path.join(cwd, 'created later.txt'))
+
+    const deletionBaseline = await review.snapshotWorktreeTree(cwd)
+    await fs.rm(path.join(cwd, 'session file.txt'))
+    const deletionDiff = deletionBaseline
+      ? await review.reviewDiffFromTree(cwd, deletionBaseline, 'session file.txt')
+      : null
+    check(
+      deletionDiff?.before === 'first\nsecond\n' && deletionDiff.after === '',
+      'session diff renders deleted files'
+    )
+
     const unborn = await fs.mkdtemp(path.join(os.tmpdir(), 'roxy-review-unborn-'))
     try {
       await command(unborn, 'init')

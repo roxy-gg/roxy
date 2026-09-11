@@ -22,6 +22,7 @@
  */
 import { spawn } from 'node:child_process'
 import { promises as fs, realpathSync } from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import { app } from 'electron'
 import { slugToBranchSegment } from '../../shared/slugs'
@@ -173,7 +174,12 @@ function serialize<T>(key: string, task: () => Promise<T>): Promise<T> {
  * Run one git command. Never throws — a missing binary, a non-zero exit and a
  * timeout all come back as `{ ok: false }` with whatever stderr git produced.
  */
-function execGit(args: string[], cwd: string, timeoutMs = GIT_TIMEOUT_MS): Promise<GitResult> {
+function execGit(
+  args: string[],
+  cwd: string,
+  timeoutMs = GIT_TIMEOUT_MS,
+  env?: NodeJS.ProcessEnv
+): Promise<GitResult> {
   return new Promise((resolve) => {
     let child: ReturnType<typeof spawn>
     try {
@@ -190,7 +196,8 @@ function execGit(args: string[], cwd: string, timeoutMs = GIT_TIMEOUT_MS): Promi
           GIT_TERMINAL_PROMPT: '0',
           GIT_OPTIONAL_LOCKS: '0',
           GIT_EDITOR: 'true',
-          GCM_INTERACTIVE: 'never'
+          GCM_INTERACTIVE: 'never',
+          ...env
         }
       })
     } catch (e) {
@@ -236,6 +243,16 @@ function execGit(args: string[], cwd: string, timeoutMs = GIT_TIMEOUT_MS): Promi
 /** Run a git command serialized against everything else touching this repo. */
 export function git(args: string[], cwd: string, timeoutMs?: number): Promise<GitResult> {
   return serialize(cwd, () => execGit(args, cwd, timeoutMs))
+}
+
+/** Run Git with a controlled environment, still serialized with normal commands. */
+function gitWithEnv(
+  args: string[],
+  cwd: string,
+  env: NodeJS.ProcessEnv,
+  timeoutMs?: number
+): Promise<GitResult> {
+  return serialize(cwd, () => execGit(args, cwd, timeoutMs, env))
 }
 
 // ---------------------------------------------------------------------------
@@ -1045,6 +1062,102 @@ function renderable(text: string): string | null {
   if (Buffer.byteLength(text) > MAX_DIFF_BYTES) return null
   if (text.slice(0, BINARY_SNIFF_BYTES).includes('\0')) return null
   return text
+}
+
+/**
+ * Write the current tracked + untracked, non-ignored workspace into Git's
+ * object database without changing the real index. A copied index avoids
+ * re-hashing unchanged tracked files on every poll. The returned tree survives
+ * commits, staging and restarts, making it a stable session baseline.
+ */
+export async function snapshotWorktreeTree(cwd: string): Promise<string | null> {
+  if (!cwd || !(await isGitAvailable())) return null
+  const root = await repoRoot(cwd)
+  if (!root) return null
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'roxy-review-index-'))
+  const index = path.join(dir, 'index')
+  const env = { GIT_INDEX_FILE: index }
+  try {
+    const sourceIndex = await git(['rev-parse', '--git-path', 'index'], root)
+    const sourcePath = sourceIndex.stdout.trim()
+    let copied = false
+    if (sourceIndex.ok && sourcePath) {
+      const absolute = path.isAbsolute(sourcePath) ? sourcePath : path.resolve(root, sourcePath)
+      copied = await fs
+        .copyFile(absolute, index)
+        .then(() => true)
+        .catch(() => false)
+    }
+    if (!copied) {
+      const empty = await gitWithEnv(['read-tree', '--empty'], root, env)
+      if (!empty.ok) return null
+    }
+    const add = await gitWithEnv(['add', '-A', '--ignore-errors', '--', '.'], root, env)
+    if (!add.ok) return null
+    const tree = await gitWithEnv(['write-tree'], root, env)
+    const sha = tree.stdout.trim()
+    return tree.ok && /^[0-9a-f]{40}$/i.test(sha) ? sha : null
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true }).catch(() => undefined)
+  }
+}
+
+/** Keep an otherwise-unreachable snapshot tree alive behind a private ref. */
+export async function setReviewBaselineRef(
+  cwd: string,
+  ref: string,
+  tree: string
+): Promise<boolean> {
+  if (!/^refs\/roxy\/sessions\/[A-Za-z0-9._/-]+$/.test(ref)) return false
+  const root = await repoRoot(cwd)
+  if (!root || !/^[0-9a-f]{40}$/i.test(tree)) return false
+  return (await git(['update-ref', ref, tree], root)).ok
+}
+
+export async function deleteReviewBaselineRef(cwd: string, ref: string): Promise<void> {
+  if (!/^refs\/roxy\/sessions\/[A-Za-z0-9._/-]+$/.test(ref)) return
+  const root = await repoRoot(cwd)
+  if (root) await git(['update-ref', '-d', ref], root)
+}
+
+/** Changed files between a persisted session baseline tree and the current workspace. */
+export async function reviewFilesFromTree(cwd: string, from: string): Promise<ReviewFile[]> {
+  if (!/^[0-9a-f]{40}$/i.test(from)) return []
+  const root = await repoRoot(cwd)
+  const current = root ? await snapshotWorktreeTree(root) : null
+  if (!root || !current) return []
+  const [names, nums] = await Promise.all([
+    git(['diff', '--name-status', '-z', '--find-renames', '--find-copies', from, current], root),
+    git(['diff', '--numstat', '-z', '--find-renames', '--find-copies', from, current], root)
+  ])
+  if (!names.ok) return []
+  const counts = parseNumstat(nums.ok ? nums.stdout : '')
+  return parseNameStatus(names.stdout).map((file) => ({
+    ...file,
+    ...(counts.get(file.path) ?? { additions: 0, deletions: 0, binary: false })
+  }))
+}
+
+/** Full before/after contents for one session-scoped file. */
+export async function reviewDiffFromTree(
+  cwd: string,
+  from: string,
+  file: string,
+  oldPath?: string
+): Promise<ReviewDiff | null> {
+  if (!/^[0-9a-f]{40}$/i.test(from) || !file) return null
+  const root = await repoRoot(cwd)
+  if (!root || !reviewPath(root, file) || (oldPath !== undefined && !reviewPath(root, oldPath)))
+    return null
+  const before = await fileAt(root, from, oldPath ?? file)
+  const after = await readWorktreeFile(root, file)
+  if (before === null || after === null) return { path: file, before: '', after: '', binary: true }
+  return {
+    path: file,
+    before: normalizeEol(before),
+    after: normalizeEol(after),
+    binary: false
+  }
 }
 
 export function clampCommitLimit(limit: number | undefined): number {

@@ -2,13 +2,13 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { FileDiff, Loader2, RefreshCw } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { REVIEW_COMMITS } from '@shared/api'
-import type { GitReviewScope, ReviewCommit, ReviewFile, ReviewTarget } from '@shared/api'
+import type { ReviewCommit, ReviewFile, ReviewScope, ReviewTarget } from '@shared/api'
 import { api } from '../lib/api'
 import { cn } from '../lib/cn'
 import { GIT_POLL_MS } from '../lib/polling'
 import { ReviewFileRow } from './ReviewFileRow'
 
-const SCOPES: GitReviewScope[] = ['unstaged', 'staged', 'branch', 'commit']
+const SCOPES: ReviewScope[] = ['session', 'unstaged', 'staged', 'branch', 'commit']
 
 export function ReviewPane({
   sessionId,
@@ -20,7 +20,7 @@ export function ReviewPane({
   action?: ReactNode
 }): JSX.Element {
   const { t } = useTranslation()
-  const [scope, setScope] = useState<GitReviewScope>('unstaged')
+  const [scope, setScope] = useState<ReviewScope>('session')
   const [commitKey, setCommitKey] = useState('')
   const [files, setFiles] = useState<ReviewFile[] | null>(null)
   const [commits, setCommits] = useState<ReviewCommit[] | null>(null)
@@ -226,9 +226,10 @@ export function ReviewPane({
   )
 }
 
-function emptyKey(scope: GitReviewScope, commit: string | undefined) {
+function emptyKey(scope: ReviewScope, commit: string | undefined) {
   if (scope === 'commit')
     return commit ? ('review.emptyCommit' as const) : ('review.pickCommit' as const)
+  if (scope === 'session') return 'review.emptySession' as const
   if (scope === 'staged') return 'review.emptyStaged' as const
   if (scope === 'branch') return 'review.emptyBranch' as const
   return 'review.emptyUnstaged' as const

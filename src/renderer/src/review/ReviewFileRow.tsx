@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ChevronRight, Loader2, RotateCcw } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
-import type { GitReviewScope, ReviewDiff, ReviewFile, ReviewTarget } from '@shared/api'
+import type { ReviewDiff, ReviewFile, ReviewScope, ReviewTarget } from '@shared/api'
 import { DiffViewer } from '../components/diff/DiffViewer'
 import { api } from '../lib/api'
 import { cn } from '../lib/cn'
@@ -13,7 +13,7 @@ export function ReviewFileRow({
   onChanged
 }: {
   file: ReviewFile
-  scope: GitReviewScope
+  scope: ReviewScope
   target: ReviewTarget | null
   onChanged: () => Promise<void>
 }): JSX.Element {

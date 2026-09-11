@@ -41,16 +41,9 @@ export function ChangesChip({
     if (open) return () => undefined
     const load = async (): Promise<void> => {
       try {
-        const [unstaged, staged] = await Promise.all([
-          api.review.files({ sessionId, scope: 'unstaged' }),
-          api.review.files({ sessionId, scope: 'staged' })
-        ])
+        const files = await api.review.files({ sessionId, scope: 'session' })
         if (!alive) return
-        const byFile = new Map<string, (typeof unstaged)[number]>()
-        for (const file of [...unstaged, ...staged]) {
-          byFile.set(`${file.repo ?? ''}:${file.path}`, file)
-        }
-        const next = [...byFile.values()].reduce<ReviewCounts>(
+        const next = files.reduce<ReviewCounts>(
           (total, file) => ({
             files: total.files + 1,
             additions: total.additions + file.additions,
@@ -73,7 +66,7 @@ export function ChangesChip({
     }
   }, [sessionId, open, onCounts])
 
-  if (!sessionId) return null
+  if (!sessionId || !counts?.files) return null
 
   return (
     <button

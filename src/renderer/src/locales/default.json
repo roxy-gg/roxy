@@ -316,6 +316,7 @@
     "diffReadFailed": "Could not read this file",
     "discardFile": "Discard this file's changes",
     "emptyBranch": "This branch matches its base",
+    "emptySession": "No changes from this session",
     "emptyCommit": "That commit changed nothing",
     "emptyStaged": "Nothing staged",
     "emptyUnstaged": "No uncommitted changes",
@@ -331,6 +332,8 @@
     "refresh": "Refresh",
     "revertConfirm": "Sure?",
     "scope": {
+      "session": "Session",
+      "sessionHint": "Changes since this chat started",
       "branch": "Branch",
       "branchHint": "Everything on this branch",
       "commit": "Commit",

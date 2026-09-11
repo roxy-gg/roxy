@@ -54,6 +54,24 @@ interface ProviderRow {
   has_credential: number
 }
 
+export interface SessionReviewBaseline {
+  sessionId: string
+  repoKey: string
+  repoRoot: string
+  baselineTree: string
+  baselineRef: string
+  createdAt: number
+}
+
+interface SessionReviewBaselineRow {
+  session_id: string
+  repo_key: string
+  repo_root: string
+  baseline_tree: string
+  baseline_ref: string
+  created_at: number
+}
+
 interface ChatRow {
   id: string
   title: string
@@ -1682,6 +1700,56 @@ export function recordActivityTurn(day: string, turns = 1): void {
        ON CONFLICT(day) DO UPDATE SET turns = turns + excluded.turns`
     )
     .run(day, Math.floor(turns))
+}
+
+export function getSessionReviewBaseline(
+  sessionId: string,
+  repoKey: string
+): SessionReviewBaseline | undefined {
+  const row = getDb()
+    .prepare('SELECT * FROM session_review_baselines WHERE session_id = ? AND repo_key = ?')
+    .get(sessionId, repoKey) as SessionReviewBaselineRow | undefined
+  return row ? sessionReviewBaseline(row) : undefined
+}
+
+export function listSessionReviewBaselines(sessionId: string): SessionReviewBaseline[] {
+  const rows = getDb()
+    .prepare('SELECT * FROM session_review_baselines WHERE session_id = ? ORDER BY repo_key')
+    .all(sessionId) as SessionReviewBaselineRow[]
+  return rows.map(sessionReviewBaseline)
+}
+
+export function addSessionReviewBaseline(
+  input: Omit<SessionReviewBaseline, 'createdAt'>
+): SessionReviewBaseline {
+  const createdAt = Date.now()
+  getDb()
+    .prepare(
+      `INSERT INTO session_review_baselines
+         (session_id, repo_key, repo_root, baseline_tree, baseline_ref, created_at)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(session_id, repo_key) DO NOTHING`
+    )
+    .run(
+      input.sessionId,
+      input.repoKey,
+      input.repoRoot,
+      input.baselineTree,
+      input.baselineRef,
+      createdAt
+    )
+  return getSessionReviewBaseline(input.sessionId, input.repoKey) ?? { ...input, createdAt }
+}
+
+function sessionReviewBaseline(row: SessionReviewBaselineRow): SessionReviewBaseline {
+  return {
+    sessionId: row.session_id,
+    repoKey: row.repo_key,
+    repoRoot: row.repo_root,
+    baselineTree: row.baseline_tree,
+    baselineRef: row.baseline_ref,
+    createdAt: row.created_at
+  }
 }
 
 /** Per-day turn counts from `fromDay` (inclusive, local YYYY-MM-DD) onward. */

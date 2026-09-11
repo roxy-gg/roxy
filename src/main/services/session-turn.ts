@@ -15,8 +15,10 @@ import { runAgentTurn } from '../harness'
 import { activeBackgroundSubChatIds } from './background-tasks'
 import { protectedSubChatIds } from './subagent-stream'
 import { setLabel as setBrowserLabel } from './browser'
-import { sessionCwd } from './workspace'
+import { discoverRepos, sessionCwd } from './workspace'
 import { materializePendingWorktree } from './worktree'
+import { ensureSessionReviewBaselines } from './session-review'
+import * as git from './git'
 import { markActivation, track, trackFeature, trackToolUse } from './track'
 import { beginTurn, finishTurn } from './turn-metrics'
 import { modelFamily, reportableAgent } from '../../shared/telemetry'
@@ -29,6 +31,20 @@ import path from 'node:path'
  * touches the filesystem, and a turn that can't resolve a worktree should still
  * run — just without one.
  */
+async function reviewReposForSession(sessionId: string, cwd: string) {
+  const chat = repo.getChat(repo.rootSessionId(sessionId))
+  if (chat?.repos?.length) {
+    return chat.repos.map((link) => ({ key: link.name, name: link.name, cwd: link.worktreePath }))
+  }
+  const root = await git.repoRoot(cwd)
+  if (root) return [{ key: root, cwd: root }]
+  return discoverRepos(cwd).roots.map((repoRoot) => ({
+    key: path.basename(repoRoot),
+    name: path.basename(repoRoot),
+    cwd: repoRoot
+  }))
+}
+
 function safeSessionCwd(sessionId: string): string {
   try {
     return sessionCwd(sessionId)
@@ -181,6 +197,14 @@ async function runTurn(
   // Where this session's tools run — its worktree when it has one, else the
   // project folder. The single resolver; never read workspace_path directly.
   const cwd = safeSessionCwd(input.sessionId)
+  try {
+    await ensureSessionReviewBaselines(
+      input.sessionId,
+      await reviewReposForSession(input.sessionId, cwd)
+    )
+  } catch (e) {
+    console.warn('[review] could not capture the session baseline:', e)
+  }
   // Name this session's browser window after its project so concurrent windows
   // are tellable apart (a no-op until/unless the agent opens the browser).
   if (cwd) setBrowserLabel(input.sessionId, path.basename(cwd))

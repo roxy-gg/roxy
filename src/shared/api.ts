@@ -326,6 +326,7 @@ export interface MultiSyncOutcome {
 
 /** Which set of Git changes the review pane is showing. */
 export type GitReviewScope = 'unstaged' | 'staged' | 'branch' | 'commit'
+export type ReviewScope = 'session' | GitReviewScope
 
 /** How many commits the picker requests, and the largest limit main accepts. */
 export const REVIEW_COMMITS = 30
@@ -371,7 +372,7 @@ export interface ReviewCommit {
 /** Which repository and scope a review operation targets. */
 export interface ReviewTarget {
   sessionId: string
-  scope: GitReviewScope
+  scope: ReviewScope
   /** Required to disambiguate a file in a multi-repo session. */
   repo?: string
   /** Required by commit scope. */
