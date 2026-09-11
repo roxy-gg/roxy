@@ -5,13 +5,16 @@ import { ModelPicker } from './ModelPicker'
 import { ContextMeter, ContextPicker, ThinkingPicker, AgentPicker } from './InferenceControls'
 import { imageFilesFrom, readImageFile, type ComposerImage } from '../lib/images'
 import { ImagePreview } from './ImagePreview'
+import { useRoxyStore } from '../lib/store'
+import { BotAvatar } from './BotAvatar'
+import { cn } from '../lib/cn'
 
 export function Composer({
   onSend,
   sending,
   onStop
 }: {
-  onSend: (text: string, images?: ComposerImage[]) => void
+  onSend: (text: string, images?: ComposerImage[]) => void | Promise<void>
   sending?: boolean
   onStop?: () => void
 }): JSX.Element {
@@ -21,6 +24,31 @@ export function Composer({
   const [dragging, setDragging] = useState(false)
   const ref = useRef<HTMLTextAreaElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
+  const bots = useRoxyStore((s) => s.bots)
+  const [caret, setCaret] = useState(0)
+  const [mentionIndex, setMentionIndex] = useState(0)
+  const [mentionDismissed, setMentionDismissed] = useState(false)
+  const [focused, setFocused] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState('')
+  const prefix = /^\s*@([a-z0-9_-]*)$/i.exec(value.slice(0, caret))
+  const mentions =
+    focused && prefix && !mentionDismissed
+      ? bots.filter((bot) => bot.username.startsWith(prefix[1].toLowerCase())).slice(0, 8)
+      : []
+  const selectedMention = Math.min(mentionIndex, Math.max(0, mentions.length - 1))
+  const chooseMention = (username: string): void => {
+    const rest = value.slice(caret).replace(/^[a-z0-9_-]*\s*/i, '')
+    const start = `@${username} `
+    setValue(start + rest)
+    setCaret(start.length)
+    setMentionDismissed(true)
+    requestAnimationFrame(() => {
+      ref.current?.focus()
+      ref.current?.setSelectionRange(start.length, start.length)
+      autoGrow()
+    })
+  }
 
   const addFiles = async (files: File[]): Promise<void> => {
     if (files.length === 0) return
@@ -31,16 +59,50 @@ export function Composer({
 
   const removeImage = (id: string): void => setImages((prev) => prev.filter((i) => i.id !== id))
 
-  const submit = (): void => {
+  const submit = async (): Promise<void> => {
     const text = value.trim()
-    if (!text && images.length === 0) return
-    onSend(text, images.length ? images : undefined)
+    if ((submitting && !sending) || (!text && images.length === 0)) return
+    // Clear immediately so a long direct turn never locks the composer. If the
+    // enqueue fails, restore this draft without dropping its image attachments.
     setValue('')
     setImages([])
+    setMentionDismissed(true)
+    setError('')
+    setSubmitting(true)
     if (ref.current) ref.current.style.height = 'auto'
+    try {
+      await onSend(text, images.length ? images : undefined)
+    } catch (e) {
+      setValue((draft) => draft || text)
+      setImages((draft) => (draft.length ? draft : images))
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setSubmitting(false)
+    }
   }
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>): void => {
+    if (event.nativeEvent.isComposing) return
+    if (mentions.length) {
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault()
+        setMentionIndex(
+          (selectedMention + (event.key === 'ArrowDown' ? 1 : -1) + mentions.length) %
+            mentions.length
+        )
+        return
+      }
+      if (event.key === 'Tab' || (event.key === 'Enter' && !event.shiftKey)) {
+        event.preventDefault()
+        chooseMention(mentions[selectedMention].username)
+        return
+      }
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        setMentionDismissed(true)
+        return
+      }
+    }
     // Escape stops the turn. The button alone was not enough: it hides as soon
     // as you type (the composer switches to "add to queue"), so drafting a
     // follow-up while a turn ran left no visible way to stop it — you had to
@@ -52,7 +114,7 @@ export function Composer({
     }
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault()
-      submit()
+      void submit()
     }
   }
 
@@ -117,7 +179,7 @@ export function Composer({
         //
         // On focus the hairline brightens rather than changing hue: the box is
         // already the focus of the screen, so a colored ring on it is noise.
-        className={`mx-auto max-w-3xl sq-frame sq-2xl sq-ring sq-fill-surface-2 edge edge-panel shadow-raised rounded-2xl border bg-surface-2 transition ${
+        className={`relative mx-auto max-w-3xl sq-frame sq-2xl sq-ring sq-fill-surface-2 edge edge-panel shadow-raised rounded-2xl border bg-surface-2 transition ${
           dragging
             ? 'border-accent [--sq-ring:var(--color-accent)] inset-ring-1 inset-ring-accent/40'
             : 'border-border focus-within:border-border-strong focus-within:[--sq-ring:var(--edge-strong)]'
@@ -150,10 +212,48 @@ export function Composer({
           </div>
         )}
 
+        {mentions.length > 0 && (
+          <div
+            id="bot-mentions"
+            role="listbox"
+            aria-label={t('bots.mentionLabel')}
+            className="absolute bottom-full left-0 z-40 mb-2 w-64 max-w-full rounded-xl border border-border bg-surface p-1 shadow-2xl"
+          >
+            {mentions.map((bot, index) => (
+              <button
+                type="button"
+                key={bot.id}
+                id={`bot-mention-${bot.id}`}
+                role="option"
+                aria-selected={index === selectedMention}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => chooseMention(bot.username)}
+                className={cn(
+                  'flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-sm',
+                  index === selectedMention
+                    ? 'bg-elevated text-text'
+                    : 'text-text-muted hover:bg-white/5'
+                )}
+              >
+                <BotAvatar username={bot.username} size={24} />
+                <span className="truncate">@{bot.username}</span>
+              </button>
+            ))}
+          </div>
+        )}
         <textarea
           ref={ref}
           value={value}
           rows={1}
+          aria-label={t('composer.placeholder')}
+          aria-autocomplete="list"
+          aria-controls={mentions.length ? 'bot-mentions' : undefined}
+          aria-activedescendant={
+            mentions.length ? `bot-mention-${mentions[selectedMention].id}` : undefined
+          }
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
+          onSelect={(e) => setCaret(e.currentTarget.selectionStart)}
           placeholder={
             sending
               ? onStop
@@ -163,6 +263,9 @@ export function Composer({
           }
           onChange={(e) => {
             setValue(e.target.value)
+            setCaret(e.target.selectionStart)
+            setMentionIndex(0)
+            setMentionDismissed(false)
             autoGrow()
           }}
           onKeyDown={onKeyDown}
@@ -200,9 +303,9 @@ export function Composer({
             </button>
           ) : (
             <button
-              onClick={submit}
-              disabled={!canSend}
-              title={sending ? 'Add to queue' : 'Send'}
+              onClick={() => void submit()}
+              disabled={!canSend || (submitting && !sending)}
+              title={sending ? t('composer.addToQueue') : t('composer.send')}
               className="press-scale flex h-8 w-8 shrink-0 items-center justify-center sq sq-lg rounded-lg bg-white text-black hover:bg-white/90 disabled:opacity-30"
             >
               <ArrowUp className="h-4 w-4" />
@@ -210,6 +313,11 @@ export function Composer({
           )}
         </div>
       </div>
+      {error && (
+        <p role="alert" className="mx-auto mt-2 max-w-3xl text-xs text-danger">
+          {error}
+        </p>
+      )}
       <input
         ref={fileRef}
         type="file"

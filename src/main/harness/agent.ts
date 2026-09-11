@@ -42,6 +42,7 @@ import {
 import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import * as repo from '../db/repo'
+import { chatBot, listBots } from '../db/bots'
 import { runTool } from './tools'
 import { boundToolOutput } from '../services/tool-output-store'
 import { modelCost } from '../services/models'
@@ -481,6 +482,29 @@ function buildSystemMessage(
     ...(mcpInfo ? [mcpInfo] : []),
     ...(agentPrompt ? [agentPrompt] : [])
   ]
+  const bot = chatId ? chatBot(chatId) : undefined
+  extra.push(
+    [
+      '<bots>',
+      bot
+        ? `You are @${bot.username}, a persistent, top-level bot. Your session ID is ${chatId}.`
+        : `This session ID is ${chatId ?? 'unknown'}.`,
+      bot
+        ? `Your standing role (not an instruction to start working on every greeting):\n${bot.instructions || 'Ask the user what they want you to be or do. Use bot_manage to save the agreed role as instructions.'}`
+        : '',
+      'Bots are local Roxy collaborators, not GitHub users or temporary task subagents.',
+      'Use project_list and session_manage to discover projects and sessions. Use bot_manage to discover or configure persistent bots.',
+      'Use bot_invoke to ask another bot for help. Its result is delivered to your transcript asynchronously; do not poll or duplicate its work.',
+      'Use session_manage action send to prompt a project session. Use queue_manage for delayed messages, inspection, edits, cancellation, and retries.',
+      'Use bot_schedule to configure optional interval, five-field cron (with timezone), or timestamp jobs. Never claim a schedule exists until the tool succeeds.',
+      'A user message beginning with @username explicitly addresses that bot. Mentions inside prose are references, not handoffs. To hand off as an agent, call bot_invoke explicitly.',
+      'Do not reflexively reply to a returned result by invoking its sender again. Keep collaboration finite. Ask before repeating a completed chain.',
+      ...listBots().map((b) => `@${b.username}: id=${b.id}, chat=${b.chatId}`),
+      '</bots>'
+    ]
+      .filter(Boolean)
+      .join('\n')
+  )
   const contextSummary = chatId ? (repo.getChat(chatId)?.contextSummary ?? undefined) : undefined
   return assembleSystemPrompt({
     base,
@@ -639,24 +663,93 @@ const BASE_SCHEMAS = [
     ['id']
   ),
   fn('browser_close', 'Close the built-in browser and end the current browsing session.', {}, []),
+  fn('project_list', 'List all projects across Roxy with their workspace paths.', {}, []),
   fn(
-    'loop_create',
-    'Create a scheduled loop (a recurring "heartbeat") that re-runs a prompt in THIS project every N minutes — the agent runs fully each beat. Use when the user wants ongoing/recurring/autonomous/looping work (e.g. "every 5 min, keep improving the site").',
+    'session_manage',
+    'Create, list, read, update, delete, stop, or send a prompt to a session in any project. send queues work and returns its result to this chat asynchronously.',
     {
-      name: str('Short label for the loop.'),
-      prompt: str('The instruction to run every interval.'),
-      interval_minutes: { type: 'number', description: 'Minutes between runs (>= 1).' }
+      action: {
+        type: 'string',
+        enum: ['list', 'create', 'read', 'update', 'delete', 'send', 'stop']
+      },
+      id: str('Session ID for read/update/delete/send/stop.'),
+      project: str('Project path from project_list. Required to create; optional filter for list.'),
+      title: str('Session title.'),
+      description: str('Session description.'),
+      prompt: str('Prompt to send.')
     },
-    ['name', 'prompt', 'interval_minutes']
+    ['action']
   ),
-  fn('loop_list', 'List the scheduled loops and whether each is running.', {}, []),
-  fn('loop_enable', 'Resume a paused loop by name or id.', { loop: str('Loop name or id.') }, [
-    'loop'
-  ]),
-  fn('loop_disable', 'Pause a running loop by name or id.', { loop: str('Loop name or id.') }, [
-    'loop'
-  ]),
-  fn('loop_remove', 'Delete a loop by name or id.', { loop: str('Loop name or id.') }, ['loop']),
+  fn(
+    'bot_manage',
+    'Manage persistent top-level bots. Instructions are a standing role, not an immediate task. Use read for its chat history.',
+    {
+      action: { type: 'string', enum: ['list', 'create', 'read', 'update', 'delete'] },
+      id: str('Bot ID or exact username.'),
+      username: str(
+        'Unique username: 2-32 lowercase letters, digits, underscore or hyphen; starts with a letter.'
+      ),
+      instructions: str('Persistent role and behavior for the bot.')
+    },
+    ['action']
+  ),
+  fn(
+    'bot_invoke',
+    'Ask a persistent bot to do work in its own chat using its full harness and memory. Queues safely if busy. Returns immediately; the final reply is delivered to this chat. Do not poll or duplicate it.',
+    {
+      bot: str('Bot ID or exact username from bot_manage list.'),
+      prompt: str('Self-contained task and relevant context for the bot.')
+    },
+    ['bot', 'prompt']
+  ),
+  fn(
+    'bot_schedule',
+    'Manage scheduled bot prompts. Jobs persist and run while Roxy is open, even with no chat window. Intervals and cron coalesce missed beats; explicit timestamps run once each. remaining_runs caps deliveries.',
+    {
+      action: { type: 'string', enum: ['list', 'create', 'update', 'delete'] },
+      id: str('Schedule ID for update/delete; optional bot ID filter for list.'),
+      bot: str('Bot ID or username; defaults to the current bot.'),
+      name: str('Schedule label.'),
+      prompt: str('Prompt for each run.'),
+      enabled: { type: 'boolean' },
+      remaining_runs: {
+        type: ['integer', 'null'],
+        minimum: 1,
+        description: 'Number of deliveries remaining; null for unlimited.'
+      },
+      schedule: {
+        type: 'object',
+        properties: {
+          kind: { type: 'string', enum: ['interval', 'cron', 'timestamps'] },
+          minutes: { type: 'number', minimum: 1 },
+          expression: str('Five-field cron, e.g. 0 9 * * 1-5.'),
+          timezone: str('IANA timezone required for cron, e.g. America/New_York.'),
+          timestamps: {
+            type: 'array',
+            items: { type: 'integer' },
+            description: 'Epoch milliseconds for explicit runs.'
+          }
+        },
+        required: ['kind']
+      }
+    },
+    ['action']
+  ),
+  fn(
+    'queue_manage',
+    'Create, list, read, edit/retry, or delete queued prompts on yourself, another bot chat, or any project session. Running items cannot be edited/deleted. Failed items block the queue until edited or removed.',
+    {
+      action: { type: 'string', enum: ['list', 'create', 'read', 'update', 'delete'] },
+      id: str('Queue item ID.'),
+      session: str('Target chat ID; defaults to this session.'),
+      prompt: str('Prompt content.'),
+      not_before: {
+        type: 'integer',
+        description: 'Do not deliver before this epoch millisecond timestamp.'
+      }
+    },
+    ['action']
+  ),
   fn(
     'change_session_metadata',
     "Organize THIS session: set its `title` (shown in the sidebar), a one-line `description` of what it's about, and/or a `tasks` checklist you maintain as you work. Send the FULL tasks array each time — it REPLACES the previous list. Use it to rename a vaguely-named session and to track multi-step work (mark a task in_progress when you start it, completed when done). If the session has a workstream, setting `title` also renames its git branch to match — but only while that branch is still the auto-generated one and has never been pushed. Pass `branch` to choose the branch name yourself.",
@@ -1380,7 +1473,7 @@ async function runLoop(o: LoopOptions): Promise<string> {
       if (tc.name.startsWith('mcp__')) trackFeature(metricsId, 'mcp_server')
       else if (tc.name === SKILL_TOOL_NAME) trackFeature(metricsId, 'skill')
       else if (tc.name.startsWith('browser_')) trackFeature(metricsId, 'browser')
-      else if (tc.name.startsWith('loop_')) trackFeature(metricsId, 'loop')
+      else if (tc.name.startsWith('bot_')) trackFeature(metricsId, 'bot')
       // Full output still streams to the UI (tool-end above); for the model's
       // rolling context, spill oversized results to disk and keep a head/tail
       // preview + a read-tool pointer instead of a blind 8k cut (Phase 9.3).

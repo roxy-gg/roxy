@@ -424,6 +424,37 @@ check('returning to an identical IPC snapshot reuses measured text', () => {
   layoutTranscript({ ...input, messages: structuredClone(longMessages) }, cache)
   assert.ok(calls < initialCalls / 3, `revisit ${calls} versus cold ${initialCalls}`)
 })
+check(
+  'bot identity preserves measured text on remount and still invalidates renamed headers',
+  () => {
+    let calls = 0
+    const counted = {
+      ...metrics,
+      measure: (value: string, f: ReturnType<typeof font>) => {
+        calls++
+        return metrics.measure(value, f)
+      }
+    } as unknown as TextMetrics
+    for (const messages of [[longMessages[149]], longMessages]) {
+      const cache = new BlockCache()
+      const input = { ...longInput(messages), metrics: counted, botUsername: 'helper' }
+      calls = 0
+      layoutTranscript(input, cache)
+      const cold = calls
+      cache.detach()
+      calls = 0
+      const revisited = layoutTranscript(
+        { ...input, messages: structuredClone(messages), view: view() },
+        cache
+      )
+      if (messages.length > 1) assert.ok(calls < cold / 2, `remount ${calls} versus cold ${cold}`)
+      assert.ok(JSON.stringify(revisited.blocks.at(-1)!.nodes).includes('@helper'))
+      const renamed = layoutTranscript({ ...input, botUsername: 'reviewer' }, cache)
+      assert.ok(JSON.stringify(renamed.blocks.at(-1)!.nodes).includes('@reviewer'))
+      assert.ok(!JSON.stringify(renamed.blocks.at(-1)!.nodes).includes('@helper'))
+    }
+  }
+)
 check('changed text invalidates cached parts despite stable message ids', () => {
   const cache = new BlockCache()
   const input = longInput(longMessages)
@@ -651,6 +682,44 @@ check('a dragged selection retains its source rows across viewport boundaries', 
   )
   assert.ok(next.blocks[0].selectable.some((line) => line.key === anchor))
   assert.ok(next.window!.end >= next.window!.scrollTop + 600)
+})
+
+check('bot replies use a round Facehash and username in both transcript layouts', () => {
+  const own = {
+    ...FIXTURES[1],
+    id: 'own-bot-reply',
+    parts: [{ type: 'text' as const, text: 'Ready.' }]
+  }
+  const attributed = { ...own, id: 'attributed-reply', botId: 'bot-1', botUsername: 'old-name' }
+  const bot = {
+    id: 'bot-1',
+    username: 'helper',
+    instructions: '',
+    chatId: 'bot-chat',
+    createdAt: 0
+  }
+  for (const messages of [[own], [attributed], [...longMessages, attributed]]) {
+    const scene = layoutTranscript(
+      {
+        ...longInput(messages),
+        botUsername: 'helper',
+        bots: [bot],
+        botAvatar: (name) => `data:image/svg+xml,${name}`
+      },
+      new BlockCache()
+    )
+    const last = scene.blocks.at(-1)!
+    const nodes = JSON.stringify(last.nodes)
+    assert.ok(nodes.includes('@helper'))
+    assert.ok(nodes.includes('data:image/svg+xml,'))
+    assert.ok(!nodes.includes('__roxy__'))
+    assert.ok(!nodes.includes('@old-name'))
+  }
+  const live = layoutTranscript(
+    { ...longInput(longMessages), streaming: [], botUsername: 'helper' },
+    new BlockCache()
+  )
+  assert.ok(JSON.stringify(live.blocks.at(-1)!.nodes).includes('@helper'))
 })
 
 check('Windows terminal lines survive CRLF and ANSI style changes', () => {

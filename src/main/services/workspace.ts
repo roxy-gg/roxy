@@ -11,7 +11,8 @@
  * consumer must agree, or a session will read from one tree and write to
  * another.
  */
-import { existsSync, readdirSync } from 'node:fs'
+import { existsSync, readdirSync, mkdirSync } from 'node:fs'
+import { app } from 'electron'
 import path from 'node:path'
 import * as repo from '../db/repo'
 import { resolveWorktreeCwd } from '../../shared/workspace'
@@ -179,6 +180,11 @@ export function sessionCwd(chatId: string): string {
       continue
     }
     const workspacePath = chat.workspacePath
+    if (chat.kind === 'bot' && !workspacePath) {
+      const home = path.join(app.getPath('userData'), 'bots', chat.id)
+      mkdirSync(home, { recursive: true })
+      return home
+    }
     if (!workspacePath) return ''
     if (!chat.worktreePath) return workspacePath
     return resolveWorktreeCwd(

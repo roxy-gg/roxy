@@ -108,7 +108,11 @@ export function reconstructAssistant(parts: MessagePart[]): ChatMessage[] {
 
 /** Rebuild one persisted turn (user or assistant) into structured chat messages. */
 export function reconstructTurn(m: Message): ChatMessage[] {
-  if (m.role === 'assistant') return reconstructAssistant(m.parts)
+  if (m.role === 'assistant') {
+    const turns = reconstructAssistant(m.parts)
+    if (m.botUsername && turns[0]) turns[0].content = `[@${m.botUsername}]\n${turns[0].content}`
+    return turns
+  }
   const content = m.parts
     .map((p) => (p.type === 'text' ? p.text : ''))
     .join('')
