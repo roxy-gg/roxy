@@ -59,8 +59,20 @@ const DEFAULT_WIDTH = 288
  */
 const SWEEP_MS = 30_000
 const WIDTH_KEY = 'roxy.sidebar.width'
-const COLLAPSED_KEY = 'roxy.sidebar.collapsed'
+const RAIL_COLLAPSED_KEY = 'roxy.sidebar.collapsed'
+const COLLAPSED_PROJECTS_KEY = 'roxy.sidebar.projects.v1'
 const clampWidth = (n: number): number => Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, n))
+
+const storedCollapsedProjects = (): Set<string> => {
+  try {
+    const paths: unknown = JSON.parse(localStorage.getItem(COLLAPSED_PROJECTS_KEY) ?? '[]')
+    return new Set(
+      Array.isArray(paths) ? paths.filter((p): p is string => typeof p === 'string') : []
+    )
+  } catch {
+    return new Set()
+  }
+}
 
 interface Project {
   path: string
@@ -169,13 +181,15 @@ export function Sidebar(): JSX.Element {
   const reorderSessions = useRoxyStore((s) => s.reorderSessions)
   const reorderProjects = useRoxyStore((s) => s.reorderProjects)
   const projectOrder = useRoxyStore((s) => s.projectOrder)
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
+  const [collapsed, setCollapsed] = useState<Set<string>>(storedCollapsedProjects)
   const [expandedSubs, setExpandedSubs] = useState<Set<string>>(new Set())
   const [width, setWidth] = useState<number>(() => {
     const v = Number(localStorage.getItem(WIDTH_KEY))
     return Number.isFinite(v) && v >= MIN_WIDTH && v <= MAX_WIDTH ? v : DEFAULT_WIDTH
   })
-  const [railed, setRailed] = useState<boolean>(() => localStorage.getItem(COLLAPSED_KEY) === '1')
+  const [railed, setRailed] = useState<boolean>(
+    () => localStorage.getItem(RAIL_COLLAPSED_KEY) === '1'
+  )
   // The open right-click menu: which session, and where the cursor was.
   const [contextMenu, setContextMenu] = useState<{ chat: Chat; x: number; y: number } | null>(null)
   const [remoteOpen, setRemoteOpen] = useState(false)
@@ -192,7 +206,7 @@ export function Sidebar(): JSX.Element {
     localStorage.setItem(WIDTH_KEY, String(width))
   }, [width])
   useEffect(() => {
-    localStorage.setItem(COLLAPSED_KEY, railed ? '1' : '0')
+    localStorage.setItem(RAIL_COLLAPSED_KEY, railed ? '1' : '0')
   }, [railed])
 
   // Double-click a session name to rename it inline. Enter / click-away saves,
@@ -373,6 +387,18 @@ export function Sidebar(): JSX.Element {
         (rank.get(b.path) ?? Number.MAX_SAFE_INTEGER)
     )
   }, [chats, loops, projectOrder])
+
+  useEffect(() => {
+    const live = new Set(projects.map((p) => p.path))
+    try {
+      localStorage.setItem(
+        COLLAPSED_PROJECTS_KEY,
+        JSON.stringify([...collapsed].filter((p) => live.has(p)))
+      )
+    } catch {
+      // Sidebar expansion is a preference, not a requirement.
+    }
+  }, [collapsed, projects])
 
   // Reorder projects so the dragged folder lands before/after the drop target,
   // then persist. Only real folders take part — the '(no folder)' catch-all
