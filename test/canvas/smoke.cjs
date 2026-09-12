@@ -54,6 +54,13 @@ async function click(x, y, button = 'left') {
   await mouse('mouseDown', x, y, button)
   await mouse('mouseUp', x, y, button)
 }
+async function doubleClick(x, y) {
+  await mouse('mouseMove', x, y)
+  await mouse('mouseDown', x, y, 'left', { clickCount: 1 })
+  await mouse('mouseUp', x, y, 'left', { clickCount: 1 })
+  await mouse('mouseDown', x, y, 'left', { clickCount: 2 })
+  await mouse('mouseUp', x, y, 'left', { clickCount: 2 })
+}
 async function clickDom(selector) {
   const rect = await evaluate(
     `(() => { const r = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 } })()`
@@ -269,6 +276,20 @@ async function run() {
   check('sub-threshold movement stays unselected', await probe('return probe.selection() === null'))
   await mouse('mouseUp', textPoint.x + 1, textPoint.y + 1)
   check('single click remains unselected', await probe('return probe.selection() === null'))
+  await wait(550)
+  await doubleClick(textPoint.x, textPoint.y)
+  const doubleClickSelection = await probe(`
+    const s=probe.selection();
+    const line=s && scene.blocks.flatMap(b=>b.selectable).find(line=>line.index===s.startLine);
+    return { selection:s, text:line && s ? line.text.slice(s.startChar,s.endChar) : null };
+  `)
+  check(
+    `double click selects one canvas word: ${JSON.stringify(doubleClickSelection)}`,
+    doubleClickSelection.selection &&
+      doubleClickSelection.selection.startLine === doubleClickSelection.selection.endLine &&
+      doubleClickSelection.selection.startChar !== doubleClickSelection.selection.endChar &&
+      doubleClickSelection.text.trim().split(/\s+/).length === 1
+  )
   await mouse('mouseDown', textPoint.x, textPoint.y)
   await mouse('mouseMove', textPoint.x + 100, textPoint.y)
   await mouse('mouseUp', textPoint.x + 100, textPoint.y)

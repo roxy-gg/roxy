@@ -11,7 +11,12 @@ import {
 import { layoutDiffViewer } from '../../src/renderer/src/components/diff/layout'
 import { Builder } from '../../src/renderer/src/canvas/builder'
 import { font, wrapSpans, type TextMetrics } from '../../src/renderer/src/canvas/text'
-import { hitTest, hitText, selectionText } from '../../src/renderer/src/canvas/renderer'
+import {
+  hitTest,
+  hitText,
+  selectionText,
+  wordSelection
+} from '../../src/renderer/src/canvas/renderer'
 import { layoutMarkdown, layoutPlainText } from '../../src/renderer/src/canvas/prose'
 import { BlockCache, layoutTranscript } from '../../src/renderer/src/canvas/transcript'
 import { linkUrl } from '../../src/renderer/src/canvas/links'
@@ -254,6 +259,23 @@ check('selection measures proportional glyphs instead of average widths', () => 
   )
   assert.equal(hitText(sceneOf(builder, 20), 5, 4, metrics)?.char, 0)
   assert.equal(hitText(sceneOf(builder, 20), 7, 4, metrics)?.char, 1)
+})
+check('double-click selection uses native word boundaries', () => {
+  const builder = new Builder(metrics, theme, { value: 0 }, t)
+  const text = "alpha can't 日本語, omega"
+  builder.selectableRow(
+    0,
+    0,
+    20,
+    [{ text, font: font(14), color: '#fff', x: 0, width: metrics.measure(text, font(14)), offset: 0 }],
+    text,
+    { group: 'after' }
+  )
+  const scene = sceneOf(builder, 20)
+  const selection = wordSelection(scene, { line: 0, char: 8, group: 'after' })
+  assert.ok(selection)
+  assert.equal(selectionText(scene, selection), "can't")
+  assert.equal(selection.group, 'after')
 })
 check('clipping limits both link and selectable hit regions', () => {
   const builder = new Builder(metrics, theme, { value: 0 }, t)
@@ -633,9 +655,48 @@ check('a new canvas host cannot reuse stale expanded diff controls', () => {
   assert.ok(scene.blocks[0].scrollRegions.length > 0)
 })
 check('an empty streaming turn remains visible beside windowed history', () => {
-  const scene = layoutTranscript({ ...longInput(longMessages), streaming: [] }, new BlockCache())
+  const state = view()
+  const input = { ...longInput(longMessages, state), streaming: [], now: 1234 }
+  const scene = layoutTranscript(input, new BlockCache())
   assert.ok(scene.blocks.at(-1)!.animated)
   assert.ok(JSON.stringify(scene.blocks.at(-1)!.nodes).includes('braille'))
+  assert.ok(JSON.stringify(scene.blocks.at(-1)!.nodes).includes('elapsed'))
+  assert.equal(state.startedAt.get('__turn__'), 1234)
+  layoutTranscript({ ...input, streaming: null, now: 5000 }, new BlockCache())
+  assert.equal(state.startedAt.has('__turn__'), false)
+})
+check('a quiet live turn restores working after visible prose', () => {
+  const input = {
+    ...longInput(longMessages),
+    streaming: [{ type: 'text' as const, text: 'I found the integration issue.' }]
+  }
+  const active = layoutTranscript(input, new BlockCache())
+  assert.equal(JSON.stringify(active.blocks.at(-1)!.nodes).includes('braille'), false)
+
+  const quiet = layoutTranscript({ ...input, quiet: true }, new BlockCache())
+  assert.ok(quiet.blocks.at(-1)!.animated)
+  assert.ok(JSON.stringify(quiet.blocks.at(-1)!.nodes).includes('braille'))
+})
+check('live reasoning starts collapsed and can be toggled closed again', () => {
+  const state = view()
+  const input = {
+    ...longInput([], state),
+    streaming: [{ type: 'reasoning' as const, text: 'Private planning details.' }],
+    viewport: undefined
+  }
+  const closed = layoutTranscript(input, new BlockCache())
+  const toggle = closed.blocks[0].regions.find((region) => region.action.type === 'toggle')
+  assert.deepEqual(toggle?.action, { type: 'toggle', id: '__streaming__/0' })
+  assert.equal(closed.blocks[0].selectable.some((line) => line.text.includes('Private planning')), false)
+
+  state.open.add('__streaming__/0')
+  const opened = layoutTranscript(input, new BlockCache())
+  assert.ok(opened.blocks[0].height > closed.blocks[0].height)
+  assert.ok(opened.blocks[0].selectable.some((line) => line.text.includes('Private planning')))
+
+  state.open.delete('__streaming__/0')
+  const closedAgain = layoutTranscript(input, new BlockCache())
+  assert.equal(closedAgain.blocks[0].height, closed.blocks[0].height)
 })
 check('a dragged selection retains its source rows across viewport boundaries', () => {
   const cache = new BlockCache()

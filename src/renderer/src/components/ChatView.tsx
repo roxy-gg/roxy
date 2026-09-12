@@ -93,6 +93,17 @@ export function ChatView(): JSX.Element {
   const subagentRunning = useRoxyStore((s) =>
     s.activeChatId ? !!s.runningSubagents[s.activeChatId] : false
   )
+  const [subagentSeconds, setSubagentSeconds] = useState(0)
+  useEffect(() => {
+    setSubagentSeconds(0)
+    if (!subagentRunning) return
+    const startedAt = Date.now()
+    const clock = setInterval(
+      () => setSubagentSeconds(Math.floor((Date.now() - startedAt) / 1000)),
+      1000
+    )
+    return () => clearInterval(clock)
+  }, [activeChatId, subagentRunning])
   const cancelSubagent = useRoxyStore((s) => s.cancelSubagent)
   const cancelBackgroundTask = useRoxyStore((s) => s.cancelBackgroundTask)
   const cancelToolCall = useRoxyStore((s) => s.cancelToolCall)
@@ -192,6 +203,11 @@ export function ChatView(): JSX.Element {
                 <Loader2 className="h-3 w-3 animate-spin group-hover:hidden" />
                 <Square className="hidden h-2.5 w-2.5 fill-current group-hover:block" />
                 <span className="group-hover:hidden">{t('chat.working')}</span>
+                {subagentSeconds > 0 && (
+                  <span className="font-mono tabular-nums text-accent/70 group-hover:hidden">
+                    {subagentSeconds}s
+                  </span>
+                )}
                 <span className="hidden group-hover:inline">{t('chat.cancel')}</span>
               </button>
             )}

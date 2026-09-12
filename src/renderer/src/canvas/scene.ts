@@ -116,6 +116,14 @@ export type Node =
       align?: 'left' | 'right' | 'center'
       maxWidth?: number
     }
+  | {
+      kind: 'elapsed'
+      x: number
+      y: number
+      startedAt: number
+      font: Font
+      color: string
+    }
   | { kind: 'lines'; x: number; y: number; lines: WrappedLine[] }
   | {
       kind: 'icon'

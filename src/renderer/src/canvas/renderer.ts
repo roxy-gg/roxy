@@ -164,6 +164,15 @@ function paintNode(node: Node, paint: PaintContext, pen: Pen): void {
       return
     }
 
+    case 'elapsed': {
+      const seconds = Math.floor((paint.now - node.startedAt) / 1000)
+      if (seconds < 1) return
+      pen.setFont(fontCss(node.font, theme))
+      pen.setFill(node.color)
+      ctx.fillText(`${seconds}s`, node.x, node.y + baselineOffset(node.font))
+      return
+    }
+
     case 'lines': {
       for (const line of node.lines) {
         const y = node.y + line.y
@@ -633,7 +642,42 @@ function charAt(line: SelectableLine, x: number, metrics: TextMetrics): number {
 }
 
 const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' })
+const wordSegmenter = new Intl.Segmenter(undefined, { granularity: 'word' })
 const graphemes = new WeakMap<TextRun, number[]>()
+
+/** Select the word-like segment under a canvas text hit, matching native double-click selection. */
+export function wordSelection(
+  scene: Scene,
+  hit: { line: number; char: number; group?: string }
+): SelectionRange | null {
+  const line = scene.blocks
+    .flatMap((block) => block.selectable)
+    .find((candidate) => candidate.index === hit.line && candidate.group === hit.group)
+  if (!line?.text) return null
+  const offset = Math.max(0, Math.min(hit.char, line.text.length))
+  let last: { index: number; segment: string } | null = null
+  for (const part of wordSegmenter.segment(line.text)) {
+    last = part
+    const end = part.index + part.segment.length
+    if (offset >= part.index && offset < end) {
+      return {
+        startLine: line.index,
+        startChar: part.index,
+        endLine: line.index,
+        endChar: end,
+        group: line.group
+      }
+    }
+  }
+  if (!last || offset !== line.text.length) return null
+  return {
+    startLine: line.index,
+    startChar: last.index,
+    endLine: line.index,
+    endChar: line.text.length,
+    group: line.group
+  }
+}
 
 /** The text of a selection, for the clipboard. */
 export function selectionText(scene: Scene, selection: SelectionRange): string {
