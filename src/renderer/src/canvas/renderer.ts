@@ -679,6 +679,42 @@ export function wordSelection(
   }
 }
 
+/**
+ * Select the whole logical line under a canvas text hit, matching native
+ * triple-click. A wrapped paragraph is one logical line, so this spans every
+ * visual row joined by `breakAfter: false`.
+ */
+export function paragraphSelection(
+  scene: Scene,
+  hit: { line: number; group?: string }
+): SelectionRange | null {
+  const lines = scene.blocks.flatMap((block) => block.selectable)
+  const start = lines.find(
+    (candidate) => candidate.index === hit.line && candidate.group === hit.group
+  )
+  if (!start) return null
+  const at = (index: number): SelectableLine | undefined =>
+    lines.find((candidate) => candidate.index === index && candidate.group === start.group)
+  let first = start
+  for (let previous = at(first.index - 1); previous && !previous.breakAfter; ) {
+    first = previous
+    previous = at(first.index - 1)
+  }
+  let last = start
+  while (!last.breakAfter) {
+    const next = at(last.index + 1)
+    if (!next) break
+    last = next
+  }
+  return {
+    startLine: first.index,
+    startChar: 0,
+    endLine: last.index,
+    endChar: last.text.length,
+    group: start.group
+  }
+}
+
 /** The text of a selection, for the clipboard. */
 export function selectionText(scene: Scene, selection: SelectionRange): string {
   if (selection.all && scene.copyText) return scene.copyText()

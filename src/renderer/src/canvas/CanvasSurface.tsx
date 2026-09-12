@@ -19,6 +19,7 @@ import {
   paintScene,
   selectionCollapsed,
   selectionText,
+  paragraphSelection,
   wordSelection,
   type SelectionRange
 } from './renderer'
@@ -70,7 +71,8 @@ type Press = {
   anchor: ReturnType<typeof hitText>
   dragged: boolean
   touch: boolean
-  wordSelected: boolean
+  /** 1 = plain press, 2 = word selection, 3+ = whole logical line. */
+  clicks: number
   scrollbar?: {
     region: ScrollRegion
     axis: 'x' | 'y'
@@ -128,6 +130,7 @@ export function CanvasSurface({
     x: number
     y: number
     anchor: NonNullable<ReturnType<typeof hitText>>
+    count: number
   } | null>(null)
   const hovered = useRef<HitRegion | null>(null)
   const pointer = useRef<{ x: number; y: number } | null>(null)
@@ -671,7 +674,7 @@ export function CanvasSurface({
             focusedScroll.current = inner?.id ?? null
             const anchor = hitText(scene.current, pos.x, y, metrics)
             const previousClick = lastClick.current
-            const doubleClick =
+            const repeated =
               !!anchor &&
               !!previousClick &&
               event.pointerType !== 'touch' &&
@@ -679,6 +682,8 @@ export function CanvasSurface({
               Math.hypot(pos.x - previousClick.x, pos.y - previousClick.y) <= 4 &&
               anchor.line === previousClick.anchor.line &&
               anchor.group === previousClick.anchor.group
+            // Native click cycle: the second selects a word, the third the line.
+            const clicks = repeated ? previousClick!.count + 1 : 1
             const pending: Press = {
               pointerId: event.pointerId,
               ...pos,
@@ -686,7 +691,7 @@ export function CanvasSurface({
               anchor,
               dragged: false,
               touch: event.pointerType === 'touch',
-              wordSelected: false
+              clicks
             }
             if (inner) {
               const vertical = pos.x >= inner.x + inner.w - 10 && inner.contentHeight > inner.h
@@ -715,13 +720,14 @@ export function CanvasSurface({
                 setScroll(inner, vertical ? inner.left : next, vertical ? next : inner.top)
               }
             }
-            const selectedWord =
-              doubleClick && !pending.action && !pending.scrollbar && anchor
-                ? wordSelection(scene.current, anchor)
+            const selected =
+              clicks >= 2 && !pending.action && !pending.scrollbar && anchor
+                ? clicks >= 3
+                  ? paragraphSelection(scene.current, anchor)
+                  : wordSelection(scene.current, anchor)
                 : null
-            pending.wordSelected = !!selectedWord
             press.current = pending
-            selection.current = selectedWord
+            selection.current = selected
             if (!pending.touch) el.setPointerCapture(event.pointerId)
             requestPaint()
           }}
@@ -787,7 +793,8 @@ export function CanvasSurface({
                 at: event.timeStamp,
                 x: pending.x,
                 y: pending.y,
-                anchor: pending.anchor
+                anchor: pending.anchor,
+                count: pending.clicks
               }
             else lastClick.current = null
             if (selection.current && selectionCollapsed(selection.current)) selection.current = null

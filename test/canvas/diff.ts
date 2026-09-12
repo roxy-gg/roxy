@@ -15,6 +15,7 @@ import {
   hitTest,
   hitText,
   selectionText,
+  paragraphSelection,
   wordSelection
 } from '../../src/renderer/src/canvas/renderer'
 import { layoutMarkdown, layoutPlainText } from '../../src/renderer/src/canvas/prose'
@@ -276,6 +277,26 @@ check('double-click selection uses native word boundaries', () => {
   assert.ok(selection)
   assert.equal(selectionText(scene, selection), "can't")
   assert.equal(selection.group, 'after')
+})
+check('triple-click selection spans a whole wrapped paragraph', () => {
+  const builder = new Builder(metrics, theme, { value: 0 }, t)
+  const rows = ['first visual row', 'second visual row', 'next paragraph']
+  rows.forEach((text, i) =>
+    builder.selectableRow(
+      0,
+      i * 20,
+      20,
+      [{ text, font: font(14), color: '#fff', x: 0, width: metrics.measure(text, font(14)), offset: 0 }],
+      text,
+      { breakAfter: i !== 0 }
+    )
+  )
+  const scene = sceneOf(builder, 60)
+  const selection = paragraphSelection(scene, { line: 1 })
+  assert.ok(selection)
+  assert.equal(selectionText(scene, selection), 'first visual rowsecond visual row')
+  assert.equal(selection.startLine, 0)
+  assert.equal(selection.endLine, 1)
 })
 check('clipping limits both link and selectable hit regions', () => {
   const builder = new Builder(metrics, theme, { value: 0 }, t)
