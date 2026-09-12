@@ -68,12 +68,37 @@
     "unknown": "Inconnu"
   },
   "composer": {
+    "addToQueue": "Add to queue",
     "attachImages": "Joindre des images",
+    "dictationDownloading": "Downloading free local dictation… {{percent}}%",
+    "dictationFinishing": "Finishing transcript…",
+    "dictationLoading": "Loading local speech model…",
+    "dictationStopped": "Local dictation stopped unexpectedly.",
+    "endVoice": "End",
+    "interrupt": "Interrupt",
+    "interruptVoiceTitle": "Interrupt and speak",
+    "localDictation": "Local dictation",
+    "microphoneDenied": "Microphone permission was denied.",
     "placeholder": "Demandez ce que vous voulez à Roxy… (collez ou déposez des images)",
+    "polish": "Polish",
+    "polishDiscarded": "The draft changed while Polish was running, so its result was discarded.",
+    "polishNeedsModel": "Select a connected chat model before polishing.",
+    "polishTitle": "Polish transcript with the selected chat model (may use provider tokens)",
+    "polishing": "Polishing…",
     "queuePlaceholder": "Mettre un message de suivi en file d’attente…",
     "queuePlaceholderStop": "Mettre un message de suivi en file d’attente… (Échap pour arrêter)",
     "removeImage": "Supprimer l'image",
-    "stop": "Arrêter (Échap)"
+    "restoreTranscript": "Restore raw transcript",
+    "send": "Send",
+    "startVoiceAria": "Start voice conversation",
+    "startVoiceTitle": "Start hands-free voice conversation",
+    "stop": "Arrêter (Échap)",
+    "stopDictation": "Stop",
+    "stopVoiceAria": "Interrupt or stop voice conversation",
+    "stopVoiceTitle": "Stop voice conversation",
+    "undoPolish": "Undo polish",
+    "voiceSpeaking": "Roxy is speaking",
+    "voiceThinking": "Voice conversation · Roxy is thinking…"
   },
   "configBackup": {
     "export": "Exporter",
@@ -236,8 +261,8 @@
     "title": "Serveurs MCP"
   },
   "models": {
-    "copilotUnavailable": "No available GitHub Copilot model is selected. Choose an enabled model, or check your account's model access and connection, then try again.",
     "allHidden": "Tous les modèles sont masqués. Réactivez-en dans <settings>Paramètres → Modèles</settings>.",
+    "copilotUnavailable": "No available GitHub Copilot model is selected. Choose an enabled model, or check your account's model access and connection, then try again.",
     "loadFailed": "Impossible de charger les modèles depuis models.dev — vous pouvez toujours envoyer avec le modèle actuel.",
     "loading": "Chargement des modèles…",
     "noMatch": "Aucun modèle ne correspond à « {{query}} ».",
@@ -440,6 +465,23 @@
       "signedInLocally": "connecté localement"
     },
     "title": "Paramètres",
+    "voice": {
+      "accurate": "Accurate",
+      "accurateDescription": "560 ms, better accuracy",
+      "clearCache": "Clear local model cache",
+      "clearing": "Clearing…",
+      "downloadHint": "The runtime and model download when you first press the microphone.",
+      "fast": "Fast",
+      "fastDescription": "160 ms, lower CPU latency",
+      "heading": "Voice dictation",
+      "installed": "Installed: {{file}}",
+      "license": "NVIDIA Open Model License; runtime Apache-2.0.",
+      "localDescription": "Roxy transcribes microphone audio on this device with NVIDIA Nemotron Speech. Audio is kept in memory and is not sent to your chat provider or saved to disk. The first use downloads about {{size}} MB.",
+      "localTitle": "Free local transcription",
+      "modeLabel": "Dictation quality",
+      "polishDescription": "Uses the AI model already selected in the composer to remove filler words and restore punctuation. This is optional, off by default, and may consume billable provider tokens. It never changes the selected model.",
+      "polishTitle": "Show transcript Polish action"
+    },
     "workstreams": {
       "autoDescription": "Chaque session fonctionne dans son propre worktree git sur sa propre branche, de sorte que les sessions parallèles ne peuvent pas s'écraser mutuellement ou interférer avec votre éditeur. Le dossier est créé lors du premier message de la session, et uniquement dans les dépôts git. Désactivez cette option pour exécuter de nouvelles sessions directement dans le dossier du projet.",
       "autoTitle": "Les nouvelles sessions obtiennent leur propre flux de travail",

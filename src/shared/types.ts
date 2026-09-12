@@ -438,6 +438,10 @@ export interface AppSettings {
    * been deleted resolves back to the default rather than failing.
    */
   activeThemeId: string | null
+  /** Local speech-to-text latency/accuracy tradeoff; unrelated to the chat model. */
+  dictationMode: 'fast' | 'accurate'
+  /** Whether the explicit post-dictation Polish action is shown. */
+  dictationPolish: boolean
 }
 
 export interface AppVersions {

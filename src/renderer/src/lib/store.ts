@@ -225,6 +225,8 @@ interface RoxyStore {
   setBranchPrefix: (prefix: string) => Promise<void>
   setLanguage: (language: Language) => Promise<void>
   setMotion: (preference: MotionPreference) => Promise<void>
+  setDictationMode: (mode: 'fast' | 'accurate') => Promise<void>
+  setDictationPolish: (enabled: boolean) => Promise<void>
   selectChat: (id: string) => Promise<void>
   clearActive: () => void
   newSession: () => Promise<void>
@@ -1528,6 +1530,16 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
 
   setBranchPrefix: async (prefix) => {
     const settings = await api.settings.setBranchPrefix(prefix)
+    set({ settings })
+  },
+
+  setDictationMode: async (mode) => {
+    const settings = await api.settings.setDictationMode(mode)
+    set({ settings })
+  },
+
+  setDictationPolish: async (enabled) => {
+    const settings = await api.settings.setDictationPolish(enabled)
     set({ settings })
   },
 

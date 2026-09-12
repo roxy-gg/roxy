@@ -68,12 +68,37 @@
     "unknown": "Desconocido"
   },
   "composer": {
+    "addToQueue": "Add to queue",
     "attachImages": "Adjuntar imágenes",
+    "dictationDownloading": "Downloading free local dictation… {{percent}}%",
+    "dictationFinishing": "Finishing transcript…",
+    "dictationLoading": "Loading local speech model…",
+    "dictationStopped": "Local dictation stopped unexpectedly.",
+    "endVoice": "End",
+    "interrupt": "Interrupt",
+    "interruptVoiceTitle": "Interrupt and speak",
+    "localDictation": "Local dictation",
+    "microphoneDenied": "Microphone permission was denied.",
     "placeholder": "Pregúntale lo que quieras a Roxy… (pega o suelta imágenes)",
+    "polish": "Polish",
+    "polishDiscarded": "The draft changed while Polish was running, so its result was discarded.",
+    "polishNeedsModel": "Select a connected chat model before polishing.",
+    "polishTitle": "Polish transcript with the selected chat model (may use provider tokens)",
+    "polishing": "Polishing…",
     "queuePlaceholder": "Pon un mensaje de seguimiento en cola…",
     "queuePlaceholderStop": "Pon un mensaje de seguimiento en cola… (Esc para detener)",
     "removeImage": "Quitar la imagen",
-    "stop": "Detener (Esc)"
+    "restoreTranscript": "Restore raw transcript",
+    "send": "Send",
+    "startVoiceAria": "Start voice conversation",
+    "startVoiceTitle": "Start hands-free voice conversation",
+    "stop": "Detener (Esc)",
+    "stopDictation": "Stop",
+    "stopVoiceAria": "Interrupt or stop voice conversation",
+    "stopVoiceTitle": "Stop voice conversation",
+    "undoPolish": "Undo polish",
+    "voiceSpeaking": "Roxy is speaking",
+    "voiceThinking": "Voice conversation · Roxy is thinking…"
   },
   "configBackup": {
     "export": "Exportar",
@@ -236,8 +261,8 @@
     "title": "Servidores MCP"
   },
   "models": {
-    "copilotUnavailable": "No available GitHub Copilot model is selected. Choose an enabled model, or check your account's model access and connection, then try again.",
     "allHidden": "Todos los modelos están ocultos. Vuelve a habilitar algunos en <settings>Ajustes → Modelos</settings>.",
+    "copilotUnavailable": "No available GitHub Copilot model is selected. Choose an enabled model, or check your account's model access and connection, then try again.",
     "loadFailed": "No se pudieron cargar los modelos de models.dev; aún puedes enviar con el modelo actual.",
     "loading": "Cargando los modelos…",
     "noMatch": "Ningún modelo coincide con «{{query}}».",
@@ -440,6 +465,23 @@
       "signedInLocally": "sesión iniciada localmente"
     },
     "title": "Ajustes",
+    "voice": {
+      "accurate": "Accurate",
+      "accurateDescription": "560 ms, better accuracy",
+      "clearCache": "Clear local model cache",
+      "clearing": "Clearing…",
+      "downloadHint": "The runtime and model download when you first press the microphone.",
+      "fast": "Fast",
+      "fastDescription": "160 ms, lower CPU latency",
+      "heading": "Voice dictation",
+      "installed": "Installed: {{file}}",
+      "license": "NVIDIA Open Model License; runtime Apache-2.0.",
+      "localDescription": "Roxy transcribes microphone audio on this device with NVIDIA Nemotron Speech. Audio is kept in memory and is not sent to your chat provider or saved to disk. The first use downloads about {{size}} MB.",
+      "localTitle": "Free local transcription",
+      "modeLabel": "Dictation quality",
+      "polishDescription": "Uses the AI model already selected in the composer to remove filler words and restore punctuation. This is optional, off by default, and may consume billable provider tokens. It never changes the selected model.",
+      "polishTitle": "Show transcript Polish action"
+    },
     "workstreams": {
       "autoDescription": "Cada sesión trabaja en su propio worktree de git, en su propia rama, para que las sesiones en paralelo no se pisen entre sí ni entren en conflicto con tu editor. La carpeta se crea con el primer mensaje de la sesión, y solo en repositorios git. Desactiva esto para que las sesiones nuevas se ejecuten directamente en la carpeta del proyecto.",
       "autoTitle": "Cada sesión nueva tiene su propio flujo de trabajo",

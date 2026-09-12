@@ -68,12 +68,37 @@
     "unknown": "不明"
   },
   "composer": {
+    "addToQueue": "Add to queue",
     "attachImages": "画像を添付",
+    "dictationDownloading": "Downloading free local dictation… {{percent}}%",
+    "dictationFinishing": "Finishing transcript…",
+    "dictationLoading": "Loading local speech model…",
+    "dictationStopped": "Local dictation stopped unexpectedly.",
+    "endVoice": "End",
+    "interrupt": "Interrupt",
+    "interruptVoiceTitle": "Interrupt and speak",
+    "localDictation": "Local dictation",
+    "microphoneDenied": "Microphone permission was denied.",
     "placeholder": "Roxy に何でも質問…（画像を貼り付けるかドロップ）",
+    "polish": "Polish",
+    "polishDiscarded": "The draft changed while Polish was running, so its result was discarded.",
+    "polishNeedsModel": "Select a connected chat model before polishing.",
+    "polishTitle": "Polish transcript with the selected chat model (may use provider tokens)",
+    "polishing": "Polishing…",
     "queuePlaceholder": "次のメッセージをキューに追加…",
     "queuePlaceholderStop": "次のメッセージをキューに追加…（Esc で停止）",
     "removeImage": "画像を削除",
-    "stop": "停止 (Esc)"
+    "restoreTranscript": "Restore raw transcript",
+    "send": "Send",
+    "startVoiceAria": "Start voice conversation",
+    "startVoiceTitle": "Start hands-free voice conversation",
+    "stop": "停止 (Esc)",
+    "stopDictation": "Stop",
+    "stopVoiceAria": "Interrupt or stop voice conversation",
+    "stopVoiceTitle": "Stop voice conversation",
+    "undoPolish": "Undo polish",
+    "voiceSpeaking": "Roxy is speaking",
+    "voiceThinking": "Voice conversation · Roxy is thinking…"
   },
   "configBackup": {
     "export": "エクスポート",
@@ -236,8 +261,8 @@
     "title": "MCP サーバー"
   },
   "models": {
-    "copilotUnavailable": "No available GitHub Copilot model is selected. Choose an enabled model, or check your account's model access and connection, then try again.",
     "allHidden": "すべてのモデルが非表示になっています。<settings>設定 → モデル</settings>で一部を元に戻してください。",
+    "copilotUnavailable": "No available GitHub Copilot model is selected. Choose an enabled model, or check your account's model access and connection, then try again.",
     "loadFailed": "models.dev からモデルを読み込めませんでした — 現在のモデルで送信することはできます。",
     "loading": "モデルを読み込み中…",
     "noMatch": "「{{query}}」に一致するモデルはありません。",
@@ -440,6 +465,23 @@
       "signedInLocally": "ローカルでサインイン済み"
     },
     "title": "設定",
+    "voice": {
+      "accurate": "Accurate",
+      "accurateDescription": "560 ms, better accuracy",
+      "clearCache": "Clear local model cache",
+      "clearing": "Clearing…",
+      "downloadHint": "The runtime and model download when you first press the microphone.",
+      "fast": "Fast",
+      "fastDescription": "160 ms, lower CPU latency",
+      "heading": "Voice dictation",
+      "installed": "Installed: {{file}}",
+      "license": "NVIDIA Open Model License; runtime Apache-2.0.",
+      "localDescription": "Roxy transcribes microphone audio on this device with NVIDIA Nemotron Speech. Audio is kept in memory and is not sent to your chat provider or saved to disk. The first use downloads about {{size}} MB.",
+      "localTitle": "Free local transcription",
+      "modeLabel": "Dictation quality",
+      "polishDescription": "Uses the AI model already selected in the composer to remove filler words and restore punctuation. This is optional, off by default, and may consume billable provider tokens. It never changes the selected model.",
+      "polishTitle": "Show transcript Polish action"
+    },
     "workstreams": {
       "autoDescription": "各セッションは独自のブランチで独自のgitワークツリーで動作するため、並行セッションが互いに上書きしたり、エディターと競合したりすることはありません。フォルダーはセッションの最初のメッセージで作成され、gitリポジトリ内でのみ作成されます。これをオフにすると、新しいセッションがプロジェクトフォルダーで直接実行されます。",
       "autoTitle": "新しいセッションは独自のワークストリームを取得します",

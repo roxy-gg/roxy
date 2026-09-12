@@ -33,6 +33,12 @@ import type { RepoLayout } from './repos'
 import type { SessionConfigPatch } from './session-config'
 import type { ClipboardAction } from './context-menu'
 import type { ResolvedTheme, ThemeView } from './theme'
+import type {
+  DictationPolishInput,
+  DictationStartInput,
+  DictationState,
+  DictationTranscript
+} from './dictation'
 
 /** A configured MCP server merged with its live connection status (for Settings). */
 export interface McpServerView {
@@ -721,6 +727,8 @@ export interface RoxyApi {
     /** Set the UI language. An unknown code falls back to English. */
     setLanguage(language: Language): Promise<AppSettings>
     setMotion(motion: MotionPreference): Promise<AppSettings>
+    setDictationMode(mode: 'fast' | 'accurate'): Promise<AppSettings>
+    setDictationPolish(enabled: boolean): Promise<AppSettings>
     /** Keep the app and its browser toolbar in sync; never changes OS preferences. */
     onMotionChanged(callback: (motion: MotionPreference) => void): () => void
     completeOnboarding(): Promise<AppSettings>
@@ -732,6 +740,16 @@ export interface RoxyApi {
      */
     getTelemetry(): Promise<boolean>
     setTelemetry(enabled: boolean): Promise<boolean>
+  }
+  dictation: {
+    status(): Promise<DictationState>
+    start(input: DictationStartInput): Promise<DictationState>
+    pushAudio(requestId: string, pcm16: ArrayBuffer): void
+    stop(requestId: string, cancel: boolean): Promise<DictationState>
+    polish(input: DictationPolishInput): Promise<string>
+    clearCache(): Promise<DictationState>
+    onState(callback: (state: DictationState) => void): () => void
+    onTranscript(callback: (payload: DictationTranscript) => void): () => void
   }
   providers: {
     listConnected(): Promise<ConnectedProvider[]>
