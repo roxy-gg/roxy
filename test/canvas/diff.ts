@@ -268,7 +268,16 @@ check('double-click selection uses native word boundaries', () => {
     0,
     0,
     20,
-    [{ text, font: font(14), color: '#fff', x: 0, width: metrics.measure(text, font(14)), offset: 0 }],
+    [
+      {
+        text,
+        font: font(14),
+        color: '#fff',
+        x: 0,
+        width: metrics.measure(text, font(14)),
+        offset: 0
+      }
+    ],
     text,
     { group: 'after' }
   )
@@ -286,7 +295,16 @@ check('triple-click selection spans a whole wrapped paragraph', () => {
       0,
       i * 20,
       20,
-      [{ text, font: font(14), color: '#fff', x: 0, width: metrics.measure(text, font(14)), offset: 0 }],
+      [
+        {
+          text,
+          font: font(14),
+          color: '#fff',
+          x: 0,
+          width: metrics.measure(text, font(14)),
+          offset: 0
+        }
+      ],
       text,
       { breakAfter: i !== 0 }
     )
@@ -708,7 +726,10 @@ check('live reasoning starts collapsed and can be toggled closed again', () => {
   const closed = layoutTranscript(input, new BlockCache())
   const toggle = closed.blocks[0].regions.find((region) => region.action.type === 'toggle')
   assert.deepEqual(toggle?.action, { type: 'toggle', id: '__streaming__/0' })
-  assert.equal(closed.blocks[0].selectable.some((line) => line.text.includes('Private planning')), false)
+  assert.equal(
+    closed.blocks[0].selectable.some((line) => line.text.includes('Private planning')),
+    false
+  )
 
   state.open.add('__streaming__/0')
   const opened = layoutTranscript(input, new BlockCache())
