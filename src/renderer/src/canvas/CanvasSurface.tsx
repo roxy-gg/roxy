@@ -19,6 +19,8 @@ import {
   paintScene,
   selectionCollapsed,
   selectionText,
+  paragraphSelection,
+  wordSelection,
   type SelectionRange
 } from './renderer'
 import { CanvasMenu, type CanvasMenuItem } from './CanvasMenu'
@@ -69,6 +71,8 @@ type Press = {
   anchor: ReturnType<typeof hitText>
   dragged: boolean
   touch: boolean
+  /** 1 = plain press, 2 = word selection, 3+ = whole logical line. */
+  clicks: number
   scrollbar?: {
     region: ScrollRegion
     axis: 'x' | 'y'
@@ -121,6 +125,13 @@ export function CanvasSurface({
   const scene = useRef<Scene>({ width: 0, height: 0, blocks: [] })
   const selection = useRef<SelectionRange | null>(null)
   const press = useRef<Press | null>(null)
+  const lastClick = useRef<{
+    at: number
+    x: number
+    y: number
+    anchor: NonNullable<ReturnType<typeof hitText>>
+    count: number
+  } | null>(null)
   const hovered = useRef<HitRegion | null>(null)
   const pointer = useRef<{ x: number; y: number } | null>(null)
   const focusedScroll = useRef<string | null>(null)
@@ -228,6 +239,7 @@ export function CanvasSurface({
     }
     selection.current = null
     press.current = null
+    lastClick.current = null
     hovered.current = null
     focusedScroll.current = null
     stick.current = followTail
@@ -661,13 +673,25 @@ export function CanvasSurface({
             const inner = scrollAt(pos.x, y)
             focusedScroll.current = inner?.id ?? null
             const anchor = hitText(scene.current, pos.x, y, metrics)
+            const previousClick = lastClick.current
+            const repeated =
+              !!anchor &&
+              !!previousClick &&
+              event.pointerType !== 'touch' &&
+              event.timeStamp - previousClick.at <= 500 &&
+              Math.hypot(pos.x - previousClick.x, pos.y - previousClick.y) <= 4 &&
+              anchor.line === previousClick.anchor.line &&
+              anchor.group === previousClick.anchor.group
+            // Native click cycle: the second selects a word, the third the line.
+            const clicks = repeated ? previousClick!.count + 1 : 1
             const pending: Press = {
               pointerId: event.pointerId,
               ...pos,
               action: region?.action,
               anchor,
               dragged: false,
-              touch: event.pointerType === 'touch'
+              touch: event.pointerType === 'touch',
+              clicks
             }
             if (inner) {
               const vertical = pos.x >= inner.x + inner.w - 10 && inner.contentHeight > inner.h
@@ -696,8 +720,14 @@ export function CanvasSurface({
                 setScroll(inner, vertical ? inner.left : next, vertical ? next : inner.top)
               }
             }
+            const selected =
+              clicks >= 2 && !pending.action && !pending.scrollbar && anchor
+                ? clicks >= 3
+                  ? paragraphSelection(scene.current, anchor)
+                  : wordSelection(scene.current, anchor)
+                : null
             press.current = pending
-            selection.current = null
+            selection.current = selected
             if (!pending.touch) el.setPointerCapture(event.pointerId)
             requestPaint()
           }}
@@ -752,6 +782,21 @@ export function CanvasSurface({
               if (released && JSON.stringify(released.action) === JSON.stringify(pending.action))
                 act(pending.action)
             }
+            if (
+              !pending.dragged &&
+              !pending.scrollbar &&
+              !pending.action &&
+              !pending.touch &&
+              pending.anchor
+            )
+              lastClick.current = {
+                at: event.timeStamp,
+                x: pending.x,
+                y: pending.y,
+                anchor: pending.anchor,
+                count: pending.clicks
+              }
+            else lastClick.current = null
             if (selection.current && selectionCollapsed(selection.current)) selection.current = null
             updateHover()
             requestPaint()

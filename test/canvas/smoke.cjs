@@ -54,6 +54,16 @@ async function click(x, y, button = 'left') {
   await mouse('mouseDown', x, y, button)
   await mouse('mouseUp', x, y, button)
 }
+async function multiClick(x, y, times) {
+  await mouse('mouseMove', x, y)
+  for (let i = 1; i <= times; i++) {
+    await mouse('mouseDown', x, y, 'left', { clickCount: i })
+    await mouse('mouseUp', x, y, 'left', { clickCount: i })
+  }
+}
+async function doubleClick(x, y) {
+  await multiClick(x, y, 2)
+}
 async function clickDom(selector) {
   const rect = await evaluate(
     `(() => { const r = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 } })()`
@@ -269,6 +279,42 @@ async function run() {
   check('sub-threshold movement stays unselected', await probe('return probe.selection() === null'))
   await mouse('mouseUp', textPoint.x + 1, textPoint.y + 1)
   check('single click remains unselected', await probe('return probe.selection() === null'))
+  await wait(550)
+  await doubleClick(textPoint.x, textPoint.y)
+  const doubleClickSelection = await probe(`
+    const s=probe.selection();
+    const line=s && scene.blocks.flatMap(b=>b.selectable).find(line=>line.index===s.startLine);
+    return { selection:s, text:line && s ? line.text.slice(s.startChar,s.endChar) : null };
+  `)
+  check(
+    `double click selects one canvas word: ${JSON.stringify(doubleClickSelection)}`,
+    doubleClickSelection.selection &&
+      doubleClickSelection.selection.startLine === doubleClickSelection.selection.endLine &&
+      doubleClickSelection.selection.startChar !== doubleClickSelection.selection.endChar &&
+      doubleClickSelection.text.trim().split(/\s+/).length === 1
+  )
+  await wait(550)
+  await multiClick(textPoint.x, textPoint.y, 3)
+  const tripleClickSelection = await probe(`
+    const s=probe.selection();
+    const lines=scene.blocks.flatMap(b=>b.selectable);
+    const first=s && lines.find(line=>line.index===s.startLine);
+    const last=s && lines.find(line=>line.index===s.endLine);
+    return {
+      selection:s,
+      startsAtLineStart: !!s && s.startChar === 0,
+      endsAtLineEnd: !!last && s.endChar === last.text.length,
+      wholeLine: !!first && first.text.length > 0
+    };
+  `)
+  check(
+    `triple click selects the whole line: ${JSON.stringify(tripleClickSelection.selection)}`,
+    tripleClickSelection.selection &&
+      tripleClickSelection.startsAtLineStart &&
+      tripleClickSelection.endsAtLineEnd &&
+      tripleClickSelection.wholeLine
+  )
+  await wait(550)
   await mouse('mouseDown', textPoint.x, textPoint.y)
   await mouse('mouseMove', textPoint.x + 100, textPoint.y)
   await mouse('mouseUp', textPoint.x + 100, textPoint.y)
