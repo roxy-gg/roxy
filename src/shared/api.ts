@@ -33,6 +33,7 @@ import type { RepoLayout } from './repos'
 import type { SessionConfigPatch } from './session-config'
 import type { ClipboardAction } from './context-menu'
 import type { ResolvedTheme, ThemeView } from './theme'
+import type { KernelStatus, KernelInstallResult } from './kernel'
 
 /** A configured MCP server merged with its live connection status (for Settings). */
 export interface McpServerView {
@@ -1191,5 +1192,13 @@ export interface RoxyApi {
      * Returns an unsubscribe fn.
      */
     onDelta(callback: (payload: RemoteDelta) => void): () => void
+  }
+  kernel: {
+    status(): Promise<KernelStatus>
+    install(): Promise<KernelInstallResult>
+    start(): Promise<KernelInstallResult>
+    setAgentAccess(enable: boolean): Promise<KernelInstallResult>
+    uninstall(disableSigning: boolean): Promise<KernelInstallResult>
+    toggleTestSigning(enable: boolean): Promise<KernelInstallResult>
   }
 }

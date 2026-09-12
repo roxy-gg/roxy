@@ -310,6 +310,14 @@ const roxy: RoxyApi = {
       ipcRenderer.on(CHANNELS.remoteDelta, handler)
       return () => ipcRenderer.removeListener(CHANNELS.remoteDelta, handler)
     }
+  },
+  kernel: {
+    status: () => ipcRenderer.invoke(CHANNELS.kernelStatus),
+    install: () => ipcRenderer.invoke(CHANNELS.kernelInstall),
+    start: () => ipcRenderer.invoke(CHANNELS.kernelStart),
+    setAgentAccess: (enable) => ipcRenderer.invoke(CHANNELS.kernelSetAgentAccess, enable),
+    uninstall: (disableSigning) => ipcRenderer.invoke(CHANNELS.kernelUninstall, disableSigning),
+    toggleTestSigning: (enable) => ipcRenderer.invoke(CHANNELS.kernelToggleTestSigning, enable)
   }
 }
 

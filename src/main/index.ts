@@ -4,6 +4,7 @@ import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import macDockIcon from '../../resources/icon-mac.png?asset'
 import { registerIpc } from './ipc'
+import { registerKernelIpc } from './ipc/kernel'
 import { getDb } from './db/database'
 import { startLoopScheduler } from './services/loops'
 import { listModels } from './services/models'
@@ -121,6 +122,7 @@ app.whenReady().then(() => {
   // Open the database (runs migrations) and wire up IPC before the first window.
   getDb()
   registerIpc()
+  registerKernelIpc()
   // Anonymous usage tracking (opt-out in Settings). Deliberately after the DB
   // and IPC are up so nothing here can delay the first window, and it owns its
   // own storage - a failure in it can't touch either.

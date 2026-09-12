@@ -27,6 +27,7 @@ import { SubscriptionAccounts } from '../components/SubscriptionSetup'
 import { ModelVisibility } from '../components/ModelVisibility'
 import { useRoxyStore } from '../lib/store'
 import { MotionSettings } from '../components/MotionSettings'
+import { KernelToolsSection } from '../components/KernelToolsSection'
 
 /** The section heading repeated down the page. */
 const SECTION_HEADING = 'mb-3 text-xs font-semibold uppercase tracking-wide text-text-subtle'
@@ -401,6 +402,8 @@ export default function Settings(): JSX.Element {
           )}
         </div>
       </section>
+
+      <KernelToolsSection />
 
       <section className="mt-8">
         <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-danger">
