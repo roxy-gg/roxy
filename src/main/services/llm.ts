@@ -28,8 +28,7 @@ import {
 } from './responses'
 
 const COPILOT_TOKEN_URL = 'https://api.github.com/copilot_internal/v2/token'
-const COPILOT_CHAT_URL = 'https://api.githubcopilot.com/chat/completions'
-const COPILOT_RESPONSES_URL = 'https://api.githubcopilot.com/responses'
+const COPILOT_API_URL = 'https://api.githubcopilot.com'
 export const COPILOT_EDITOR_HEADERS = {
   'User-Agent': 'GitHubCopilotChat/0.26.7',
   'Editor-Version': 'vscode/1.99.3',
@@ -41,6 +40,7 @@ interface CopilotToken {
   token: string
   refreshAt: number
   credentialKey: string
+  apiUrl: string
 }
 let copilotCache: CopilotToken | null = null
 let copilotRefresh: { credentialKey: string; promise: Promise<CopilotToken> } | null = null
@@ -98,7 +98,7 @@ function geminiParts(m: ChatMessage): unknown[] {
 }
 
 /** Exchange the stored GitHub token for a short-lived Copilot token (cached). */
-async function getCopilotToken(): Promise<string> {
+async function getCopilotToken(): Promise<CopilotToken> {
   const stored = repo.getCopilotCredential()
   if (!stored) {
     copilotCache = null
@@ -107,9 +107,9 @@ async function getCopilotToken(): Promise<string> {
   let credential = stored
   const credentialKey = JSON.stringify(credential)
   if (copilotCache?.credentialKey === credentialKey && copilotCache.refreshAt > Date.now()) {
-    return copilotCache.token
+    return copilotCache
   }
-  if (copilotRefresh?.credentialKey === credentialKey) return (await copilotRefresh.promise).token
+  if (copilotRefresh?.credentialKey === credentialKey) return copilotRefresh.promise
 
   // One renewal per credential: refresh tokens rotate and must not be spent twice.
   const pending = { credentialKey, promise: null! as Promise<CopilotToken> }
@@ -141,7 +141,7 @@ async function getCopilotToken(): Promise<string> {
           Accept: 'application/json',
           ...COPILOT_EDITOR_HEADERS
         },
-        signal: AbortSignal.timeout(30_000)
+        signal: AbortSignal.timeout(15_000)
       })
     let startedAt = Date.now()
     let res = await exchange()
@@ -172,7 +172,12 @@ async function getCopilotToken(): Promise<string> {
     }
     const data = (await res.json().catch(() => {
       throw new ModelHttpError(502, 'GitHub returned an invalid Copilot token. Try again.')
-    })) as { token?: string; expires_at?: number; refresh_in?: number }
+    })) as {
+      token?: string
+      expires_at?: number
+      refresh_in?: number
+      endpoints?: { api?: string }
+    }
     const serverTime = Date.parse(res.headers.get('date') ?? '')
     // Relative lifetime avoids repeatedly sending expired tokens when the local clock is wrong.
     const lifetime =
@@ -191,7 +196,8 @@ async function getCopilotToken(): Promise<string> {
     const token = {
       token: data.token,
       refreshAt: startedAt + Math.min(refreshIn, lifetime - Math.min(120_000, lifetime / 10)),
-      credentialKey: pending.credentialKey
+      credentialKey: pending.credentialKey,
+      apiUrl: (data.endpoints?.api || COPILOT_API_URL).replace(/\/+$/, '')
     }
     if (JSON.stringify(repo.getCopilotCredential()) !== pending.credentialKey) {
       throw new ModelHttpError(
@@ -204,7 +210,7 @@ async function getCopilotToken(): Promise<string> {
   })()
   copilotRefresh = pending
   try {
-    return (await pending.promise).token
+    return await pending.promise
   } finally {
     if (copilotRefresh === pending) copilotRefresh = null
   }
@@ -254,6 +260,15 @@ function copilotHeaders(token: string, vision = false): Record<string, string> {
   }
 }
 
+/** Discovery and inference must use the API host assigned to this account. */
+export async function copilotEndpoint(
+  path: '/models' | '/chat/completions' | '/responses',
+  vision = false
+): Promise<{ url: string; headers: Record<string, string> }> {
+  const auth = await getCopilotToken()
+  return { url: `${auth.apiUrl}${path}`, headers: copilotHeaders(auth.token, vision) }
+}
+
 /**
  * Resolve the base URL for a provider, booting the CLIProxyAPI sidecar first for
  * any subscription-backed provider.
@@ -284,10 +299,7 @@ export async function openaiEndpoint(
   opts: { vision?: boolean; responses?: boolean } = {}
 ): Promise<{ url: string; headers: Record<string, string> }> {
   if (providerId === 'github-copilot') {
-    return {
-      url: opts.responses ? COPILOT_RESPONSES_URL : COPILOT_CHAT_URL,
-      headers: copilotHeaders(await getCopilotToken(), opts.vision)
-    }
+    return copilotEndpoint(opts.responses ? '/responses' : '/chat/completions', opts.vision)
   }
   const provider = repo.listConnectedProviders().find((p) => p.id === providerId)
   if (!provider) throw new Error(`Provider "${providerId}" is not connected.`)
@@ -389,9 +401,9 @@ export async function streamChat(opts: StreamChatOptions): Promise<void> {
     const send = async (
       recordAuthorization: (authorization: string) => void
     ): Promise<Response> => {
-      const headers = copilotHeaders(await getCopilotToken(), vision)
+      const { url, headers } = await copilotEndpoint('/chat/completions', vision)
       recordAuthorization(headers.Authorization)
-      return fetch(COPILOT_CHAT_URL, {
+      return fetch(url, {
         method: 'POST',
         headers,
         body,
@@ -520,9 +532,9 @@ async function streamCopilotResponses(opts: {
     stream: true
   })
   const send = async (recordAuthorization: (authorization: string) => void): Promise<Response> => {
-    const headers = copilotHeaders(await getCopilotToken(), opts.vision)
+    const { url, headers } = await copilotEndpoint('/responses', opts.vision)
     recordAuthorization(headers.Authorization)
-    return fetch(COPILOT_RESPONSES_URL, {
+    return fetch(url, {
       method: 'POST',
       headers,
       body,

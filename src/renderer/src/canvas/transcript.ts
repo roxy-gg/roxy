@@ -29,6 +29,8 @@ export interface LayoutInput {
   messages: Message[]
   /** The live turn's parts, or null when nothing is streaming. */
   streaming: MessagePart[] | null
+  /** True once a live turn has produced no visible update for a short interval. */
+  quiet?: boolean
   width: number
   metrics: TextMetrics
   theme: CanvasTheme
@@ -57,9 +59,12 @@ export interface LayoutInput {
 
 /** How long a call must run before its cancel button appears. */
 const CANCEL_REVEAL_MS = 1200
+const TURN_STARTED_AT = '__turn__'
 
 export function layoutTranscript(input: LayoutInput, cache: BlockCache): Scene {
   const { messages, streaming, width, theme, view } = input
+  if (streaming === null) view.startedAt.delete(TURN_STARTED_AT)
+  else if (!view.startedAt.has(TURN_STARTED_AT)) view.startedAt.set(TURN_STARTED_AT, input.now)
   const availableWidth =
     width - (messages.some((message) => message.role === 'user') ? PROMPT_GUTTER : 0)
   const column = Math.max(1, Math.min(SPACE.columnMax, availableWidth - SPACE.columnPadX * 2))
@@ -363,12 +368,13 @@ export function layoutParts(
   const last = parts[parts.length - 1]
   const runningTool = last?.type === 'tool' && last.state === 'running'
   const liveText = (last?.type === 'text' || last?.type === 'reasoning') && last.text.trim() !== ''
-  if (indicator && streaming && !runningTool && !liveText) {
+  if (indicator && streaming && !runningTool && (!liveText || input.quiet)) {
     cursor += layoutThinking(
       builder,
       x,
       cursor,
-      builder.t(last === undefined ? 'transcript.thinking' : 'transcript.working')
+      builder.t(last === undefined ? 'transcript.thinking' : 'transcript.working'),
+      input.view.startedAt.get(TURN_STARTED_AT) ?? input.now
     )
   }
 
@@ -405,9 +411,7 @@ function layoutReasoning(
   width: number
 ): number {
   const palette = builder.palette
-  // Streaming forces it open: watching the model think is the point while it is
-  // happening, and reading it back afterwards rarely is.
-  const expanded = open || streaming
+  const expanded = open
   const headerHeight = 26
   const frame = builder.slot()
 
@@ -469,9 +473,16 @@ function layoutReasoning(
 }
 
 /** The braille spinner + label shown while a turn is live but silent. */
-function layoutThinking(builder: Builder, x: number, y: number, label: string): number {
+function layoutThinking(
+  builder: Builder,
+  x: number,
+  y: number,
+  label: string,
+  startedAt: number
+): number {
   const palette = builder.palette
   const f = font(FONT_SIZE.body, 400, 'sans')
+  const timerFont = font(FONT_SIZE.small, 400, 'mono')
   const height = builder.metrics.lineHeight(f) + 8
   const centerY = y + height / 2
   builder.push({
@@ -483,6 +494,14 @@ function layoutThinking(builder: Builder, x: number, y: number, label: string): 
   })
   builder.pulsing(() => {
     builder.text(x + 20, centerY - builder.metrics.lineHeight(f) / 2, label, f, palette.textMuted)
+  })
+  builder.push({
+    kind: 'elapsed',
+    x: x + 20 + builder.metrics.measure(label, f) + 8,
+    y: centerY - builder.metrics.lineHeight(timerFont) / 2,
+    startedAt,
+    font: timerFont,
+    color: palette.textSubtle
   })
   builder.animate()
   return height

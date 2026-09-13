@@ -41,7 +41,7 @@ import {
   sha256For,
   upstreamFor
 } from '../src/shared/cliproxy'
-import { modelLabel, pickDefaultModel } from '../src/shared/models'
+import { modelLabel, pickDefaultModel, resolveProviderModel } from '../src/shared/models'
 import { DEFAULT_MOTION, normalizeMotion, reduceMotion } from '../src/shared/motion'
 import {
   BUILT_IN_THEMES,
@@ -932,6 +932,36 @@ check(
 check(
   'pickDefaultModel: first entry wins when it is already tool-capable',
   pickDefaultModel([mkModel('latest', true), mkModel('older', true)]) === 'latest'
+)
+
+const copilotProvider = { id: 'github-copilot', defaultModel: 'revoked-default' }
+const enabledModels = [mkModel('enabled', true), mkModel('other', true)]
+check(
+  'Copilot selection: an enabled saved model is preserved',
+  resolveProviderModel(copilotProvider, enabledModels, 'other') === 'other'
+)
+check(
+  'Copilot selection: a revoked choice never silently switches to another model',
+  resolveProviderModel(copilotProvider, enabledModels, 'revoked') === undefined
+)
+check(
+  'Copilot selection: a revoked default is replaced only when no model was selected',
+  resolveProviderModel(copilotProvider, enabledModels, null) === 'enabled'
+)
+check(
+  'Copilot selection: a valid provider default is respected',
+  resolveProviderModel({ ...copilotProvider, defaultModel: 'other' }, enabledModels, null) ===
+    'other'
+)
+check(
+  'Copilot selection: an empty account catalog has no hardcoded fallback',
+  resolveProviderModel(copilotProvider, [], null) === undefined &&
+    resolveProviderModel(copilotProvider, [], 'enabled') === undefined
+)
+check(
+  'other providers retain custom model ids and offline fallbacks',
+  resolveProviderModel({ id: 'openai-compatible' }, [], 'custom-model') === 'custom-model' &&
+    resolveProviderModel({ id: 'openai' }, [], null) === 'gpt-4o-mini'
 )
 
 // ---- model display names (the vendor prefix on gateway catalogs) ----
@@ -5469,6 +5499,35 @@ async function main(): Promise<void> {
     baseRows
       .filter((r) => r.kind === 'model')
       .every((r) => r.kind === 'model' && r.info !== undefined)
+  )
+
+  const refreshedCatalogs = {
+    ...pickerCatalogs,
+    'github-copilot': [mkModel('just-enabled', 'Just Enabled')]
+  }
+  const refreshedRows = buildModelRows({
+    providers: pickerProviders,
+    catalogs: refreshedCatalogs,
+    recent: pickerRecent,
+    pinned: pickerPinned,
+    index: buildModelIndex(refreshedCatalogs),
+    query: '',
+    hidden: new Set()
+  })
+  check(
+    'picker rows: revoked Copilot models disappear from pinned, recent and catalog sections',
+    !refreshedRows.some(
+      (r) => r.kind === 'model' && ['claude-opus-5', 'gpt-5.6-sol'].includes(r.modelId)
+    )
+  )
+  check(
+    'picker rows: newly enabled models appear without a static catalog update',
+    refreshedRows.some((r) => r.kind === 'model' && r.modelId === 'just-enabled')
+  )
+  check(
+    'picker rows: reenabled models regain their saved pin and recent position',
+    rowsFor('').some((r) => r.key === 'pin:github-copilot:claude-opus-5') &&
+      rowsFor('').some((r) => r.key === 'recent:github-copilot:gpt-5.6-sol')
   )
 
   // Every section, not just the catalog — recents keep listing a hidden model.

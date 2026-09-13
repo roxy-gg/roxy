@@ -35,7 +35,8 @@ import * as copilot from '../services/copilot'
 import * as cliproxy from '../services/cliproxy'
 import * as browser from '../services/browser'
 import * as cookies from '../services/cookies'
-import { listModels } from '../services/models'
+import { invalidateCopilotModels, listModels } from '../services/models'
+import { invalidateCopilotToken } from '../services/llm'
 import { pickDefaultModel } from '../../shared/models'
 import { CLIPROXY_PROVIDER_IDS, accountsFor, isCliProxyProvider } from '../../shared/cliproxy'
 import { getUsageStats } from '../services/usage'
@@ -229,6 +230,8 @@ export function registerIpc(): void {
       await cliproxy.disconnect(id).catch(() => undefined)
     }
     repo.resetAll()
+    invalidateCopilotModels()
+    invalidateCopilotToken()
     for (const window of BrowserWindow.getAllWindows())
       if (!window.isDestroyed())
         window.webContents.send(CHANNELS.settingsMotionChanged, DEFAULT_MOTION)
@@ -260,6 +263,10 @@ export function registerIpc(): void {
     // disk and the proxy running. Sign out first, then remove the row. The
     // sidecar keeps running if the OTHER subscription is still signed in.
     if (isCliProxyProvider(id)) await cliproxy.disconnect(id)
+    if (id === 'github-copilot') {
+      invalidateCopilotModels()
+      invalidateCopilotToken()
+    }
     return repo.disconnectProvider(id)
   })
   ipcMain.handle(CHANNELS.providersReorder, (_e, ids: string[]) => repo.reorderProviders(ids))
@@ -567,6 +574,8 @@ export function registerIpc(): void {
   ipcMain.handle(CHANNELS.copilotPoll, async (_e, deviceCode: string, interval: number) => {
     const token = await copilot.pollForToken(deviceCode, interval)
     const provider = repo.storeCopilotCredential(token)
+    invalidateCopilotModels()
+    invalidateCopilotToken()
     repo.setActiveProvider(provider.id, provider.defaultModel ?? null)
     return provider
   })

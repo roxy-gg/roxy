@@ -71,10 +71,30 @@ export default function App(): JSX.Element {
   const ready = useRoxyStore((s) => s.ready)
   const settings = useRoxyStore((s) => s.settings)
   const bootstrap = useRoxyStore((s) => s.bootstrap)
+  const ensureModels = useRoxyStore((s) => s.ensureModels)
+  const copilotConnected = useRoxyStore((s) => s.providers.some((p) => p.id === 'github-copilot'))
 
   useEffect(() => {
     bootstrap()
   }, [bootstrap])
+
+  useEffect(() => {
+    if (!ready || !copilotConnected) return
+    const refresh = (): void => {
+      if (document.visibilityState !== 'hidden') void ensureModels('github-copilot')
+    }
+    refresh()
+    const timer = window.setInterval(refresh, 60_000)
+    window.addEventListener('focus', refresh)
+    window.addEventListener('online', refresh)
+    document.addEventListener('visibilitychange', refresh)
+    return () => {
+      window.clearInterval(timer)
+      window.removeEventListener('focus', refresh)
+      window.removeEventListener('online', refresh)
+      document.removeEventListener('visibilitychange', refresh)
+    }
+  }, [ready, copilotConnected, ensureModels])
 
   if (!ready) return <Splash />
 

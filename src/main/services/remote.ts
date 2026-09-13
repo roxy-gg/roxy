@@ -39,7 +39,7 @@ import {
 } from '../../shared/session-config'
 import * as repo from '../db/repo'
 import { listModels } from './models'
-import { pickDefaultModel } from '../../shared/models'
+import { resolveProviderModel } from '../../shared/models'
 import { runSessionTurn } from './session-turn'
 import { track, trackFeature } from './track'
 import { sessionCwd } from './workspace'
@@ -478,11 +478,19 @@ async function runTurn(
     } catch {
       // Offline model catalog — fall back to conservative defaults below.
     }
-    const model =
-      (config.providerId === provider.id ? config.model : null) ||
-      provider.defaultModel ||
-      pickDefaultModel(catalog) ||
-      (provider.id === 'github-copilot' ? 'gpt-4o' : 'gpt-4o-mini')
+    const model = resolveProviderModel(
+      provider,
+      catalog,
+      config.providerId === provider.id ? config.model : null
+    )
+    if (!model) {
+      const message =
+        'No available GitHub Copilot model is selected. Choose an enabled model on the desktop, or check account access and connectivity.'
+      repo.addMessage({ chatId: sessionId, role: 'assistant', content: message })
+      sendFrameFor(active, { t: 'error', message })
+      bumpFor(active)
+      return
+    }
     const info = catalog.find((m) => m.id === model)
     const modelContext = info?.contextLimit ?? 128_000
     const contextBudget = contextBudgetFor(config.contextLimit, modelContext)

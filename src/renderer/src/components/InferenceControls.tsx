@@ -3,6 +3,7 @@ import { Brain, Check, Loader2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import type { MessagePart, ReasoningEffort } from '@shared/types'
 import type { ModelInfo } from '@shared/api'
+import { resolveProviderModel } from '@shared/models'
 import { PRIMARY_AGENTS, getAgent, DEFAULT_AGENT_ID } from '@shared/agents'
 import { buildSystemPrompt, useRoxyStore } from '../lib/store'
 import {
@@ -83,7 +84,17 @@ function useActiveModelInfo(): ModelInfo | undefined {
   useEffect(() => {
     if (activeProvider) void ensureModels(activeProvider.id)
   }, [activeProvider, ensureModels])
-  if (!activeProvider || !config.model) return undefined
+  if (!activeProvider) return undefined
+  const catalog = modelCatalog[activeProvider.id] ?? []
+  if (activeProvider.id === 'github-copilot') {
+    const model = resolveProviderModel(
+      activeProvider,
+      catalog,
+      config.providerId === activeProvider.id ? config.model : null
+    )
+    return catalog.find((m) => m.id === model)
+  }
+  if (!config.model) return undefined
   // Only match within the resolved provider, so a session pinned to a model
   // from another provider doesn't borrow its capabilities.
   if (config.providerId && config.providerId !== activeProvider.id) return undefined

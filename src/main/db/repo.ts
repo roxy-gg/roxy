@@ -497,6 +497,8 @@ function getProviderSecret(providerId: string): string | null {
 }
 
 export interface CopilotCredential {
+  /** Identifies a login across token rotations; a reconnect gets a new id. */
+  sessionId?: string
   accessToken: string
   refreshToken?: string
   expiresAt?: number
@@ -513,6 +515,7 @@ export function getCopilotCredential(): CopilotCredential | null {
     if (
       typeof credential.accessToken === 'string' &&
       credential.accessToken &&
+      (credential.sessionId === undefined || typeof credential.sessionId === 'string') &&
       (credential.refreshToken === undefined || typeof credential.refreshToken === 'string') &&
       (credential.expiresAt === undefined || Number.isFinite(credential.expiresAt)) &&
       (credential.refreshTokenExpiresAt === undefined ||
@@ -524,6 +527,12 @@ export function getCopilotCredential(): CopilotCredential | null {
     // JSON syntax errors can quote the input, which contains secrets.
   }
   throw new Error('The saved GitHub Copilot credential is invalid. Reconnect it in Settings.')
+}
+
+/** Model catalogs belong to a login, not to its rotating access token. */
+export function getCopilotSessionKey(): string | null {
+  const credential = getCopilotCredential()
+  return credential ? (credential.sessionId ?? credential.accessToken) : null
 }
 
 /** Read a provider's access token, keeping OAuth refresh secrets in the main process. */
@@ -572,7 +581,9 @@ export function storeCopilotCredential(credential: CopilotCredential): Connected
       sort_order: -now,
       now
     })
-    const { data, encrypted } = encryptSecret(JSON.stringify(credential))
+    const { data, encrypted } = encryptSecret(
+      JSON.stringify({ ...credential, sessionId: randomUUID() })
+    )
     db.prepare(
       `INSERT INTO credentials(provider_id, type, data, encrypted, created_at)
        VALUES(?, 'oauth', ?, ?, ?)

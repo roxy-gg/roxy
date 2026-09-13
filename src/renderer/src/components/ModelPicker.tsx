@@ -3,7 +3,7 @@ import { Brain, Check, ChevronsUpDown, Clock, Pin, Search, Wrench } from 'lucide
 import { useNavigate } from 'react-router-dom'
 import { Trans, useTranslation } from 'react-i18next'
 import { buildModelIndex, buildModelRows } from '../lib/modelRows'
-import { modelLabel } from '@shared/models'
+import { modelLabel, resolveProviderModel } from '@shared/models'
 import { useRoxyStore } from '../lib/store'
 import { resolveSessionConfig } from '@shared/session-config'
 import { ProviderLogo } from '../lib/providerLogos'
@@ -15,7 +15,7 @@ import { cn } from '../lib/cn'
 /**
  * A cute, searchable model picker: the active provider's logo + model on the
  * trigger, and a popover grouped by every connected provider (with its icon)
- * listing the real models models.dev knows about. A PINNED section (a
+ * listing the models currently available from each provider. A PINNED section (a
  * deliberate, user-curated shortlist — for people juggling many providers or
  * a provider with a huge catalog) sits above everything when non-empty,
  * followed by a LATEST section per provider showing its last five distinct
@@ -140,7 +140,11 @@ export function ModelPicker(): JSX.Element {
   // another one, and labelling that fallback with the old model would claim a
   // pairing the turn will not actually use (the send path picks the fallback
   // provider's own default instead).
-  const activeModel = activeProvider?.id === config.providerId ? config.model : null
+  const selectedModel = activeProvider?.id === config.providerId ? config.model : null
+  const activeModel =
+    activeProvider?.id === 'github-copilot'
+      ? resolveProviderModel(activeProvider, models[activeProvider.id] ?? [], selectedModel)
+      : selectedModel
 
   // Lazy-load every connected provider's models and recents into shared caches.
   useEffect(() => {
@@ -151,6 +155,10 @@ export function ModelPicker(): JSX.Element {
       void ensureRecentModels(p.id)
     })
   }, [providers, ensureModels, ensureRecentModels, ensurePinnedModels, ensureHiddenModels])
+
+  useEffect(() => {
+    if (open) void ensureModels('github-copilot')
+  }, [open, ensureModels])
 
   // Close on outside click / Escape.
   useEffect(() => {
@@ -391,7 +399,11 @@ export function ModelPicker(): JSX.Element {
               </div>
             )}
             {rows.length === 0 && !loading && !q && !allHidden && (
-              <div className="px-3 py-3 text-xs text-text-subtle">{t('models.loadFailed')}</div>
+              <div className="px-3 py-3 text-xs text-text-subtle">
+                {providers.every((p) => p.id === 'github-copilot')
+                  ? t('models.copilotUnavailable')
+                  : t('models.loadFailed')}
+              </div>
             )}
           </div>
         </div>

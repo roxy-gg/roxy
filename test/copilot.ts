@@ -4,6 +4,7 @@ import * as repo from '../src/main/db/repo'
 import { closeDb, getDb } from '../src/main/db/database'
 import { encryptSecret } from '../src/main/services/secure'
 import { pollForToken } from '../src/main/services/copilot'
+import { invalidateCopilotModels, listModels } from '../src/main/services/models'
 import {
   invalidateCopilotToken,
   ModelHttpError,
@@ -22,12 +23,19 @@ export async function testCopilot(): Promise<void> {
       {
         token,
         expires_at: (now + skew) / 1000 + lifetime,
-        refresh_in: refreshIn
+        refresh_in: refreshIn,
+        endpoints: { api: 'https://api.business.githubcopilot.com/' }
       },
       { headers: { date: new Date(now + skew).toUTCString() } }
     )
   let exchangeCount = 0
   let refreshCount = 0
+  let modelCount = 0
+  const catalog = (): Response =>
+    Response.json({
+      data: [{ id: 'tenant-model', model_picker_enabled: true, capabilities: { type: 'chat' } }]
+    })
+  let models: (headers: Headers) => Response | Promise<Response> = catalog
   let exchange: (headers: Headers) => Response | Promise<Response> = () => ide()
   let oauth: (body: Record<string, unknown>) => Response | Promise<Response> = () => {
     throw new Error('Unexpected OAuth request')
@@ -38,6 +46,10 @@ export async function testCopilot(): Promise<void> {
       exchangeCount++
       return exchange(new Headers(init?.headers))
     }
+    if (url === 'https://api.business.githubcopilot.com/models') {
+      modelCount++
+      return models(new Headers(init?.headers))
+    }
     assert.equal(url, 'https://github.com/login/oauth/access_token', 'no unexpected network access')
     const body = JSON.parse(String(init?.body))
     if (body.grant_type === 'refresh_token') refreshCount++
@@ -46,7 +58,9 @@ export async function testCopilot(): Promise<void> {
   const reset = (credential: repo.CopilotCredential = { accessToken: 'github-test' }): void => {
     repo.storeCopilotCredential(credential)
     invalidateCopilotToken()
-    exchangeCount = refreshCount = 0
+    invalidateCopilotModels()
+    exchangeCount = refreshCount = modelCount = 0
+    models = catalog
     exchange = () => ide()
     oauth = () => {
       throw new Error('Unexpected OAuth request')
@@ -75,10 +89,13 @@ export async function testCopilot(): Promise<void> {
       refreshTokenExpiresAt: now + 15897600_000
     })
     repo.storeCopilotCredential(credential)
+    const saved = repo.getCopilotCredential()!
+    assert.equal(typeof saved.sessionId, 'string')
+    assert.deepEqual(saved, { ...credential, sessionId: saved.sessionId })
     closeDb()
     assert.deepEqual(
       repo.getCopilotCredential(),
-      credential,
+      saved,
       'refresh secrets survive reopening the database'
     )
     assert.equal(
@@ -303,11 +320,82 @@ export async function testCopilot(): Promise<void> {
     assert.equal(recovered.status, 200)
     assert.equal(exchangeCount, 2, 'IDE 401 silently exchanges and retries')
     assert.equal(refreshCount, 0, 'IDE expiry is not a new GitHub login')
+
+    reset({ accessToken: 'catalog-expired', refreshToken: 'catalog-refresh', expiresAt: now - 1 })
+    oauth = () =>
+      Response.json({
+        access_token: 'catalog-renewed',
+        refresh_token: 'catalog-next',
+        expires_in: 28800
+      })
+    const [discovered, concurrent] = await Promise.all([
+      listModels('github-copilot'),
+      listModels('github-copilot')
+    ])
+    assert.equal(
+      discovered[0]?.id,
+      'tenant-model',
+      'OAuth rotation must not empty the model picker'
+    )
+    assert.equal(discovered, concurrent)
+    assert.equal(await listModels('github-copilot'), discovered, 'renewed catalog stays cached')
+    assert.equal(refreshCount, 1)
+    assert.equal(modelCount, 1)
+    const sessionKey = repo.getCopilotSessionKey()
+    closeDb()
+    assert.equal(repo.getCopilotSessionKey(), sessionKey, 'login identity survives restart')
+    assert.equal((await endpoint()).url, 'https://api.business.githubcopilot.com/chat/completions')
+    assert.equal(
+      (await openaiEndpoint('github-copilot', { responses: true })).url,
+      'https://api.business.githubcopilot.com/responses'
+    )
+
+    // Discovery may still be in flight when inference renews the same account.
+    reset({
+      accessToken: 'catalog-valid',
+      refreshToken: 'catalog-refresh',
+      expiresAt: now + 120_000
+    })
+    let finishModels!: (response: Response) => void
+    models = () =>
+      new Promise((resolve) => {
+        finishModels = resolve
+      })
+    const duringDiscovery = listModels('github-copilot')
+    while (!finishModels) await new Promise((resolve) => setImmediate(resolve))
+    now += 901_000
+    oauth = () => Response.json({ access_token: 'catalog-rotated', refresh_token: 'catalog-next' })
+    await endpoint()
+    finishModels(catalog())
+    assert.equal(
+      (await duringDiscovery)[0]?.id,
+      'tenant-model',
+      'inference rotation is not an account switch'
+    )
+
+    // The discovery retry must identify its rejected token, just like inference.
+    reset()
+    exchange = () => ide(`ide-${exchangeCount}`)
+    finishModels = undefined!
+    models = () =>
+      modelCount === 1
+        ? new Promise((resolve) => {
+            finishModels = resolve
+          })
+        : catalog()
+    const lateDiscovery = listModels('github-copilot')
+    while (!finishModels) await new Promise((resolve) => setImmediate(resolve))
+    invalidateCopilotToken()
+    await endpoint()
+    finishModels(new Response('', { status: 401 }))
+    assert.equal((await lateDiscovery)[0]?.id, 'tenant-model')
+    assert.equal(exchangeCount, 2, 'a late discovery 401 preserves the new IDE token')
     console.log('  Copilot auth: persistence, renewal, expiry, failures, and concurrency passed')
   } finally {
     globalThis.fetch = originalFetch
     Date.now = originalNow
     invalidateCopilotToken()
+    invalidateCopilotModels()
     repo.disconnectProvider('github-copilot')
   }
 }
