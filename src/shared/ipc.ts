@@ -272,7 +272,14 @@ export const CHANNELS = {
   /** main -> renderer: Remote Workspace sharing status changed */
   remoteState: 'remote:state',
   /** main -> renderer: a streamed event from a phone-driven turn (live desktop mirror) */
-  remoteDelta: 'remote:delta'
+  remoteDelta: 'remote:delta',
+
+  kernelStatus: 'kernel:status',
+  kernelInstall: 'kernel:install',
+  kernelStart: 'kernel:start',
+  kernelSetAgentAccess: 'kernel:setAgentAccess',
+  kernelUninstall: 'kernel:uninstall',
+  kernelToggleTestSigning: 'kernel:toggleTestSigning'
 } as const
 
 export type ChannelName = (typeof CHANNELS)[keyof typeof CHANNELS]
