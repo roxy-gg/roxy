@@ -146,6 +146,7 @@ import {
 } from '../src/main/services/turn-metrics'
 import { isSeedProviderId } from '../src/shared/providers'
 import { createServer } from 'node:http'
+import { testCopilot } from './copilot'
 
 let pass = 0
 const fails: string[] = []
@@ -178,6 +179,7 @@ app.setPath('userData', tmp)
 app.on('window-all-closed', () => undefined)
 
 async function main(): Promise<void> {
+  await testCopilot()
   const ws = path.join(tmp, 'workspace')
   await fs.mkdir(ws, { recursive: true })
   const run = (name: string, input: Record<string, unknown>): ReturnType<typeof runTool> =>

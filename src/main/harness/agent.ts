@@ -1900,8 +1900,9 @@ async function streamOnce(
   // agent loop (many tool calls) never sends a stale token — the root cause of
   // the intermittent "IDE token expired" 401.
   let useResponses = isResponsesOnly(providerId, model)
-  const send = async (): Promise<Response> => {
+  const send = async (recordAuthorization: (authorization: string) => void): Promise<Response> => {
     const { url, headers } = await openaiEndpoint(providerId, { vision, responses: useResponses })
+    if (providerId === 'github-copilot') recordAuthorization(headers.Authorization)
     const body = useResponses ? responsesPayload() : chatPayload
     return fetch(url, { method: 'POST', headers, body, signal })
   }

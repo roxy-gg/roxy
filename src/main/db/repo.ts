@@ -478,8 +478,8 @@ export function listHiddenModels(): { providerId: string; model: string }[] {
   return rows.map((r) => ({ providerId: r.provider_id, model: r.model }))
 }
 
-/** Read + decrypt a provider's stored credential token (api key or oauth). */
-export function getProviderToken(providerId: string): string | null {
+/** Read + decrypt a provider's stored credential payload. */
+function getProviderSecret(providerId: string): string | null {
   const row = getDb()
     .prepare('SELECT data, encrypted FROM credentials WHERE provider_id = ?')
     .get(providerId) as { data: string; encrypted: number } | undefined
@@ -487,12 +487,73 @@ export function getProviderToken(providerId: string): string | null {
   try {
     return decryptSecret({ data: row.data, encrypted: row.encrypted > 0 })
   } catch {
+    if (providerId === 'github-copilot') {
+      throw new Error(
+        'Cannot unlock the saved GitHub Copilot credential. Check your OS keychain and restart Roxy.'
+      )
+    }
     return null
   }
 }
 
-/** Persist the GitHub OAuth token for Copilot as an encrypted oauth credential. */
-export function storeCopilotCredential(token: string): ConnectedProvider {
+export interface CopilotCredential {
+  accessToken: string
+  refreshToken?: string
+  expiresAt?: number
+  refreshTokenExpiresAt?: number
+}
+
+/** Older installs stored only the GitHub access token, not a JSON credential. */
+export function getCopilotCredential(): CopilotCredential | null {
+  const raw = getProviderSecret('github-copilot')
+  if (!raw) return null
+  if (!raw.startsWith('{')) return { accessToken: raw }
+  try {
+    const credential = JSON.parse(raw) as CopilotCredential
+    if (
+      typeof credential.accessToken === 'string' &&
+      credential.accessToken &&
+      (credential.refreshToken === undefined || typeof credential.refreshToken === 'string') &&
+      (credential.expiresAt === undefined || Number.isFinite(credential.expiresAt)) &&
+      (credential.refreshTokenExpiresAt === undefined ||
+        Number.isFinite(credential.refreshTokenExpiresAt))
+    ) {
+      return credential
+    }
+  } catch {
+    // JSON syntax errors can quote the input, which contains secrets.
+  }
+  throw new Error('The saved GitHub Copilot credential is invalid. Reconnect it in Settings.')
+}
+
+/** Read a provider's access token, keeping OAuth refresh secrets in the main process. */
+export function getProviderToken(providerId: string): string | null {
+  return providerId === 'github-copilot'
+    ? (getCopilotCredential()?.accessToken ?? null)
+    : getProviderSecret(providerId)
+}
+
+/** Rotate without reconnecting a removed account or overwriting a newer login. */
+export function updateCopilotCredential(
+  previous: CopilotCredential,
+  credential: CopilotCredential
+): boolean {
+  const db = getDb()
+  return db
+    .transaction(() => {
+      if (JSON.stringify(getCopilotCredential()) !== JSON.stringify(previous)) return false
+      const { data, encrypted } = encryptSecret(JSON.stringify(credential))
+      return (
+        db
+          .prepare('UPDATE credentials SET data = ?, encrypted = ? WHERE provider_id = ?')
+          .run(data, encrypted ? 1 : 0, 'github-copilot').changes === 1
+      )
+    })
+    .immediate()
+}
+
+/** Persist the complete GitHub OAuth credential using the OS secret storage. */
+export function storeCopilotCredential(credential: CopilotCredential): ConnectedProvider {
   const seed = resolveSeed('github-copilot')
   const now = Date.now()
   const db = getDb()
@@ -511,7 +572,7 @@ export function storeCopilotCredential(token: string): ConnectedProvider {
       sort_order: -now,
       now
     })
-    const { data, encrypted } = encryptSecret(token)
+    const { data, encrypted } = encryptSecret(JSON.stringify(credential))
     db.prepare(
       `INSERT INTO credentials(provider_id, type, data, encrypted, created_at)
        VALUES(?, 'oauth', ?, ?, ?)

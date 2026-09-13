@@ -10,6 +10,9 @@
  * base URL directly.
  */
 import * as repo from '../db/repo'
+import { refreshGitHubCredential } from './copilot'
+import { ModelHttpError } from './model-http-error'
+export { ModelHttpError } from './model-http-error'
 import type { ChatMessage } from '../../shared/api'
 import type { ReasoningEffort } from '../../shared/types'
 import { isCliProxyProvider } from '../../shared/cliproxy'
@@ -34,27 +37,13 @@ export const COPILOT_EDITOR_HEADERS = {
   'Copilot-Integration-Id': 'vscode-chat'
 } as const
 
-/**
- * A failed model HTTP request that carries the status code, so the agent loop can
- * decide whether to ride it out (429 rate-limit / 5xx / 408 = transient, retry
- * forever during a long autonomous run) or surface it (other 4xx = fatal). The
- * plain `Error` we used to throw hid the status, forcing every failure — even a
- * momentary rate-limit — to kill the whole turn.
- */
-export class ModelHttpError extends Error {
-  readonly status: number
-  constructor(status: number, message: string) {
-    super(message)
-    this.name = 'ModelHttpError'
-    this.status = status
-  }
-}
-
 interface CopilotToken {
   token: string
-  expiresAt: number
+  refreshAt: number
+  credentialKey: string
 }
 let copilotCache: CopilotToken | null = null
+let copilotRefresh: { credentialKey: string; promise: Promise<CopilotToken> } | null = null
 
 // ---- Vision helpers ----------------------------------------------------------
 
@@ -109,51 +98,123 @@ function geminiParts(m: ChatMessage): unknown[] {
 }
 
 /** Exchange the stored GitHub token for a short-lived Copilot token (cached). */
-async function getCopilotToken(force = false): Promise<string> {
-  // Refresh a couple of minutes early so a near-expiry token is never sent
-  // (covers clock skew + the time a long agent turn spends between calls).
-  if (!force && copilotCache && copilotCache.expiresAt - 120_000 > Date.now()) {
+async function getCopilotToken(): Promise<string> {
+  const stored = repo.getCopilotCredential()
+  if (!stored) {
+    copilotCache = null
+    throw new Error('GitHub Copilot is not linked. Connect it in onboarding or Settings.')
+  }
+  let credential = stored
+  const credentialKey = JSON.stringify(credential)
+  if (copilotCache?.credentialKey === credentialKey && copilotCache.refreshAt > Date.now()) {
     return copilotCache.token
   }
+  if (copilotRefresh?.credentialKey === credentialKey) return (await copilotRefresh.promise).token
 
-  const github = repo.getProviderToken('github-copilot')
-  if (!github)
-    throw new Error('GitHub Copilot is not linked. Connect it in onboarding or Settings.')
-
-  const res = await fetch(COPILOT_TOKEN_URL, {
-    headers: {
-      Authorization: `token ${github}`,
-      Accept: 'application/json',
-      ...COPILOT_EDITOR_HEADERS
+  // One renewal per credential: refresh tokens rotate and must not be spent twice.
+  const pending = { credentialKey, promise: null! as Promise<CopilotToken> }
+  pending.promise = (async () => {
+    let renewed = false
+    const renew = async (): Promise<void> => {
+      const next = await refreshGitHubCredential(credential)
+      if (!repo.updateCopilotCredential(credential, next)) {
+        throw new ModelHttpError(
+          409,
+          'GitHub Copilot authorization changed while refreshing. Try again.'
+        )
+      }
+      credential = next
+      pending.credentialKey = JSON.stringify(next)
+      renewed = true
     }
-  })
-  if (!res.ok) {
-    const body = await res.text().catch(() => '')
-    if (res.status === 401) {
+    if (
+      credential.refreshToken &&
+      credential.expiresAt !== undefined &&
+      credential.expiresAt - 60_000 <= Date.now()
+    ) {
+      await renew()
+    }
+    const exchange = (): Promise<Response> =>
+      fetch(COPILOT_TOKEN_URL, {
+        headers: {
+          Authorization: `token ${credential.accessToken}`,
+          Accept: 'application/json',
+          ...COPILOT_EDITOR_HEADERS
+        },
+        signal: AbortSignal.timeout(30_000)
+      })
+    let startedAt = Date.now()
+    let res = await exchange()
+    if (res.status === 401 && credential.refreshToken && !renewed) {
+      await res.body?.cancel().catch(() => undefined)
+      await renew()
+      startedAt = Date.now()
+      res = await exchange()
+    }
+    if (!res.ok) {
+      await res.body?.cancel().catch(() => undefined)
+      if (res.status === 401) {
+        throw new ModelHttpError(
+          401,
+          'GitHub rejected the saved authorization and it could not be renewed. Reconnect GitHub Copilot in Settings.'
+        )
+      }
+      if (res.status === 403) {
+        throw new ModelHttpError(
+          403,
+          'GitHub denied Copilot access. Check your Copilot subscription and organization access policies.'
+        )
+      }
       throw new ModelHttpError(
         res.status,
-        'GitHub authorization expired. Reconnect GitHub Copilot in Settings and try again.'
+        `Copilot token exchange failed (${res.status}). Try again.`
       )
     }
-    if (res.status === 403) {
+    const data = (await res.json().catch(() => {
+      throw new ModelHttpError(502, 'GitHub returned an invalid Copilot token. Try again.')
+    })) as { token?: string; expires_at?: number; refresh_in?: number }
+    const serverTime = Date.parse(res.headers.get('date') ?? '')
+    // Relative lifetime avoids repeatedly sending expired tokens when the local clock is wrong.
+    const lifetime =
+      (data?.expires_at ?? NaN) * 1000 - (Number.isFinite(serverTime) ? serverTime : startedAt)
+    if (
+      !data ||
+      typeof data.token !== 'string' ||
+      !data.token ||
+      !Number.isFinite(lifetime) ||
+      lifetime <= 0
+    ) {
+      throw new ModelHttpError(502, 'GitHub returned an invalid Copilot token. Try again.')
+    }
+    const refreshIn =
+      Number.isFinite(data.refresh_in) && data.refresh_in! > 0 ? data.refresh_in! * 1000 : lifetime
+    const token = {
+      token: data.token,
+      refreshAt: startedAt + Math.min(refreshIn, lifetime - Math.min(120_000, lifetime / 10)),
+      credentialKey: pending.credentialKey
+    }
+    if (JSON.stringify(repo.getCopilotCredential()) !== pending.credentialKey) {
       throw new ModelHttpError(
-        res.status,
-        'GitHub denied Copilot access. Verify that this account has an active Copilot subscription, then reconnect it in Settings.'
+        409,
+        'GitHub Copilot authorization changed while refreshing. Try again.'
       )
     }
-    throw new ModelHttpError(
-      res.status,
-      `Copilot token exchange failed (${res.status}). ${body.slice(0, 200)}`
-    )
+    copilotCache = token
+    return token
+  })()
+  copilotRefresh = pending
+  try {
+    return (await pending.promise).token
+  } finally {
+    if (copilotRefresh === pending) copilotRefresh = null
   }
-  const data = (await res.json()) as { token: string; expires_at: number }
-  copilotCache = { token: data.token, expiresAt: data.expires_at * 1000 }
-  return data.token
 }
 
 /** Drop the cached Copilot token so the next call re-exchanges it (used on a 401). */
-export function invalidateCopilotToken(): void {
-  copilotCache = null
+export function invalidateCopilotToken(rejectedAuthorization?: string): void {
+  if (!rejectedAuthorization || rejectedAuthorization === `Bearer ${copilotCache?.token}`) {
+    copilotCache = null
+  }
 }
 
 /**
@@ -164,16 +225,21 @@ export function invalidateCopilotToken(): void {
  */
 export async function withCopilotRetry(
   isCopilot: boolean,
-  send: () => Promise<Response>,
+  send: (recordAuthorization: (authorization: string) => void) => Promise<Response>,
   signal?: AbortSignal
 ): Promise<Response> {
-  let res = await send()
+  let authorization: string | undefined
+  const recordAuthorization = (value: string): void => {
+    authorization = value
+  }
+  let res = await send(recordAuthorization)
   for (let attempt = 0; isCopilot && res.status === 401 && attempt < 3; attempt++) {
     if (signal?.aborted) break
-    invalidateCopilotToken()
+    invalidateCopilotToken(authorization)
+    await res.body?.cancel().catch(() => undefined)
     await new Promise((resolve) => setTimeout(resolve, 400 * 2 ** attempt)) // 400ms, 800ms, 1.6s
     if (signal?.aborted) break
-    res = await send()
+    res = await send(recordAuthorization)
   }
   return res
 }
@@ -320,13 +386,18 @@ export async function streamChat(opts: StreamChatOptions): Promise<void> {
       ...openAiReasoning('github-copilot', reasoning, reasoningEffort),
       stream: true
     })
-    const send = async (): Promise<Response> =>
-      fetch(COPILOT_CHAT_URL, {
+    const send = async (
+      recordAuthorization: (authorization: string) => void
+    ): Promise<Response> => {
+      const headers = copilotHeaders(await getCopilotToken(), vision)
+      recordAuthorization(headers.Authorization)
+      return fetch(COPILOT_CHAT_URL, {
         method: 'POST',
-        headers: copilotHeaders(await getCopilotToken(), vision),
+        headers,
         body,
         signal
       })
+    }
     // Responses-only models (GPT-5.x) 400 on /chat/completions. Skip straight to
     // the Responses API once we've learned that for this model; otherwise try
     // chat and fall back on that specific error. Claude stays on chat throughout.
@@ -448,13 +519,16 @@ async function streamCopilotResponses(opts: {
     ...toResponsesReasoning(opts.reasoning, opts.reasoningEffort),
     stream: true
   })
-  const send = async (): Promise<Response> =>
-    fetch(COPILOT_RESPONSES_URL, {
+  const send = async (recordAuthorization: (authorization: string) => void): Promise<Response> => {
+    const headers = copilotHeaders(await getCopilotToken(), opts.vision)
+    recordAuthorization(headers.Authorization)
+    return fetch(COPILOT_RESPONSES_URL, {
       method: 'POST',
-      headers: copilotHeaders(await getCopilotToken(), opts.vision),
+      headers,
       body,
       signal: opts.signal
     })
+  }
   const res = await withCopilotRetry(true, send, opts.signal)
   return readResponsesSse(res, opts.onDelta)
 }
