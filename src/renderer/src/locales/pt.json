@@ -15,6 +15,10 @@
     "cancelBackground_other": "Cancelar {{count}} subagentes em segundo plano",
     "cancelSubagent": "Cancelar este subagente",
     "copied": "Copiado",
+    "copilotAuthenticate": "Authenticate on GitHub",
+    "copilotReconnect": "Refresh GitHub Copilot login",
+    "copilotReconnectBody": "GitHub Copilot auth sucks sometimes. Your authorization expired or was revoked, and automatic refresh could not recover it. Refresh your login here to keep chatting.",
+    "copilotReconnected": "GitHub Copilot is reconnected. You can retry your message when you are ready.",
     "descriptionAndTasks": "Descrição e tarefas",
     "emptyBody": "Escolha uma pasta para iniciar uma sessão de agente.",
     "emptyTitle": "Abrir um espaço de trabalho",
@@ -236,8 +240,8 @@
     "title": "Servidores MCP"
   },
   "models": {
-    "copilotUnavailable": "No available GitHub Copilot model is selected. Choose an enabled model, or check your account's model access and connection, then try again.",
     "allHidden": "Todos os modelos estão ocultos. Reative alguns em <settings>Definições → Modelos</settings>.",
+    "copilotUnavailable": "No available GitHub Copilot model is selected. Choose an enabled model, or check your account's model access and connection, then try again.",
     "loadFailed": "Não foi possível carregar modelos de models.dev — você ainda pode enviar com o modelo atual.",
     "loading": "Carregando modelos…",
     "noMatch": "Nenhum modelo corresponde a “{{query}}”.",

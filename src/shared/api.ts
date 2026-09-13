@@ -872,6 +872,7 @@ export interface RoxyApi {
     onStatus(callback: (state: UpdateState) => void): () => void
   }
   copilot: {
+    needsReauthentication(): Promise<boolean>
     start(): Promise<DeviceFlowStart>
     poll(deviceCode: string, interval: number): Promise<ConnectedProvider>
   }

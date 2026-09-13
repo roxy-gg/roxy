@@ -15,6 +15,10 @@
     "cancelBackground_other": "バックグラウンドサブエージェントを{{count}}件キャンセル",
     "cancelSubagent": "このサブエージェントをキャンセル",
     "copied": "コピーしました",
+    "copilotAuthenticate": "Authenticate on GitHub",
+    "copilotReconnect": "Refresh GitHub Copilot login",
+    "copilotReconnectBody": "GitHub Copilot auth sucks sometimes. Your authorization expired or was revoked, and automatic refresh could not recover it. Refresh your login here to keep chatting.",
+    "copilotReconnected": "GitHub Copilot is reconnected. You can retry your message when you are ready.",
     "descriptionAndTasks": "説明とタスク",
     "emptyBody": "エージェントセッションを開始するにはフォルダーを選択してください。",
     "emptyTitle": "ワークスペースを開く",
@@ -236,8 +240,8 @@
     "title": "MCP サーバー"
   },
   "models": {
-    "copilotUnavailable": "No available GitHub Copilot model is selected. Choose an enabled model, or check your account's model access and connection, then try again.",
     "allHidden": "すべてのモデルが非表示になっています。<settings>設定 → モデル</settings>で一部を元に戻してください。",
+    "copilotUnavailable": "No available GitHub Copilot model is selected. Choose an enabled model, or check your account's model access and connection, then try again.",
     "loadFailed": "models.dev からモデルを読み込めませんでした — 現在のモデルで送信することはできます。",
     "loading": "モデルを読み込み中…",
     "noMatch": "「{{query}}」に一致するモデルはありません。",

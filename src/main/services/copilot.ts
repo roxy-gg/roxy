@@ -59,7 +59,7 @@ export async function refreshGitHubCredential(
   ) {
     throw new ModelHttpError(
       401,
-      'GitHub authorization can no longer be renewed. Reconnect GitHub Copilot in Settings.'
+      'GitHub authorization can no longer be renewed. Reconnect GitHub Copilot to continue.'
     )
   }
   const startedAt = Date.now()
@@ -77,13 +77,22 @@ export async function refreshGitHubCredential(
     }),
     signal: AbortSignal.timeout(30_000)
   })
-  if (!res.ok) {
+  // OAuth errors may arrive as HTTP 400 as well as a successful JSON response.
+  // Server/rate-limit errors remain retryable regardless of their response body.
+  if (!res.ok && ![400, 401, 403].includes(res.status)) {
+    await res.body?.cancel().catch(() => undefined)
     throw new ModelHttpError(
       res.status,
       `GitHub authorization refresh failed (${res.status}). Try again.`
     )
   }
   const data = (await res.json().catch(() => {
+    if (!res.ok) {
+      throw new ModelHttpError(
+        res.status,
+        `GitHub authorization refresh failed (${res.status}). Try again.`
+      )
+    }
     throw new ModelHttpError(502, 'GitHub returned an invalid authorization response. Try again.')
   })) as GitHubTokenResponse
   if (data?.error) {
@@ -94,13 +103,19 @@ export async function refreshGitHubCredential(
     ) {
       throw new ModelHttpError(
         401,
-        'GitHub authorization can no longer be renewed. Reconnect GitHub Copilot in Settings.'
+        'GitHub authorization can no longer be renewed. Reconnect GitHub Copilot to continue.'
       )
     }
     // Do not echo OAuth response bodies: they may contain credentials.
     throw new ModelHttpError(
-      data.error === 'slow_down' ? 429 : 502,
+      data.error === 'slow_down' ? 429 : res.ok ? 502 : res.status,
       'GitHub could not refresh authorization. Try again.'
+    )
+  }
+  if (!res.ok) {
+    throw new ModelHttpError(
+      res.status,
+      `GitHub authorization refresh failed (${res.status}). Try again.`
     )
   }
   return { ...credentialFromResponse(data, startedAt), sessionId: credential.sessionId }
@@ -114,7 +129,8 @@ export async function startDeviceFlow(): Promise<DeviceFlowStart> {
       'Content-Type': 'application/json',
       'User-Agent': USER_AGENT
     },
-    body: JSON.stringify({ client_id: CLIENT_ID, scope: 'read:user' })
+    body: JSON.stringify({ client_id: CLIENT_ID, scope: 'read:user' }),
+    signal: AbortSignal.timeout(30_000)
   })
   if (!res.ok) {
     throw new Error(`GitHub device code request failed (${res.status})`)
@@ -157,7 +173,8 @@ export async function pollForToken(
         client_id: CLIENT_ID,
         device_code: deviceCode,
         grant_type: 'urn:ietf:params:oauth:grant-type:device_code'
-      })
+      }),
+      signal: AbortSignal.timeout(30_000)
     })
     if (!res.ok)
       throw new ModelHttpError(

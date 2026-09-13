@@ -129,6 +129,7 @@ const roxy: RoxyApi = {
     }
   },
   copilot: {
+    needsReauthentication: () => ipcRenderer.invoke(CHANNELS.copilotNeedsReauthentication),
     start: () => ipcRenderer.invoke(CHANNELS.copilotStart),
     poll: (deviceCode, interval) => ipcRenderer.invoke(CHANNELS.copilotPoll, deviceCode, interval)
   },

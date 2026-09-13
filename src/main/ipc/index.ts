@@ -36,7 +36,7 @@ import * as cliproxy from '../services/cliproxy'
 import * as browser from '../services/browser'
 import * as cookies from '../services/cookies'
 import { invalidateCopilotModels, listModels } from '../services/models'
-import { invalidateCopilotToken } from '../services/llm'
+import { copilotNeedsReauthentication, invalidateCopilotToken } from '../services/llm'
 import { pickDefaultModel } from '../../shared/models'
 import { CLIPROXY_PROVIDER_IDS, accountsFor, isCliProxyProvider } from '../../shared/cliproxy'
 import { getUsageStats } from '../services/usage'
@@ -570,6 +570,7 @@ export function registerIpc(): void {
   })
 
   // ---- github copilot device flow ----
+  ipcMain.handle(CHANNELS.copilotNeedsReauthentication, () => copilotNeedsReauthentication())
   ipcMain.handle(CHANNELS.copilotStart, () => copilot.startDeviceFlow())
   ipcMain.handle(CHANNELS.copilotPoll, async (_e, deviceCode: string, interval: number) => {
     const token = await copilot.pollForToken(deviceCode, interval)

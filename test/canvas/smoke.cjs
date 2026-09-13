@@ -666,6 +666,8 @@ async function run() {
     await probe(`return probe.debug.frames===${idleFrames}`)
   )
   await promptHistory()
+  await require('./copilot.cjs')({ win, url, check, evaluate, clickDom, key, wait })
+  check('Copilot recovery produces no renderer errors', errors.length === 0)
   console.log(`CANVAS OK - ${checks} checks passed`)
 }
 

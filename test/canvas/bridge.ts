@@ -11,6 +11,11 @@ declare global {
       logoFallbacks: number
       releaseLogo: () => void
       motionSaveFails: boolean
+      copilotStarts: number
+      copilotPolls: number
+      copilotConnected: number
+      copilotStartFails: boolean
+      finishCopilot: (error?: string) => void
     }
   }
 }
@@ -29,7 +34,12 @@ window.__canvasTest = {
   logoPaints: 0,
   logoFallbacks: 0,
   releaseLogo,
-  motionSaveFails: false
+  motionSaveFails: false,
+  copilotStarts: 0,
+  copilotPolls: 0,
+  copilotConnected: 0,
+  copilotStartFails: false,
+  finishCopilot: () => {}
 }
 const motionListeners = new Set<(motion: MotionPreference) => void>()
 
@@ -62,6 +72,29 @@ CanvasRenderingContext2D.prototype.fillText = function (text: string, ...args: n
   Reflect.apply(fillText, this, [text, ...args])
 }
 window.roxy = {
+  copilot: {
+    start: async () => {
+      window.__canvasTest.copilotStarts++
+      if (window.__canvasTest.copilotStartFails) throw new Error('Test connection failure')
+      return {
+        userCode: 'ABCD-1234',
+        deviceCode: 'private-device-code',
+        verificationUri: 'https://github.com/login/device',
+        interval: 5,
+        expiresIn: 900
+      }
+    },
+    poll: async (deviceCode: string, interval: number) => {
+      if (deviceCode !== 'private-device-code' || interval !== 5)
+        throw new Error('Wrong device flow')
+      window.__canvasTest.copilotPolls++
+      await new Promise<void>((resolve, reject) => {
+        window.__canvasTest.finishCopilot = (error) =>
+          error ? reject(new Error(error)) : resolve()
+      })
+      return { id: 'github-copilot' }
+    }
+  },
   settings: {
     getAll: async () => ({ motion: normalizeMotion(localStorage.getItem('roxy.test.motion')) }),
     setMotion: async (value: MotionPreference) => {

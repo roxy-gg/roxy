@@ -87,6 +87,7 @@ export const CHANNELS = {
   systemOpenExternal: 'system:openExternal',
 
   copilotStart: 'copilot:start',
+  copilotNeedsReauthentication: 'copilot:needs-reauthentication',
   copilotPoll: 'copilot:poll',
 
   /**

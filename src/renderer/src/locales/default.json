@@ -9,6 +9,10 @@
     "closeCookies": "Close cookies"
   },
   "chat": {
+    "copilotReconnectBody": "GitHub Copilot auth sucks sometimes. Your authorization expired or was revoked, and automatic refresh could not recover it. Refresh your login here to keep chatting.",
+    "copilotReconnect": "Refresh GitHub Copilot login",
+    "copilotAuthenticate": "Authenticate on GitHub",
+    "copilotReconnected": "GitHub Copilot is reconnected. You can retry your message when you are ready.",
     "backTo": "Back to {{title}}",
     "cancel": "cancel",
     "cancelBackground_one": "Cancel {{count}} background subagent",

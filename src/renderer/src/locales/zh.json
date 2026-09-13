@@ -15,6 +15,10 @@
     "cancelBackground_other": "取消 {{count}} 个后台子代理",
     "cancelSubagent": "取消此子代理",
     "copied": "已复制",
+    "copilotAuthenticate": "Authenticate on GitHub",
+    "copilotReconnect": "Refresh GitHub Copilot login",
+    "copilotReconnectBody": "GitHub Copilot auth sucks sometimes. Your authorization expired or was revoked, and automatic refresh could not recover it. Refresh your login here to keep chatting.",
+    "copilotReconnected": "GitHub Copilot is reconnected. You can retry your message when you are ready.",
     "descriptionAndTasks": "描述与任务",
     "emptyBody": "选择一个文件夹以开始代理会话。",
     "emptyTitle": "打开工作区",
@@ -236,8 +240,8 @@
     "title": "MCP 服务器"
   },
   "models": {
-    "copilotUnavailable": "No available GitHub Copilot model is selected. Choose an enabled model, or check your account's model access and connection, then try again.",
     "allHidden": "所有模型都已隐藏。在<settings>设置 → 模型</settings>中恢复一些模型。",
+    "copilotUnavailable": "No available GitHub Copilot model is selected. Choose an enabled model, or check your account's model access and connection, then try again.",
     "loadFailed": "无法从 models.dev 加载模型 — 您仍然可以使用当前模型发送。",
     "loading": "正在加载模型…",
     "noMatch": "没有模型与“{{query}}”匹配。",

@@ -1,23 +1,15 @@
 import { useMemo, useState, type ReactNode } from 'react'
 import { useTranslation, Trans } from 'react-i18next'
-import {
-  ArrowLeft,
-  ArrowRight,
-  Check,
-  ChevronRight,
-  Copy,
-  ExternalLink,
-  Loader2,
-  Search
-} from 'lucide-react'
+import { ArrowLeft, ArrowRight, Check, ChevronRight, ExternalLink, Search } from 'lucide-react'
 import { AUTH_LABELS, SEED_PROVIDERS, isConnectableNow, resolveSeed } from '@shared/providers'
 import { pickDefaultModel } from '@shared/models'
-import type { DeviceFlowStart, SeedProvider } from '@shared/types'
+import type { SeedProvider } from '@shared/types'
 import { api } from '../../lib/api'
 import { useRoxyStore } from '../../lib/store'
 import { Button, Input } from '../../components/ui'
 import { ProviderLogo } from '../../lib/providerLogos'
 import { SubscriptionSetup } from '../../components/SubscriptionSetup'
+import { CopilotSetup } from '../../components/CopilotSetup'
 
 // The searchable list leads with Roxy too — a fallback for anyone who breezes
 // past the featured hero card above — followed by every other provider. (Roxy
@@ -335,93 +327,6 @@ function ProviderSetup({
             </div>
           )}
         </div>
-      </div>
-    </div>
-  )
-}
-
-function CopilotSetup({ onConnected }: { onConnected: () => void }): JSX.Element {
-  const { t } = useTranslation()
-  const [status, setStatus] = useState<'idle' | 'waiting' | 'error'>('idle')
-  const [flow, setFlow] = useState<DeviceFlowStart | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const [copied, setCopied] = useState(false)
-
-  const begin = async (): Promise<void> => {
-    setStatus('waiting')
-    setError(null)
-    try {
-      const started = await api.copilot.start()
-      setFlow(started)
-      await api.system.openExternal(started.verificationUri)
-      await api.copilot.poll(started.deviceCode, started.interval)
-      onConnected()
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
-      setStatus('error')
-    }
-  }
-
-  const copyCode = async (): Promise<void> => {
-    if (!flow) return
-    await navigator.clipboard.writeText(flow.userCode)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 1500)
-  }
-
-  if (status === 'idle') {
-    return (
-      <div className="flex flex-col gap-4">
-        <div>
-          <h2 className="text-lg font-semibold">{t('onboarding.copilotTitle')}</h2>
-          <p className="mt-1 text-sm text-text-muted">{t('onboarding.copilotBody')}</p>
-        </div>
-        <Button variant="primary" onClick={begin}>
-          <ProviderLogo id="github-copilot" name="GitHub" size={16} />{' '}
-          {t('onboarding.copilotContinue')}
-        </Button>
-      </div>
-    )
-  }
-
-  if (status === 'error') {
-    return (
-      <div className="flex flex-col gap-4">
-        <h2 className="text-lg font-semibold">{t('onboarding.copilotFailed')}</h2>
-        <p className="text-sm text-danger">{error}</p>
-        <Button variant="secondary" onClick={begin}>
-          {t('onboarding.tryAgain')}
-        </Button>
-      </div>
-    )
-  }
-
-  return (
-    <div className="flex flex-col items-center gap-5 text-center">
-      <div>
-        <h2 className="text-lg font-semibold">{t('onboarding.copilotCodeTitle')}</h2>
-        <p className="mt-1 text-sm text-text-muted">{t('onboarding.copilotCodeBody')}</p>
-      </div>
-      <button
-        onClick={copyCode}
-        className="group flex items-center gap-3 sq sq-xl sq-ring rounded-xl border border-border bg-surface-2 px-5 py-3 transition-colors hover:border-border-strong"
-      >
-        <span className="font-mono text-2xl font-semibold tracking-[0.3em] text-text">
-          {flow?.userCode ?? '••••-••••'}
-        </span>
-        <Copy className="h-4 w-4 text-text-subtle transition-colors group-hover:text-text" />
-      </button>
-      <span className="text-xs text-text-subtle">
-        {copied ? t('onboarding.copied') : t('onboarding.clickToCopy')}
-      </span>
-      <Button
-        variant="secondary"
-        onClick={() => flow && api.system.openExternal(flow.verificationUri)}
-      >
-        <ExternalLink className="h-4 w-4" /> {t('onboarding.openGitHub')}
-      </Button>
-      <div className="mt-1 flex items-center gap-2 text-sm text-text-muted">
-        <Loader2 className="h-4 w-4 animate-spin" /> {t('onboarding.waitingForAuth')}
       </div>
     </div>
   )

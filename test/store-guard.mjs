@@ -110,8 +110,10 @@ const model = (id) => ({ id, name: id, reasoning: false, toolCall: true })
 let providers = [copilot]
 let list = async () => [model('enabled')]
 let calls = 0
-const state = { providers, modelCatalog: {}, modelsTried: {} }
+let needsReauthentication = false
+const state = { providers, modelCatalog: {}, modelsTried: {}, copilotNeedsReauthentication: false }
 const bridge = {
+  copilot: { needsReauthentication: async () => needsReauthentication },
   models: {
     list: (...args) => {
       calls++
@@ -164,6 +166,19 @@ check(
 )
 
 state.modelCatalog.openai = [model('custom')]
+needsReauthentication = true
+list = async () => []
+await state.ensureModels(copilot.id)
+check(
+  'Copilot: terminal auth failure offers reconnect even with an empty model list',
+  state.copilotNeedsReauthentication
+)
+needsReauthentication = false
+await state.ensureModels(copilot.id)
+check(
+  'Copilot: policy and network failures do not ask for another login',
+  !state.copilotNeedsReauthentication
+)
 const beforeStatic = calls
 await state.ensureModels('openai')
 check('model cache: other providers retain their successful cache', calls === beforeStatic)
@@ -206,6 +221,7 @@ check(
   'model cache: reconnect leaves other providers intact',
   state.modelCatalog.openai[0]?.id === 'custom'
 )
+check('Copilot: reconnect clears the recovery action', !state.copilotNeedsReauthentication)
 
 const disconnecting = deferred()
 list = () => disconnecting.promise

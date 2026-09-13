@@ -6,6 +6,7 @@ import { encryptSecret } from '../src/main/services/secure'
 import { pollForToken } from '../src/main/services/copilot'
 import { invalidateCopilotModels, listModels } from '../src/main/services/models'
 import {
+  copilotNeedsReauthentication,
   invalidateCopilotToken,
   ModelHttpError,
   openaiEndpoint,
@@ -390,6 +391,125 @@ export async function testCopilot(): Promise<void> {
     finishModels(new Response('', { status: 401 }))
     assert.equal((await lateDiscovery)[0]?.id, 'tenant-model')
     assert.equal(exchangeCount, 2, 'a late discovery 401 preserves the new IDE token')
+    assert.equal(copilotNeedsReauthentication(), false, 'silent recovery needs no reconnect action')
+
+    // Recovery is retained even when discovery turns the auth error into an empty catalog.
+    reset({
+      accessToken: 'expired-access',
+      refreshToken: 'expired-refresh',
+      expiresAt: now - 1,
+      refreshTokenExpiresAt: now - 1
+    })
+    closeDb()
+    assert.deepEqual(await listModels('github-copilot'), [])
+    assert.equal(
+      copilotNeedsReauthentication(),
+      true,
+      'expired refresh token after restart offers reconnect'
+    )
+    assert.equal(refreshCount, 0, 'known expired refresh token is not sent')
+    assert.equal(exchangeCount, 0)
+
+    for (const error of ['bad_refresh_token', 'expired_token', 'invalid_grant']) {
+      for (const status of [200, 400]) {
+        reset({
+          accessToken: 'revoked-access',
+          refreshToken: 'revoked-refresh',
+          expiresAt: now - 1
+        })
+        oauth = () => Response.json({ error, error_description: 'SECRET' }, { status })
+        assert.deepEqual(await listModels('github-copilot'), [])
+        assert.equal(copilotNeedsReauthentication(), true, `${error} (${status}) offers reconnect`)
+      }
+    }
+    reset({ accessToken: 'revoked-access', refreshToken: 'revoked-refresh' })
+    exchange = () => new Response('', { status: 401 })
+    oauth = () => new Response('', { status: 401 })
+    await assert.rejects(endpoint(), httpError(401))
+    assert.equal(
+      copilotNeedsReauthentication(),
+      true,
+      'revocation without expiry metadata offers reconnect'
+    )
+
+    reset()
+    exchange = () => new Response('', { status: 401 })
+    await assert.rejects(endpoint(), httpError(401))
+    assert.equal(
+      copilotNeedsReauthentication(),
+      true,
+      'revoked legacy authorization offers reconnect'
+    )
+    repo.storeCopilotCredential({ accessToken: 'github-test' })
+    assert.equal(
+      copilotNeedsReauthentication(),
+      false,
+      'reconnecting even the same account clears recovery'
+    )
+    repo.disconnectProvider('github-copilot')
+    assert.equal(copilotNeedsReauthentication(), false, 'disconnect hides recovery')
+
+    for (const status of [403, 429, 502, 503]) {
+      reset()
+      exchange = () => new Response('', { status })
+      await assert.rejects(endpoint(), httpError(status))
+      assert.equal(
+        copilotNeedsReauthentication(),
+        false,
+        `exchange ${status} does not ask for sign-in`
+      )
+      reset({ accessToken: 'expired', refreshToken: 'valid-refresh', expiresAt: now - 1 })
+      oauth = () => new Response('', { status })
+      await assert.rejects(endpoint(), httpError(status))
+      assert.equal(
+        copilotNeedsReauthentication(),
+        false,
+        `refresh ${status} does not ask for sign-in`
+      )
+    }
+
+    reset()
+    const rejected = await withCopilotRetry(true, async (record) => {
+      record((await endpoint()).headers.Authorization)
+      return new Response('', { status: 401 })
+    })
+    assert.equal(rejected.status, 401)
+    assert.equal(exchangeCount, 4, 'reauthentication is offered only after automatic retries')
+    assert.equal(copilotNeedsReauthentication(), true)
+    await withCopilotRetry(true, async (record) => {
+      record((await endpoint()).headers.Authorization)
+      return new Response('ok')
+    })
+    assert.equal(copilotNeedsReauthentication(), false, 'successful request clears recovery')
+
+    reset()
+    let rejectOld!: (response: Response) => void
+    exchange = () =>
+      new Promise((resolve) => {
+        rejectOld = resolve
+      })
+    const rejectedAccount = assert.rejects(endpoint(), httpError(401))
+    repo.storeCopilotCredential({ accessToken: 'new-account' })
+    rejectOld(new Response('', { status: 401 }))
+    await rejectedAccount
+    assert.equal(
+      copilotNeedsReauthentication(),
+      false,
+      'late failure cannot ask a new account to reconnect'
+    )
+
+    reset()
+    const aborted = new AbortController()
+    await withCopilotRetry(
+      true,
+      async (record) => {
+        record((await endpoint()).headers.Authorization)
+        aborted.abort()
+        return new Response('', { status: 401 })
+      },
+      aborted.signal
+    )
+    assert.equal(copilotNeedsReauthentication(), false, 'aborted retries do not request sign-in')
     console.log('  Copilot auth: persistence, renewal, expiry, failures, and concurrency passed')
   } finally {
     globalThis.fetch = originalFetch

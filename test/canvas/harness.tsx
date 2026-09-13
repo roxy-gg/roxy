@@ -12,6 +12,7 @@ import { FIXTURES, STREAMING, LARGE_DIFF, HISTORY_FIXTURES, TERMINAL_FIXTURES } 
 import { PerformanceHarness } from './PerformanceHarness'
 import { AnimationHarness } from './AnimationHarness'
 import { startMotion } from '../../src/renderer/src/lib/motion'
+import { CopilotReconnect } from '../../src/renderer/src/components/CopilotReconnect'
 
 document.documentElement.dataset.platform = 'win32'
 const stopMotion = startMotion()
@@ -143,9 +144,43 @@ function Harness(): JSX.Element {
   )
 }
 
+function CopilotHarness(): JSX.Element {
+  const [needed, setNeeded] = useState(true)
+  const [hidden, setHidden] = useState(false)
+  return (
+    <>
+      <div className="min-h-0 flex-1 p-4">
+        <button id="switch-provider" onClick={() => setHidden(!hidden)}>
+          Switch provider
+        </button>
+        <button id="revoke" onClick={() => setNeeded(true)}>
+          Revoke again
+        </button>
+      </div>
+      <div hidden={hidden}>
+        <CopilotReconnect
+          needed={needed}
+          onConnected={async () => {
+            window.__canvasTest.copilotConnected++
+            setNeeded(false)
+          }}
+        />
+      </div>
+      <textarea
+        id="composer"
+        aria-label="Test composer"
+        className="m-4 shrink-0"
+        defaultValue="Keep my draft"
+      />
+    </>
+  )
+}
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    {new URLSearchParams(location.search).has('animation') ? (
+    {new URLSearchParams(location.search).has('copilot') ? (
+      <CopilotHarness />
+    ) : new URLSearchParams(location.search).has('animation') ? (
       <AnimationHarness />
     ) : new URLSearchParams(location.search).has('performance') ? (
       <PerformanceHarness />

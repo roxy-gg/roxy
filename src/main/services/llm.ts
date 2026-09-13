@@ -44,6 +44,20 @@ interface CopilotToken {
 }
 let copilotCache: CopilotToken | null = null
 let copilotRefresh: { credentialKey: string; promise: Promise<CopilotToken> } | null = null
+let copilotRejectedCredential: string | null = null
+
+/** Expose only the recovery action, never credentials or provider error bodies. */
+export function copilotNeedsReauthentication(): boolean {
+  try {
+    return (
+      copilotRejectedCredential !== null &&
+      copilotRejectedCredential === JSON.stringify(repo.getCopilotCredential())
+    )
+  } catch {
+    // A locked keychain is not fixed by signing in again.
+    return false
+  }
+}
 
 // ---- Vision helpers ----------------------------------------------------------
 
@@ -156,7 +170,7 @@ async function getCopilotToken(): Promise<CopilotToken> {
       if (res.status === 401) {
         throw new ModelHttpError(
           401,
-          'GitHub rejected the saved authorization and it could not be renewed. Reconnect GitHub Copilot in Settings.'
+          'GitHub rejected the saved authorization and it could not be renewed. Reconnect GitHub Copilot to continue.'
         )
       }
       if (res.status === 403) {
@@ -206,11 +220,17 @@ async function getCopilotToken(): Promise<CopilotToken> {
       )
     }
     copilotCache = token
+    copilotRejectedCredential = null
     return token
   })()
   copilotRefresh = pending
   try {
     return await pending.promise
+  } catch (error) {
+    if (error instanceof ModelHttpError && error.status === 401 && copilotRefresh === pending) {
+      copilotRejectedCredential = pending.credentialKey
+    }
+    throw error
   } finally {
     if (copilotRefresh === pending) copilotRefresh = null
   }
@@ -246,6 +266,15 @@ export async function withCopilotRetry(
     await new Promise((resolve) => setTimeout(resolve, 400 * 2 ** attempt)) // 400ms, 800ms, 1.6s
     if (signal?.aborted) break
     res = await send(recordAuthorization)
+  }
+  if (
+    isCopilot &&
+    !signal?.aborted &&
+    copilotCache &&
+    authorization === `Bearer ${copilotCache.token}`
+  ) {
+    if (res.status === 401) copilotRejectedCredential = copilotCache.credentialKey
+    else if (res.ok) copilotRejectedCredential = null
   }
   return res
 }

@@ -13,12 +13,14 @@ import {
   Square
 } from 'lucide-react'
 import type { Chat } from '@shared/types'
+import { resolveSessionConfig } from '@shared/session-config'
 import { useRoxyStore } from '../lib/store'
 import { useTranslation, Trans } from 'react-i18next'
 import { formatInterval } from '@shared/format'
 import { cn } from '../lib/cn'
 import { CanvasTranscript } from '../canvas/CanvasTranscript'
 import { Composer } from './Composer'
+import { CopilotReconnect } from './CopilotReconnect'
 import { LoopDetailsPane } from './LoopDetailsPane'
 import { SessionInfo } from './SessionInfo'
 import { WorkstreamStrip } from './WorkstreamStrip'
@@ -77,6 +79,10 @@ export function ChatView(): JSX.Element {
   const selectChat = useRoxyStore((s) => s.selectChat)
   const activeChatId = useRoxyStore((s) => s.activeChatId)
   const chats = useRoxyStore((s) => s.chats)
+  const settings = useRoxyStore((s) => s.settings)
+  const providers = useRoxyStore((s) => s.providers)
+  const copilotNeedsReauthentication = useRoxyStore((s) => s.copilotNeedsReauthentication)
+  const refreshProviders = useRoxyStore((s) => s.refreshProviders)
   const loops = useRoxyStore((s) => s.loops)
   // Subscribe to the STORED array, not a defaulted copy. A selector returning
   // `?? []` builds a new array every call, so zustand's Object.is check never
@@ -120,6 +126,8 @@ export function ChatView(): JSX.Element {
     setInfoOpen(false)
   }, [activeChatId])
   const activeChat = chats.find((c) => c.id === activeChatId)
+  const selectedProvider = settings ? resolveSessionConfig(activeChat, settings).providerId : null
+  const provider = providers.find((p) => p.id === selectedProvider) ?? providers[0]
   const isSub = activeChat?.kind === 'sub'
   const parentChat = activeChat?.parentId
     ? chats.find((c) => c.id === activeChat.parentId)
@@ -372,6 +380,10 @@ export function ChatView(): JSX.Element {
           </div>
         </div>
       )}
+
+      <div hidden={provider?.id !== 'github-copilot'}>
+        <CopilotReconnect needed={copilotNeedsReauthentication} onConnected={refreshProviders} />
+      </div>
 
       {/* A subagent's session can now be stopped from its own composer: the Stop
           cancels the DELEGATE (there is no local request here to abort), which
