@@ -31,9 +31,11 @@ import {
 import { resolveThemeById } from './services/themes'
 import * as repo from './db/repo'
 
+let mainWindow: BrowserWindow | null = null
+
 function createWindow(): BrowserWindow {
   const isMac = process.platform === 'darwin'
-  const mainWindow = new BrowserWindow({
+  const window = new BrowserWindow({
     width: 1100,
     height: 720,
     minWidth: 760,
@@ -55,30 +57,39 @@ function createWindow(): BrowserWindow {
     }
   })
 
-  mainWindow.on('ready-to-show', () => {
+  mainWindow = window
+  window.on('closed', () => {
+    if (mainWindow === window) mainWindow = null
+  })
+
+  window.on('ready-to-show', () => {
     // Repaint the native window controls from the active theme before the
     // window is first shown. The constructor can only reach built-in themes
     // synchronously; this covers a user theme, whose file has to be read.
     void resolveThemeById(repo.getSettings().activeThemeId, chromePlatform())
-      .then((theme) => applyWindowChrome(mainWindow, theme))
+      .then((theme) => applyWindowChrome(window, theme))
       .catch(() => undefined)
-    mainWindow.show()
+    window.show()
   })
 
   // Open external links in the user's browser instead of a new Electron window.
-  mainWindow.webContents.setWindowOpenHandler((details) => {
+  window.webContents.setWindowOpenHandler((details) => {
     shell.openExternal(details.url)
     return { action: 'deny' }
+  })
+  window.webContents.on('will-navigate', (event, url) => {
+    const currentUrl = window.webContents.getURL()
+    if (currentUrl && url !== currentUrl) event.preventDefault()
   })
 
   // Load the Vite dev server in development, or the built HTML in production.
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
-    mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
+    window.loadURL(process.env['ELECTRON_RENDERER_URL'])
   } else {
-    mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
+    window.loadFile(join(__dirname, '../renderer/index.html'))
   }
 
-  return mainWindow
+  return window
 }
 
 /**
@@ -122,7 +133,7 @@ app.whenReady().then(() => {
   // Open the database (runs migrations) and wire up IPC before the first window.
   getDb()
   registerIpc()
-  registerKernelIpc()
+  registerKernelIpc(() => mainWindow)
   // Anonymous usage tracking (opt-out in Settings). Deliberately after the DB
   // and IPC are up so nothing here can delay the first window, and it owns its
   // own storage - a failure in it can't touch either.
@@ -135,8 +146,7 @@ app.whenReady().then(() => {
   // backfilled rows can be priced (else they'd all cost $0). Best-effort + async.
   void warmCatalogThenBackfill()
 
-  const mainWindow = createWindow()
-  initAutoUpdater(mainWindow)
+  initAutoUpdater(createWindow())
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()

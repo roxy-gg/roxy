@@ -13,7 +13,7 @@ const execFileAsync = promisify(execFile)
 const REPOSITORY_URL = 'https://github.com/roxy-gg/kernel-tools.git'
 // Review and update this pin deliberately when the external driver changes.
 const REPOSITORY_REVISION = '2f51a1d5981a553d7642db9c81d41a002f3c44e4'
-const SERVICE_NAME = 'AIBridge'
+const SERVICE_NAME = 'RoxyKernelToolsAIBridge'
 const MCP_SERVER_ID = 'roxy-kernel-tools'
 const MCP_SERVER_IDS = [MCP_SERVER_ID, 'kernel'] as const
 
@@ -33,9 +33,28 @@ const PRIVILEGED_INSTALL_DIR = path.join(
 )
 const DRIVER_PATH = path.join(PRIVILEGED_INSTALL_DIR, 'aibridge.sys')
 const BRIDGE_PATH = path.join(PRIVILEGED_INSTALL_DIR, 'roxy-kernel-bridge.exe')
+let mutationInProgress = false
 
 function isWindows(): boolean {
   return process.platform === 'win32'
+}
+
+function isSupportedPlatform(): boolean {
+  return isWindows() && process.arch === 'x64'
+}
+
+async function runMutation(
+  operation: () => Promise<KernelInstallResult>
+): Promise<KernelInstallResult> {
+  if (mutationInProgress) {
+    return { ok: false, error: 'Another Kernel Tools operation is already in progress.', steps: [] }
+  }
+  mutationInProgress = true
+  try {
+    return await operation()
+  } finally {
+    mutationInProgress = false
+  }
 }
 
 function errorMessage(error: unknown): string {
@@ -66,11 +85,11 @@ async function run(
   args: string[],
   timeout = 30_000
 ): Promise<{ stdout: string; stderr: string }> {
-  return execFileAsync(file, args, { timeout, windowsHide: true })
+  return execFileAsync(file, args, { timeout, windowsHide: true, maxBuffer: 10 * 1024 * 1024 })
 }
 
 /** Run one executable through the standard Windows UAC consent prompt. */
-async function runElevated(file: string, args: string[], timeout = 120_000): Promise<void> {
+async function runElevated(file: string, args: string[]): Promise<void> {
   const argumentList = args.map(powershellLiteral).join(', ')
   const resultPath = path.join(INSTALL_DIR, `elevated-${randomUUID()}.txt`)
   const command = [
@@ -87,7 +106,7 @@ async function runElevated(file: string, args: string[], timeout = 120_000): Pro
     await run(
       systemExecutable('WindowsPowerShell\\v1.0\\powershell.exe'),
       ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', command],
-      timeout
+      0
     )
     const [exitCode, ...details] = readFileSync(resultPath, 'utf8')
       .replace(/^\uFEFF/, '')
@@ -143,8 +162,8 @@ function installedDriverScript(
     '  Start-Sleep -Seconds 1',
     '}',
     'New-Item -ItemType Directory -Force -Path $installDirectory | Out-Null',
-    'Copy-Item -Force $driverSource $driverTarget',
-    'Copy-Item -Force $bridgeSource $bridgeTarget',
+    'Copy-Item -Force -LiteralPath $driverSource -Destination $driverTarget',
+    'Copy-Item -Force -LiteralPath $bridgeSource -Destination $bridgeTarget',
     "if ((Get-FileHash -Algorithm SHA256 $driverTarget).Hash.ToLowerInvariant() -ne $expectedDriverHash) { throw 'Installed driver hash mismatch.' }",
     "if ((Get-FileHash -Algorithm SHA256 $bridgeTarget).Hash.ToLowerInvariant() -ne $expectedBridgeHash) { throw 'Installed bridge hash mismatch.' }",
     `& sc.exe create ${SERVICE_NAME} 'type=' 'kernel' 'start=' 'demand' 'binPath=' $driverTarget | Out-Null`,
@@ -232,7 +251,7 @@ async function removeKernelMcpServers(): Promise<void> {
   }
 }
 
-export async function setKernelAgentAccess(enable: boolean): Promise<KernelInstallResult> {
+async function setKernelAgentAccessImpl(enable: boolean): Promise<KernelInstallResult> {
   if (!isWindows()) return { ok: false, error: 'Kernel tools require Windows.', steps: [] }
   const steps: string[] = []
 
@@ -297,10 +316,11 @@ export async function getKernelStatus(): Promise<KernelStatus> {
     // The database may still be opening during app startup.
   }
 
+  const serviceExists = driverState === 'running' || driverState === 'stopped'
   return {
     isWindows: true,
-    installed: driverPath !== null && bridgePath !== null && driverState !== 'not-installed',
-    hasArtifacts: driverPath !== null || bridgePath !== null || driverState !== 'not-installed',
+    installed: driverPath !== null && bridgePath !== null && serviceExists,
+    hasArtifacts: driverPath !== null || bridgePath !== null || serviceExists,
     driverPath,
     testSigning,
     bridgePath,
@@ -315,6 +335,28 @@ async function checkoutPinnedRepository(steps: string[]): Promise<void> {
   mkdirSync(INSTALL_DIR, { recursive: true })
   await run('git.exe', ['clone', '--no-checkout', REPOSITORY_URL, REPOSITORY_DIR], 120_000)
   await run('git.exe', ['-C', REPOSITORY_DIR, 'checkout', '--detach', REPOSITORY_REVISION], 30_000)
+}
+
+export async function setKernelAgentAccess(enable: boolean): Promise<KernelInstallResult> {
+  return runMutation(() => setKernelAgentAccessImpl(enable))
+}
+
+async function verifyBuiltDriverSignature(): Promise<void> {
+  const { stdout } = await run(
+    systemExecutable('WindowsPowerShell\\v1.0\\powershell.exe'),
+    [
+      '-NoProfile',
+      '-NonInteractive',
+      '-Command',
+      `(Get-AuthenticodeSignature -LiteralPath ${powershellLiteral(BUILT_DRIVER_PATH)}).Status`
+    ],
+    10_000
+  )
+  if (stdout.trim() !== 'Valid') {
+    throw new Error(
+      'The built kernel driver does not have a valid embedded signature. Windows test-signing mode still requires a signed driver, so installation was stopped before changing your system.'
+    )
+  }
 }
 
 async function buildArtifacts(steps: string[]): Promise<void> {
@@ -353,8 +395,10 @@ async function buildArtifacts(steps: string[]): Promise<void> {
   }
 }
 
-export async function installKernelTools(): Promise<KernelInstallResult> {
-  if (!isWindows()) return { ok: false, error: 'Kernel tools require Windows.', steps: [] }
+async function installKernelToolsImpl(): Promise<KernelInstallResult> {
+  if (!isSupportedPlatform()) {
+    return { ok: false, error: 'Kernel tools require 64-bit x64 Windows.', steps: [] }
+  }
   const steps: string[] = []
   let enabledTestSigning = false
 
@@ -362,6 +406,8 @@ export async function installKernelTools(): Promise<KernelInstallResult> {
     await removeKernelMcpServers()
     await checkoutPinnedRepository(steps)
     await buildArtifacts(steps)
+    await verifyBuiltDriverSignature()
+    steps.push('Verified the kernel driver signature.')
 
     const testSigningWasEnabled = await checkTestSigning()
     if (!testSigningWasEnabled) {
@@ -409,8 +455,14 @@ export async function installKernelTools(): Promise<KernelInstallResult> {
   }
 }
 
-export async function startKernelDriver(): Promise<KernelInstallResult> {
-  if (!isWindows()) return { ok: false, error: 'Kernel tools require Windows.', steps: [] }
+export async function installKernelTools(): Promise<KernelInstallResult> {
+  return runMutation(installKernelToolsImpl)
+}
+
+async function startKernelDriverImpl(): Promise<KernelInstallResult> {
+  if (!isSupportedPlatform()) {
+    return { ok: false, error: 'Kernel tools require 64-bit x64 Windows.', steps: [] }
+  }
   const steps: string[] = []
 
   if (!existsSync(DRIVER_PATH) || !existsSync(BRIDGE_PATH)) {
@@ -430,7 +482,11 @@ export async function startKernelDriver(): Promise<KernelInstallResult> {
   }
 }
 
-export async function toggleTestSigning(enable: boolean): Promise<KernelInstallResult> {
+export async function startKernelDriver(): Promise<KernelInstallResult> {
+  return runMutation(startKernelDriverImpl)
+}
+
+async function toggleTestSigningImpl(enable: boolean): Promise<KernelInstallResult> {
   if (!isWindows()) return { ok: false, error: 'Kernel tools require Windows.', steps: [] }
   const steps: string[] = []
 
@@ -446,7 +502,11 @@ export async function toggleTestSigning(enable: boolean): Promise<KernelInstallR
   }
 }
 
-export async function uninstallKernelTools(disableSigning: boolean): Promise<KernelInstallResult> {
+export async function toggleTestSigning(enable: boolean): Promise<KernelInstallResult> {
+  return runMutation(() => toggleTestSigningImpl(enable))
+}
+
+async function uninstallKernelToolsImpl(disableSigning: boolean): Promise<KernelInstallResult> {
   if (!isWindows()) return { ok: false, error: 'Kernel tools require Windows.', steps: [] }
   const steps: string[] = []
 
@@ -487,4 +547,8 @@ export async function uninstallKernelTools(disableSigning: boolean): Promise<Ker
   } catch (error) {
     return { ok: false, error: errorMessage(error), steps }
   }
+}
+
+export async function uninstallKernelTools(disableSigning: boolean): Promise<KernelInstallResult> {
+  return runMutation(() => uninstallKernelToolsImpl(disableSigning))
 }

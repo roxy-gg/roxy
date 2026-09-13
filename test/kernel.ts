@@ -44,4 +44,13 @@ for (const key of [
   assert.ok(kernelStrings[key], `settings.kernel.${key} resolves`)
 }
 
+const kernelService = readFileSync(path.join(process.cwd(), 'src/main/services/kernel.ts'), 'utf8')
+assert.match(kernelService, /Get-AuthenticodeSignature/)
+assert.match(kernelService, /RoxyKernelToolsAIBridge/)
+assert.match(kernelService, /Another Kernel Tools operation is already in progress/)
+
+const kernelIpc = readFileSync(path.join(process.cwd(), 'src/main/ipc/kernel.ts'), 'utf8')
+assert.match(kernelIpc, /event\.senderFrame !== mainWindow\.webContents\.mainFrame/)
+assert.match(kernelIpc, /typeof enable !== 'boolean'/)
+
 console.log('kernel shared contract OK')
