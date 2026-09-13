@@ -20,6 +20,8 @@ nsis:
   createDesktopShortcut: always
 mac:
   hardenedRuntime: true
+  extendInfo:
+    NSMicrophoneUsageDescription: Roxy uses your microphone only while local dictation is active.
   entitlements: build/entitlements.mac.plist
   entitlementsInherit: build/entitlements.mac.plist
   # Notarization runs only when Apple credentials are present in the environment

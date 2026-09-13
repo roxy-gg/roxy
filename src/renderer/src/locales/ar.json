@@ -68,12 +68,37 @@
     "unknown": "غير معروف"
   },
   "composer": {
+    "addToQueue": "Add to queue",
     "attachImages": "إرفاق الصور",
+    "dictationDownloading": "Downloading free local dictation… {{percent}}%",
+    "dictationFinishing": "Finishing transcript…",
+    "dictationLoading": "Loading local speech model…",
+    "dictationStopped": "Local dictation stopped unexpectedly.",
+    "endVoice": "End",
+    "interrupt": "Interrupt",
+    "interruptVoiceTitle": "Interrupt and speak",
+    "localDictation": "Local dictation",
+    "microphoneDenied": "Microphone permission was denied.",
     "placeholder": "اسأل Roxy عن أي شيء… (الصق الصور أو أفلتها)",
+    "polish": "Polish",
+    "polishDiscarded": "The draft changed while Polish was running, so its result was discarded.",
+    "polishNeedsModel": "Select a connected chat model before polishing.",
+    "polishTitle": "Polish transcript with the selected chat model (may use provider tokens)",
+    "polishing": "Polishing…",
     "queuePlaceholder": "ضع متابعة في قائمة الانتظار…",
     "queuePlaceholderStop": "ضع متابعة في قائمة الانتظار… (Esc للإيقاف)",
     "removeImage": "إزالة الصورة",
-    "stop": "إيقاف (Esc)"
+    "restoreTranscript": "Restore raw transcript",
+    "send": "Send",
+    "startVoiceAria": "Start voice conversation",
+    "startVoiceTitle": "Start hands-free voice conversation",
+    "stop": "إيقاف (Esc)",
+    "stopDictation": "Stop",
+    "stopVoiceAria": "Interrupt or stop voice conversation",
+    "stopVoiceTitle": "Stop voice conversation",
+    "undoPolish": "Undo polish",
+    "voiceSpeaking": "Roxy is speaking",
+    "voiceThinking": "Voice conversation · Roxy is thinking…"
   },
   "configBackup": {
     "export": "تصدير",
@@ -236,8 +261,8 @@
     "title": "خوادم MCP"
   },
   "models": {
-    "copilotUnavailable": "No available GitHub Copilot model is selected. Choose an enabled model, or check your account's model access and connection, then try again.",
     "allHidden": "كل النماذج مخفية. أعد بعضها في <settings>الإعدادات ← النماذج</settings>.",
+    "copilotUnavailable": "No available GitHub Copilot model is selected. Choose an enabled model, or check your account's model access and connection, then try again.",
     "loadFailed": "تعذر تحميل النماذج من models.dev — لا يزال بإمكانك الإرسال بالنموذج الحالي.",
     "loading": "جارٍ تحميل النماذج…",
     "noMatch": "لا توجد نماذج تطابق \"{{query}}\".",
@@ -440,6 +465,23 @@
       "signedInLocally": "تم تسجيل الدخول محليًا"
     },
     "title": "الإعدادات",
+    "voice": {
+      "accurate": "Accurate",
+      "accurateDescription": "560 ms, better accuracy",
+      "clearCache": "Clear local model cache",
+      "clearing": "Clearing…",
+      "downloadHint": "The runtime and model download when you first press the microphone.",
+      "fast": "Fast",
+      "fastDescription": "160 ms, lower CPU latency",
+      "heading": "Voice dictation",
+      "installed": "Installed: {{file}}",
+      "license": "NVIDIA Open Model License; runtime Apache-2.0.",
+      "localDescription": "Roxy transcribes microphone audio on this device with NVIDIA Nemotron Speech. Audio is kept in memory and is not sent to your chat provider or saved to disk. The first use downloads about {{size}} MB.",
+      "localTitle": "Free local transcription",
+      "modeLabel": "Dictation quality",
+      "polishDescription": "Uses the AI model already selected in the composer to remove filler words and restore punctuation. This is optional, off by default, and may consume billable provider tokens. It never changes the selected model.",
+      "polishTitle": "Show transcript Polish action"
+    },
     "workstreams": {
       "autoDescription": "تعمل كل جلسة في شجرة عمل git خاصة بها على فرعها الخاص، لذا لا يمكن للجلسات المتوازية أن تتجاوز بعضها البعض أو تتعارض مع محرر النصوص الخاص بك. يتم إنشاء المجلد عند الرسالة الأولى للجلسة، وفقط في مستودعات git. قم بإيقاف تشغيل هذا لتشغيل الجلسات الجديدة مباشرة في مجلد المشروع.",
       "autoTitle": "تحصل الجلسات الجديدة على مسار عمل خاص بها",

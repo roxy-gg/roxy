@@ -9,6 +9,8 @@ export const CHANNELS = {
   settingsSetBranchPrefix: 'settings:setBranchPrefix',
   settingsSetLanguage: 'settings:setLanguage',
   settingsSetMotion: 'settings:setMotion',
+  settingsSetDictationMode: 'settings:setDictationMode',
+  settingsSetDictationPolish: 'settings:setDictationPolish',
   settingsMotionChanged: 'settings:motionChanged',
   settingsCompleteOnboarding: 'settings:completeOnboarding',
   settingsReset: 'settings:reset',
@@ -101,6 +103,15 @@ export const CHANNELS = {
   cliproxyInstallFile: 'cliproxy:installFile',
   /** main -> renderer: sidecar install/run status changed */
   cliproxyState: 'cliproxy:state',
+
+  dictationStatus: 'dictation:status',
+  dictationStart: 'dictation:start',
+  dictationAudio: 'dictation:audio',
+  dictationStop: 'dictation:stop',
+  dictationPolish: 'dictation:polish',
+  dictationClearCache: 'dictation:clearCache',
+  dictationState: 'dictation:state',
+  dictationTranscript: 'dictation:transcript',
 
   dialogOpenWorkspace: 'dialog:openWorkspace',
 

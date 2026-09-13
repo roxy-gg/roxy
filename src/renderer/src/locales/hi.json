@@ -68,12 +68,37 @@
     "unknown": "अज्ञात"
   },
   "composer": {
+    "addToQueue": "Add to queue",
     "attachImages": "छवियाँ संलग्न करें",
+    "dictationDownloading": "Downloading free local dictation… {{percent}}%",
+    "dictationFinishing": "Finishing transcript…",
+    "dictationLoading": "Loading local speech model…",
+    "dictationStopped": "Local dictation stopped unexpectedly.",
+    "endVoice": "End",
+    "interrupt": "Interrupt",
+    "interruptVoiceTitle": "Interrupt and speak",
+    "localDictation": "Local dictation",
+    "microphoneDenied": "Microphone permission was denied.",
     "placeholder": "Roxy से कुछ भी पूछें… (चित्र चिपकाएँ या यहाँ छोड़ें)",
+    "polish": "Polish",
+    "polishDiscarded": "The draft changed while Polish was running, so its result was discarded.",
+    "polishNeedsModel": "Select a connected chat model before polishing.",
+    "polishTitle": "Polish transcript with the selected chat model (may use provider tokens)",
+    "polishing": "Polishing…",
     "queuePlaceholder": "अगला संदेश कतार में जोड़ें…",
     "queuePlaceholderStop": "अगला संदेश कतार में जोड़ें… (रोकने के लिए Esc)",
     "removeImage": "छवि हटाएँ",
-    "stop": "रोकें (Esc)"
+    "restoreTranscript": "Restore raw transcript",
+    "send": "Send",
+    "startVoiceAria": "Start voice conversation",
+    "startVoiceTitle": "Start hands-free voice conversation",
+    "stop": "रोकें (Esc)",
+    "stopDictation": "Stop",
+    "stopVoiceAria": "Interrupt or stop voice conversation",
+    "stopVoiceTitle": "Stop voice conversation",
+    "undoPolish": "Undo polish",
+    "voiceSpeaking": "Roxy is speaking",
+    "voiceThinking": "Voice conversation · Roxy is thinking…"
   },
   "configBackup": {
     "export": "निर्यात करें",
@@ -236,8 +261,8 @@
     "title": "MCP सर्वर"
   },
   "models": {
-    "copilotUnavailable": "No available GitHub Copilot model is selected. Choose an enabled model, or check your account's model access and connection, then try again.",
     "allHidden": "हर मॉडल छिपा हुआ है। कुछ को <settings>सेटिंग्स → मॉडल</settings> में वापस लाएँ।",
+    "copilotUnavailable": "No available GitHub Copilot model is selected. Choose an enabled model, or check your account's model access and connection, then try again.",
     "loadFailed": "models.dev से मॉडल लोड नहीं हो सके — आप अभी भी वर्तमान मॉडल के साथ भेज सकते हैं।",
     "loading": "मॉडल लोड हो रहे हैं…",
     "noMatch": "“{{query}}” से कोई मॉडल मेल नहीं खाता।",
@@ -440,6 +465,23 @@
       "signedInLocally": "स्थानीय रूप से साइन इन किया गया"
     },
     "title": "सेटिंग्स",
+    "voice": {
+      "accurate": "Accurate",
+      "accurateDescription": "560 ms, better accuracy",
+      "clearCache": "Clear local model cache",
+      "clearing": "Clearing…",
+      "downloadHint": "The runtime and model download when you first press the microphone.",
+      "fast": "Fast",
+      "fastDescription": "160 ms, lower CPU latency",
+      "heading": "Voice dictation",
+      "installed": "Installed: {{file}}",
+      "license": "NVIDIA Open Model License; runtime Apache-2.0.",
+      "localDescription": "Roxy transcribes microphone audio on this device with NVIDIA Nemotron Speech. Audio is kept in memory and is not sent to your chat provider or saved to disk. The first use downloads about {{size}} MB.",
+      "localTitle": "Free local transcription",
+      "modeLabel": "Dictation quality",
+      "polishDescription": "Uses the AI model already selected in the composer to remove filler words and restore punctuation. This is optional, off by default, and may consume billable provider tokens. It never changes the selected model.",
+      "polishTitle": "Show transcript Polish action"
+    },
     "workstreams": {
       "autoDescription": "प्रत्येक सत्र अपनी शाखा पर अपनी git कार्यवृक्ष में काम करता है, इसलिए समानांतर सत्र एक-दूसरे को अधिलेखित नहीं कर सकते या आपके संपादक के साथ संघर्ष नहीं कर सकते। फ़ोल्डर सत्र के पहले संदेश पर बनाया जाता है, और केवल git रिपॉजिटरी में। नए सत्रों को सीधे प्रोजेक्ट फ़ोल्डर में चलाने के लिए इसे बंद करें।",
       "autoTitle": "नए सत्रों को अपनी कार्यधारा मिलती है",

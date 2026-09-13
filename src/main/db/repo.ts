@@ -127,7 +127,9 @@ export function getSettings(): AppSettings {
     // than leave the UI rendering raw keys.
     language: normalizeLanguage(map.get('language')),
     motion: normalizeMotion(map.get('motion')),
-    activeThemeId: map.get('active_theme_id') ?? null
+    activeThemeId: map.get('active_theme_id') ?? null,
+    dictationMode: map.get('dictation_mode') === 'accurate' ? 'accurate' : 'fast',
+    dictationPolish: map.get('dictation_polish') === '1'
   }
 }
 
@@ -237,6 +239,16 @@ export function setMotion(value: MotionPreference): AppSettings {
 export function setAutoWorkstream(enabled: boolean): AppSettings {
   // Store only the OFF state; see getSettings for why.
   setSetting('auto_workstream', enabled ? null : '0')
+  return getSettings()
+}
+
+export function setDictationMode(mode: 'fast' | 'accurate'): AppSettings {
+  setSetting('dictation_mode', mode === 'accurate' ? 'accurate' : null)
+  return getSettings()
+}
+
+export function setDictationPolish(enabled: boolean): AppSettings {
+  setSetting('dictation_polish', enabled ? '1' : null)
   return getSettings()
 }
 
