@@ -11,12 +11,13 @@ import { disposeConnection } from './mcp'
 
 const execFileAsync = promisify(execFile)
 
-const RELEASE_TAG = 'v1.0.1'
+const RELEASE_TAG = 'v1.0.2'
 const RELEASE_ASSET = 'kernel-tools-windows-x64.zip'
 const RELEASE_URL = `https://github.com/roxy-gg/kernel-tools/releases/download/${RELEASE_TAG}/${RELEASE_ASSET}`
-const RELEASE_SHA256 = 'a14ab9b420923f3de017923dacae87ebf72ac80def8f9ce568df3ebdaeb7f282'
-const RELEASE_COMMIT = '88dd68313db9c08e6ce419426d545e02066f5d91'
-const SIGNER_THUMBPRINT = '8106e5e23fc13860575a61c16e391ad44e174d46'
+const RELEASE_SHA256 = 'c3e0b19f69c13d4bb4ffb55987f13b3f4e6232a92245645e98acccf5cee2c4f5'
+const RELEASE_COMMIT = '62126a86e335caee1a04fdfc8db08986638112d7'
+const SIGNER_THUMBPRINT = 'f1b5ab3fa912b6bc5ae30301dd36b64708f293cf'
+const BRIDGE_SHA256 = '48e24b722c77394416801bc1c6a19dcff109561942fe03f6590056b2b730563a'
 const MAX_RELEASE_BYTES = 5 * 1024 * 1024
 const SERVICE_NAME = 'RoxyKernelToolsAIBridge'
 const MCP_SERVER_ID = 'roxy-kernel-tools'
@@ -148,6 +149,7 @@ function installedDriverScript(startDriver: boolean): string {
     `$expectedVersion = ${powershellLiteral(RELEASE_TAG)}`,
     `$expectedCommit = ${powershellLiteral(RELEASE_COMMIT)}`,
     `$expectedSignerThumbprint = ${powershellLiteral(SIGNER_THUMBPRINT)}`,
+    `$expectedBridgeHash = ${powershellLiteral(BRIDGE_SHA256)}`,
     `$installDirectory = ${powershellLiteral(PRIVILEGED_INSTALL_DIR)}`,
     `$driverTarget = ${powershellLiteral(DRIVER_PATH)}`,
     `$bridgeTarget = ${powershellLiteral(BRIDGE_PATH)}`,
@@ -184,6 +186,8 @@ function installedDriverScript(startDriver: boolean): string {
     '}',
     '$driverSource = Join-Path $stagingDirectory "aibridge.sys"',
     '$bridgeSource = Join-Path $stagingDirectory "roxy-kernel-bridge.exe"',
+    '$bridgeRecord = @($manifest.files | Where-Object { $_.name -eq "roxy-kernel-bridge.exe" })',
+    "if ($bridgeRecord.Count -ne 1 -or $bridgeRecord[0].sha256.ToLowerInvariant() -ne $expectedBridgeHash -or (Get-FileHash -Algorithm SHA256 -LiteralPath $bridgeSource).Hash.ToLowerInvariant() -ne $expectedBridgeHash) { throw 'Bridge executable hash mismatch.' }",
     '$certificateSource = Join-Path $stagingDirectory "aibridge-test.cer"',
     '$certificate = New-Object Security.Cryptography.X509Certificates.X509Certificate2($certificateSource)',
     "if ($certificate.Thumbprint.ToLowerInvariant() -ne $expectedSignerThumbprint) { throw 'Certificate thumbprint mismatch.' }",
