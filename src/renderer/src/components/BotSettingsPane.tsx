@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Pencil, Play, Plus, Trash2, X } from 'lucide-react'
-import type { Bot, BotJob, BotSchedule } from '@shared/bots'
+import type { Bot, BotJob, BotJobInput, BotSchedule } from '@shared/bots'
 import { api } from '../lib/api'
 import { useRoxyStore } from '../lib/store'
 import { BotAvatar } from './BotAvatar'
@@ -104,6 +104,8 @@ export function BotSettingsPane({ bot, onClose }: { bot: Bot; onClose: () => voi
               await api.bots.update(bot.id, { username, instructions })
               await refreshBots()
               setSaved(true)
+              // Saving is the end of an edit: confirm briefly, then close the pane.
+              setTimeout(onClose, 600)
             })
           }}
         >
@@ -346,14 +348,17 @@ function localDateTime(timestamp: number): string {
   return new Date(timestamp - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16)
 }
 
-function BotJobEditor({
+export function BotJobEditor({
   botId,
   job,
+  submit,
   onCancel,
   onSaved
 }: {
   botId: string
   job?: BotJob
+  /** Override persistence — the new-bot dialog collects drafts before the bot exists. */
+  submit?: (input: BotJobInput) => Promise<void>
   onCancel: () => void
   onSaved: () => Promise<void>
 }): JSX.Element {
@@ -400,18 +405,19 @@ function BotJobEditor({
             times.some((time) => !time || !Number.isFinite(new Date(time).getTime()))
           )
             throw new Error(t('bots.invalidTimes'))
-          await api.bots.saveJob(
-            {
-              botId,
-              name: name.trim(),
-              prompt: prompt.trim(),
-              schedule,
-              enabled,
-              remainingRuns: runs === '' ? null : Number(runs)
-            },
-            job?.id
-          )
-          await api.automation.wake()
+          const input: BotJobInput = {
+            botId,
+            name: name.trim(),
+            prompt: prompt.trim(),
+            schedule,
+            enabled,
+            remainingRuns: runs === '' ? null : Number(runs)
+          }
+          if (submit) await submit(input)
+          else {
+            await api.bots.saveJob(input, job?.id)
+            await api.automation.wake()
+          }
           await onSaved()
         } catch (e) {
           setError(message(e))

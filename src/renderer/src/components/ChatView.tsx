@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useState } from 'react'
 import {
   Check,
   ChevronRight,
@@ -7,6 +7,7 @@ import {
   Hammer,
   ListTree,
   Loader2,
+  Download,
   RotateCw,
   Settings,
   Square
@@ -16,6 +17,7 @@ import { useRoxyStore } from '../lib/store'
 import { useTranslation } from 'react-i18next'
 import { cn } from '../lib/cn'
 import { CanvasTranscript } from '../canvas/CanvasTranscript'
+import { partsText } from '../canvas/transcript'
 import { Composer } from './Composer'
 import { BotSettingsPane } from './BotSettingsPane'
 import { BotAvatar } from './BotAvatar'
@@ -75,7 +77,11 @@ export function ChatView(): JSX.Element {
   )
   const submit = useRoxyStore((s) => s.submit)
   const stop = useRoxyStore((s) => s.stop)
-  const queue = useRoxyStore((s) => s.queue)
+  const allQueued = useRoxyStore((s) => s.queue)
+  // A running item's prompt is already persisted to the transcript by the main
+  // process, so showing its queue row too renders the same message twice.
+  // Failed items stay listed: they're the retry/edit affordance.
+  const queue = useMemo(() => allQueued.filter((item) => item.state !== 'running'), [allQueued])
   const newSession = useRoxyStore((s) => s.newSession)
   const selectChat = useRoxyStore((s) => s.selectChat)
   const activeChatId = useRoxyStore((s) => s.activeChatId)
@@ -264,6 +270,28 @@ export function ChatView(): JSX.Element {
                 <Settings className="h-3.5 w-3.5" /> {t('chat.settings')}
               </button>
             )}
+            {/* DEV ONLY — dump the transcript to a file for debugging. Remove before release. */}
+            <button
+              onClick={() => {
+                const dump = messages
+                  .map(
+                    (m) =>
+                      `## ${m.botUsername ? `@${m.botUsername}` : m.role}\n\n${partsText(m.parts)}`
+                  )
+                  .join('\n\n')
+                const url = URL.createObjectURL(new Blob([dump], { type: 'text/markdown' }))
+                const link = document.createElement('a')
+                link.href = url
+                const name = activeBot ? `@${activeBot.username}` : activeChat.title
+                link.download = `${(name || 'chat').replace(/[/\\:]/g, '-')}.md`
+                link.click()
+                URL.revokeObjectURL(url)
+              }}
+              title="Export chat (dev)"
+              className="flex shrink-0 items-center gap-1 sq sq-md rounded-md px-1.5 py-0.5 text-[11px] text-text-muted transition-colors hover:bg-white/5 hover:text-text"
+            >
+              <Download className="h-3.5 w-3.5" />
+            </button>
             <UsageMeter />
           </div>
         </header>

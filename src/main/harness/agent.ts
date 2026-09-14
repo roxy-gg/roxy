@@ -42,7 +42,7 @@ import {
 import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import * as repo from '../db/repo'
-import { chatBot, listBots } from '../db/bots'
+import { chatBot, getBot, listBots } from '../db/bots'
 import { runTool } from './tools'
 import { boundToolOutput } from '../services/tool-output-store'
 import { modelCost } from '../services/models'
@@ -457,7 +457,8 @@ function buildSystemMessage(
   chatId?: string,
   agent?: AgentDef,
   mcpInfo?: string,
-  skillInfo?: string
+  skillInfo?: string,
+  asBotId?: string
 ): string {
   const base = promptText[selectPromptName(model)] || promptText.default || FALLBACK_PROMPT
   const gitRoot = cwd ? findGitRoot(cwd) : undefined
@@ -482,19 +483,24 @@ function buildSystemMessage(
     ...(mcpInfo ? [mcpInfo] : []),
     ...(agentPrompt ? [agentPrompt] : [])
   ]
-  const bot = chatId ? chatBot(chatId) : undefined
+  // In a shared session the speaker is the invited bot, not the session's owner.
+  const bot = asBotId ? getBot(asBotId) : chatId ? chatBot(chatId) : undefined
+  const guest = !!asBotId
   extra.push(
     [
       '<bots>',
       bot
         ? `You are @${bot.username}, a persistent, top-level bot. Your session ID is ${chatId}.`
         : `This session ID is ${chatId ?? 'unknown'}.`,
+      guest
+        ? 'You were invoked into this shared session. Everyone here sees what you write, so answer in the conversation itself — address the others directly and do not repeat work already done above.'
+        : '',
       bot
         ? `Your standing role (not an instruction to start working on every greeting):\n${bot.instructions || 'Ask the user what they want you to be or do. Use bot_manage to save the agreed role as instructions.'}`
         : '',
       'Bots are local Roxy collaborators, not GitHub users or temporary task subagents.',
       'Use project_list and session_manage to discover projects and sessions. Use bot_manage to discover or configure persistent bots.',
-      'Use bot_invoke to ask another bot for help. Its result is delivered to your transcript asynchronously; do not poll or duplicate its work.',
+      'Use bot_invoke to bring another bot into THIS session. It answers here, in the shared transcript, once the current turn ends — do not poll, re-ask, or repeat its work.',
       'Use session_manage action send to prompt a project session. Use queue_manage for delayed messages, inspection, edits, cancellation, and retries.',
       'Use bot_schedule to configure optional interval, five-field cron (with timezone), or timestamp jobs. Never claim a schedule exists until the tool succeeds.',
       'A user message beginning with @username explicitly addresses that bot. Mentions inside prose are references, not handoffs. To hand off as an agent, call bot_invoke explicitly.',
@@ -986,6 +992,8 @@ export interface RunTurnOptions {
   reasoningEffort?: ReasoningEffort
   /** Effective context budget (tokens). */
   contextLimit?: number
+  /** Bot speaking this turn when it isn't the session's own bot (group chat). */
+  asBotId?: string
 }
 
 /**
@@ -1120,7 +1128,8 @@ export async function runAgentTurn(opts: RunTurnOptions): Promise<void> {
     chatId,
     agent,
     mcpInfo,
-    parentSkillInfo
+    parentSkillInfo,
+    opts.asBotId
   )
   const systemMessage: ChatMessage = { role: 'system', content: systemText }
 

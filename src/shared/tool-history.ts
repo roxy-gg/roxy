@@ -106,11 +106,27 @@ export function reconstructAssistant(parts: MessagePart[]): ChatMessage[] {
   return out
 }
 
-/** Rebuild one persisted turn (user or assistant) into structured chat messages. */
-export function reconstructTurn(m: Message): ChatMessage[] {
+/** A speaker marker this module added on a previous pass — or one a model copied
+ *  from its own history. Either way it is scaffolding, never part of the reply. */
+const SPEAKER_MARKER = /^(?:\[@[a-z0-9_-]+\]\s*)+/i
+
+/**
+ * Rebuild one persisted turn (user or assistant) into structured chat messages.
+ *
+ * `self` is the bot whose context is being built. Its own turns are NOT marked:
+ * a model that sees `[@bobo]` on every one of its past replies concludes the
+ * marker is part of its voice and starts typing it itself — and since the next
+ * rebuild prefixes *that* too, every round added another one ("[@bobo] [@bobo] …").
+ * Marking only other speakers keeps the tag meaningful and the loop impossible.
+ */
+export function reconstructTurn(m: Message, self?: string): ChatMessage[] {
   if (m.role === 'assistant') {
     const turns = reconstructAssistant(m.parts)
-    if (m.botUsername && turns[0]) turns[0].content = `[@${m.botUsername}]\n${turns[0].content}`
+    if (turns[0]) {
+      turns[0].content = turns[0].content.replace(SPEAKER_MARKER, '')
+      if (m.botUsername && m.botUsername !== self)
+        turns[0].content = `[@${m.botUsername}]\n${turns[0].content}`
+    }
     return turns
   }
   const content = m.parts

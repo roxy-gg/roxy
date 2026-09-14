@@ -23,6 +23,7 @@ export function Composer({
   const [images, setImages] = useState<ComposerImage[]>([])
   const [dragging, setDragging] = useState(false)
   const ref = useRef<HTMLTextAreaElement>(null)
+  const mirror = useRef<HTMLDivElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const bots = useRoxyStore((s) => s.bots)
   const [caret, setCaret] = useState(0)
@@ -31,21 +32,25 @@ export function Composer({
   const [focused, setFocused] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
-  const prefix = /^\s*@([a-z0-9_-]*)$/i.exec(value.slice(0, caret))
+  // A mention can start anywhere, as long as the "@" opens a word (start of
+  // input or after whitespace) — matching how you actually type "ask @bob to…".
+  const prefix = /(?:^|\s)@([a-z0-9_-]*)$/i.exec(value.slice(0, caret))
   const mentions =
     focused && prefix && !mentionDismissed
       ? bots.filter((bot) => bot.username.startsWith(prefix[1].toLowerCase())).slice(0, 8)
       : []
   const selectedMention = Math.min(mentionIndex, Math.max(0, mentions.length - 1))
   const chooseMention = (username: string): void => {
+    if (!prefix) return
+    // Replace just the partial mention, keeping whatever surrounds it.
+    const head = value.slice(0, caret - prefix[1].length - 1) + `@${username} `
     const rest = value.slice(caret).replace(/^[a-z0-9_-]*\s*/i, '')
-    const start = `@${username} `
-    setValue(start + rest)
-    setCaret(start.length)
+    setValue(head + rest)
+    setCaret(head.length)
     setMentionDismissed(true)
     requestAnimationFrame(() => {
       ref.current?.focus()
-      ref.current?.setSelectionRange(start.length, start.length)
+      ref.current?.setSelectionRange(head.length, head.length)
       autoGrow()
     })
   }
@@ -134,6 +139,27 @@ export function Composer({
       void addFiles(files)
     }
   }
+
+  // Same split the transcript uses: "@" must open a word to count as a mention.
+  const highlighted = value
+    .split(/((?:^|\s)@[a-z0-9_-]+)/gi)
+    .map((chunk, i) => {
+      const at = chunk.search(/@/)
+      if (i % 2 === 0 || at < 0)
+        return (
+          <span key={i} className="text-text">
+            {chunk}
+          </span>
+        )
+      return (
+        <span key={i} className="text-text">
+          {chunk.slice(0, at)}
+          <span className="font-semibold text-accent">{chunk.slice(at)}</span>
+        </span>
+      )
+    })
+    // A trailing newline is invisible in a div but real in a textarea.
+    .concat(value.endsWith('\n') ? [<span key="pad">{'\u200b'}</span>] : [])
 
   const autoGrow = (): void => {
     const el = ref.current
@@ -241,37 +267,52 @@ export function Composer({
             ))}
           </div>
         )}
-        <textarea
-          ref={ref}
-          value={value}
-          rows={1}
-          aria-label={t('composer.placeholder')}
-          aria-autocomplete="list"
-          aria-controls={mentions.length ? 'bot-mentions' : undefined}
-          aria-activedescendant={
-            mentions.length ? `bot-mention-${mentions[selectedMention].id}` : undefined
-          }
-          onFocus={() => setFocused(true)}
-          onBlur={() => setFocused(false)}
-          onSelect={(e) => setCaret(e.currentTarget.selectionStart)}
-          placeholder={
-            sending
-              ? onStop
-                ? t('composer.queuePlaceholderStop')
-                : t('composer.queuePlaceholder')
-              : t('composer.placeholder')
-          }
-          onChange={(e) => {
-            setValue(e.target.value)
-            setCaret(e.target.selectionStart)
-            setMentionIndex(0)
-            setMentionDismissed(false)
-            autoGrow()
-          }}
-          onKeyDown={onKeyDown}
-          onPaste={onPaste}
-          className="block max-h-44 w-full resize-none bg-transparent px-4 pt-3 text-sm text-text outline-none placeholder:text-text-subtle"
-        />
+        {/* A textarea can't style parts of its own value, so an identical,
+            aria-hidden layer sits behind it and paints the @mentions. Every
+            metric below must match the textarea's exactly or the text drifts. */}
+        <div className="relative">
+          <div
+            ref={mirror}
+            aria-hidden
+            className="pointer-events-none absolute inset-0 max-h-44 overflow-hidden whitespace-pre-wrap break-words px-4 pt-3 text-sm text-transparent"
+          >
+            {highlighted}
+          </div>
+          <textarea
+            ref={ref}
+            value={value}
+            rows={1}
+            aria-label={t('composer.placeholder')}
+            aria-autocomplete="list"
+            aria-controls={mentions.length ? 'bot-mentions' : undefined}
+            aria-activedescendant={
+              mentions.length ? `bot-mention-${mentions[selectedMention].id}` : undefined
+            }
+            onFocus={() => setFocused(true)}
+            onBlur={() => setFocused(false)}
+            onSelect={(e) => setCaret(e.currentTarget.selectionStart)}
+            placeholder={
+              sending
+                ? onStop
+                  ? t('composer.queuePlaceholderStop')
+                  : t('composer.queuePlaceholder')
+                : t('composer.placeholder')
+            }
+            onChange={(e) => {
+              setValue(e.target.value)
+              setCaret(e.target.selectionStart)
+              setMentionIndex(0)
+              setMentionDismissed(false)
+              autoGrow()
+            }}
+            onKeyDown={onKeyDown}
+            onPaste={onPaste}
+            onScroll={(e) => {
+              if (mirror.current) mirror.current.scrollTop = e.currentTarget.scrollTop
+            }}
+            className="relative block max-h-44 w-full resize-none bg-transparent px-4 pt-3 text-sm text-transparent caret-text outline-none placeholder:text-text-subtle"
+          />
+        </div>
         <div className="flex items-center justify-between gap-2 px-2.5 pb-2 pt-1.5">
           {/* Chrome-less controls, matching the workstream strip below. Two
               things do the work the borders used to: gap-1 (further apart and

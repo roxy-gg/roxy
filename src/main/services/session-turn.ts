@@ -195,6 +195,7 @@ async function runTurn(
       contextLimit: input.contextLimit,
       cwd,
       chatId: input.sessionId,
+      asBotId: input.asBotId,
       signal,
       emit
     })

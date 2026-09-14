@@ -1286,6 +1286,9 @@ interface QueueRow {
   not_before: number
   state: 'pending' | 'running' | 'failed'
   error: string | null
+  bot_id: string | null
+  bot_username: string | null
+  as_bot_id: string | null
 }
 
 export function listQueue(chatId: string): QueueItem[] {
@@ -1303,7 +1306,10 @@ export function listQueue(chatId: string): QueueItem[] {
     hops: r.hops,
     notBefore: r.not_before,
     state: r.state,
-    error: r.error ?? undefined
+    error: r.error ?? undefined,
+    botId: r.bot_id ?? undefined,
+    botUsername: r.bot_username ?? undefined,
+    asBotId: r.as_bot_id ?? undefined
   }))
 }
 

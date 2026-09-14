@@ -106,11 +106,21 @@ export async function runBotTool(
       const bot = bots.getBot(text(input.bot))
       if (!bot) throw new Error('Bot not found; use bot_manage list')
       if (bot.chatId === source) throw new Error('Use queue_manage to queue work for yourself')
-      result = enqueuePrompt(bot.chatId, text(input.prompt), undefined, {
+      if (!source) throw new Error('bot_invoke needs a session to answer in')
+      // The invited bot answers HERE, in the shared session, the way a group chat
+      // works: everyone sees the exchange and the context is the conversation
+      // itself. Sending it to the bot's own chat instead split the thread in two
+      // and forced the reply to be copied back.
+      //
+      // The request belongs to whoever is asking — attributing it to the invited
+      // bot made its own question appear above its answer, signed with its name.
+      const asker = bots.chatBot(source)
+      result = enqueuePrompt(source, text(input.prompt), undefined, {
         sourceChatId: source,
-        replyToChatId: source,
         hops,
-        continueReply: true
+        asBotId: bot.id,
+        botId: asker?.id,
+        botUsername: asker?.username
       })
       break
     }

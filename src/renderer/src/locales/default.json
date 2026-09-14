@@ -7,6 +7,8 @@
     "usernameHint": "2–32 letters, numbers, underscores or hyphens. Start with a letter. Roxy is reserved.",
     "intro": "What do you want me to be or do?",
     "settings": "Bot settings",
+    "editSettings": "Edit settings",
+    "deleteTitle": "Delete bot?",
     "close": "Close",
     "instructions": "Instructions",
     "instructionsHint": "Describe who this bot is and how it should help.",

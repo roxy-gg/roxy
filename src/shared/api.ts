@@ -370,6 +370,9 @@ export interface LlmStartInput {
   reasoning?: boolean
   /** Effective context-window budget in tokens (drives large-context headers). */
   contextLimit?: number
+  /** Bot speaking this turn, when it is not the session's own bot — a guest in a
+   *  shared session. Drives the identity + role in the system prompt. */
+  asBotId?: string
 }
 
 export interface LlmResult {

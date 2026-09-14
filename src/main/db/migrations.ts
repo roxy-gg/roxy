@@ -40,6 +40,9 @@ function botSchema(db: Database): void {
   addColumnIfMissing(db, 'queue', 'message_id', 'TEXT')
   addColumnIfMissing(db, 'queue', 'continue_reply', 'INTEGER NOT NULL DEFAULT 0')
   addColumnIfMissing(db, 'queue', 'schedule_id', 'TEXT')
+  addColumnIfMissing(db, 'queue', 'bot_id', 'TEXT')
+  addColumnIfMissing(db, 'queue', 'bot_username', 'TEXT')
+  addColumnIfMissing(db, 'queue', 'as_bot_id', 'TEXT')
 }
 
 /** Whether a table already has a column — SQLite can't express this in DDL. */

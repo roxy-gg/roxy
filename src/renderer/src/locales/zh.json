@@ -48,6 +48,8 @@
     "scheduleType": "Schedule type",
     "schedules": "Schedules",
     "settings": "Bot settings",
+    "editSettings": "Edit settings",
+    "deleteTitle": "Delete bot?",
     "timestamps": "Specific times",
     "timezone": "Time zone",
     "unlimited": "Unlimited",

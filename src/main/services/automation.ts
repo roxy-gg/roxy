@@ -78,6 +78,12 @@ export function enqueuePrompt(
     notBefore?: number
     hops?: number
     continueReply?: boolean
+    /** Set when the prompt is machine-generated on a bot's behalf, so the
+     *  transcript attributes it to that bot instead of to the user. */
+    botId?: string
+    botUsername?: string
+    /** Bot that should ANSWER this prompt, when it isn't the session's own bot. */
+    asBotId?: string
   } = {}
 ): QueueItem {
   if (!repo.getChat(chatId)) throw new Error('Session not found')
@@ -103,7 +109,7 @@ export function enqueuePrompt(
     const item = repo.enqueue(chatId, content.trim(), images)
     getDb()
       .prepare(
-        'UPDATE queue SET source_chat_id = ?, reply_to_chat_id = ?, hops = ?, not_before = ?, continue_reply = ? WHERE id = ?'
+        'UPDATE queue SET source_chat_id = ?, reply_to_chat_id = ?, hops = ?, not_before = ?, continue_reply = ?, bot_id = ?, bot_username = ?, as_bot_id = ? WHERE id = ?'
       )
       .run(
         options.sourceChatId ?? null,
@@ -111,6 +117,9 @@ export function enqueuePrompt(
         options.hops ?? 0,
         options.notBefore ?? 0,
         Number(!!options.continueReply),
+        options.botId ?? null,
+        options.botUsername ?? null,
+        options.asBotId ?? null,
         item.id
       )
     return item
@@ -156,42 +165,14 @@ export function wakeAutomation(): void {
       const item = repo.listQueue(chatId)[0]
       if (!item || item.state !== 'pending' || (item.notBefore ?? 0) > Date.now()) continue
       const target = mentionedBot(item.content, bots.listBots())
-      if (target && target.chatId !== chatId) {
-        try {
-          getDb().transaction(() => {
-            const source = repo.getChat(chatId)
-            const context = repo
-              .listMessages(chatId)
-              .slice(-8)
-              .map((m) => `${m.role}: ${m.content}`)
-              .join('\n')
-              .slice(-24000)
-            const prompt = item.content.replace(/^\s*@[a-z][a-z0-9_-]*[\s,:]*/i, '') || 'Hello'
-            enqueuePrompt(
-              target.chatId,
-              `Request from session ${chatId} (${source?.title ?? ''}).\n\n${prompt}\n\n<source_context>\n${context}\n</source_context>`,
-              item.images,
-              { sourceChatId: chatId, replyToChatId: chatId, hops: (item.hops ?? 0) + 1 }
-            )
-            repo.addMessage({
-              chatId,
-              role: 'user',
-              content: item.content,
-              parts: [
-                { type: 'text', text: item.content },
-                ...(item.images ?? []).map((image) => ({ type: 'image' as const, ...image }))
-              ]
-            })
-            repo.removeQueueItem(item.id)
-          })()
-        } catch (error) {
-          getDb()
-            .prepare(`UPDATE queue SET state = 'failed', error = ? WHERE id = ?`)
-            .run(String(error), item.id)
-        }
+      // Addressing a bot by name invites it into THIS conversation — it answers
+      // here, with the thread as its context. The message itself still belongs to
+      // whoever wrote it; only the responder changes.
+      if (target && target.chatId !== chatId && target.id !== item.asBotId) {
+        getDb()
+          .prepare('UPDATE queue SET as_bot_id = ?, hops = ? WHERE id = ?')
+          .run(target.id, (item.hops ?? 0) + 1, item.id)
         notifyAutomation(chatId)
-        notifyTranscriptChanged(chatId)
-        continue
       }
       void deliver(item).catch((error) => console.error('[bots] delivery failed', error))
     }
@@ -202,10 +183,11 @@ export function wakeAutomation(): void {
 
 function history(chatId: string, budget: number, outputReserve: number): ChatMessage[] {
   const since = repo.getChat(chatId)?.contextSummaryAt ?? 0
+  const self = bots.chatBot(chatId)?.username
   const groups = repo
     .listMessages(chatId)
     .filter((m) => (m.role === 'user' || m.role === 'assistant') && m.createdAt > since)
-    .map(reconstructTurn)
+    .map((m) => reconstructTurn(m, self))
     .filter((g) => g.length)
   const pruned = pruneToolMessages(groups.flat(), { keepRecentTokens: KEEP_RECENT_TOKENS })
   let index = 0
@@ -264,15 +246,28 @@ async function deliver(item: QueueItem): Promise<void> {
       pickDefaultModel(catalog)
     if (!model) throw new Error('Select a model for this session, then retry.')
     if (controller.signal.aborted) throw new Error('Stopped.')
-    const previous = getDb().prepare('SELECT message_id FROM queue WHERE id = ?').get(item.id) as
-      | { message_id: string | null }
+    const previous = getDb()
+      .prepare('SELECT message_id, bot_id, bot_username, as_bot_id FROM queue WHERE id = ?')
+      .get(item.id) as
+      | {
+          message_id: string | null
+          bot_id: string | null
+          bot_username: string | null
+          as_bot_id: string | null
+        }
       | undefined
     if (!previous) return
     if (!previous.message_id)
       getDb().transaction(() => {
         const message = repo.addMessage({
           chatId: item.chatId,
-          role: 'user',
+          // A prompt this session's own agent wrote (asking a guest bot for help)
+          // is not something the user said — attributing it to the user made the
+          // request show up as "You", and attributing it to the guest made the
+          // guest appear to ask itself.
+          role: item.sourceChatId === item.chatId ? 'assistant' : 'user',
+          ...(previous.bot_id ? { botId: previous.bot_id } : {}),
+          ...(previous.bot_username ? { botUsername: previous.bot_username } : {}),
           content: item.content,
           parts: [
             { type: 'text', text: item.content },
@@ -303,7 +298,8 @@ async function deliver(item: QueueItem): Promise<void> {
         agentId: config.agentId,
         reasoning: info?.reasoning,
         reasoningEffort: clampReasoningEffort(config.reasoningEffort, info?.reasoningEfforts),
-        contextLimit: budget
+        contextLimit: budget,
+        ...(previous.as_bot_id ? { asBotId: previous.as_bot_id } : {})
       },
       (event) => {
         fold.apply(event)
@@ -312,7 +308,9 @@ async function deliver(item: QueueItem): Promise<void> {
       },
       controller.signal
     )
-    const bot = bots.chatBot(item.chatId)
+    // Whoever spoke this turn owns the reply: the invited bot in a shared
+    // session, otherwise the session's own bot.
+    const bot = previous.as_bot_id ? bots.getBot(previous.as_bot_id) : bots.chatBot(item.chatId)
     const parts = fold.parts
     getDb().transaction(() => {
       if (!repo.getChat(item.chatId)) return
@@ -350,9 +348,12 @@ async function deliver(item: QueueItem): Promise<void> {
           .prepare('SELECT COUNT(*) AS n FROM queue WHERE chat_id = ?')
           .get(item.replyToChatId) as { n: number }
         if (continuation?.continue_reply && (item.hops ?? 0) < 8 && pending.n < 100) {
+          // The reply was just persisted to this transcript, so the nudge must
+          // NOT repeat it: quoting it again produced a second copy of the whole
+          // answer, attributed to "You" because a queued prompt is a user turn.
           enqueuePrompt(
             item.replyToChatId,
-            `Your delegated request to ${bot ? `@${bot.username}` : `session ${item.chatId}`} completed. Continue the original task if needed, or report the result. Do not reflexively invoke the sender again.\n\n<result>\n${text || partsToContent(parts)}\n</result>`,
+            `${bot ? `@${bot.username}` : `Session ${item.chatId}`} answered above. Continue the original task if needed, or report the result. Do not reflexively invoke the sender again.`,
             undefined,
             { sourceChatId: item.chatId, hops: (item.hops ?? 0) + 1 }
           )

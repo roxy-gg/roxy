@@ -16,7 +16,7 @@ import type { TFunction } from 'i18next'
 import type { Message, MessagePart } from '@shared/types'
 import { Builder } from './builder'
 import type { Block, Scene, ViewState } from './scene'
-import { TextMetrics, font } from './text'
+import { TextMetrics, font, type InlineSpan } from './text'
 import type { CanvasTheme } from './theme'
 import { alpha } from './theme'
 import { FONT_SIZE, SIZE, SPACE } from './metrics'
@@ -296,10 +296,26 @@ export function layoutUserBody(
     .map((p) => (p.type === 'text' || p.type === 'reasoning' ? p.text : ''))
     .join('')
   if (text) {
-    cursor += layoutPlainText(builder, text, x, cursor, width, {
-      color: palette.text,
-      size: FONT_SIZE.body
-    })
+    // ...except @mentions, which stay highlighted the way the composer showed
+    // them, so a prompt that hands work to a bot reads as such in the transcript.
+    const base = font(FONT_SIZE.body, 400, 'sans')
+    const spans: InlineSpan[] = []
+    let last = 0
+    for (const match of text.matchAll(/(?:^|\s)@[a-z0-9_-]+/gi)) {
+      const at = match.index + match[0].indexOf('@')
+      if (at > last)
+        spans.push({ text: text.slice(last, at), font: base, color: palette.text, offset: last })
+      last = at + match[0].length - match[0].indexOf('@')
+      spans.push({
+        text: text.slice(at, last),
+        font: font(FONT_SIZE.body, 600, 'sans'),
+        color: palette.accent,
+        offset: at
+      })
+    }
+    if (last < text.length)
+      spans.push({ text: text.slice(last), font: base, color: palette.text, offset: last })
+    cursor += builder.paragraph(spans, x, cursor, width)
   }
   return cursor - y
 }

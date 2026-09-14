@@ -144,20 +144,23 @@ async function main(): Promise<void> {
   assert.ok(
     !(await runTool('loop_create', { name: 'old', prompt: 'old', interval_minutes: 1 }, ctx)).ok
   )
+  // An invited bot answers in the session that called it, not in its own chat.
   const invoked = await runTool('bot_invoke', { bot: 'reviewer', prompt: 'Check this diff' }, ctx)
   assert.ok(invoked.ok, invoked.output)
-  const queued = repo.listQueue(bot.chatId)[0]
-  assert.equal(queued.replyToChatId, session.id)
+  assert.equal(repo.listQueue(bot.chatId).length, 0)
+  const queued = repo.listQueue(session.id)[0]
+  assert.equal(queued.asBotId, bot.id)
+  assert.equal(queued.replyToChatId, undefined)
   assert.equal(queued.hops, 1)
   assert.ok(
     (await runTool('queue_manage', { action: 'update', id: queued.id, prompt: 'Updated' }, ctx)).ok
   )
-  assert.equal(repo.listQueue(bot.chatId)[0].content, 'Updated')
+  assert.equal(repo.listQueue(session.id)[0].content, 'Updated')
   getDb().prepare(`UPDATE queue SET state = 'running' WHERE id = ?`).run(queued.id)
   assert.ok(!(await runTool('queue_manage', { action: 'delete', id: queued.id }, ctx)).ok)
   getDb().prepare(`UPDATE queue SET state = 'failed' WHERE id = ?`).run(queued.id)
   assert.ok((await runTool('queue_manage', { action: 'delete', id: queued.id }, ctx)).ok)
-  assert.equal(repo.listQueue(bot.chatId).length, 0)
+  assert.equal(repo.listQueue(session.id).length, 0)
   assert.throws(() => enqueuePrompt(bot.chatId, 'cycle', undefined, { hops: 9 }), /Handoff/)
 
   const controller = new AbortController()
@@ -178,17 +181,18 @@ async function main(): Promise<void> {
   assert.equal(automationSnapshot().length, 0)
   repo.removeQueueItem(repo.listQueue(bot.chatId)[0].id)
 
+  // A mention routes the answer to the named bot while the prompt stays put.
   const mention = enqueuePrompt(session.id, '@reviewer inspect this')
   wakeAutomation()
-  assert.ok(!repo.listQueue(session.id).some((item) => item.id === mention.id))
-  assert.equal(repo.listQueue(bot.chatId)[0].replyToChatId, session.id)
-  assert.ok(repo.listMessages(session.id).some((m) => m.content.startsWith('@reviewer')))
-  const row = repo.listQueue(bot.chatId)[0]
-  getDb().prepare(`UPDATE queue SET state = 'running' WHERE id = ?`).run(row.id)
+  const routed = repo.listQueue(session.id).find((item) => item.id === mention.id)!
+  assert.equal(routed.asBotId, bot.id)
+  assert.equal(repo.listQueue(bot.chatId).length, 0)
+  getDb().prepare(`UPDATE queue SET state = 'running' WHERE id = ?`).run(routed.id)
   startAutomation()
   stopAutomation()
-  assert.equal(repo.listQueue(bot.chatId)[0].state, 'failed')
-  assert.match(repo.listQueue(bot.chatId)[0].error!, /shutdown/)
+  assert.equal(repo.listQueue(session.id)[0].state, 'failed')
+  assert.match(repo.listQueue(session.id)[0].error!, /shutdown/)
+  for (const item of repo.listQueue(session.id)) repo.removeQueueItem(item.id)
 
   repo.addMessage({
     chatId: session.id,
@@ -299,7 +303,8 @@ async function main(): Promise<void> {
     assert.equal(repo.listQueue(worker.chatId).length, 0)
     assert.equal(repo.listMessages(worker.chatId).filter((m) => m.role === 'assistant').length, 2)
 
-    // Tool-invoked delegation resumes the caller once, without a reply-to loop.
+    // An invited bot answers inside the calling session — one shared transcript,
+    // the request signed by the caller and the reply by the guest.
     const caller = bots.createBot('caller')
     const delegated = await runTool(
       'bot_invoke',
@@ -311,12 +316,21 @@ async function main(): Promise<void> {
     )
     assert.ok(delegated.ok, delegated.output)
     wakeAutomation()
-    await waitIdle()
-    const continuation = repo.listQueue(caller.chatId)[0]
-    assert.equal(continuation.hops, 2)
-    assert.equal(continuation.replyToChatId, undefined)
-    assert.ok(continuation.content.includes('Reviewed by the bot.'))
-    repo.removeQueueItem(continuation.id)
+    const guestDeadline = Date.now() + 10000
+    while (
+      (sessionBusy(caller.chatId) || repo.listQueue(caller.chatId).length) &&
+      Date.now() < guestDeadline
+    )
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    assert.equal(repo.listQueue(caller.chatId).length, 0, 'guest turn did not settle')
+    const shared = repo.listMessages(caller.chatId).slice(-2)
+    assert.equal(shared[0].content, 'One bounded delegation')
+    assert.equal(shared[0].botUsername, 'caller', 'the request belongs to the asking bot')
+    assert.equal(shared[1].botUsername, 'worker', 'the reply belongs to the invited bot')
+    assert.ok(
+      JSON.stringify(requests.at(-1)?.messages[0]).includes('You are @worker'),
+      'the guest speaks as itself'
+    )
 
     // Stop keeps the interrupted item and blocks its backlog until explicitly retried.
     holdReply = true

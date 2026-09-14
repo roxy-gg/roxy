@@ -337,6 +337,11 @@ export interface QueueItem {
   error?: string
   /** Claimed items remain durable until their result has been persisted. */
   state?: 'pending' | 'running' | 'failed'
+  /** Set when a bot, not the user, wrote this prompt — the transcript attributes it. */
+  botId?: string
+  botUsername?: string
+  /** Bot that should ANSWER this prompt, when it isn't the session's own bot. */
+  asBotId?: string
 }
 
 // ---- Integrations & skills ---------------------------------------------------

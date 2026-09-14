@@ -238,7 +238,8 @@ interface RoxyStore {
    * repos, and only git can say).
    */
   autoWorkstreamFor: (workspacePath: string | null) => Promise<boolean>
-  createBot: (username: string) => Promise<void>
+  /** Create a bot with its identity already filled in; returns it so schedules can be attached. */
+  createBot: (username: string, instructions?: string) => Promise<Bot>
   removeBot: (id: string) => Promise<void>
   setActiveAgent: (id: string) => Promise<void>
   /** Load + cache a workspace's instruction files (AGENTS.md etc.) for sizing. */
@@ -1180,11 +1181,13 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
     if (get().activeChatId === chatId) set({ queue })
   },
 
-  createBot: async (username) => {
+  createBot: async (username, instructions) => {
     const bot = await api.bots.create(username)
+    if (instructions?.trim()) await api.bots.update(bot.id, { instructions })
     await get().refreshBots()
     await get().refreshChats()
     await get().selectChat(bot.chatId)
+    return bot
   },
 
   removeBot: async (id) => {
@@ -2425,9 +2428,10 @@ async function buildChatMessages(
   // Each turn rebuilds into one or more chat messages; keeping them grouped means
   // the window cut below can never split an assistant's tool_calls from the
   // matching role:'tool' results (which would orphan them → provider 400s).
+  const self = useRoxyStore.getState().bots.find((b) => b.chatId === chatId)?.username
   const groups = (await api.messages.list(chatId))
     .filter((m) => (m.role === 'user' || m.role === 'assistant') && m.createdAt > since)
-    .map(reconstructTurn)
+    .map((m) => reconstructTurn(m, self))
     .filter((g) => g.length > 0)
 
   // Prune older tool outputs to a head/tail preview *before* the window cut, so
