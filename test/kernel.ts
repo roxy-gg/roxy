@@ -23,10 +23,7 @@ assert.equal(CHANNELS.kernelUninstall, 'kernel:uninstall')
 assert.equal(CHANNELS.kernelToggleTestSigning, 'kernel:toggleTestSigning')
 assert.equal(nonWindowsStatus.isWindows, false)
 
-const kernelService = readFileSync(
-  path.join(process.cwd(), 'src/main/services/kernel.ts'),
-  'utf8'
-)
+const kernelService = readFileSync(path.join(process.cwd(), 'src/main/services/kernel.ts'), 'utf8')
 assert.match(kernelService, /RELEASE_TAG = 'v\d+\.\d+\.\d+'/)
 assert.match(kernelService, /RELEASE_SHA256 = '[0-9a-f]{64}'/)
 assert.match(kernelService, /RELEASE_COMMIT = '[0-9a-f]{40}'/)
