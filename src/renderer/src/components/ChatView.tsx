@@ -13,6 +13,7 @@ import {
   Square
 } from 'lucide-react'
 import type { Chat } from '@shared/types'
+import { resolveSessionConfig } from '@shared/session-config'
 import { useRoxyStore } from '../lib/store'
 import { useTranslation } from 'react-i18next'
 import { cn } from '../lib/cn'
@@ -21,6 +22,7 @@ import { partsText } from '../canvas/transcript'
 import { Composer } from './Composer'
 import { BotSettingsPane } from './BotSettingsPane'
 import { BotAvatar } from './BotAvatar'
+import { CopilotReconnect } from './CopilotReconnect'
 import { SessionInfo } from './SessionInfo'
 import { WorkstreamStrip } from './WorkstreamStrip'
 import { QueuedMessage } from './QueuedMessage'
@@ -87,6 +89,10 @@ export function ChatView(): JSX.Element {
   const activeChatId = useRoxyStore((s) => s.activeChatId)
   const chats = useRoxyStore((s) => s.chats)
   const bots = useRoxyStore((s) => s.bots)
+  const settings = useRoxyStore((s) => s.settings)
+  const providers = useRoxyStore((s) => s.providers)
+  const copilotNeedsReauthentication = useRoxyStore((s) => s.copilotNeedsReauthentication)
+  const refreshProviders = useRoxyStore((s) => s.refreshProviders)
   // Subscribe to the STORED array, not a defaulted copy. A selector returning
   // `?? []` builds a new array every call, so zustand's Object.is check never
   // matches and the component re-renders forever ("getSnapshot should be
@@ -102,6 +108,17 @@ export function ChatView(): JSX.Element {
   const subagentRunning = useRoxyStore((s) =>
     s.activeChatId ? !!s.runningSubagents[s.activeChatId] : false
   )
+  const [subagentSeconds, setSubagentSeconds] = useState(0)
+  useEffect(() => {
+    setSubagentSeconds(0)
+    if (!subagentRunning) return
+    const startedAt = Date.now()
+    const clock = setInterval(
+      () => setSubagentSeconds(Math.floor((Date.now() - startedAt) / 1000)),
+      1000
+    )
+    return () => clearInterval(clock)
+  }, [activeChatId, subagentRunning])
   const cancelSubagent = useRoxyStore((s) => s.cancelSubagent)
   const cancelBackgroundTask = useRoxyStore((s) => s.cancelBackgroundTask)
   const cancelToolCall = useRoxyStore((s) => s.cancelToolCall)
@@ -119,6 +136,8 @@ export function ChatView(): JSX.Element {
     setInfoOpen(false)
   }, [activeChatId])
   const activeChat = chats.find((c) => c.id === activeChatId)
+  const selectedProvider = settings ? resolveSessionConfig(activeChat, settings).providerId : null
+  const provider = providers.find((p) => p.id === selectedProvider) ?? providers[0]
   const isSub = activeChat?.kind === 'sub'
   const parentChat = activeChat?.parentId
     ? chats.find((c) => c.id === activeChat.parentId)
@@ -203,6 +222,11 @@ export function ChatView(): JSX.Element {
                   <Loader2 className="h-3 w-3 animate-spin group-hover:hidden" />
                   <Square className="hidden h-2.5 w-2.5 fill-current group-hover:block" />
                   <span className="group-hover:hidden">{t('chat.working')}</span>
+                  {subagentSeconds > 0 && (
+                    <span className="font-mono tabular-nums text-accent/70 group-hover:hidden">
+                      {subagentSeconds}s
+                    </span>
+                  )}
                   <span className="hidden group-hover:inline">{t('chat.cancel')}</span>
                 </button>
               )}
@@ -385,6 +409,10 @@ export function ChatView(): JSX.Element {
             </div>
           </div>
         )}
+
+        <div hidden={provider?.id !== 'github-copilot'}>
+          <CopilotReconnect needed={copilotNeedsReauthentication} onConnected={refreshProviders} />
+        </div>
 
         {/* A subagent's session can now be stopped from its own composer: the Stop
           cancels the DELEGATE (there is no local request here to abort), which

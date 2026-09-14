@@ -5,7 +5,7 @@
 import type { ModelInfo, ModelCost } from '../../shared/api'
 import type { ReasoningEffort } from '../../shared/types'
 import { REASONING_EFFORTS } from '../../shared/session-config'
-import { getProviderToken, listConnectedProviders } from '../db/repo'
+import { getCopilotSessionKey, getProviderToken, listConnectedProviders } from '../db/repo'
 import { isCliProxyProvider } from '../../shared/cliproxy'
 import { ensureRunning as ensureCliProxy, listProxyModels } from './cliproxy'
 import { copilotEndpoint, withCopilotRetry } from './llm'
@@ -58,7 +58,7 @@ export function invalidateCopilotModels(): void {
 
 /** The public catalog cannot know the signed-in account's model policies. */
 async function listCopilotModels(): Promise<ModelInfo[]> {
-  const credential = getProviderToken('github-copilot')
+  const credential = getCopilotSessionKey()
   if (!credential) {
     copilotCache = null
     return []
@@ -75,11 +75,12 @@ async function listCopilotModels(): Promise<ModelInfo[]> {
       const signal = AbortSignal.timeout(20_000)
       const res = await withCopilotRetry(
         true,
-        async () => {
-          if (getProviderToken('github-copilot') !== credential) {
+        async (recordAuthorization) => {
+          if (getCopilotSessionKey() !== credential) {
             throw new Error('GitHub Copilot account changed.')
           }
           const { url, headers } = await copilotEndpoint('/models')
+          recordAuthorization(headers.Authorization)
           return fetch(url, { headers: { ...headers, Accept: 'application/json' }, signal })
         },
         signal
@@ -113,7 +114,7 @@ async function listCopilotModels(): Promise<ModelInfo[]> {
             outputLimit: m.capabilities?.limits?.max_output_tokens
           }
         })
-      if (copilotCache !== entry || getProviderToken('github-copilot') !== credential) return []
+      if (copilotCache !== entry || getCopilotSessionKey() !== credential) return []
       entry.data = models
     } catch {
       // Fail closed: a stale or public list can advertise models the tenant revoked.

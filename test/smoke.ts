@@ -153,6 +153,7 @@ import {
 } from '../src/main/services/turn-metrics'
 import { isSeedProviderId } from '../src/shared/providers'
 import { createServer } from 'node:http'
+import { testCopilot } from './copilot'
 
 let pass = 0
 const fails: string[] = []
@@ -185,6 +186,7 @@ app.setPath('userData', tmp)
 app.on('window-all-closed', () => undefined)
 
 async function main(): Promise<void> {
+  await testCopilot()
   const ws = path.join(tmp, 'workspace')
   await fs.mkdir(ws, { recursive: true })
   const run = (name: string, input: Record<string, unknown>): ReturnType<typeof runTool> =>
@@ -3900,7 +3902,7 @@ async function main(): Promise<void> {
       return Response.json(body, { status })
     }
     try {
-      repo.storeCopilotCredential('test-account-a')
+      repo.storeCopilotCredential({ accessToken: 'test-account-a' })
       const a = await openaiEndpoint('github-copilot')
       check('Copilot: exchanges the stored OAuth token', exchanges[0] === 'token test-account-a')
       check(
@@ -3996,7 +3998,7 @@ async function main(): Promise<void> {
         (await listModels('github-copilot')).length === 1 && exchanges.length === beforeRetry + 1
       )
 
-      repo.storeCopilotCredential('test-account-b')
+      repo.storeCopilotCredential({ accessToken: 'test-account-b' })
       const beforeSwitch = exchanges.length
       const b = await openaiEndpoint('github-copilot')
       check(
@@ -4019,7 +4021,7 @@ async function main(): Promise<void> {
       now += 60_001
       const stale = listModels('github-copilot')
       while (!pending.release) await new Promise((resolve) => setTimeout(resolve, 0))
-      repo.storeCopilotCredential('test-account-a')
+      repo.storeCopilotCredential({ accessToken: 'test-account-a' })
       paused = false
       body = { data: [{ ...enabled, id: 'account-a-model' }] }
       const accountA = await listModels('github-copilot')
