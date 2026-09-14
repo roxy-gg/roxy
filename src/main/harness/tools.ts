@@ -26,6 +26,7 @@ import {
 import * as browser from '../services/browser'
 import * as lsp from '../services/lsp'
 import * as repo from '../db/repo'
+import { runBotTool } from './bot-tools'
 import { isManagedToolOutputPath } from '../services/tool-output-store'
 import { renderDiagnosticsBlock } from '../../shared/lsp'
 import {
@@ -260,16 +261,13 @@ export async function runTool(
       case 'browser_close':
         browser.close(browserKey(ctx))
         return { ok: true, output: 'Closed the browser.' }
-      case 'loop_create':
-        return runLoopCreate(input, ctx.cwd)
-      case 'loop_remove':
-        return runLoopRemove(str(input.loop ?? input.name ?? input.id))
-      case 'loop_list':
-        return runLoopList()
-      case 'loop_enable':
-        return runLoopSet(str(input.loop ?? input.name ?? input.id), true)
-      case 'loop_disable':
-        return runLoopSet(str(input.loop ?? input.name ?? input.id), false)
+      case 'project_list':
+      case 'session_manage':
+      case 'bot_manage':
+      case 'bot_schedule':
+      case 'bot_invoke':
+      case 'queue_manage':
+        return await runBotTool(name, input, ctx)
       case 'change_session_metadata':
         return await runSetSessionMetadata(input, ctx.sessionId)
       case 'lsp':
@@ -1199,69 +1197,6 @@ async function runBrowserScroll(input: Record<string, unknown>, key?: string): P
 async function runBrowserType(selector: string, text: string, key?: string): Promise<ToolResult> {
   const out = await browser.type(selector, text, key)
   return { ok: !out.startsWith('No element') && !out.startsWith('browser_'), output: out }
-}
-
-// ---- Loops (turn scheduled prompts on/off via a tool, not a UI toggle) -------
-
-function runLoopCreate(input: Record<string, unknown>, cwd: string): ToolResult {
-  const name = str(input.name).trim()
-  const prompt = str(input.prompt).trim()
-  const interval = Number(
-    input.interval_minutes ?? input.intervalMinutes ?? input.interval ?? input.minutes
-  )
-  if (!name || !prompt) return { ok: false, output: 'loop_create: needs "name" and "prompt".' }
-  if (!Number.isFinite(interval) || interval < 1) {
-    return { ok: false, output: 'loop_create: "interval_minutes" must be a number >= 1.' }
-  }
-  const loop = repo.createLoop({
-    name,
-    prompt,
-    intervalMinutes: Math.floor(interval),
-    workspacePath: cwd || null
-  })
-  return {
-    ok: true,
-    output: `Created loop "${loop.name}" — runs every ${loop.intervalMinutes} min${
-      cwd ? ' in this project' : ''
-    }. It fires shortly and on each interval; pause it with loop_disable.`
-  }
-}
-
-function runLoopRemove(ref: string): ToolResult {
-  if (!ref.trim()) return { ok: false, output: 'loop_remove: missing "loop" (a name or id)' }
-  const loops = repo.listLoops()
-  const needle = ref.trim().toLowerCase()
-  const loop =
-    loops.find((l) => l.id === ref) ??
-    loops.find((l) => l.name.toLowerCase() === needle) ??
-    loops.find((l) => l.name.toLowerCase().includes(needle))
-  if (!loop) return { ok: false, output: `No loop matches "${ref}". Run loop_list to see them.` }
-  repo.removeLoop(loop.id)
-  return { ok: true, output: `Removed loop "${loop.name}".` }
-}
-
-function runLoopList(): ToolResult {
-  const loops = repo.listLoops()
-  if (loops.length === 0) return { ok: true, output: 'No loops defined.' }
-  const lines = loops.map(
-    (l) =>
-      `${l.enabled ? '\u25cf' : '\u25cb'} ${l.name} \u2014 every ${l.intervalMinutes}m (${l.enabled ? 'running' : 'paused'})`
-  )
-  return { ok: true, output: lines.join('\n') }
-}
-
-function runLoopSet(ref: string, enabled: boolean): ToolResult {
-  const verb = enabled ? 'loop_enable' : 'loop_disable'
-  if (!ref.trim()) return { ok: false, output: `${verb}: missing "loop" (a name or id)` }
-  const loops = repo.listLoops()
-  const needle = ref.trim().toLowerCase()
-  const loop =
-    loops.find((l) => l.id === ref) ??
-    loops.find((l) => l.name.toLowerCase() === needle) ??
-    loops.find((l) => l.name.toLowerCase().includes(needle))
-  if (!loop) return { ok: false, output: `No loop matches "${ref}". Run loop_list to see them.` }
-  repo.setLoopEnabled(loop.id, enabled)
-  return { ok: true, output: `${enabled ? 'Enabled' : 'Disabled'} loop "${loop.name}".` }
 }
 
 // ---- Skills authoring (the agent saving reusable workflows for later) --------
