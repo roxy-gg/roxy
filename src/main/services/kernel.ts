@@ -1,18 +1,23 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { execFile } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync } from 'node:fs'
-import { rm } from 'node:fs/promises'
+import { open, rm } from 'node:fs/promises'
 import path from 'node:path'
 import { promisify } from 'node:util'
+import { app, net as electronNet } from 'electron'
 import type { KernelInstallResult, KernelStatus } from '../../shared/kernel'
 import { deleteMcpServer, listMcpServers, upsertMcpServer } from '../db/repo'
 import { disposeConnection } from './mcp'
 
 const execFileAsync = promisify(execFile)
 
-const REPOSITORY_URL = 'https://github.com/roxy-gg/kernel-tools.git'
-// Review and update this pin deliberately when the external driver changes.
-const REPOSITORY_REVISION = '2f51a1d5981a553d7642db9c81d41a002f3c44e4'
+const RELEASE_TAG = 'v1.0.1'
+const RELEASE_ASSET = 'kernel-tools-windows-x64.zip'
+const RELEASE_URL = `https://github.com/roxy-gg/kernel-tools/releases/download/${RELEASE_TAG}/${RELEASE_ASSET}`
+const RELEASE_SHA256 = 'a14ab9b420923f3de017923dacae87ebf72ac80def8f9ce568df3ebdaeb7f282'
+const RELEASE_COMMIT = '88dd68313db9c08e6ce419426d545e02066f5d91'
+const SIGNER_THUMBPRINT = '8106e5e23fc13860575a61c16e391ad44e174d46'
+const MAX_RELEASE_BYTES = 5 * 1024 * 1024
 const SERVICE_NAME = 'RoxyKernelToolsAIBridge'
 const MCP_SERVER_ID = 'roxy-kernel-tools'
 const MCP_SERVER_IDS = [MCP_SERVER_ID, 'kernel'] as const
@@ -22,10 +27,7 @@ const INSTALL_DIR = path.join(
   'roxy',
   'kernel-tools'
 )
-const REPOSITORY_DIR = path.join(INSTALL_DIR, 'repo')
-const OUTPUT_DIR = path.join(REPOSITORY_DIR, 'out')
-const BUILT_DRIVER_PATH = path.join(OUTPUT_DIR, 'aibridge.sys')
-const BUILT_BRIDGE_PATH = path.join(OUTPUT_DIR, 'roxy-kernel-bridge.exe')
+const ARCHIVE_PATH = path.join(INSTALL_DIR, RELEASE_ASSET)
 const PRIVILEGED_INSTALL_DIR = path.join(
   process.env.ProgramFiles ?? 'C:\\Program Files',
   'Roxy',
@@ -33,6 +35,7 @@ const PRIVILEGED_INSTALL_DIR = path.join(
 )
 const DRIVER_PATH = path.join(PRIVILEGED_INSTALL_DIR, 'aibridge.sys')
 const BRIDGE_PATH = path.join(PRIVILEGED_INSTALL_DIR, 'roxy-kernel-bridge.exe')
+const INSTALL_MANIFEST_PATH = path.join(PRIVILEGED_INSTALL_DIR, 'install-manifest.json')
 let mutationInProgress = false
 
 function isWindows(): boolean {
@@ -137,46 +140,100 @@ async function setTestSigning(enable: boolean): Promise<void> {
   await runElevated(systemExecutable('bcdedit.exe'), ['/set', 'testsigning', enable ? 'on' : 'off'])
 }
 
-function installedDriverScript(
-  expectedDriverHash: string,
-  expectedBridgeHash: string,
-  startDriver: boolean
-): string {
+function installedDriverScript(startDriver: boolean): string {
   return [
     "$ErrorActionPreference = 'Stop'",
+    `$archivePath = ${powershellLiteral(ARCHIVE_PATH)}`,
+    `$expectedArchiveHash = ${powershellLiteral(RELEASE_SHA256)}`,
+    `$expectedVersion = ${powershellLiteral(RELEASE_TAG)}`,
+    `$expectedCommit = ${powershellLiteral(RELEASE_COMMIT)}`,
+    `$expectedSignerThumbprint = ${powershellLiteral(SIGNER_THUMBPRINT)}`,
     `$installDirectory = ${powershellLiteral(PRIVILEGED_INSTALL_DIR)}`,
-    `$driverSource = ${powershellLiteral(BUILT_DRIVER_PATH)}`,
     `$driverTarget = ${powershellLiteral(DRIVER_PATH)}`,
-    `$bridgeSource = ${powershellLiteral(BUILT_BRIDGE_PATH)}`,
     `$bridgeTarget = ${powershellLiteral(BRIDGE_PATH)}`,
-    `$expectedDriverHash = ${powershellLiteral(expectedDriverHash)}`,
-    `$expectedBridgeHash = ${powershellLiteral(expectedBridgeHash)}`,
-    "if ((Get-FileHash -Algorithm SHA256 $driverSource).Hash.ToLowerInvariant() -ne $expectedDriverHash) { throw 'Driver hash mismatch.' }",
-    "if ((Get-FileHash -Algorithm SHA256 $bridgeSource).Hash.ToLowerInvariant() -ne $expectedBridgeHash) { throw 'Bridge hash mismatch.' }",
-    `$service = Get-Service -Name ${powershellLiteral(SERVICE_NAME)} -ErrorAction SilentlyContinue`,
-    'if ($service) {',
-    `  & sc.exe stop ${SERVICE_NAME} | Out-Null`,
-    '  Start-Sleep -Seconds 1',
-    `  & sc.exe delete ${SERVICE_NAME} | Out-Null`,
-    '  if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne 1060) { exit $LASTEXITCODE }',
-    '  Start-Sleep -Seconds 1',
+    `$installManifestPath = ${powershellLiteral(INSTALL_MANIFEST_PATH)}`,
+    `$stagingDirectory = Join-Path $installDirectory ('.staging-' + [guid]::NewGuid().ToString('N'))`,
+    'try {',
+    '  New-Item -ItemType Directory -Force -Path $installDirectory | Out-Null',
+    '  $archive = [IO.File]::Open($archivePath, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::None)',
+    '  try {',
+    '    $archiveHash = [Security.Cryptography.SHA256]::Create().ComputeHash($archive)',
+    "    $archiveHashHex = (($archiveHash | ForEach-Object { $_.ToString('x2') }) -join '')",
+    "    if ($archiveHashHex -ne $expectedArchiveHash) { throw 'Release archive hash mismatch.' }",
+    '    $archive.Position = 0',
+    '    New-Item -ItemType Directory -Force -Path $stagingDirectory | Out-Null',
+    "    Add-Type -AssemblyName 'System.IO.Compression'",
+    "  Add-Type -AssemblyName 'System.IO.Compression.FileSystem'",
+    '    $zip = New-Object IO.Compression.ZipArchive($archive, [IO.Compression.ZipArchiveMode]::Read, $true)',
+    '    try {',
+    "      $allowedNames = @('aibridge-test.cer', 'aibridge.sys', 'manifest.json', 'roxy-kernel-bridge.exe')",
+    "      if ($zip.Entries.Count -ne $allowedNames.Count -or @($zip.Entries | Where-Object { $_.FullName -notin $allowedNames }).Count -ne 0) { throw 'Unexpected release archive contents.' }",
+    '      foreach ($entry in $zip.Entries) {',
+    '        $destination = Join-Path $stagingDirectory $entry.FullName',
+    '        [IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $destination, $true)',
+    '      }',
+    '    } finally { $zip.Dispose() }',
+    '  } finally { $archive.Dispose() }',
+    '$manifest = Get-Content -Raw -LiteralPath (Join-Path $stagingDirectory "manifest.json") | ConvertFrom-Json',
+    "if ($manifest.version -ne $expectedVersion -or $manifest.architecture -ne 'x64' -or $manifest.sourceCommit -ne $expectedCommit -or -not $manifest.testSigned -or $manifest.signerThumbprint.ToLowerInvariant() -ne $expectedSignerThumbprint) { throw 'Release manifest mismatch.' }",
+    "$expectedNames = @('aibridge-test.cer', 'aibridge.sys', 'roxy-kernel-bridge.exe')",
+    "if ($manifest.files.Count -ne $expectedNames.Count -or @($manifest.files | Where-Object { $_.name -notin $expectedNames }).Count -ne 0) { throw 'Unexpected release manifest file set.' }",
+    'foreach ($file in $manifest.files) {',
+    '  $filePath = Join-Path $stagingDirectory $file.name',
+    "  if ((Get-Item -LiteralPath $filePath).Length -ne $file.size -or (Get-FileHash -Algorithm SHA256 -LiteralPath $filePath).Hash.ToLowerInvariant() -ne $file.sha256.ToLowerInvariant()) { throw ('Integrity check failed for ' + $file.name + '.') }",
     '}',
-    'New-Item -ItemType Directory -Force -Path $installDirectory | Out-Null',
+    '$driverSource = Join-Path $stagingDirectory "aibridge.sys"',
+    '$bridgeSource = Join-Path $stagingDirectory "roxy-kernel-bridge.exe"',
+    '$certificateSource = Join-Path $stagingDirectory "aibridge-test.cer"',
+    '$certificate = New-Object Security.Cryptography.X509Certificates.X509Certificate2($certificateSource)',
+    "if ($certificate.Thumbprint.ToLowerInvariant() -ne $expectedSignerThumbprint) { throw 'Certificate thumbprint mismatch.' }",
+    '$signature = Get-AuthenticodeSignature -LiteralPath $driverSource',
+    "if (-not $signature.SignerCertificate -or $signature.SignerCertificate.Thumbprint.ToLowerInvariant() -ne $expectedSignerThumbprint) { throw 'Driver signer mismatch.' }",
+    `$serviceKey = ${powershellLiteral(`Registry::HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\${SERVICE_NAME}`)}`,
+    '$service = Get-ItemProperty -LiteralPath $serviceKey -ErrorAction SilentlyContinue',
+    'if ($service) {',
+    `  $registeredPath = [Environment]::ExpandEnvironmentVariables([string]$service.ImagePath).Trim('"')`,
+    "  if ($registeredPath.StartsWith('\\??\\')) { $registeredPath = $registeredPath.Substring(4) }",
+    "  if ($registeredPath.StartsWith('\\\\?\\')) { $registeredPath = $registeredPath.Substring(4) }",
+    "  if ([IO.Path]::GetFullPath($registeredPath) -ne [IO.Path]::GetFullPath($driverTarget)) { throw 'Refusing to replace an AIBridge service not owned by Roxy.' }",
+    `  & sc.exe stop ${SERVICE_NAME} | Out-Null`,
+    "  for ($attempt = 0; $attempt -lt 30 -and (Get-Service -Name ${SERVICE_NAME} -ErrorAction SilentlyContinue).Status -ne 'Stopped'; $attempt++) { Start-Sleep -Milliseconds 500 }",
+    "  if ((Get-Service -Name ${SERVICE_NAME} -ErrorAction SilentlyContinue).Status -ne 'Stopped') { throw 'The AIBridge service did not stop.' }",
+    '}',
     'Copy-Item -Force -LiteralPath $driverSource -Destination $driverTarget',
     'Copy-Item -Force -LiteralPath $bridgeSource -Destination $bridgeTarget',
-    "if ((Get-FileHash -Algorithm SHA256 $driverTarget).Hash.ToLowerInvariant() -ne $expectedDriverHash) { throw 'Installed driver hash mismatch.' }",
-    "if ((Get-FileHash -Algorithm SHA256 $bridgeTarget).Hash.ToLowerInvariant() -ne $expectedBridgeHash) { throw 'Installed bridge hash mismatch.' }",
-    `& sc.exe create ${SERVICE_NAME} 'type=' 'kernel' 'start=' 'demand' 'binPath=' $driverTarget | Out-Null`,
-    'if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }',
+    '$previousInstallManifest = if (Test-Path $installManifestPath) { Get-Content -Raw -LiteralPath $installManifestPath | ConvertFrom-Json } else { $null }',
+    '$rootCertificateManagedByRoxy = [bool]$previousInstallManifest.rootCertificateManagedByRoxy -or -not (Test-Path ("Cert:\\LocalMachine\\Root\\" + $expectedSignerThumbprint))',
+    '$publisherCertificateManagedByRoxy = [bool]$previousInstallManifest.publisherCertificateManagedByRoxy -or -not (Test-Path ("Cert:\\LocalMachine\\TrustedPublisher\\" + $expectedSignerThumbprint))',
+    '@{ version = $expectedVersion; signerThumbprint = $expectedSignerThumbprint; rootCertificateManagedByRoxy = $rootCertificateManagedByRoxy; publisherCertificateManagedByRoxy = $publisherCertificateManagedByRoxy } | ConvertTo-Json | Set-Content -Encoding UTF8 -LiteralPath $installManifestPath',
+    'try {',
+    '  if ($rootCertificateManagedByRoxy) { Import-Certificate -FilePath $certificateSource -CertStoreLocation Cert:\\LocalMachine\\Root | Out-Null }',
+    '  if ($publisherCertificateManagedByRoxy) { Import-Certificate -FilePath $certificateSource -CertStoreLocation Cert:\\LocalMachine\\TrustedPublisher | Out-Null }',
+    '} catch {',
+    '  if ($rootCertificateManagedByRoxy) { Remove-Item -Force ("Cert:\\LocalMachine\\Root\\" + $expectedSignerThumbprint) -ErrorAction SilentlyContinue }',
+    '  if ($publisherCertificateManagedByRoxy) { Remove-Item -Force ("Cert:\\LocalMachine\\TrustedPublisher\\" + $expectedSignerThumbprint) -ErrorAction SilentlyContinue }',
+    '  throw',
+    '}',
+    'if (-not $service) {',
+    `  & sc.exe create ${SERVICE_NAME} 'type=' 'kernel' 'start=' 'demand' 'binPath=' $driverTarget | Out-Null`,
+    '  if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }',
+    '}',
     startDriver ? `& sc.exe start ${SERVICE_NAME} | Out-Null` : 'exit 0',
-    startDriver ? 'exit $LASTEXITCODE' : ''
+    startDriver ? 'exit $LASTEXITCODE' : '',
+    '} finally { Remove-Item -Recurse -Force $stagingDirectory -ErrorAction SilentlyContinue }'
   ].join('; ')
 }
 function uninstallDriverScript(): string {
   return [
     "$ErrorActionPreference = 'Stop'",
-    `$service = Get-Service -Name ${powershellLiteral(SERVICE_NAME)} -ErrorAction SilentlyContinue`,
+    `$installManifestPath = ${powershellLiteral(INSTALL_MANIFEST_PATH)}`,
+    `$serviceKey = ${powershellLiteral(`Registry::HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\${SERVICE_NAME}`)}`,
+    '$service = Get-ItemProperty -LiteralPath $serviceKey -ErrorAction SilentlyContinue',
     'if ($service) {',
+    `  $registeredPath = [Environment]::ExpandEnvironmentVariables([string]$service.ImagePath).Trim('"')`,
+    "  if ($registeredPath.StartsWith('\\??\\')) { $registeredPath = $registeredPath.Substring(4) }",
+    "  if ($registeredPath.StartsWith('\\\\?\\')) { $registeredPath = $registeredPath.Substring(4) }",
+    `  if ([IO.Path]::GetFullPath($registeredPath) -ne [IO.Path]::GetFullPath(${powershellLiteral(DRIVER_PATH)})) { throw 'Refusing to remove an AIBridge service not owned by Roxy.' }`,
     `  & sc.exe stop ${SERVICE_NAME} | Out-Null`,
     '  Start-Sleep -Seconds 1',
     `  & sc.exe delete ${SERVICE_NAME} | Out-Null`,
@@ -184,9 +241,12 @@ function uninstallDriverScript(): string {
     '}',
     `Remove-Item -Force ${powershellLiteral(DRIVER_PATH)} -ErrorAction SilentlyContinue`,
     `Remove-Item -Force ${powershellLiteral(BRIDGE_PATH)} -ErrorAction SilentlyContinue`,
+    '$installManifest = if (Test-Path $installManifestPath) { Get-Content -Raw -LiteralPath $installManifestPath | ConvertFrom-Json } else { $null }',
+    `if ($installManifest.signerThumbprint -eq ${powershellLiteral(SIGNER_THUMBPRINT)} -and $installManifest.rootCertificateManagedByRoxy) { Remove-Item -Force ${powershellLiteral(`Cert:\LocalMachine\Root\${SIGNER_THUMBPRINT}`)} -ErrorAction SilentlyContinue }`,
+    `if ($installManifest.signerThumbprint -eq ${powershellLiteral(SIGNER_THUMBPRINT)} -and $installManifest.publisherCertificateManagedByRoxy) { Remove-Item -Force ${powershellLiteral(`Cert:\LocalMachine\TrustedPublisher\${SIGNER_THUMBPRINT}`)} -ErrorAction SilentlyContinue }`,
     `if (Test-Path ${powershellLiteral(DRIVER_PATH)}) { throw 'The installed driver file could not be removed.' }`,
     `if (Test-Path ${powershellLiteral(BRIDGE_PATH)}) { throw 'The installed bridge file could not be removed.' }`,
-    `if (Test-Path ${powershellLiteral(PRIVILEGED_INSTALL_DIR)}) { Remove-Item -Force ${powershellLiteral(PRIVILEGED_INSTALL_DIR)} -ErrorAction SilentlyContinue }`
+    `if (Test-Path ${powershellLiteral(PRIVILEGED_INSTALL_DIR)}) { Remove-Item -Recurse -Force ${powershellLiteral(PRIVILEGED_INSTALL_DIR)} -ErrorAction SilentlyContinue }`
   ].join('; ')
 }
 
@@ -198,7 +258,18 @@ async function getDriverServiceState(): Promise<KernelStatus['driverState']> {
         '-NoProfile',
         '-NonInteractive',
         '-Command',
-        `$service = Get-Service -Name ${powershellLiteral(SERVICE_NAME)} -ErrorAction SilentlyContinue; if ($service) { [int]$service.Status } else { 0 }`
+        [
+          `$serviceKey = ${powershellLiteral(`Registry::HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\${SERVICE_NAME}`)}`,
+          '$serviceConfig = Get-ItemProperty -LiteralPath $serviceKey -ErrorAction SilentlyContinue',
+          'if (-not $serviceConfig) { 0; exit }',
+          `$expectedPath = ${powershellLiteral(DRIVER_PATH)}`,
+          `$registeredPath = [Environment]::ExpandEnvironmentVariables([string]$serviceConfig.ImagePath).Trim('"')`,
+          "if ($registeredPath.StartsWith('\\??\\')) { $registeredPath = $registeredPath.Substring(4) }",
+          "if ($registeredPath.StartsWith('\\\\?\\')) { $registeredPath = $registeredPath.Substring(4) }",
+          'if ([IO.Path]::GetFullPath($registeredPath) -ne [IO.Path]::GetFullPath($expectedPath)) { 9; exit }',
+          `$service = Get-Service -Name ${powershellLiteral(SERVICE_NAME)} -ErrorAction SilentlyContinue`,
+          'if ($service) { [int]$service.Status } else { 0 }'
+        ].join('; ')
       ],
       5_000
     )
@@ -329,70 +400,49 @@ export async function getKernelStatus(): Promise<KernelStatus> {
   }
 }
 
-async function checkoutPinnedRepository(steps: string[]): Promise<void> {
-  steps.push('Downloading the pinned kernel-tools source...')
-  await rm(REPOSITORY_DIR, { recursive: true, force: true })
-  mkdirSync(INSTALL_DIR, { recursive: true })
-  await run('git.exe', ['clone', '--no-checkout', REPOSITORY_URL, REPOSITORY_DIR], 120_000)
-  await run('git.exe', ['-C', REPOSITORY_DIR, 'checkout', '--detach', REPOSITORY_REVISION], 30_000)
+async function fetchRelease(): Promise<Response> {
+  try {
+    const response = app.isReady() ? await electronNet.fetch(RELEASE_URL) : await fetch(RELEASE_URL)
+    if (response.ok) return response
+  } catch {
+    // Fall through to Node's network stack for environments where Chromium is blocked.
+  }
+  return fetch(RELEASE_URL)
 }
 
 export async function setKernelAgentAccess(enable: boolean): Promise<KernelInstallResult> {
   return runMutation(() => setKernelAgentAccessImpl(enable))
 }
 
-async function verifyBuiltDriverSignature(): Promise<void> {
-  const { stdout } = await run(
-    systemExecutable('WindowsPowerShell\\v1.0\\powershell.exe'),
-    [
-      '-NoProfile',
-      '-NonInteractive',
-      '-Command',
-      `(Get-AuthenticodeSignature -LiteralPath ${powershellLiteral(BUILT_DRIVER_PATH)}).Status`
-    ],
-    10_000
-  )
-  if (stdout.trim() !== 'Valid') {
-    throw new Error(
-      'The built kernel driver does not have a valid embedded signature. Windows test-signing mode still requires a signed driver, so installation was stopped before changing your system.'
-    )
+async function downloadPinnedRelease(steps: string[]): Promise<void> {
+  steps.push(`Downloading pinned Kernel Tools ${RELEASE_TAG}...`)
+  await rm(ARCHIVE_PATH, { force: true })
+  mkdirSync(INSTALL_DIR, { recursive: true })
+
+  const response = await fetchRelease()
+  if (!response.ok) throw new Error(`Kernel Tools download failed (${response.status}).`)
+  const contentLength = Number(response.headers.get('content-length') || 0)
+  if (contentLength > MAX_RELEASE_BYTES) throw new Error('The Kernel Tools download is too large.')
+  if (!response.body) throw new Error('The Kernel Tools download returned no body.')
+  const archive = await open(ARCHIVE_PATH, 'wx')
+  let downloadedBytes = 0
+  try {
+    for await (const chunk of response.body) {
+      downloadedBytes += chunk.byteLength
+      if (downloadedBytes > MAX_RELEASE_BYTES) {
+        throw new Error('The Kernel Tools download is too large.')
+      }
+      await archive.write(chunk)
+    }
+  } finally {
+    await archive.close()
   }
-}
-
-async function buildArtifacts(steps: string[]): Promise<void> {
-  const powershell = systemExecutable('WindowsPowerShell\\v1.0\\powershell.exe')
-
-  steps.push('Building the Windows kernel driver...')
-  await run(
-    powershell,
-    [
-      '-NoProfile',
-      '-NonInteractive',
-      '-ExecutionPolicy',
-      'Bypass',
-      '-File',
-      path.join(REPOSITORY_DIR, 'driver', 'build.ps1')
-    ],
-    10 * 60_000
-  )
-
-  steps.push('Building the MCP bridge...')
-  await run(
-    powershell,
-    [
-      '-NoProfile',
-      '-NonInteractive',
-      '-ExecutionPolicy',
-      'Bypass',
-      '-File',
-      path.join(REPOSITORY_DIR, 'bridge', 'build.ps1')
-    ],
-    10 * 60_000
-  )
-
-  if (!existsSync(BUILT_DRIVER_PATH) || !existsSync(BUILT_BRIDGE_PATH)) {
-    throw new Error('The external build completed without producing both required binaries.')
+  if (downloadedBytes === 0) throw new Error('The Kernel Tools download has an invalid size.')
+  if (sha256(ARCHIVE_PATH) !== RELEASE_SHA256) {
+    throw new Error('The Kernel Tools download failed its pinned SHA-256 integrity check.')
   }
+
+  steps.push(`Verified the pinned Kernel Tools ${RELEASE_TAG} archive.`)
 }
 
 async function installKernelToolsImpl(): Promise<KernelInstallResult> {
@@ -404,10 +454,7 @@ async function installKernelToolsImpl(): Promise<KernelInstallResult> {
 
   try {
     await removeKernelMcpServers()
-    await checkoutPinnedRepository(steps)
-    await buildArtifacts(steps)
-    await verifyBuiltDriverSignature()
-    steps.push('Verified the kernel driver signature.')
+    await downloadPinnedRelease(steps)
 
     const testSigningWasEnabled = await checkTestSigning()
     if (!testSigningWasEnabled) {
@@ -424,11 +471,7 @@ async function installKernelToolsImpl(): Promise<KernelInstallResult> {
       '-NoProfile',
       '-NonInteractive',
       '-Command',
-      installedDriverScript(
-        sha256(BUILT_DRIVER_PATH),
-        sha256(BUILT_BRIDGE_PATH),
-        testSigningWasEnabled
-      )
+      installedDriverScript(testSigningWasEnabled)
     ])
     const driverState = await getDriverServiceState()
     if (driverState === 'running') {
@@ -467,6 +510,11 @@ async function startKernelDriverImpl(): Promise<KernelInstallResult> {
 
   if (!existsSync(DRIVER_PATH) || !existsSync(BRIDGE_PATH)) {
     return { ok: false, error: 'Install kernel tools before starting the driver.', steps }
+  }
+
+  const state = await getDriverServiceState()
+  if (state === 'unknown' || state === 'not-installed') {
+    return { ok: false, error: 'The AIBridge service is missing or is not owned by Roxy.', steps }
   }
 
   try {
@@ -517,6 +565,7 @@ async function uninstallKernelToolsImpl(disableSigning: boolean): Promise<Kernel
     if (
       existsSync(DRIVER_PATH) ||
       existsSync(BRIDGE_PATH) ||
+      existsSync(INSTALL_MANIFEST_PATH) ||
       (await getDriverServiceState()) !== 'not-installed'
     ) {
       steps.push('Requesting administrator approval to remove the driver service...')

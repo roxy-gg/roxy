@@ -23,6 +23,22 @@ assert.equal(CHANNELS.kernelUninstall, 'kernel:uninstall')
 assert.equal(CHANNELS.kernelToggleTestSigning, 'kernel:toggleTestSigning')
 assert.equal(nonWindowsStatus.isWindows, false)
 
+const kernelService = readFileSync(
+  path.join(process.cwd(), 'src/main/services/kernel.ts'),
+  'utf8'
+)
+assert.match(kernelService, /RELEASE_TAG = 'v\d+\.\d+\.\d+'/)
+assert.match(kernelService, /RELEASE_SHA256 = '[0-9a-f]{64}'/)
+assert.match(kernelService, /RELEASE_COMMIT = '[0-9a-f]{40}'/)
+assert.match(kernelService, /SIGNER_THUMBPRINT = '[0-9a-f]{40}'/)
+assert.match(kernelService, /Get-AuthenticodeSignature/)
+assert.match(kernelService, /IO\.FileShare\]::None/)
+assert.match(kernelService, /isSupportedPlatform/)
+assert.match(kernelService, /RoxyKernelToolsAIBridge/)
+assert.match(kernelService, /Another Kernel Tools operation is already in progress/)
+assert.doesNotMatch(kernelService, /git\.exe', \['clone'/)
+assert.doesNotMatch(kernelService, /driver', 'build\.ps1'/)
+
 const defaultLocale = JSON.parse(
   readFileSync(path.join(process.cwd(), 'src/renderer/src/locales/default.json'), 'utf8')
 ) as { settings?: { kernel?: Record<string, string> } }
@@ -43,11 +59,6 @@ for (const key of [
 ]) {
   assert.ok(kernelStrings[key], `settings.kernel.${key} resolves`)
 }
-
-const kernelService = readFileSync(path.join(process.cwd(), 'src/main/services/kernel.ts'), 'utf8')
-assert.match(kernelService, /Get-AuthenticodeSignature/)
-assert.match(kernelService, /RoxyKernelToolsAIBridge/)
-assert.match(kernelService, /Another Kernel Tools operation is already in progress/)
 
 const kernelIpc = readFileSync(path.join(process.cwd(), 'src/main/ipc/kernel.ts'), 'utf8')
 assert.match(kernelIpc, /event\.senderFrame !== mainWindow\.webContents\.mainFrame/)

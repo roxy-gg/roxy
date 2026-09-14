@@ -445,7 +445,7 @@
       "refresh": "Refresh",
       "disableTestSigning": "Disable test signing",
       "disablingTestSigning": "Disabling...",
-      "confirmInstallDescription": "This downloads and builds the external kernel-tools project, enables Windows test signing, and installs its driver. Administrator approval and a reboot are required; agent access is not enabled automatically.",
+      "confirmInstallDescription": "This downloads a pinned, test-signed Kernel Tools release, trusts its pinned test certificate, enables Windows test signing, and installs its driver. Administrator approval and a reboot are required; Secure Boot may block test signing, and agent access is not enabled automatically.",
       "confirmUninstallDescription": "This stops and removes the kernel driver and any related agent registration. Test signing remains enabled until you disable it separately.",
       "confirmDisableTestSigningDescription": "Turn off Windows test signing? This removes support for test-signed drivers after the next reboot.",
       "confirmEnableAgentAccessDescription": "Allow Roxy sessions to call the installed kernel bridge tools? These tools run with elevated system access. Only enable this on a dedicated research machine or VM.",
