@@ -870,6 +870,12 @@ export function registerIpc(): void {
     if (localTurnReleases.has(input.requestId))
       return { ok: false, error: 'Request ID is already in use.' }
     if (!repo.getChat(input.sessionId)) return { ok: false, error: 'Session not found.' }
+    // Stop PAUSES this session's queue, and only enqueueing or editing a prompt
+    // ever lifted that. Sending a message directly did not, so anything already
+    // queued - a guest bot invited into this thread, a handoff from another
+    // session - stayed pending forever while the session went on answering you.
+    // Driving a turn yourself is the same intent as resuming.
+    resumeQueue(input.sessionId)
     const controller = new AbortController()
     const release = claimTurn(input.sessionId, controller)
     if (!release)

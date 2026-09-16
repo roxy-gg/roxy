@@ -83,7 +83,19 @@ export function ChatView(): JSX.Element {
   // A running item's prompt is already persisted to the transcript by the main
   // process, so showing its queue row too renders the same message twice.
   // Failed items stay listed: they're the retry/edit affordance.
-  const queue = useMemo(() => allQueued.filter((item) => item.state !== 'running'), [allQueued])
+  //
+  // This panel is YOUR outbox: prompts you typed and haven't sent yet. A
+  // machine-generated item (`sourceChatId` is set - bot_invoke inviting a bot to
+  // answer here, or another session handing work over) belongs to a turn already
+  // in flight, not to you, so listing it as an editable draft read as a bug. It
+  // still appears once it FAILS, the one moment you can act on it.
+  const queue = useMemo(
+    () =>
+      allQueued.filter(
+        (item) => item.state !== 'running' && (!item.sourceChatId || item.state === 'failed')
+      ),
+    [allQueued]
+  )
   const newSession = useRoxyStore((s) => s.newSession)
   const selectChat = useRoxyStore((s) => s.selectChat)
   const activeChatId = useRoxyStore((s) => s.activeChatId)

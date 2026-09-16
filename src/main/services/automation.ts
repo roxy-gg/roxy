@@ -33,6 +33,16 @@ import {
 let timer: ReturnType<typeof setInterval> | null = null
 const live = new Map<string, PartsFold>()
 
+/**
+ * How far a request may be handed on before it needs a human again.
+ *
+ * Every route that passes work to another bot counts against this one budget:
+ * an explicit `bot_invoke`, a reply nudge, and a redirect by @mention. They
+ * used to be capped separately (and the mention path not at all), so bots
+ * could volley a message between themselves indefinitely.
+ */
+const MAX_HOPS = 8
+
 export function notifyAutomation(chatId: string): void {
   for (const win of BrowserWindow.getAllWindows()) {
     try {
@@ -91,7 +101,7 @@ export function enqueuePrompt(
     throw new Error('A prompt is required')
   if (
     options.hops !== undefined &&
-    (!Number.isSafeInteger(options.hops) || options.hops > 8 || options.hops < 0)
+    (!Number.isSafeInteger(options.hops) || options.hops > MAX_HOPS || options.hops < 0)
   ) {
     throw new Error('Handoff limit reached. Ask the user before starting another chain.')
   }
@@ -164,14 +174,32 @@ export function wakeAutomation(): void {
       if (sessionBusy(chatId) || queuePaused(chatId) || subagentSnapshot(chatId) !== null) continue
       const item = repo.listQueue(chatId)[0]
       if (!item || item.state !== 'pending' || (item.notBefore ?? 0) > Date.now()) continue
-      const target = mentionedBot(item.content, bots.listBots())
       // Addressing a bot by name invites it into THIS conversation — it answers
       // here, with the thread as its context. The message itself still belongs to
       // whoever wrote it; only the responder changes.
-      if (target && target.chatId !== chatId && target.id !== item.asBotId) {
+      //
+      // Skipped when the item already names its responder: `bot_invoke` picked
+      // that bot deliberately, and a mention inside the brief it wrote ("review
+      // this, then tell @qa") must not quietly hand the turn to someone else.
+      const target = item.asBotId ? undefined : mentionedBot(item.content, bots.listBots())
+      if (target && target.chatId !== chatId) {
+        // Each redirect is a hop, and the cap is the same one `enqueuePrompt`
+        // enforces — this path wrote `hops` with raw SQL, so a chain that
+        // handed off by mention never met the limit that stops bots from
+        // volleying a message between themselves forever.
+        const hops = (item.hops ?? 0) + 1
+        if (hops > MAX_HOPS) {
+          getDb()
+            .prepare(
+              `UPDATE queue SET state = 'failed', error = ? WHERE id = ? AND state = 'pending'`
+            )
+            .run('Handoff limit reached. Ask the user before starting another chain.', item.id)
+          notifyAutomation(chatId)
+          continue
+        }
         getDb()
           .prepare('UPDATE queue SET as_bot_id = ?, hops = ? WHERE id = ?')
-          .run(target.id, (item.hops ?? 0) + 1, item.id)
+          .run(target.id, hops, item.id)
         notifyAutomation(chatId)
       }
       void deliver(item).catch((error) => console.error('[bots] delivery failed', error))
@@ -181,9 +209,23 @@ export function wakeAutomation(): void {
   }
 }
 
-function history(chatId: string, budget: number, outputReserve: number): ChatMessage[] {
+/**
+ * Rebuild this session's transcript for the bot about to speak.
+ *
+ * `speaker` is that bot, which is NOT always the session's own bot: a guest
+ * invited in through `bot_invoke` answers here while belonging elsewhere.
+ * Deriving it from the chat marked the guest's own past replies as someone
+ * else's, so it read its own words in the third person ("[@sub] ...") and
+ * answered them as if a colleague had written them.
+ */
+function history(
+  chatId: string,
+  budget: number,
+  outputReserve: number,
+  speaker?: string
+): ChatMessage[] {
   const since = repo.getChat(chatId)?.contextSummaryAt ?? 0
-  const self = bots.chatBot(chatId)?.username
+  const self = speaker ?? bots.chatBot(chatId)?.username
   const groups = repo
     .listMessages(chatId)
     .filter((m) => (m.role === 'user' || m.role === 'assistant') && m.createdAt > since)
@@ -294,7 +336,12 @@ async function deliver(item: QueueItem): Promise<void> {
         sessionId: item.chatId,
         providerId: provider.id,
         model,
-        messages: history(item.chatId, budget, info?.outputLimit ?? 4096),
+        messages: history(
+          item.chatId,
+          budget,
+          info?.outputLimit ?? 4096,
+          previous.as_bot_id ? bots.getBot(previous.as_bot_id)?.username : undefined
+        ),
         agentId: config.agentId,
         reasoning: info?.reasoning,
         reasoningEffort: clampReasoningEffort(config.reasoningEffort, info?.reasoningEfforts),
@@ -347,7 +394,7 @@ async function deliver(item: QueueItem): Promise<void> {
         const pending = getDb()
           .prepare('SELECT COUNT(*) AS n FROM queue WHERE chat_id = ?')
           .get(item.replyToChatId) as { n: number }
-        if (continuation?.continue_reply && (item.hops ?? 0) < 8 && pending.n < 100) {
+        if (continuation?.continue_reply && (item.hops ?? 0) < MAX_HOPS && pending.n < 100) {
           // The reply was just persisted to this transcript, so the nudge must
           // NOT repeat it: quoting it again produced a second copy of the whole
           // answer, attributed to "You" because a queued prompt is a user turn.

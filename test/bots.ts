@@ -194,6 +194,32 @@ async function main(): Promise<void> {
   assert.match(repo.listQueue(session.id)[0].error!, /shutdown/)
   for (const item of repo.listQueue(session.id)) repo.removeQueueItem(item.id)
 
+  // A mention inside a brief already addressed to a bot is NOT a redirect:
+  // bot_invoke chose the responder, and telling it "then report to @reviewer"
+  // used to hand the turn to @reviewer instead.
+  const helper = bots.createBot('helper')
+  const addressed = enqueuePrompt(session.id, 'Do the work, then tell @reviewer', undefined, {
+    asBotId: helper.id
+  })
+  wakeAutomation()
+  assert.equal(
+    repo.listQueue(session.id).find((item) => item.id === addressed.id)!.asBotId,
+    helper.id
+  )
+  for (const item of repo.listQueue(session.id)) repo.removeQueueItem(item.id)
+
+  // Redirecting by mention spends a hop, so a chain that hands off this way
+  // meets the same ceiling as one built from explicit invokes.
+  const exhausted = enqueuePrompt(session.id, '@reviewer take over', undefined, {
+    hops: 8
+  })
+  wakeAutomation()
+  const stopped = repo.listQueue(session.id).find((item) => item.id === exhausted.id)!
+  assert.equal(stopped.state, 'failed')
+  assert.match(stopped.error!, /Handoff limit/)
+  assert.equal(stopped.asBotId, undefined)
+  for (const item of repo.listQueue(session.id)) repo.removeQueueItem(item.id)
+
   repo.addMessage({
     chatId: session.id,
     role: 'assistant',

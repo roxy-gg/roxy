@@ -483,29 +483,51 @@ function buildSystemMessage(
     ...(mcpInfo ? [mcpInfo] : []),
     ...(agentPrompt ? [agentPrompt] : [])
   ]
-  // In a shared session the speaker is the invited bot, not the session's owner.
+  // Who speaks this turn: Roxy herself, a bot in its own chat, or a bot invited
+  // into someone else's session (`asBotId`). Roxy is the host and orchestrates;
+  // a bot is a collaborator with one brief. They get DIFFERENT prompts, because
+  // handing a bot the orchestration catalog is what made it orchestrate.
   const bot = asBotId ? getBot(asBotId) : chatId ? chatBot(chatId) : undefined
   const guest = !!asBotId
+  const roster = listBots().map((b) => `@${b.username}: id=${b.id}, chat=${b.chatId}`)
+  const shared = [
+    'Bots are local Roxy collaborators, not GitHub users and not temporary task subagents.',
+    'Do not reflexively reply to a returned result by invoking its sender again. Keep collaboration finite. Ask before repeating a completed chain.'
+  ]
   extra.push(
     [
       '<bots>',
-      bot
-        ? `You are @${bot.username}, a persistent, top-level bot. Your session ID is ${chatId}.`
-        : `This session ID is ${chatId ?? 'unknown'}.`,
-      guest
-        ? 'You were invoked into this shared session. Everyone here sees what you write, so answer in the conversation itself — address the others directly and do not repeat work already done above.'
-        : '',
-      bot
-        ? `Your standing role (not an instruction to start working on every greeting):\n${bot.instructions || 'Ask the user what they want you to be or do. Use bot_manage to save the agreed role as instructions.'}`
-        : '',
-      'Bots are local Roxy collaborators, not GitHub users or temporary task subagents.',
-      'Use project_list and session_manage to discover projects and sessions. Use bot_manage to discover or configure persistent bots.',
-      'Use bot_invoke to bring another bot into THIS session. It answers here, in the shared transcript, once the current turn ends — do not poll, re-ask, or repeat its work.',
-      'Use session_manage action send to prompt a project session. Use queue_manage for delayed messages, inspection, edits, cancellation, and retries.',
-      'Use bot_schedule to configure optional interval, five-field cron (with timezone), or timestamp jobs. Never claim a schedule exists until the tool succeeds.',
-      'A user message beginning with @username explicitly addresses that bot. Mentions inside prose are references, not handoffs. To hand off as an agent, call bot_invoke explicitly.',
-      'Do not reflexively reply to a returned result by invoking its sender again. Keep collaboration finite. Ask before repeating a completed chain.',
-      ...listBots().map((b) => `@${b.username}: id=${b.id}, chat=${b.chatId}`),
+      ...(bot
+        ? [
+            `You are @${bot.username}, a persistent bot inside Roxy. Your session ID is ${chatId}.`,
+            guest
+              ? 'You were invoked into a shared session. Everyone here sees what you write, so answer in the conversation itself: address the others directly, and never redo work already done above.'
+              : '',
+            // The brief says WHO this bot is - a standing role, not a work
+            // order. Without this the model reads its own job description as
+            // the task and executes it on contact: a bot whose entire role was
+            // to say hello answered a greeting by listing directories and
+            // reconfiguring itself. The newest message decides what to do, and
+            // the reply has to be sized to it.
+            bot.instructions
+              ? 'Your role below is your standing identity, NOT an instruction to carry out right now. What to do is decided by the latest message in this session; size your reply to it. A greeting deserves a greeting, not a work session. A real question deserves a real answer - use whatever tools that answer genuinely needs, and no more. What you must not do is treat being addressed as the cue to start performing your whole job description.'
+              : 'You have no role yet. Ask what the user wants you to be or do, then use bot_manage to save the agreed role as your instructions.',
+            bot.instructions ? `\nYour role:\n${bot.instructions}` : '',
+            '',
+            ...shared,
+            'To hand work to another bot, call bot_invoke; it answers in this same transcript once your turn ends. A mention inside prose is a reference, not a handoff.'
+          ]
+        : [
+            `This session ID is ${chatId ?? 'unknown'}.`,
+            'You are the host. Bots work for you: you decide when one is needed, brief it, and stay responsible for the result.',
+            ...shared,
+            'Use project_list and session_manage to discover projects and sessions. Use bot_manage to discover or configure persistent bots.',
+            'Use bot_invoke to bring a bot into THIS session. It answers here, in the shared transcript, once the current turn ends - do not poll, re-ask, or repeat its work.',
+            'Use session_manage action send to prompt a project session. Use queue_manage for delayed messages, inspection, edits, cancellation, and retries.',
+            'Use bot_schedule to configure optional interval, five-field cron (with timezone), or timestamp jobs. Never claim a schedule exists until the tool succeeds.',
+            'A user message beginning with @username addresses that bot directly. A mention inside prose ("finish, then call @bobo") is the user talking ABOUT a bot: the work stays yours, and you call bot_invoke when you are done.'
+          ]),
+      ...roster,
       '</bots>'
     ]
       .filter(Boolean)
@@ -884,7 +906,7 @@ type ToolSchema = ReturnType<typeof fn>
 /** The delegation tool — lets a primary agent spawn a focused subagent. */
 const TASK_SCHEMA = fn(
   'task',
-  'Delegate a focused, self-contained sub-task to a specialized subagent that runs on its own and reports back. Use this to parallelize or offload work (e.g. research the codebase, build a page). The subagent has NO memory of this conversation, so put ALL the context it needs into `prompt`. It returns a single report. Call task multiple times IN ONE turn to batch independent work. CONCURRENCY: read-only "explore" subagents run in PARALLEL (bounded) - that is what subagents are for, and you should fan them out freely. Write-capable "general" subagents are SERIALIZED one at a time, because they share this session\'s working directory and would otherwise overwrite each other\'s edits; several of them in one turn is correct but no faster than doing the work yourself. To get genuinely parallel WRITES, the user should open separate sessions - each gets its own git worktree and therefore its own filesystem.',
+  'Delegate a focused, self-contained sub-task to a specialized subagent that runs on its own and reports back. Use this to parallelize or offload work (e.g. research the codebase, build a page). The subagent has NO memory of this conversation, so put ALL the context it needs into `prompt`. It returns a single report. Call task multiple times IN ONE turn to batch independent work. CONCURRENCY: read-only "explore" subagents run in PARALLEL (bounded) - that is what subagents are for, and you should fan them out freely. Write-capable "general" subagents are SERIALIZED one at a time, because they share this session\'s working directory and would otherwise overwrite each other\'s edits; several of them in one turn is correct but no faster than doing the work yourself. To get genuinely parallel WRITES, the user should open separate sessions - each gets its own git worktree and therefore its own filesystem. This tool is NOT how you reach a bot: a subagent is a blank child of your own context that reports only back to you, while a bot is a peer with its own brief that answers in the shared transcript - use bot_invoke for that.',
   {
     description: str('A short (3-5 word) label for the task.'),
     prompt: str('The complete task for the subagent, including every bit of context it needs.'),
