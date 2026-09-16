@@ -238,9 +238,6 @@ const roxy: RoxyApi = {
   models: {
     list: (providerId) => ipcRenderer.invoke(CHANNELS.modelsList, providerId),
     recent: (providerId) => ipcRenderer.invoke(CHANNELS.modelsRecent, providerId),
-    pinned: () => ipcRenderer.invoke(CHANNELS.modelsPinned),
-    setPinned: (providerId, model, pinned) =>
-      ipcRenderer.invoke(CHANNELS.modelsSetPinned, providerId, model, pinned),
     hidden: () => ipcRenderer.invoke(CHANNELS.modelsHidden),
     setHidden: (providerId, model, hidden) =>
       ipcRenderer.invoke(CHANNELS.modelsSetHidden, providerId, model, hidden),

@@ -290,14 +290,14 @@
     "copilotUnavailable": "No available GitHub Copilot model is selected. Choose an enabled model, or check your account's model access and connection, then try again.",
     "loadFailed": "无法从 models.dev 加载模型 — 您仍然可以使用当前模型发送。",
     "loading": "正在加载模型…",
+    "matchesInOther": "Available in:",
     "noMatch": "没有模型与“{{query}}”匹配。",
+    "noMatchInProvider": "No models match “{{query}}” in {{provider}}.",
     "noProvider": "未连接提供商",
-    "pin": "固定模型",
+    "reasoning": "Reasoning",
     "search": "搜索模型…",
-    "sectionLatest": "最新 · {{provider}}",
-    "sectionPinned": "已固定",
     "selectModel": "选择模型",
-    "unpin": "取消固定模型"
+    "tools": "Tools"
   },
   "onboarding": {
     "apiKey": "API 密钥",

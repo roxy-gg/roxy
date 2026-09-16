@@ -78,15 +78,8 @@ interface RoxyStore {
   /** Last 5 distinct model picks per provider, lazy-loaded + refreshed on selection. */
   recentModels: Record<string, { model: string; usedAt: number }[]>
   /**
-   * A deliberate, user-curated shortlist of models - pinned models show above
-   * everything else in the picker, across all providers. Unlike `recentModels`
-   * this never reshuffles on its own; only `setModelPinned` changes it.
-   */
-  pinnedModels: { providerId: string; model: string }[]
-  /**
-   * Models omitted from the picker, as `providerId:model` keys. A Set, not the
-   * array `pinnedModels` uses: membership is queried once per row over a long
-   * list, and there is no order to preserve.
+   * Models omitted from the picker, as `providerId:model` keys. A Set:
+   * membership is queried once per row over a long list, and there is no order to preserve.
    */
   hiddenModels: Set<string>
   chats: Chat[]
@@ -212,13 +205,9 @@ interface RoxyStore {
   selectModel: (providerId: string, model: string) => Promise<void>
   ensureModels: (providerId: string) => Promise<void>
   ensureRecentModels: (providerId: string) => Promise<void>
-  /** Load the pinned-model shortlist once (cached until toggled). */
-  ensurePinnedModels: () => Promise<void>
-  /** Pin or unpin a model in the shortlist; updates the cache optimistically. */
-  setModelPinned: (providerId: string, model: string, pinned: boolean) => Promise<void>
   /** Load the hidden-model deny-list once (cached until toggled). */
   ensureHiddenModels: () => Promise<void>
-  /** Hide or show one model in the picker. Hiding also unpins it. */
+  /** Hide or show one model in the picker. */
   setModelHidden: (providerId: string, model: string, hidden: boolean) => Promise<void>
   /** Replace one provider's entire hidden set — Hide all / Show all, in one write. */
   setProviderHiddenModels: (providerId: string, models: string[]) => Promise<void>
@@ -393,8 +382,6 @@ const chatRequests = new Map<string, string>()
  * they queue behind a process launch. One promise per provider, shared.
  */
 const modelCatalogInflight = new Map<string, Promise<void>>()
-/** Loaded once per app session — `ensurePinnedModels` is called from every ModelPicker mount. */
-let pinnedModelsLoaded = false
 /** Same, for the hidden-model deny-list — every ModelPicker and Settings mount asks. */
 let hiddenModelsLoaded = false
 /** Set when a remote turn lands while a local send streams into the shared chat. */
@@ -963,7 +950,6 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
   modelCatalog: {},
   modelsTried: {},
   recentModels: {},
-  pinnedModels: [],
   hiddenModels: new Set<string>(),
   chats: [],
   activeChatId: null,
@@ -1016,7 +1002,6 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
     // A factory reset truncates these tables and re-bootstraps, so the load
     // guards have to fall with them or the picker keeps filtering on a
     // deny-list the database no longer has.
-    pinnedModelsLoaded = false
     hiddenModelsLoaded = false
     // Before `ready` flips: the splash is still up, so switching the catalog
     // here means the first painted frame is already in the right language
@@ -1033,7 +1018,6 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
       modelCatalog: {},
       modelsTried: {},
       recentModels: {},
-      pinnedModels: [],
       hiddenModels: new Set(),
       ready: true
     })
@@ -1532,23 +1516,6 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
     set((s) => ({ recentModels: { ...s.recentModels, [providerId]: recent } }))
   },
 
-  ensurePinnedModels: async () => {
-    if (pinnedModelsLoaded) return
-    pinnedModelsLoaded = true
-    const pinned = await api.models.pinned()
-    set({ pinnedModels: pinned })
-  },
-
-  setModelPinned: async (providerId, model, pinned) => {
-    // Optimistic: the picker toggles instantly, no round trip flicker.
-    set((s) => ({
-      pinnedModels: pinned
-        ? [...s.pinnedModels, { providerId, model }]
-        : s.pinnedModels.filter((p) => !(p.providerId === providerId && p.model === model))
-    }))
-    await api.models.setPinned(providerId, model, pinned)
-  },
-
   ensureHiddenModels: async () => {
     if (hiddenModelsLoaded) return
     hiddenModelsLoaded = true
@@ -1562,17 +1529,7 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
       const next = new Set(s.hiddenModels)
       if (hidden) next.add(key)
       else next.delete(key)
-      // Mirrors the main process, which unpins on hide.
-      return {
-        hiddenModels: next,
-        ...(hidden
-          ? {
-              pinnedModels: s.pinnedModels.filter(
-                (p) => !(p.providerId === providerId && p.model === model)
-              )
-            }
-          : {})
-      }
+      return { hiddenModels: next }
     })
     await api.models.setHidden(providerId, model, hidden)
   },
@@ -1584,12 +1541,7 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
       const next = new Set<string>()
       for (const key of s.hiddenModels) if (!key.startsWith(`${providerId}:`)) next.add(key)
       for (const model of hiding) next.add(`${providerId}:${model}`)
-      return {
-        hiddenModels: next,
-        pinnedModels: s.pinnedModels.filter(
-          (p) => !(p.providerId === providerId && hiding.has(p.model))
-        )
-      }
+      return { hiddenModels: next }
     })
     await api.models.setProviderHidden(providerId, models)
   },

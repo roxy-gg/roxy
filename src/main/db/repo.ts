@@ -403,33 +403,6 @@ export function listRecentModels(providerId: string): { model: string; usedAt: n
 }
 
 /**
- * Pin/unpin a model as a shortlist entry. Unlike recent models, this is a
- * deliberate user action with no cap and no MRU reshuffling - it only changes
- * when the user toggles it.
- */
-export function setModelPinned(providerId: string, model: string, pinned: boolean): void {
-  const db = getDb()
-  if (pinned) {
-    db.prepare(
-      'INSERT OR IGNORE INTO pinned_models(provider_id, model, pinned_at) VALUES(?, ?, ?)'
-    ).run(providerId, model, Date.now())
-  } else {
-    db.prepare('DELETE FROM pinned_models WHERE provider_id = ? AND model = ?').run(
-      providerId,
-      model
-    )
-  }
-}
-
-/** Every model pinned across every provider, oldest pin first. */
-export function listPinnedModels(): { providerId: string; model: string }[] {
-  const rows = getDb()
-    .prepare('SELECT provider_id, model FROM pinned_models ORDER BY pinned_at ASC')
-    .all() as { provider_id: string; model: string }[]
-  return rows.map((r) => ({ providerId: r.provider_id, model: r.model }))
-}
-
-/**
  * Hide/unhide a model in the picker. Display-only: a session already on the
  * model keeps running it, since removing it from a menu must not reroute work.
  */
@@ -439,11 +412,6 @@ export function setModelHidden(providerId: string, model: string, hidden: boolea
     db.prepare(
       'INSERT OR IGNORE INTO hidden_models(provider_id, model, hidden_at) VALUES(?, ?, ?)'
     ).run(providerId, model, Date.now())
-    // A pin would keep it atop the list it was just removed from.
-    db.prepare('DELETE FROM pinned_models WHERE provider_id = ? AND model = ?').run(
-      providerId,
-      model
-    )
   } else {
     db.prepare('DELETE FROM hidden_models WHERE provider_id = ? AND model = ?').run(
       providerId,
@@ -461,10 +429,8 @@ export function setProviderHiddenModels(providerId: string, models: string[]): v
     const insert = db.prepare(
       'INSERT OR IGNORE INTO hidden_models(provider_id, model, hidden_at) VALUES(?, ?, ?)'
     )
-    const unpin = db.prepare('DELETE FROM pinned_models WHERE provider_id = ? AND model = ?')
     for (const model of models) {
       insert.run(providerId, model, now)
-      unpin.run(providerId, model)
     }
   })
   tx()

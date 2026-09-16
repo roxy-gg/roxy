@@ -270,15 +270,15 @@
     "copilotUnavailable": "No available GitHub Copilot model is selected. Choose an enabled model, or check your account's model access and connection, then try again.",
     "selectModel": "Select a model",
     "noProvider": "No provider connected",
-    "pin": "Pin model",
-    "unpin": "Unpin model",
     "search": "Search models…",
     "loading": "Loading models…",
     "noMatch": "No models match “{{query}}”.",
     "loadFailed": "Couldn't load models from models.dev — you can still send with the current model.",
-    "sectionPinned": "Pinned",
-    "sectionLatest": "Latest · {{provider}}",
-    "allHidden": "Every model is hidden. Bring some back in <settings>Settings → Models</settings>."
+    "allHidden": "Every model is hidden. Bring some back in <settings>Settings → Models</settings>.",
+    "noMatchInProvider": "No models match “{{query}}” in {{provider}}.",
+    "matchesInOther": "Available in:",
+    "reasoning": "Reasoning",
+    "tools": "Tools"
   },
   "onboarding": {
     "welcomeTagline": "This might be a complete disaster. It might also be the best thing you use all year!",

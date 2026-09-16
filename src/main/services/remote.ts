@@ -296,7 +296,16 @@ export function notifyQueueChanged(): void {
   if (share) sendQueue(share.currentSessionId)
 }
 
-/** Reconcile queued turns and out-of-band bot replies with the phone transcript. */
+/**
+ * Reconcile a desktop-persisted message with the phone's transcript.
+ *
+ * Live deltas remain the fast path, but they are not an authoritative record:
+ * a provider can fail before emitting one, a local command never enters the LLM
+ * stream, and a guest can connect between two events. Every turn now drains
+ * through the main-process queue, whose owner calls this from its own `finally`
+ * (see `automation.ts`) — so a queued prompt, a scheduled job and an
+ * out-of-band bot reply all reconcile the same way a desktop turn does.
+ */
 export function notifyTranscriptChanged(sessionId: string): void {
   if (share?.currentSessionId === sessionId) sendSnapshot(sessionId)
 }

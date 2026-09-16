@@ -290,14 +290,14 @@
     "copilotUnavailable": "No available GitHub Copilot model is selected. Choose an enabled model, or check your account's model access and connection, then try again.",
     "loadFailed": "تعذر تحميل النماذج من models.dev — لا يزال بإمكانك الإرسال بالنموذج الحالي.",
     "loading": "جارٍ تحميل النماذج…",
+    "matchesInOther": "Available in:",
     "noMatch": "لا توجد نماذج تطابق \"{{query}}\".",
+    "noMatchInProvider": "No models match “{{query}}” in {{provider}}.",
     "noProvider": "لم يتم توصيل أي مزود",
-    "pin": "تثبيت النموذج",
+    "reasoning": "Reasoning",
     "search": "البحث عن نماذج…",
-    "sectionLatest": "الأحدث · {{provider}}",
-    "sectionPinned": "مثبت",
     "selectModel": "اختر نموذجًا",
-    "unpin": "إلغاء تثبيت النموذج"
+    "tools": "Tools"
   },
   "onboarding": {
     "apiKey": "مفتاح API",

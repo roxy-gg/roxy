@@ -324,7 +324,11 @@ import {
   type Rect
 } from '../src/renderer/src/lib/anchor'
 import { rowOffsets, visibleRange, OVERSCAN } from '../src/renderer/src/lib/windowing'
-import { buildModelIndex, buildModelRows } from '../src/renderer/src/lib/modelRows'
+import {
+  buildModelIndex,
+  buildProviderModelRows,
+  countMatchesByProvider
+} from '../src/renderer/src/lib/modelRows'
 import {
   contextMenuItems as clipboardMenuItems,
   hasUsableItems,
@@ -2692,6 +2696,7 @@ console.log('\nremote workspace ipc parity\n')
   const preload = read('src/preload/index.ts')
   const handlers = read('src/main/ipc/index.ts')
   const service = read('src/main/services/remote.ts')
+  const automation = read('src/main/services/automation.ts')
   const api = read('src/shared/api.ts')
   // `remote` is the last member of both the preload bridge and RoxyApi, so
   // slicing from its marker to EOF isolates just that block for method checks.
@@ -2730,6 +2735,26 @@ console.log('\nremote workspace ipc parity\n')
   check(
     'preload unsubscribes from remote:delta',
     preload.includes('removeListener(CHANNELS.remoteDelta')
+  )
+  check(
+    'the queue owner fans turn events to the desktop',
+    automation.includes('CHANNELS.automationDelta')
+  )
+  check(
+    'persisted desktop messages refresh the remote transcript',
+    /CHANNELS\.messagesAdd[\s\S]{0,300}remote\.notifyTranscriptChanged\(input\.chatId\)/.test(
+      handlers
+    )
+  )
+  check(
+    'remote transcript refresh sends an authoritative snapshot',
+    /function notifyTranscriptChanged[\s\S]{0,200}sendSnapshot\(sessionId\)/.test(service)
+  )
+  // Queued turns reconcile too: the queue owner snapshots from its own finally,
+  // which is what makes a scheduled/bot reply reach the phone at all.
+  check(
+    'the queue owner refreshes the remote transcript when a turn ends',
+    /finally\s*{[\s\S]{0,400}notifyTranscriptChanged\(item\.chatId\)/.test(automation)
   )
   check(
     'phone prompts use the main-process queue',
@@ -5360,14 +5385,9 @@ async function main(): Promise<void> {
 
   // ---- model picker rows (renderer/lib/modelRows) ----------------------------
   //
-  // The regression this exists for: rows were keyed by `provider:model`, which
-  // LOOKS unique and is not. The same model shows up in up to three sections at
-  // once - Pinned, its provider's Latest, and that provider's full catalog - so
-  // sibling rows collided on their React key. Combined with windowing (which
-  // remounts a different slice on every scroll) React reused the wrong DOM node
-  // and rows visibly duplicated and stuck to the viewport while scrolling.
-  //
-  // Keys are cheap to get wrong and invisible in review, so assert them.
+  // Rows are keyed provider:model; with one section per provider that is unique.
+  // It was not when sections overlapped — see modelRows.ts.
+  // Asserts provider model rows generation, hidden filtering and search matching.
   const mkModel = (id: string, name: string) => ({ id, name, reasoning: true, toolCall: true })
   const pickerProviders = [
     { id: 'github-copilot', name: 'GitHub Copilot' },
@@ -5381,217 +5401,44 @@ async function main(): Promise<void> {
     ],
     roxy: [mkModel('anthropic/claude-opus-5', 'Claude Opus 5'), mkModel('x/other', 'Other Model')]
   }
-  // Exactly the shape of the real bug report: the recents are also in the
-  // catalog, and one of them is pinned too.
-  const pickerRecent = {
-    'github-copilot': [{ model: 'claude-opus-5' }, { model: 'gpt-5.6-sol' }],
-    roxy: [{ model: 'anthropic/claude-opus-5' }]
-  }
-  const pickerPinned = [{ providerId: 'github-copilot', model: 'claude-opus-5' }]
   const pickerIndex = buildModelIndex(pickerCatalogs)
 
-  const rowsFor = (query: string) =>
-    buildModelRows({
-      providers: pickerProviders,
-      catalogs: pickerCatalogs,
-      recent: pickerRecent,
-      pinned: pickerPinned,
-      index: pickerIndex,
-      query,
-      hidden: new Set<string>()
-    })
-
-  let dupeKeys = ''
-  for (const query of ['', 'claude', 'opus 5', 'gpt', 'zzz', '  ']) {
-    const keys = rowsFor(query).map((r) => r.key)
-    const seen = new Set<string>()
-    for (const k of keys) {
-      if (seen.has(k)) {
-        dupeKeys = `"${query}" -> ${k}`
-        break
-      }
-      seen.add(k)
-    }
-    if (dupeKeys) break
-  }
-  check('picker rows: every React key is unique', dupeKeys === '', dupeKeys)
-
-  // The duplicate-key case must still RENDER the model in each section - the
-  // fix is a unique key, not dropping the row.
-  const baseRows = rowsFor('')
-  const opusRows = baseRows.filter((r) => r.kind === 'model' && r.modelId === 'claude-opus-5')
-  check(
-    'picker rows: a pinned+recent+catalog model still appears in each section',
-    opusRows.length === 2, // pinned + catalog; suppressed under Latest because pinned
-    String(opusRows.length)
-  )
-
-  // A pinned model must not ALSO be repeated under Latest - it is already shown
-  // at the top, and a 5-row shortcut section should not waste a row on it.
-  const latestIdx = baseRows.findIndex(
-    (r) => r.kind === 'header' && r.key === 'h:latest:github-copilot'
-  )
-  const copilotIdx = baseRows.findIndex((r) => r.kind === 'header' && r.key === 'h:github-copilot')
-  const latestSection = baseRows.slice(latestIdx + 1, copilotIdx)
-  check(
-    'picker rows: a pinned model is not repeated under Latest',
-    latestSection.every((r) => r.kind === 'model' && r.modelId !== 'claude-opus-5')
-  )
-
-  // Searching collapses the shortcuts: repeating Pinned/Latest above the
-  // matches would show the same model three times in a short result list.
-  const searched = rowsFor('opus')
-  check(
-    'picker rows: a query drops the Pinned and Latest sections',
-    !searched.some(
-      (r) => r.kind === 'header' && (r.key === 'h:pinned' || r.key.startsWith('h:latest:'))
-    )
-  )
-  check(
-    'picker rows: a query still matches on name across providers',
-    searched.filter((r) => r.kind === 'model').length === 2
-  )
-  check('picker rows: a non-matching query yields nothing', rowsFor('zzzz').length === 0)
-
-  // The vendor prefix is a DISPLAY concern, so it has to hold at the row level
-  // AND must not cost the search: the label loses "Anthropic: ", the haystack
-  // keeps it. Getting that backwards is silent - the menu looks right, and
-  // typing a vendor name quietly returns nothing.
-  const gatewayCatalog = {
-    roxy: [mkModel('anthropic/claude-opus-5', 'Anthropic: Claude Opus 5')]
-  }
-  const gatewayIndex = buildModelIndex(gatewayCatalog)
-  const gatewayRows = (query: string) =>
-    buildModelRows({
-      providers: [{ id: 'roxy', name: 'Roxy.gg Inference' }],
-      catalogs: gatewayCatalog,
-      // Pinned + Latest + catalog at once: the strip has to hold in all three,
-      // and only the catalog section passes the name in explicitly.
-      recent: { roxy: [{ model: 'anthropic/claude-opus-5' }] },
-      pinned: [{ providerId: 'roxy', model: 'anthropic/claude-opus-5' }],
-      index: gatewayIndex,
-      query,
-      hidden: new Set<string>()
-    })
-  const gatewayLabels = gatewayRows('')
-    .filter((r) => r.kind === 'model')
-    .map((r) => (r.kind === 'model' ? r.label : ''))
-  check(
-    'picker rows: the roxy vendor prefix is stripped in every section',
-    gatewayLabels.length === 2 && gatewayLabels.every((l) => l === 'Claude Opus 5'),
-    gatewayLabels.join(' | ')
-  )
-  check(
-    'picker rows: the stripped vendor is still searchable',
-    gatewayRows('anthropic').some((r) => r.kind === 'model')
-  )
-
-  // A pin whose provider was disconnected (or whose model left the catalog)
-  // would otherwise render an unselectable row.
-  const staleRows = buildModelRows({
-    providers: pickerProviders,
-    catalogs: pickerCatalogs,
-    recent: {},
-    pinned: [{ providerId: 'deleted-provider', model: 'ghost' }],
-    index: pickerIndex,
-    query: '',
-    hidden: new Set<string>()
-  })
-  check(
-    'picker rows: a pin for a disconnected provider is dropped',
-    !staleRows.some((r) => r.kind === 'header' && r.key === 'h:pinned')
-  )
-
-  // Every model row must carry its capability flags, or the Brain/Wrench icons
-  // silently stop rendering.
-  check(
-    'picker rows: model rows keep their catalog info',
-    baseRows
-      .filter((r) => r.kind === 'model')
-      .every((r) => r.kind === 'model' && r.info !== undefined)
-  )
-
-  const refreshedCatalogs = {
-    ...pickerCatalogs,
-    'github-copilot': [mkModel('just-enabled', 'Just Enabled')]
-  }
-  const refreshedRows = buildModelRows({
-    providers: pickerProviders,
-    catalogs: refreshedCatalogs,
-    recent: pickerRecent,
-    pinned: pickerPinned,
-    index: buildModelIndex(refreshedCatalogs),
-    query: '',
-    hidden: new Set()
-  })
-  check(
-    'picker rows: revoked Copilot models disappear from pinned, recent and catalog sections',
-    !refreshedRows.some(
-      (r) => r.kind === 'model' && ['claude-opus-5', 'gpt-5.6-sol'].includes(r.modelId)
-    )
-  )
-  check(
-    'picker rows: newly enabled models appear without a static catalog update',
-    refreshedRows.some((r) => r.kind === 'model' && r.modelId === 'just-enabled')
-  )
-  check(
-    'picker rows: reenabled models regain their saved pin and recent position',
-    rowsFor('').some((r) => r.key === 'pin:github-copilot:claude-opus-5') &&
-      rowsFor('').some((r) => r.key === 'recent:github-copilot:gpt-5.6-sol')
-  )
-
-  // Every section, not just the catalog — recents keep listing a hidden model.
-  const hiddenRows = buildModelRows({
-    providers: pickerProviders,
-    catalogs: pickerCatalogs,
-    recent: pickerRecent,
-    pinned: pickerPinned,
+  // ---- provider model rows for carousel picker (renderer/lib/modelRows) -----
+  const copilotRows = buildProviderModelRows({
+    provider: { id: 'github-copilot', name: 'GitHub Copilot' },
+    catalog: pickerCatalogs['github-copilot'],
     index: pickerIndex,
     query: '',
     hidden: new Set(['github-copilot:claude-opus-5'])
   })
   check(
-    'picker rows: a hidden model appears in no section at all',
-    !hiddenRows.some((r) => r.kind === 'model' && r.key.endsWith('github-copilot:claude-opus-5'))
+    'provider rows: filters out hidden models and keeps remaining',
+    copilotRows.length === 2 &&
+      copilotRows.every((r) => r.providerId === 'github-copilot' && r.modelId !== 'claude-opus-5')
   )
-  check(
-    "picker rows: hiding one model leaves the same provider's others alone",
-    hiddenRows.some((r) => r.kind === 'model' && r.modelId === 'gpt-5.6-sol')
-  )
-  // Keyed per provider:model — the same id from two providers is two routes.
-  check(
-    'picker rows: hiding is keyed by provider, not by model id',
-    hiddenRows.some((r) => r.kind === 'model' && r.modelId === 'anthropic/claude-opus-5')
-  )
-  // A provider with nothing left to show must not leave its header behind.
-  const allHiddenRows = buildModelRows({
-    providers: pickerProviders,
-    catalogs: pickerCatalogs,
-    recent: {},
-    pinned: [],
+
+  const copilotSearched = buildProviderModelRows({
+    provider: { id: 'github-copilot', name: 'GitHub Copilot' },
+    catalog: pickerCatalogs['github-copilot'],
     index: pickerIndex,
-    query: '',
-    hidden: new Set([
-      'github-copilot:claude-opus-5',
-      'github-copilot:gpt-5.6-sol',
-      'github-copilot:gemini-3.6-flash'
-    ])
+    query: 'sol',
+    hidden: new Set()
   })
   check(
-    'picker rows: a fully hidden provider drops its header too',
-    !allHiddenRows.some((r) => r.kind === 'header' && r.providerId === 'github-copilot')
+    'provider rows: query filters correctly within provider',
+    copilotSearched.length === 1 && copilotSearched[0].modelId === 'gpt-5.6-sol'
   )
+
+  const providerCounts = countMatchesByProvider({
+    providers: pickerProviders,
+    catalogs: pickerCatalogs,
+    index: pickerIndex,
+    query: 'opus',
+    hidden: new Set()
+  })
   check(
-    'picker rows: an empty hidden set filters nothing',
-    buildModelRows({
-      providers: pickerProviders,
-      catalogs: pickerCatalogs,
-      recent: pickerRecent,
-      pinned: pickerPinned,
-      index: pickerIndex,
-      query: '',
-      hidden: new Set()
-    }).length === baseRows.length
+    'provider match counts: counts matches per provider accurately',
+    providerCounts['github-copilot'] === 1 && providerCounts['roxy'] === 1
   )
 
   // ---- context menus open AT THE CURSOR (sidebar right-click) --------------

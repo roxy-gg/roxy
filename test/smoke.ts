@@ -249,16 +249,11 @@ async function main(): Promise<void> {
   repo.setLanguage('en')
 
   // ---- hidden models (v22: the picker deny-list) ----
-  // Against the real DB because the behaviour lives in SQL: hiding unpins.
-  repo.setModelPinned('openai', 'gpt-5', true)
+  // Against the real DB.
   repo.setModelHidden('openai', 'gpt-5', true)
   check(
     'setModelHidden records the model',
     repo.listHiddenModels().some((h) => h.providerId === 'openai' && h.model === 'gpt-5')
-  )
-  check(
-    'hiding a model also unpins it',
-    !repo.listPinnedModels().some((p) => p.providerId === 'openai' && p.model === 'gpt-5')
   )
   repo.setModelHidden('openai', 'gpt-5', true)
   check('hiding twice does not duplicate the row', repo.listHiddenModels().length === 1)

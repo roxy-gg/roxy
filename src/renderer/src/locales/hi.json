@@ -290,14 +290,14 @@
     "copilotUnavailable": "No available GitHub Copilot model is selected. Choose an enabled model, or check your account's model access and connection, then try again.",
     "loadFailed": "models.dev से मॉडल लोड नहीं हो सके — आप अभी भी वर्तमान मॉडल के साथ भेज सकते हैं।",
     "loading": "मॉडल लोड हो रहे हैं…",
+    "matchesInOther": "Available in:",
     "noMatch": "“{{query}}” से कोई मॉडल मेल नहीं खाता।",
+    "noMatchInProvider": "No models match “{{query}}” in {{provider}}.",
     "noProvider": "कोई प्रदाता कनेक्ट नहीं है",
-    "pin": "मॉडल पिन करें",
+    "reasoning": "Reasoning",
     "search": "मॉडल खोजें…",
-    "sectionLatest": "नवीनतम · {{provider}}",
-    "sectionPinned": "पिन किए गए",
     "selectModel": "एक मॉडल चुनें",
-    "unpin": "मॉडल अनपिन करें"
+    "tools": "Tools"
   },
   "onboarding": {
     "apiKey": "API कुंजी",

@@ -190,8 +190,6 @@ export const CHANNELS = {
 
   modelsList: 'models:list',
   modelsRecent: 'models:recent',
-  modelsPinned: 'models:pinned',
-  modelsSetPinned: 'models:setPinned',
   modelsHidden: 'models:hidden',
   modelsSetHidden: 'models:setHidden',
   modelsSetProviderHidden: 'models:setProviderHidden',

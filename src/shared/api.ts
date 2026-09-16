@@ -1014,13 +1014,9 @@ export interface RoxyApi {
     list(providerId: string): Promise<ModelInfo[]>
     /** Last 5 distinct model picks for a provider, newest first. */
     recent(providerId: string): Promise<{ model: string; usedAt: number }[]>
-    /** Every pinned model across every provider, in pin order (oldest first). */
-    pinned(): Promise<{ providerId: string; model: string }[]>
-    /** Pin/unpin one model - a deliberate shortlist, unlike the MRU `recent` list. */
-    setPinned(providerId: string, model: string, pinned: boolean): Promise<void>
     /** Every model the user has hidden, across every provider. */
     hidden(): Promise<{ providerId: string; model: string }[]>
-    /** Hide/show one model in the picker. Hiding also unpins it. */
+    /** Hide/show one model in the picker. */
     setHidden(providerId: string, model: string, hidden: boolean): Promise<void>
     /** Replace one provider's entire hidden set (Hide all / Show all). */
     setProviderHidden(providerId: string, models: string[]): Promise<void>

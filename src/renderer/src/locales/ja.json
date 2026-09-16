@@ -290,14 +290,14 @@
     "copilotUnavailable": "No available GitHub Copilot model is selected. Choose an enabled model, or check your account's model access and connection, then try again.",
     "loadFailed": "models.dev からモデルを読み込めませんでした — 現在のモデルで送信することはできます。",
     "loading": "モデルを読み込み中…",
+    "matchesInOther": "Available in:",
     "noMatch": "「{{query}}」に一致するモデルはありません。",
+    "noMatchInProvider": "No models match “{{query}}” in {{provider}}.",
     "noProvider": "プロバイダーが接続されていません",
-    "pin": "モデルをピン留め",
+    "reasoning": "Reasoning",
     "search": "モデルを検索…",
-    "sectionLatest": "最新 · {{provider}}",
-    "sectionPinned": "ピン留め済み",
     "selectModel": "モデルを選択",
-    "unpin": "モデルのピン留めを解除"
+    "tools": "Tools"
   },
   "onboarding": {
     "apiKey": "APIキー",

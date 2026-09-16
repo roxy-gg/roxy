@@ -1,16 +1,8 @@
 /**
  * The model picker's list, as data.
  *
- * Extracted from the component for one reason: the flattened list has a
- * correctness property that is invisible in JSX and was got WRONG in review —
- * every row needs a React key unique across the whole list, and the same model
- * legitimately appears in up to three sections at once (Pinned, its provider's
- * Latest, and that provider's full catalog). Keying rows by `provider:model`
- * therefore produced duplicate sibling keys, and React reused the wrong DOM
- * node while the windowed list scrolled: rows visibly duplicated and stuck.
- *
- * Pure data with no DOM and no React means that property can be asserted
- * directly in test/shared.ts instead of being eyeballed in a running app.
+ * Pure data with no DOM and no React means filtering and row generation can be
+ * asserted directly in test/shared.ts instead of being eyeballed in a running app.
  */
 import type { ModelInfo } from '../../../shared/api'
 import { modelLabel } from '../../../shared/models'
@@ -20,30 +12,6 @@ export interface RowProvider {
   id: string
   name: string
 }
-
-/** A section header. `providerId` is '' for the cross-provider Pinned header. */
-export interface HeaderRow {
-  kind: 'header'
-  key: string
-  label: string
-  icon: 'pin' | 'clock' | 'provider'
-  providerId: string
-}
-
-/** A selectable model. */
-export interface ModelRow {
-  kind: 'model'
-  key: string
-  providerId: string
-  providerName: string
-  modelId: string
-  /** What to render: the catalog name, with any vendor prefix already stripped. */
-  label: string
-  info: ModelInfo | undefined
-  pinned: boolean
-}
-
-export type Row = HeaderRow | ModelRow
 
 /** A model catalog entry plus its pre-lowercased search text. */
 export interface IndexEntry {
@@ -70,115 +38,73 @@ export function buildModelIndex(catalogs: Record<string, ModelInfo[]>): Map<stri
   return map
 }
 
+export interface ProviderModelRow {
+  key: string
+  providerId: string
+  providerName: string
+  modelId: string
+  label: string
+  info: ModelInfo | undefined
+}
+
 /**
- * Flatten the whole menu — Pinned, then per provider: Latest, then everything —
- * into one array the windowing math can index into.
- *
- * A search query collapses it to a flat filtered catalog: Pinned and Latest are
- * shortcuts for "no query", and repeating their entries above the matches would
- * just show the same model three times in a five-row result.
+ * Build the model rows for a single provider's view in the carousel picker.
  */
-export function buildModelRows(input: {
-  providers: RowProvider[]
-  catalogs: Record<string, ModelInfo[]>
-  recent: Record<string, { model: string }[]>
-  pinned: { providerId: string; model: string }[]
+export function buildProviderModelRows(input: {
+  provider: RowProvider
+  catalog: ModelInfo[]
   index: Map<string, IndexEntry>
   query: string
-  /**
-   * `providerId:model` keys to omit. Filtered here rather than in the catalog,
-   * so Settings can still list everything a provider offers.
-   */
   hidden: ReadonlySet<string>
-}): Row[] {
-  const { providers, catalogs, recent, pinned, index, query, hidden } = input
+}): ProviderModelRow[] {
+  const { provider, catalog, index, query, hidden } = input
   const q = query.trim().toLowerCase()
-  const pinnedKeys = new Set(pinned.map((p) => `${p.providerId}:${p.model}`))
-  const out: Row[] = []
+  const out: ProviderModelRow[] = []
+  const seen = new Set<string>()
 
-  const modelRow = (
-    section: string,
-    providerId: string,
-    providerName: string,
-    modelId: string,
-    label?: string
-  ): ModelRow => {
-    const hit = index.get(`${providerId}:${modelId}`)
-    return {
-      kind: 'model',
-      // Section-prefixed: see the note at the top of this file.
-      key: `${section}:${providerId}:${modelId}`,
-      providerId,
-      providerName,
-      modelId,
-      label: modelLabel(providerId, label ?? hit?.info.name ?? modelId, modelId),
-      info: hit?.info,
-      pinned: pinnedKeys.has(`${providerId}:${modelId}`)
+  for (const m of catalog) {
+    if (seen.has(m.id)) continue
+    seen.add(m.id)
+    const key = `${provider.id}:${m.id}`
+    if (hidden.has(key)) continue
+    if (q) {
+      const entry = index.get(key)
+      if (!entry?.haystack.includes(q)) continue
     }
-  }
-
-  // Pinned renders as ONE flat list rather than grouped per provider, so a
-  // shortlist spanning several providers stays a single glanceable block.
-  if (!q) {
-    const rows = pinned.flatMap((p) => {
-      const provider = providers.find((pr) => pr.id === p.providerId)
-      // Skip a pin whose provider was disconnected, or whose model is no longer
-      // in the catalog - it would render as a row that cannot be selected.
-      // Hiding unpins, so this pair is transient — but hidden must win, or it
-      // renders atop the list it was removed from.
-      if (
-        !provider ||
-        !index.has(`${p.providerId}:${p.model}`) ||
-        hidden.has(`${p.providerId}:${p.model}`)
-      )
-        return []
-      return [modelRow('pin', p.providerId, provider.name, p.model)]
+    const hit = index.get(key)
+    out.push({
+      key,
+      providerId: provider.id,
+      providerName: provider.name,
+      modelId: m.id,
+      label: modelLabel(provider.id, hit?.info.name ?? m.name ?? m.id, m.id),
+      info: hit?.info
     })
-    if (rows.length > 0) {
-      out.push({ kind: 'header', key: 'h:pinned', label: 'Pinned', icon: 'pin', providerId: '' })
-      out.push(...rows)
-    }
   }
 
-  for (const p of providers) {
-    const catalog = (catalogs[p.id] ?? []).filter((m) => !hidden.has(`${p.id}:${m.id}`))
-    const list = q
-      ? catalog.filter((m) => index.get(`${p.id}:${m.id}`)?.haystack.includes(q))
-      : catalog
-    // A pinned model is already shown above; repeating it under Latest wastes a
-    // row on a duplicate.
-    const latest = q
-      ? []
-      : (recent[p.id] ?? []).filter(
-          (r) =>
-            !pinnedKeys.has(`${p.id}:${r.model}`) &&
-            index.has(`${p.id}:${r.model}`) &&
-            // Recents are history and still list a hidden model, which would
-            // otherwise keep reappearing under Latest.
-            !hidden.has(`${p.id}:${r.model}`)
-        )
-    if (list.length === 0 && latest.length === 0) continue
-
-    if (latest.length > 0) {
-      out.push({
-        kind: 'header',
-        key: `h:latest:${p.id}`,
-        label: `Latest · ${p.name}`,
-        icon: 'clock',
-        providerId: p.id
-      })
-      for (const r of latest) out.push(modelRow('recent', p.id, p.name, r.model))
-    }
-    if (list.length > 0) {
-      out.push({
-        kind: 'header',
-        key: `h:${p.id}`,
-        label: p.name,
-        icon: 'provider',
-        providerId: p.id
-      })
-      for (const m of list) out.push(modelRow('all', p.id, p.name, m.id, m.name))
-    }
-  }
   return out
+}
+
+/**
+ * Count matching models for each provider when a search query is active.
+ */
+export function countMatchesByProvider(input: {
+  providers: RowProvider[]
+  catalogs: Record<string, ModelInfo[]>
+  index: Map<string, IndexEntry>
+  query: string
+  hidden: ReadonlySet<string>
+}): Record<string, number> {
+  const { providers, catalogs, index, query, hidden } = input
+  const counts: Record<string, number> = {}
+  for (const p of providers) {
+    counts[p.id] = buildProviderModelRows({
+      provider: p,
+      catalog: catalogs[p.id] ?? [],
+      index,
+      query,
+      hidden
+    }).length
+  }
+  return counts
 }
