@@ -12,11 +12,27 @@ import { cn } from '../lib/cn'
 export function Composer({
   onSend,
   sending,
-  onStop
+  onStop,
+  variant = 'session'
 }: {
   onSend: (text: string, images?: ComposerImage[]) => void | Promise<void>
   sending?: boolean
   onStop?: () => void
+  /**
+   * `'bot'` strips the controls that only mean something for a project session,
+   * so a bot's window reads as a different kind of place at a glance:
+   *
+   * - Build/Plan is a *code* mode (Plan narrows tools to read-only over a repo).
+   *   A bot has no workstream - it already hides the workstream strip below -
+   *   so the choice would name something that does not exist here.
+   * - Effort and context budget are standing config for a bot, not a per-turn
+   *   decision: its scheduled runs happen with no window open, so a footer
+   *   picker there promises control nobody is present to exercise. They move
+   *   to the bot's settings pane (`BotInferenceFields`).
+   *
+   * The meter stays - it describes the conversation you are actually looking at.
+   */
+  variant?: 'session' | 'bot'
 }): JSX.Element {
   const { t } = useTranslation()
   const [value, setValue] = useState('')
@@ -329,9 +345,13 @@ export function Composer({
               <Plus className="h-3.5 w-3.5" />
             </button>
             <ModelPicker />
-            <AgentPicker />
-            <ThinkingPicker />
-            <ContextPicker />
+            {variant === 'session' && (
+              <>
+                <AgentPicker />
+                <ThinkingPicker />
+                <ContextPicker />
+              </>
+            )}
             <ContextMeter />
           </div>
           {showStop ? (

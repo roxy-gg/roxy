@@ -432,6 +432,7 @@ export function ChatView(): JSX.Element {
         <Composer
           key={activeChatId}
           onSend={submit}
+          variant={activeChat.kind === 'bot' ? 'bot' : 'session'}
           sending={sending || subagentRunning}
           onStop={
             subagentRunning && activeChatId ? () => void cancelSubagent(activeChatId) : () => stop()

@@ -361,6 +361,81 @@ export function ContextPicker(): JSX.Element | null {
   )
 }
 
+// ---- Bot inference fields ----------------------------------------------------
+
+/**
+ * Thinking effort + context budget for a BOT, as plain form fields.
+ *
+ * A bot's composer deliberately doesn't carry these pickers (see `Composer`):
+ * a bot also runs on a schedule, with no renderer open and nobody to touch a
+ * footer control, so presenting them as per-turn choices is a lie. They are
+ * standing configuration, so they live in the bot's settings pane next to its
+ * username and schedules.
+ *
+ * It still writes through the same session actions: the pane only renders for
+ * the bot whose chat is open, so "the active session" IS this bot's chat.
+ */
+export function BotInferenceFields(): JSX.Element | null {
+  const { t } = useTranslation()
+  const info = useActiveModelInfo()
+  const config = useSessionConfig()
+  const setReasoningEffort = useRoxyStore((s) => s.setReasoningEffort)
+  const setContextLimit = useRoxyStore((s) => s.setContextLimit)
+
+  const efforts = info?.reasoning
+    ? info.reasoningEfforts?.length
+      ? EFFORTS.filter((e) => info.reasoningEfforts!.includes(e.value))
+      : EFFORTS
+    : []
+  const max = info ? effectiveContextMax(info) : 0
+  if (!efforts.length && !max) return null
+
+  const fieldClass = 'flex flex-col gap-1.5 text-xs text-text-muted'
+  const selectClass =
+    'h-9 w-full rounded-lg border border-border bg-surface-2 px-2 text-sm text-text outline-none focus:border-accent'
+
+  return (
+    <section className="border-t border-border pt-4">
+      <h3 className="mb-3 text-sm font-medium">{t('bots.inference')}</h3>
+      <div className="flex flex-col gap-3">
+        {efforts.length > 0 && (
+          <label className={fieldClass}>
+            {t('inference.thinkingTitle')}
+            <select
+              className={selectClass}
+              value={clampReasoningEffort(config.reasoningEffort, info?.reasoningEfforts)}
+              onChange={(e) => void setReasoningEffort(e.target.value as ReasoningEffort)}
+            >
+              {efforts.map((e) => (
+                <option key={e.value} value={e.value}>
+                  {t(e.labelKey)}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+        {max > 0 && (
+          <label className={fieldClass}>
+            {t('inference.contextTitle')}
+            <select
+              className={selectClass}
+              value={config.contextLimit ?? Math.min(max, 200_000)}
+              onChange={(e) => void setContextLimit(Number(e.target.value))}
+            >
+              {contextOptions(max).map((value) => (
+                <option key={value} value={value}>
+                  {formatTokens(value)}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+        <p className="text-[11px] text-text-subtle">{t('bots.inferenceHint')}</p>
+      </div>
+    </section>
+  )
+}
+
 // ---- Context usage meter -----------------------------------------------------
 
 interface Category {

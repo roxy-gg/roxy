@@ -5,6 +5,7 @@ import type { Bot, BotJob, BotJobInput, BotSchedule } from '@shared/bots'
 import { api } from '../lib/api'
 import { useRoxyStore } from '../lib/store'
 import { BotAvatar } from './BotAvatar'
+import { BotInferenceFields } from './InferenceControls'
 import { Button, Input, Textarea } from './ui'
 
 const fieldClass = 'flex flex-col gap-1.5 text-xs text-text-muted'
@@ -137,6 +138,7 @@ export function BotSettingsPane({ bot, onClose }: { bot: Bot; onClose: () => voi
             />
           </label>
         </form>
+        <BotInferenceFields />
         <section className="border-t border-border pt-4">
           <div className="mb-3 flex items-center justify-between">
             <h3 className="text-sm font-medium">{t('bots.schedules')}</h3>

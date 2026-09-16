@@ -54,7 +54,9 @@
     "remainingRuns": "Run limit (optional)",
     "unlimited": "Unlimited",
     "enabled": "Enabled",
-    "mentionLabel": "Mention a bot"
+    "mentionLabel": "Mention a bot",
+    "inference": "Inference",
+    "inferenceHint": "Applies to every run of this bot, including scheduled ones."
   },
   "browserChrome": {
     "closeTab": "Close tab",
