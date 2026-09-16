@@ -27,6 +27,7 @@ import { SubscriptionAccounts } from '../components/SubscriptionSetup'
 import { ModelVisibility } from '../components/ModelVisibility'
 import { useRoxyStore } from '../lib/store'
 import { MotionSettings } from '../components/MotionSettings'
+import { DICTATION_MODEL_FILE, DICTATION_MODEL_SIZE, type DictationState } from '@shared/dictation'
 
 /** The section heading repeated down the page. */
 const SECTION_HEADING = 'mb-3 text-xs font-semibold uppercase tracking-wide text-text-subtle'
@@ -44,6 +45,10 @@ export default function Settings(): JSX.Element {
   const setBranchPrefix = useRoxyStore((s) => s.setBranchPrefix)
   const setLanguage = useRoxyStore((s) => s.setLanguage)
   const setMotion = useRoxyStore((s) => s.setMotion)
+  const setDictationMode = useRoxyStore((s) => s.setDictationMode)
+  const setDictationPolish = useRoxyStore((s) => s.setDictationPolish)
+  const [dictationState, setDictationState] = useState<DictationState | null>(null)
+  const [clearingDictation, setClearingDictation] = useState(false)
   const [prefix, setPrefix] = useState('')
   const prefixError = branchPrefixError(prefix)
   // Pinned once per mount: a preview that reshuffled on every keystroke
@@ -97,6 +102,11 @@ export default function Settings(): JSX.Element {
     )
     return off
   }, [refreshProviders])
+
+  useEffect(() => {
+    void api.dictation.status().then(setDictationState)
+    return api.dictation.onState(setDictationState)
+  }, [])
 
   const disconnect = async (id: string): Promise<void> => {
     await api.providers.disconnect(id)
@@ -233,6 +243,81 @@ export default function Settings(): JSX.Element {
               </option>
             ))}
           </select>
+        </div>
+      </section>
+
+      <section className="mb-8">
+        <h2 className={SECTION_HEADING}>{t('settings.voice.heading')}</h2>
+        <div className="sq sq-xl sq-ring rounded-xl border border-border bg-surface p-4">
+          <div className="text-sm font-medium text-text">{t('settings.voice.localTitle')}</div>
+          <p className="mt-0.5 text-xs text-text-muted">
+            {t('settings.voice.localDescription', {
+              size: Math.round(DICTATION_MODEL_SIZE / 1_048_576)
+            })}
+          </p>
+          <div className="mt-3 flex gap-2" role="group" aria-label={t('settings.voice.modeLabel')}>
+            {(['fast', 'accurate'] as const).map((mode) => (
+              <button
+                key={mode}
+                type="button"
+                onClick={() => void setDictationMode(mode)}
+                aria-pressed={(settings?.dictationMode ?? 'fast') === mode}
+                className={cn(
+                  'sq sq-lg sq-ring rounded-lg border px-3 py-2 text-left',
+                  (settings?.dictationMode ?? 'fast') === mode
+                    ? 'border-accent [--sq-ring:var(--color-accent)] bg-accent/10 text-text'
+                    : 'border-border bg-surface-2 text-text-muted hover:border-border-strong'
+                )}
+              >
+                <span className="block text-xs font-medium">
+                  {t(mode === 'fast' ? 'settings.voice.fast' : 'settings.voice.accurate')}
+                </span>
+                <span className="block text-[11px] text-text-subtle">
+                  {t(
+                    mode === 'fast'
+                      ? 'settings.voice.fastDescription'
+                      : 'settings.voice.accurateDescription'
+                  )}
+                </span>
+              </button>
+            ))}
+          </div>
+          <p className="mt-3 text-[11px] text-text-subtle">
+            {dictationState?.installed
+              ? t('settings.voice.installed', { file: DICTATION_MODEL_FILE })
+              : dictationState?.status === 'unsupported'
+                ? dictationState.error
+                : t('settings.voice.downloadHint')}{' '}
+            {t('settings.voice.license')}
+          </p>
+          {dictationState?.installed && (
+            <Button
+              variant="secondary"
+              className="mt-3"
+              disabled={clearingDictation}
+              onClick={() => {
+                setClearingDictation(true)
+                void api.dictation
+                  .clearCache()
+                  .then(setDictationState)
+                  .finally(() => setClearingDictation(false))
+              }}
+            >
+              {clearingDictation ? t('settings.voice.clearing') : t('settings.voice.clearCache')}
+            </Button>
+          )}
+        </div>
+        <div className="mt-3 flex flex-col gap-3 sq sq-xl sq-ring rounded-xl border border-border bg-surface p-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0">
+            <div className="text-sm font-medium text-text">{t('settings.voice.polishTitle')}</div>
+            <p className="mt-0.5 text-xs text-text-muted">
+              {t('settings.voice.polishDescription')}
+            </p>
+          </div>
+          <Switch
+            checked={settings?.dictationPolish ?? false}
+            onChange={(enabled) => void setDictationPolish(enabled)}
+          />
         </div>
       </section>
 
