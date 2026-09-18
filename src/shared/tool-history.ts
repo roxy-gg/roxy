@@ -13,6 +13,7 @@
  */
 import type { ChatMessage } from './api'
 import type { Message, MessagePart } from './types'
+import type { Bot } from './bots'
 import { previewText } from './context'
 
 /** Cap a replayed tool result to what the live loop sent (agent.ts runLoop bounds big outputs). */
@@ -106,9 +107,45 @@ export function reconstructAssistant(parts: MessagePart[]): ChatMessage[] {
   return out
 }
 
-/** Rebuild one persisted turn (user or assistant) into structured chat messages. */
-export function reconstructTurn(m: Message): ChatMessage[] {
-  if (m.role === 'assistant') return reconstructAssistant(m.parts)
+/** A speaker marker this module added on a previous pass — or one a model copied
+ *  from its own history. Either way it is scaffolding, never part of the reply. */
+const SPEAKER_MARKER = /^(?:\[@[a-z0-9_-]+\]\s*)+/i
+
+/**
+ * Rebuild one persisted turn (user or assistant) into structured chat messages.
+ *
+ * `self` is the bot whose context is being built. Its own turns are NOT marked:
+ * a model that sees `[@bobo]` on every one of its past replies concludes the
+ * marker is part of its voice and starts typing it itself — and since the next
+ * rebuild prefixes *that* too, every round added another one ("[@bobo] [@bobo] …").
+ * Marking only other speakers keeps the tag meaningful and the loop impossible.
+ */
+export function reconstructTurn(m: Message, self?: Pick<Bot, 'id' | 'username'>): ChatMessage[] {
+  // IDs survive renames. Fall back to the handle only for older saved messages.
+  const own = m.botId ? m.botId === self?.id : m.botUsername === self?.username
+  const foreign = !own && (m.role === 'assistant' || !!m.botId || !!m.botUsername)
+  if (foreign) {
+    const speaker = m.botUsername ?? 'Roxy'
+    const content = m.parts
+      .flatMap((part) => {
+        if (part.type === 'text') return [part.text.replace(SPEAKER_MARKER, '')]
+        if (part.type !== 'tool') return []
+        return [
+          `${part.tool} (${part.state}): ${previewText(JSON.stringify(part.input ?? {}), { maxChars: REPLAY_OUTPUT_CAP })}`,
+          previewText(part.output ?? '(no output)', { maxChars: REPLAY_OUTPUT_CAP })
+        ]
+      })
+      .join('\n')
+    // Other participants' actions are background, never this actor's native
+    // assistant/tool history. In particular a guest must not become the host.
+    return [{ role: 'user', content: `[@${speaker}]\n${content}` }]
+  }
+  if (m.role === 'assistant') {
+    const turns = reconstructAssistant(m.parts)
+    for (const turn of turns)
+      if (turn.role === 'assistant') turn.content = turn.content.replace(SPEAKER_MARKER, '')
+    return turns
+  }
   const content = m.parts
     .map((p) => (p.type === 'text' ? p.text : ''))
     .join('')

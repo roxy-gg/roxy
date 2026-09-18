@@ -16,7 +16,7 @@ import type { TFunction } from 'i18next'
 import type { Message, MessagePart } from '@shared/types'
 import { Builder } from './builder'
 import type { Block, Scene, ViewState } from './scene'
-import { TextMetrics, font } from './text'
+import { TextMetrics, font, type InlineSpan } from './text'
 import type { CanvasTheme } from './theme'
 import { alpha } from './theme'
 import { FONT_SIZE, SIZE, SPACE } from './metrics'
@@ -24,8 +24,14 @@ import { layoutMarkdown, layoutPlainText } from './prose'
 import { layoutToolCard, type ToolCardInput } from './tool-card'
 import { PROMPT_GUTTER } from './prompt-history'
 import { TranscriptWindow } from './transcript-window'
+import type { Bot } from '@shared/bots'
+import { MENTION, isKnownMention } from '../../../shared/mentions'
 
 export interface LayoutInput {
+  botUsername?: string
+  streamingBot?: { botId?: string; botUsername?: string }
+  bots?: Bot[]
+  botAvatar?: (username: string) => string
   messages: Message[]
   /** The live turn's parts, or null when nothing is streaming. */
   streaming: MessagePart[] | null
@@ -62,6 +68,9 @@ const CANCEL_REVEAL_MS = 1200
 const TURN_STARTED_AT = '__turn__'
 
 export function layoutTranscript(input: LayoutInput, cache: BlockCache): Scene {
+  cache.setIdentity(
+    `${input.botUsername ?? ''}|${input.bots?.map((bot) => `${bot.id}:${bot.username}`).join('|') ?? ''}`
+  )
   const { messages, streaming, width, theme, view } = input
   if (streaming === null) view.startedAt.delete(TURN_STARTED_AT)
   else if (!view.startedAt.has(TURN_STARTED_AT)) view.startedAt.set(TURN_STARTED_AT, input.now)
@@ -99,6 +108,7 @@ export function layoutTranscript(input: LayoutInput, cache: BlockCache): Scene {
       input,
       {
         id: '__streaming__',
+        ...input.streamingBot,
         chatId: '',
         role: 'assistant',
         content: '',
@@ -150,8 +160,23 @@ function layoutMessage(
   counter: { value: number },
   streaming = false
 ): Block {
-  const builder = new Builder(input.metrics, input.theme, counter, input.t)
-  const body = layoutMessageHeader(builder, message.role === 'user', x, y, width)
+  const builder = new Builder(
+    input.metrics,
+    input.theme,
+    counter,
+    input.t,
+    input.bots?.map((bot) => bot.username)
+  )
+  const username = messageBotUsername(input, message)
+  const body = layoutMessageHeader(
+    builder,
+    message.role === 'user',
+    x,
+    y,
+    width,
+    username,
+    username ? input.botAvatar?.(username) : undefined
+  )
   let cursor = body.y
   if (message.role === 'user') {
     cursor += layoutUserBody(builder, message.parts, body.x, cursor, body.width)
@@ -171,12 +196,23 @@ function layoutMessage(
   return { ...builder.finish(message.id, y, height), copyText: () => partsText(message.parts) }
 }
 
+export function messageBotUsername(input: LayoutInput, message: Message): string | undefined {
+  if (message.role !== 'assistant') return undefined
+  return (
+    input.bots?.find((bot) => bot.id === message.botId)?.username ??
+    message.botUsername ??
+    input.botUsername
+  )
+}
+
 export function layoutMessageHeader(
   builder: Builder,
   isUser: boolean,
   x: number,
   y: number,
-  width: number
+  width: number,
+  botUsername?: string,
+  botAvatarSrc?: string
 ): { x: number; y: number; width: number } {
   const palette = builder.palette
   const top = y + SPACE.messagePadY
@@ -203,8 +239,8 @@ export function layoutMessageHeader(
       y: avatarY,
       w: SPACE.avatar,
       h: SPACE.avatar,
-      src: '__roxy__',
-      radius: SPACE.radiusLg,
+      src: botAvatarSrc ?? '__roxy__',
+      radius: botUsername ? SPACE.avatar / 2 : SPACE.radiusLg,
       border: palette.border
     })
   }
@@ -213,7 +249,7 @@ export function layoutMessageHeader(
   builder.text(
     bodyX,
     top,
-    builder.t(isUser ? 'transcript.you' : 'transcript.assistant'),
+    botUsername ? `@${botUsername}` : builder.t(isUser ? 'transcript.you' : 'transcript.assistant'),
     nameFont,
     palette.textMuted
   )
@@ -274,10 +310,27 @@ export function layoutUserBody(
     .map((p) => (p.type === 'text' || p.type === 'reasoning' ? p.text : ''))
     .join('')
   if (text) {
-    cursor += layoutPlainText(builder, text, x, cursor, width, {
-      color: palette.text,
-      size: FONT_SIZE.body
-    })
+    // ...except @mentions, which stay highlighted the way the composer showed
+    // them, so a prompt that hands work to a bot reads as such in the transcript.
+    const base = font(FONT_SIZE.body, 400, 'sans')
+    const spans: InlineSpan[] = []
+    let last = 0
+    for (const match of text.matchAll(MENTION)) {
+      if (!isKnownMention(match[0], builder.botUsernames)) continue
+      const at = match.index + match[0].indexOf('@')
+      if (at > last)
+        spans.push({ text: text.slice(last, at), font: base, color: palette.text, offset: last })
+      last = at + match[0].length - match[0].indexOf('@')
+      spans.push({
+        text: text.slice(at, last),
+        font: font(FONT_SIZE.body, 600, 'sans'),
+        color: palette.accent,
+        offset: at
+      })
+    }
+    if (last < text.length)
+      spans.push({ text: text.slice(last), font: base, color: palette.text, offset: last })
+    cursor += builder.paragraph(spans, x, cursor, width)
   }
   return cursor - y
 }
@@ -518,6 +571,13 @@ function layoutThinking(
  */
 export class BlockCache {
   readonly window = new TranscriptWindow()
+  private identity: string | undefined
+
+  /** Identity invalidation must survive canvas remounts alongside retained measurements. */
+  setIdentity(identity: string): void {
+    if (this.identity !== undefined && this.identity !== identity) this.clear()
+    this.identity = identity
+  }
   private messages: Message[] | null = null
   private units = 0
   private characters = 0

@@ -485,6 +485,37 @@ check('returning to an identical IPC snapshot reuses measured text', () => {
   layoutTranscript({ ...input, messages: structuredClone(longMessages) }, cache)
   assert.ok(calls < initialCalls / 3, `revisit ${calls} versus cold ${initialCalls}`)
 })
+check(
+  'bot identity preserves measured text on remount and still invalidates renamed headers',
+  () => {
+    let calls = 0
+    const counted = {
+      ...metrics,
+      measure: (value: string, f: ReturnType<typeof font>) => {
+        calls++
+        return metrics.measure(value, f)
+      }
+    } as unknown as TextMetrics
+    for (const messages of [[longMessages[149]], longMessages]) {
+      const cache = new BlockCache()
+      const input = { ...longInput(messages), metrics: counted, botUsername: 'helper' }
+      calls = 0
+      layoutTranscript(input, cache)
+      const cold = calls
+      cache.detach()
+      calls = 0
+      const revisited = layoutTranscript(
+        { ...input, messages: structuredClone(messages), view: view() },
+        cache
+      )
+      if (messages.length > 1) assert.ok(calls < cold / 2, `remount ${calls} versus cold ${cold}`)
+      assert.ok(JSON.stringify(revisited.blocks.at(-1)!.nodes).includes('@helper'))
+      const renamed = layoutTranscript({ ...input, botUsername: 'reviewer' }, cache)
+      assert.ok(JSON.stringify(renamed.blocks.at(-1)!.nodes).includes('@reviewer'))
+      assert.ok(!JSON.stringify(renamed.blocks.at(-1)!.nodes).includes('@helper'))
+    }
+  }
+)
 check('changed text invalidates cached parts despite stable message ids', () => {
   const cache = new BlockCache()
   const input = longInput(longMessages)
@@ -756,6 +787,60 @@ check('a dragged selection retains its source rows across viewport boundaries', 
   assert.ok(next.window!.end >= next.window!.scrollTop + 600)
 })
 
+check('bot replies use a round Facehash and username in both transcript layouts', () => {
+  const own = {
+    ...FIXTURES[1],
+    id: 'own-bot-reply',
+    parts: [{ type: 'text' as const, text: 'Ready.' }]
+  }
+  const attributed = { ...own, id: 'attributed-reply', botId: 'bot-1', botUsername: 'old-name' }
+  const bot = {
+    id: 'bot-1',
+    username: 'helper',
+    instructions: '',
+    chatId: 'bot-chat',
+    createdAt: 0
+  }
+  for (const messages of [[own], [attributed], [...longMessages, attributed]]) {
+    const scene = layoutTranscript(
+      {
+        ...longInput(messages),
+        botUsername: 'helper',
+        bots: [bot],
+        botAvatar: (name) => `data:image/svg+xml,${name}`
+      },
+      new BlockCache()
+    )
+    const last = scene.blocks.at(-1)!
+    const nodes = JSON.stringify(last.nodes)
+    assert.ok(nodes.includes('@helper'))
+    assert.ok(nodes.includes('data:image/svg+xml,'))
+    assert.ok(!nodes.includes('__roxy__'))
+    assert.ok(!nodes.includes('@old-name'))
+  }
+  const live = layoutTranscript(
+    { ...longInput(longMessages), streaming: [], botUsername: 'helper' },
+    new BlockCache()
+  )
+  assert.ok(JSON.stringify(live.blocks.at(-1)!.nodes).includes('@helper'))
+  for (const messages of [[own], longMessages]) {
+    const guest = layoutTranscript(
+      {
+        ...longInput(messages),
+        streaming: [],
+        streamingBot: { botId: bot.id, botUsername: 'old-name' },
+        bots: [bot],
+        botAvatar: (name) => `data:image/svg+xml,${name}`
+      },
+      new BlockCache()
+    )
+    const nodes = JSON.stringify(guest.blocks.at(-1)!.nodes)
+    assert.ok(nodes.includes('@helper'), 'a live guest is named in a project transcript')
+    assert.ok(nodes.includes('data:image/svg+xml,'))
+    assert.ok(!nodes.includes('__roxy__'))
+  }
+})
+
 check('Windows terminal lines survive CRLF and ANSI style changes', () => {
   assert.deepEqual(parseAnsi('first\r\nsecond\r\n').map(ansiLineText), ['first', 'second', ''])
   assert.deepEqual(parseAnsi('\u001b[31merror\r\u001b[0m\nnext').map(ansiLineText), [
@@ -1012,5 +1097,47 @@ check('stream publishing stays frame-coalesced with a non-resetting timer fallba
     globalThis.clearTimeout = original.clear
   }
 })
+
+check(
+  'only known mentions highlight in both roles and layouts; roster changes invalidate caches',
+  () => {
+    const text =
+      'Hola @reviewer, @roxy. @unknown @modelcontextprotocol/sdk @reviewer/sdk user@reviewer.com'
+    const bot = {
+      id: 'mention-bot',
+      username: 'reviewer',
+      instructions: '',
+      chatId: 'bot-chat',
+      createdAt: 0
+    }
+    for (const role of ['user', 'assistant'] as const) {
+      const message = {
+        ...FIXTURES[0],
+        id: 'mention-message',
+        role,
+        parts: [{ type: 'text' as const, text }]
+      }
+      for (const messages of [[message], [...longMessages, message]]) {
+        const cache = new BlockCache()
+        const input = { ...longInput(messages), bots: [bot] }
+        const highlighted = (scene: Scene) =>
+          scene.blocks
+            .at(-1)!
+            .selectable.flatMap((line) => line.runs)
+            .filter((run) => run.color === theme.palette.accent)
+            .map((run) => run.text)
+            .join('')
+        assert.equal(highlighted(layoutTranscript(input, cache)), '@reviewer@roxy')
+        assert.equal(highlighted(layoutTranscript({ ...input, bots: [] }, cache)), '@roxy')
+        assert.equal(
+          highlighted(
+            layoutTranscript({ ...input, bots: [{ ...bot, username: 'unknown' }] }, cache)
+          ),
+          '@roxy@unknown'
+        )
+      }
+    }
+  }
+)
 
 console.log(`DIFF/CANVAS MODEL OK - ${checks} checks passed`)

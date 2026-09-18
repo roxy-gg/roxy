@@ -16,6 +16,8 @@
  */
 
 /** A styled inline fragment — the atom the wrapper lays out. */
+import { MENTION } from '../../../shared/mentions'
+
 export interface MdInline {
   text: string
   bold?: boolean
@@ -23,6 +25,9 @@ export interface MdInline {
   code?: boolean
   strike?: boolean
   href?: string
+  /** An `@username` reference — a bot addressed or named, highlighted the same
+   *  way the composer shows a mention while typing it. */
+  mention?: boolean
   /** Offset of this fragment in the block's plain text, for selection/copy. */
   offset: number
 }
@@ -329,6 +334,18 @@ export function parseInline(src: string): MdInline[] {
             continue
           }
         }
+      }
+    }
+
+    if (ch === '@') {
+      const pattern = new RegExp(MENTION.source, 'iy')
+      pattern.lastIndex = i
+      const match = pattern.exec(src)
+      // Only at the start of a word: `foo@bar` is an address, not a mention.
+      if (match) {
+        push({ text: match[0], mention: true }, i)
+        i += match[0].length
+        continue
       }
     }
 
