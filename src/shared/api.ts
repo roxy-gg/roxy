@@ -373,6 +373,8 @@ export interface LlmStartInput {
   /** Bot speaking this turn, when it is not the session's own bot — a guest in a
    *  shared session. Drives the identity + role in the system prompt. */
   asBotId?: string
+  /** Roxy explicitly answering inside a bot's private chat. */
+  asHost?: boolean
 }
 
 export interface LlmResult {
@@ -671,7 +673,13 @@ export interface RemoteStartInput {
  */
 export type RemoteDelta =
   | { sessionId: string; kind: 'event'; event: LlmEvent }
-  | { sessionId: string; kind: 'turn'; state: 'running' | 'idle' }
+  | {
+      sessionId: string
+      kind: 'turn'
+      state: 'running' | 'idle'
+      botId?: string
+      botUsername?: string
+    }
 
 /** Outcome of exporting the portable config bundle (skills + MCP servers). */
 export interface ConfigExportResult {
@@ -706,7 +714,8 @@ export interface ConfigImportResult {
 export interface RoxyApi {
   bots: {
     list(): Promise<Bot[]>
-    create(username: string): Promise<Bot>
+    /** Omit the username to get a free one: a bot can be named in chat later. */
+    create(username?: string): Promise<Bot>
     update(id: string, patch: { username?: string; instructions?: string }): Promise<Bot>
     remove(id: string): Promise<void>
     jobs(botId: string): Promise<BotJob[]>
@@ -719,7 +728,9 @@ export interface RoxyApi {
   automation: {
     /** Main owns queued turns; renderers only mirror these events. */
     onDelta(callback: (payload: RemoteDelta) => void): () => void
-    snapshot(): Promise<{ sessionId: string; parts: MessagePart[] }[]>
+    snapshot(): Promise<
+      { sessionId: string; parts: MessagePart[]; botId?: string; botUsername?: string }[]
+    >
     onChanged(callback: (chatId: string) => void): () => void
     wake(): Promise<void>
   }

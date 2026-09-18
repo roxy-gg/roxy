@@ -196,6 +196,7 @@ async function runTurn(
       cwd,
       chatId: input.sessionId,
       asBotId: input.asBotId,
+      asHost: input.asHost,
       signal,
       emit
     })

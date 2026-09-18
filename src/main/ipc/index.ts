@@ -745,7 +745,7 @@ export function registerIpc(): void {
 
   // ---- bots ----
   ipcMain.handle(CHANNELS.botsList, () => bots.listBots())
-  ipcMain.handle(CHANNELS.botsCreate, (_e, username: string) => {
+  ipcMain.handle(CHANNELS.botsCreate, (_e, username?: string) => {
     const bot = bots.createBot(username)
     notifyBots()
     return bot

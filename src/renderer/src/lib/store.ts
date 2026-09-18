@@ -122,6 +122,7 @@ interface RoxyStore {
   setBotSettings: (botId: string | null, confirmDelete?: boolean) => void
   /** Main-owned queued turns, distinct from renderer-owned direct sends. */
   runningAutomation: Record<string, true>
+  automationSpeakers: Record<string, { botId?: string; botUsername?: string }>
   /** Pending prompts queued on the active chat (FIFO). */
   queue: QueueItem[]
   /** Chats with a pending stop request, keyed by chat id. */
@@ -228,8 +229,9 @@ interface RoxyStore {
    * repos, and only git can say).
    */
   autoWorkstreamFor: (workspacePath: string | null) => Promise<boolean>
-  /** Create a bot with its identity already filled in; returns it so schedules can be attached. */
-  createBot: (username: string, instructions?: string) => Promise<Bot>
+  /** Create a bot and open its chat. With no username it gets a free one and is
+   *  named in conversation; returns it so schedules can be attached. */
+  createBot: (username?: string, instructions?: string) => Promise<Bot>
   removeBot: (id: string) => Promise<void>
   setActiveAgent: (id: string) => Promise<void>
   /** Load + cache a workspace's instruction files (AGENTS.md etc.) for sizing. */
@@ -412,6 +414,15 @@ async function mirrorAutomationChat(chatId: string): Promise<void> {
 function applyAutomationDelta(payload: RemoteDelta): void {
   const id = payload.sessionId
   automationRevisions.set(id, ++automationRevision)
+  if (payload.kind === 'turn') {
+    useRoxyStore.setState((s) => {
+      const automationSpeakers = { ...s.automationSpeakers }
+      if (payload.state === 'running')
+        automationSpeakers[id] = { botId: payload.botId, botUsername: payload.botUsername }
+      else delete automationSpeakers[id]
+      return { automationSpeakers }
+    })
+  }
   // Reuse the remote fold and publisher; never keep a second live parts tree.
   applyRemoteDelta(payload)
   useRoxyStore.setState((s) => {
@@ -431,12 +442,12 @@ function applyAutomationDelta(payload: RemoteDelta): void {
   }
 }
 
-/** Bot turns (including mentions) always belong to main, even when idle. */
-function addressesBot(chatId: string, content: string, state: RoxyStore): boolean {
-  if (state.chats.find((chat) => chat.id === chatId)?.kind === 'bot') return true
-  if (state.bots.some((bot) => bot.chatId === chatId)) return true
-  const username = /^\s*@([a-z][a-z0-9_-]{1,31})(?=$|[\s,:])/i.exec(content)?.[1].toLowerCase()
-  return state.bots.some((bot) => bot.username === username)
+/** Private bot turns always belong to main, even when idle. */
+function isBotChat(chatId: string, state: RoxyStore): boolean {
+  return (
+    state.chats.some((chat) => chat.id === chatId && chat.kind === 'bot') ||
+    state.bots.some((bot) => bot.chatId === chatId)
+  )
 }
 
 async function enqueuePrompt(
@@ -974,6 +985,7 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
     set({ botSettings: { botId: bot.id, confirmDelete } })
   },
   runningAutomation: {},
+  automationSpeakers: {},
   queue: [],
   stopChats: {},
   compactingChats: {},
@@ -1046,7 +1058,13 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
             const fold = new PartsFold()
             fold.seed(run.parts)
             remoteTurns.set(run.sessionId, fold)
-            set((s) => ({ runningAutomation: { ...s.runningAutomation, [run.sessionId]: true } }))
+            set((s) => ({
+              runningAutomation: { ...s.runningAutomation, [run.sessionId]: true },
+              automationSpeakers: {
+                ...s.automationSpeakers,
+                [run.sessionId]: { botId: run.botId, botUsername: run.botUsername }
+              }
+            }))
             if (get().activeChatId === run.sessionId && !get().sendingChats[run.sessionId]) {
               publishStream(run.sessionId, fold.parts)
             }
@@ -1189,7 +1207,9 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
         const streamingChats = { ...s.streamingChats }
         delete runningAutomation[bot.chatId]
         delete streamingChats[bot.chatId]
-        return { runningAutomation, streamingChats }
+        const automationSpeakers = { ...s.automationSpeakers }
+        delete automationSpeakers[bot.chatId]
+        return { runningAutomation, streamingChats, automationSpeakers }
       })
       if (get().activeChatId === bot.chatId) get().clearActive()
     }
@@ -1760,7 +1780,9 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
       delete sendingChats[id]
       delete streamingChats[id]
       delete stopChats[id]
-      return { sendingChats, streamingChats, stopChats }
+      const automationSpeakers = { ...s.automationSpeakers }
+      delete automationSpeakers[id]
+      return { sendingChats, streamingChats, stopChats, automationSpeakers }
     })
     if (get().activeChatId === id) get().clearActive()
   },
@@ -1830,7 +1852,7 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
     // concurrent turn writing into the same transcript. Queue it instead — it
     // drains as a normal follow-up once the delegate reports.
     if (
-      addressesBot(chatId, text, get()) ||
+      isBotChat(chatId, get()) ||
       get().queue.length > 0 ||
       get().sendingChats[chatId] ||
       remoteTurns.has(chatId) ||
@@ -1845,7 +1867,7 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
   sendMessage: async (content, targetChatId, images) => {
     const chatId = targetChatId ?? get().activeChatId
     if (!chatId) return
-    if (addressesBot(chatId, content, get())) {
+    if (isBotChat(chatId, get())) {
       await enqueuePrompt(chatId, content, images)
       return
     }
@@ -2394,7 +2416,7 @@ async function buildChatMessages(
   // Each turn rebuilds into one or more chat messages; keeping them grouped means
   // the window cut below can never split an assistant's tool_calls from the
   // matching role:'tool' results (which would orphan them → provider 400s).
-  const self = useRoxyStore.getState().bots.find((b) => b.chatId === chatId)?.username
+  const self = useRoxyStore.getState().bots.find((b) => b.chatId === chatId)
   const groups = (await api.messages.list(chatId))
     .filter((m) => (m.role === 'user' || m.role === 'assistant') && m.createdAt > since)
     .map((m) => reconstructTurn(m, self))

@@ -25,9 +25,11 @@ import { layoutToolCard, type ToolCardInput } from './tool-card'
 import { PROMPT_GUTTER } from './prompt-history'
 import { TranscriptWindow } from './transcript-window'
 import type { Bot } from '@shared/bots'
+import { MENTION, isKnownMention } from '../../../shared/mentions'
 
 export interface LayoutInput {
   botUsername?: string
+  streamingBot?: { botId?: string; botUsername?: string }
   bots?: Bot[]
   botAvatar?: (username: string) => string
   messages: Message[]
@@ -106,6 +108,7 @@ export function layoutTranscript(input: LayoutInput, cache: BlockCache): Scene {
       input,
       {
         id: '__streaming__',
+        ...input.streamingBot,
         chatId: '',
         role: 'assistant',
         content: '',
@@ -157,7 +160,13 @@ function layoutMessage(
   counter: { value: number },
   streaming = false
 ): Block {
-  const builder = new Builder(input.metrics, input.theme, counter, input.t)
+  const builder = new Builder(
+    input.metrics,
+    input.theme,
+    counter,
+    input.t,
+    input.bots?.map((bot) => bot.username)
+  )
   const username = messageBotUsername(input, message)
   const body = layoutMessageHeader(
     builder,
@@ -306,7 +315,8 @@ export function layoutUserBody(
     const base = font(FONT_SIZE.body, 400, 'sans')
     const spans: InlineSpan[] = []
     let last = 0
-    for (const match of text.matchAll(/(?:^|\s)@[a-z0-9_-]+/gi)) {
+    for (const match of text.matchAll(MENTION)) {
+      if (!isKnownMention(match[0], builder.botUsernames)) continue
       const at = match.index + match[0].indexOf('@')
       if (at > last)
         spans.push({ text: text.slice(last, at), font: base, color: palette.text, offset: last })

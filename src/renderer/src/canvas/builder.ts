@@ -43,7 +43,8 @@ export class Builder {
     metrics: TextMetrics,
     theme: CanvasTheme,
     lineCounter: { value: number },
-    t: TFunction
+    t: TFunction,
+    readonly botUsernames: readonly string[] = []
   ) {
     this.metrics = metrics
     this.theme = theme

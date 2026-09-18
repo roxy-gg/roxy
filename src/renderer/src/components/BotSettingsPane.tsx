@@ -6,6 +6,7 @@ import { api } from '../lib/api'
 import { useRoxyStore } from '../lib/store'
 import { BotAvatar } from './BotAvatar'
 import { BotInferenceFields } from './InferenceControls'
+import { ModelPicker } from './ModelPicker'
 import { Button, Input, Textarea } from './ui'
 
 const fieldClass = 'flex flex-col gap-1.5 text-xs text-text-muted'
@@ -21,6 +22,21 @@ export function BotSettingsPane({ bot, onClose }: { bot: Bot; onClose: () => voi
   const removeBot = useRoxyStore((s) => s.removeBot)
   const [username, setUsername] = useState(bot.username)
   const [instructions, setInstructions] = useState(bot.instructions)
+  /**
+   * Follow the bot when IT changes, unless there is an unsaved edit here.
+   *
+   * A bot now renames itself and rewrites its role from the conversation, so
+   * this pane can be looking at a profile that is already stale — and saving it
+   * would quietly undo what the user just asked for in chat. Typed changes
+   * still win: they are the other half of the same race.
+   */
+  const seen = useRef(bot)
+  if (seen.current !== bot) {
+    const previous = seen.current
+    seen.current = bot
+    if (username === previous.username) setUsername(bot.username)
+    if (instructions === previous.instructions) setInstructions(bot.instructions)
+  }
   const [jobs, setJobs] = useState<BotJob[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -124,6 +140,9 @@ export function BotSettingsPane({ bot, onClose }: { bot: Bot; onClose: () => voi
               autoCapitalize="none"
               spellCheck={false}
             />
+            {/* Renaming is the only place these rules still bite: a bot is
+                created with a free handle and usually renamed in chat. */}
+            <span className="text-[11px] text-text-subtle">{t('bots.usernameHint')}</span>
           </label>
           <label className={fieldClass}>
             {t('bots.instructions')}
@@ -138,7 +157,7 @@ export function BotSettingsPane({ bot, onClose }: { bot: Bot; onClose: () => voi
             />
           </label>
         </form>
-        <BotInferenceFields />
+        <BotInferenceFields modelPicker={<ModelPicker side="bottom" />} />
         <section className="border-t border-border pt-4">
           <div className="mb-3 flex items-center justify-between">
             <h3 className="text-sm font-medium">{t('bots.schedules')}</h3>

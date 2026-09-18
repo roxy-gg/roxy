@@ -1,11 +1,10 @@
 {
   "bots": {
     "new": "New bot",
-    "create": "Create bot",
-    "creating": "Creating…",
     "username": "Username",
     "usernameHint": "2–32 letters, numbers, underscores or hyphens. Start with a letter. Roxy is reserved.",
-    "intro": "What do you want me to be or do?",
+    "intro": "Tell me who to be and what to do. I save it and keep it.",
+    "introExample": "For example: \"You are Atlas. Check our docs for broken links every morning and list what you find.\"",
     "settings": "Bot settings",
     "editSettings": "Edit settings",
     "deleteTitle": "Delete bot?",
@@ -56,7 +55,8 @@
     "enabled": "Enabled",
     "mentionLabel": "Mention a bot",
     "inference": "Inference",
-    "inferenceHint": "Applies to every run of this bot, including scheduled ones."
+    "model": "Model",
+    "inferenceHint": "Applies to every run of this bot — its own chat, scheduled jobs, and turns it answers as a guest in another session."
   },
   "browserChrome": {
     "closeTab": "Close tab",

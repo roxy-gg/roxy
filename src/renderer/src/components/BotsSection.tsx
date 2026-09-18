@@ -2,13 +2,10 @@ import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import { Plus, Settings, Trash2 } from 'lucide-react'
-import type { BotJobInput } from '@shared/bots'
-import { api } from '../lib/api'
-import { BotJobEditor } from './BotSettingsPane'
 import { useRoxyStore } from '../lib/store'
 import { cn } from '../lib/cn'
 import { BotAvatar } from './BotAvatar'
-import { Button, Input, Textarea } from './ui'
+import { Button } from './ui'
 import { ContextMenuRow, ContextMenuSurface, CONTEXT_MENU_PAD, CONTEXT_ROW_H } from './ContextMenu'
 
 export function BotsSection({ rail = false }: { rail?: boolean }): JSX.Element {
@@ -35,34 +32,26 @@ export function BotsSection({ rail = false }: { rail?: boolean }): JSX.Element {
   useEffect(() => {
     if (menu) menuRef.current?.querySelector('button')?.focus({ preventScroll: true })
   }, [menu])
-  const [open, setOpen] = useState(false)
-  const [username, setUsername] = useState('')
-  const [instructions, setInstructions] = useState('')
-  // Schedules are drafted here and saved once the bot exists (jobs need its id).
-  const [drafts, setDrafts] = useState<BotJobInput[]>([])
-  const [editingDraft, setEditingDraft] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   /** Bot pending deletion — its own confirm dialog, separate from the edit pane. */
   const [deleting, setDeleting] = useState<string | null>(null)
   const deletingBot = bots.find((bot) => bot.id === deleting)
   const trigger = useRef<HTMLButtonElement>(null)
-  const close = (): void => {
-    if (!busy) {
-      setOpen(false)
-      trigger.current?.focus()
-    }
-  }
-  const valid = /^[a-z][a-z0-9_-]{1,31}$/i.test(username) && username.toLowerCase() !== 'roxy'
+  /**
+   * Creating a bot asks nothing: it opens its chat.
+   *
+   * The old dialog wanted a username, a role and schedules BEFORE the first
+   * message — exactly the things you work out by talking to it, and exactly the
+   * reason a new user closed it again. The bot starts on a free handle and
+   * renames itself when the conversation says who it is.
+   */
   const create = async (): Promise<void> => {
-    if (!valid || busy || editingDraft) return
+    if (busy) return
     setBusy(true)
     setError('')
     try {
-      const bot = await createBot(username, instructions)
-      for (const draft of drafts) await api.bots.saveJob({ ...draft, botId: bot.id })
-      if (drafts.length) await api.automation.wake()
-      setOpen(false)
+      await createBot()
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -118,14 +107,8 @@ export function BotsSection({ rail = false }: { rail?: boolean }): JSX.Element {
         <button
           ref={trigger}
           title={t('bots.new')}
-          onClick={() => {
-            setUsername('')
-            setInstructions('')
-            setDrafts([])
-            setEditingDraft(false)
-            setError('')
-            setOpen(true)
-          }}
+          disabled={busy}
+          onClick={() => void create()}
           className={cn(
             'press-scale flex h-8 shrink-0 items-center justify-center gap-2 text-text-muted hover:bg-white/5 hover:text-text focus-visible:ring-2 focus-visible:ring-accent',
             bots.length || rail
@@ -241,146 +224,6 @@ export function BotsSection({ rail = false }: { rail?: boolean }): JSX.Element {
                 >
                   <Trash2 className="h-3.5 w-3.5" />
                   {t('bots.delete')}
-                </Button>
-              </div>
-            </div>
-          </div>,
-          document.body
-        )}
-      {open &&
-        createPortal(
-          <div
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-6"
-            onMouseDown={(e) => {
-              if (e.target === e.currentTarget) close()
-            }}
-          >
-            <div
-              role="dialog"
-              aria-modal="true"
-              aria-labelledby="new-bot-title"
-              className="flex max-h-full w-full max-w-sm flex-col overflow-y-auto rounded-2xl border border-border bg-surface p-5 shadow-2xl"
-              onKeyDown={(e) => {
-                if (e.key === 'Escape') {
-                  e.preventDefault()
-                  close()
-                }
-                if (e.key === 'Tab') {
-                  const elements = [
-                    ...e.currentTarget.querySelectorAll<HTMLElement>('input, button:not(:disabled)')
-                  ]
-                  const first = elements[0],
-                    last = elements.at(-1)
-                  if (e.shiftKey && document.activeElement === first) {
-                    e.preventDefault()
-                    last?.focus()
-                  } else if (!e.shiftKey && document.activeElement === last) {
-                    e.preventDefault()
-                    first?.focus()
-                  }
-                }
-              }}
-            >
-              <div className="mb-4 flex items-center gap-3">
-                <BotAvatar username={username || 'bot'} size={40} />
-                <h2 id="new-bot-title" className="text-lg font-semibold">
-                  {t('bots.new')}
-                </h2>
-              </div>
-              <label className="flex flex-col gap-2 text-xs text-text-muted">
-                {t('bots.username')}
-                <Input
-                  autoFocus
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value.replace(/\s/g, '').replace(/^@/, ''))}
-                  placeholder="helper"
-                  maxLength={32}
-                  autoCapitalize="none"
-                  autoCorrect="off"
-                  spellCheck={false}
-                  disabled={busy}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault()
-                      void create()
-                    }
-                  }}
-                />
-              </label>
-              <p className="mt-2 text-xs text-text-subtle">{t('bots.usernameHint')}</p>
-              <label className="mt-4 flex flex-col gap-2 text-xs text-text-muted">
-                {t('bots.instructions')}
-                <Textarea
-                  rows={5}
-                  value={instructions}
-                  onChange={(e) => setInstructions(e.target.value)}
-                  placeholder={t('bots.instructionsHint')}
-                  disabled={busy}
-                />
-              </label>
-              <section className="mt-4 border-t border-border pt-4">
-                <div className="mb-3 flex items-center justify-between">
-                  <h3 className="text-sm font-medium text-text">{t('bots.schedules')}</h3>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="ghost"
-                    disabled={busy || editingDraft}
-                    onClick={() => setEditingDraft(true)}
-                  >
-                    <Plus className="h-3.5 w-3.5" />
-                    {t('bots.addSchedule')}
-                  </Button>
-                </div>
-                {editingDraft ? (
-                  <BotJobEditor
-                    botId=""
-                    submit={async (input) => setDrafts((old) => [...old, input])}
-                    onCancel={() => setEditingDraft(false)}
-                    onSaved={async () => setEditingDraft(false)}
-                  />
-                ) : (
-                  <div className="flex flex-col gap-2">
-                    {!drafts.length && (
-                      <p className="text-xs text-text-subtle">{t('bots.noSchedules')}</p>
-                    )}
-                    {drafts.map((draft, index) => (
-                      <div
-                        key={index}
-                        className="flex items-start justify-between gap-2 rounded-lg border border-border bg-surface-2 p-2"
-                      >
-                        <span className="min-w-0 break-words text-xs">{draft.name}</span>
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="ghost"
-                          title={t('bots.deleteSchedule')}
-                          disabled={busy}
-                          onClick={() => setDrafts((old) => old.filter((_, i) => i !== index))}
-                        >
-                          <Trash2 className="h-3.5 w-3.5 text-danger" />
-                        </Button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </section>
-              {error && (
-                <p role="alert" className="mt-3 text-xs text-danger">
-                  {error}
-                </p>
-              )}
-              <div className="mt-5 flex justify-end gap-2">
-                <Button type="button" variant="ghost" disabled={busy} onClick={close}>
-                  {t('common.cancel')}
-                </Button>
-                <Button
-                  type="button"
-                  variant="primary"
-                  disabled={!valid || busy || editingDraft}
-                  onClick={() => void create()}
-                >
-                  {busy ? t('bots.creating') : t('bots.create')}
                 </Button>
               </div>
             </div>

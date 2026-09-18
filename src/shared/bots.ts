@@ -45,12 +45,6 @@ export function botUsername(value: string): string {
   return name
 }
 
-/** Only a leading mention addresses a bot; prose about @someone is not a handoff. */
-export function mentionedBot(text: string, bots: Bot[]): Bot | undefined {
-  const name = /^\s*@([a-z][a-z0-9_-]{1,31})(?=$|[\s,:])/i.exec(text)?.[1].toLowerCase()
-  return bots.find((bot) => bot.username === name)
-}
-
 /** Strictly after `after`. Missed interval/cron beats coalesce rather than flooding the queue. */
 export function nextBotRun(schedule: BotSchedule, after: number): number | null {
   if (!Number.isFinite(after)) throw new Error('Invalid schedule time')

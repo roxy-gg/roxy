@@ -23,6 +23,10 @@ export async function runBotTool(
   const action = text(input.action)
   const id = text(input.id)
   const source = ctx.sessionId
+  // "Me" is the bot SPEAKING, which is not always the bot that owns this chat: a
+  // guest answering in someone else's session must configure itself, never its
+  // host. Roxy and subagents have no self here, so they must name their target.
+  const self = ctx.botId ? bots.getBot(ctx.botId) : undefined
   const running = source
     ? (getDb()
         .prepare(`SELECT hops FROM queue WHERE chat_id = ? AND state = 'running'`)
@@ -41,24 +45,28 @@ export async function runBotTool(
     case 'bot_manage': {
       if (action === 'list') result = bots.listBots()
       else if (action === 'read') {
-        const bot = bots.getBot(id)
+        const bot = id ? bots.getBot(id) : self
         if (!bot) throw new Error('Bot not found')
         result = {
           ...bot,
           messages: repo.listMessages(bot.chatId).slice(-50),
+          activity: bots.botActivity(bot),
           jobs: bots.listJobs(bot.id)
         }
       } else if (action === 'create')
         result = bots.createBot(text(input.username), text(input.instructions))
       else if (action === 'update')
-        result = bots.updateBot(id, {
+        // Configuring yourself is the common case, and the one a fresh bot has to
+        // get right on its first message: with no id it updates ITSELF instead of
+        // picking a bot out of the roster.
+        result = bots.updateBot(id || self?.id || '', {
           ...(input.username !== undefined ? { username: text(input.username) } : {}),
           ...(input.instructions !== undefined ? { instructions: text(input.instructions) } : {})
         })
       else if (action === 'delete') {
         const bot = bots.getBot(id)
         if (!bot) throw new Error('Bot not found')
-        if (bot.chatId === source || sessionBusy(bot.chatId))
+        if (bot.id === self?.id || bot.chatId === source || sessionBusy(bot.chatId))
           throw new Error('Stop the bot before deleting it; a bot cannot delete itself mid-turn')
         cancelSessionBackgroundJobs(bot.chatId)
         endSubagentRuns(bot.chatId)
@@ -71,7 +79,7 @@ export async function runBotTool(
       break
     }
     case 'bot_schedule': {
-      if (action === 'list') result = bots.listJobs(id ? (bots.getBot(id)?.id ?? id) : undefined)
+      if (action === 'list') result = bots.listJobs(id ? (bots.getBot(id)?.id ?? id) : self?.id)
       else if (action === 'delete') {
         const job = bots.listJobs().find((entry) => entry.id === id)
         bots.removeJob(id)
@@ -82,7 +90,7 @@ export async function runBotTool(
         const old = action === 'update' ? bots.listJobs().find((job) => job.id === id) : undefined
         if (action === 'update' && !old) throw new Error('Schedule not found')
         const ref = text(input.bot) || old?.botId
-        const bot = ref ? bots.getBot(ref) : source ? bots.chatBot(source) : undefined
+        const bot = ref ? bots.getBot(ref) : self
         if (!bot) throw new Error('Name the bot to schedule')
         result = bots.saveJob(
           {
@@ -103,10 +111,18 @@ export async function runBotTool(
       break
     }
     case 'bot_invoke': {
-      const bot = bots.getBot(text(input.bot))
-      if (!bot) throw new Error('Bot not found; use bot_manage list')
-      if (bot.chatId === source) throw new Error('Use queue_manage to queue work for yourself')
       if (!source) throw new Error('bot_invoke needs a session to answer in')
+      const ref = text(input.bot).trim()
+      const host = ref.replace(/^@/, '').toLowerCase() === 'roxy'
+      const bot = host ? undefined : bots.getBot(ref)
+      if (host) {
+        if (!self) throw new Error('You are Roxy, already executing this turn. Do the work here.')
+      } else if (!bot) throw new Error('Bot not found; use bot_manage list, or roxy for the host')
+      if (bot && bot.id === self?.id)
+        throw new Error(
+          `You are @${bot.username}, already executing this turn. Do the assigned work and answer here; do not invoke yourself or wait for your own reply.`
+        )
+      if (bot?.chatId === source) throw new Error('Use queue_manage to queue work for yourself')
       // The invited bot answers HERE, in the shared session, the way a group chat
       // works: everyone sees the exchange and the context is the conversation
       // itself. Sending it to the bot's own chat instead split the thread in two
@@ -114,11 +130,21 @@ export async function runBotTool(
       //
       // The request belongs to whoever is asking — attributing it to the invited
       // bot made its own question appear above its answer, signed with its name.
-      const asker = bots.chatBot(source)
-      result = enqueuePrompt(source, text(input.prompt), undefined, {
+      const asker = self
+      // Named explicitly in the transcript regardless of the caller's wording:
+      // asking without an @-prefix still reaches the bot, but showing WHO was
+      // called (not just what was asked) is what makes a delegation read as one
+      // in the shared thread rather than as an unaddressed instruction.
+      const prompt = text(input.prompt)
+      if (!prompt.trim()) throw new Error('A prompt is required')
+      const username = bot?.username ?? 'Roxy'
+      const addressed = new RegExp(`^\\s*@${username}(?=$|[\\s,:])`, 'i').test(prompt)
+      const content = addressed ? prompt : `@${username} ${prompt}`
+      result = enqueuePrompt(source, content, undefined, {
         sourceChatId: source,
         hops,
-        asBotId: bot.id,
+        asBotId: bot?.id,
+        recipientId: bot?.id ?? 'roxy',
         botId: asker?.id,
         botUsername: asker?.username
       })
@@ -141,6 +167,14 @@ export async function runBotTool(
         })
       } else {
         const chat = repo.getChat(id)
+        if (!id.trim())
+          throw new Error(
+            'session_manage requires id: the session ID returned by list. For send, pass action, id and prompt; sessionId and message are not valid parameter names. No task was queued.'
+          )
+        if (action === 'send' && !text(input.prompt).trim())
+          throw new Error(
+            'session_manage send requires a non-empty prompt, not message. No task was queued.'
+          )
         if (!chat || chat.kind !== 'main') throw new Error('Project session not found')
         if (action === 'read')
           result = {
@@ -175,7 +209,9 @@ export async function runBotTool(
             sourceChatId: source,
             replyToChatId: source,
             hops,
-            continueReply: id !== source
+            continueReply: id !== source,
+            botId: self?.id,
+            botUsername: self?.username
           })
         } else if (action === 'stop') {
           stopTurn(id)

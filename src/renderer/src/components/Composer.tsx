@@ -8,6 +8,7 @@ import { ImagePreview } from './ImagePreview'
 import { useRoxyStore } from '../lib/store'
 import { BotAvatar } from './BotAvatar'
 import { cn } from '../lib/cn'
+import { MENTION, isKnownMention } from '@shared/mentions'
 
 export function Composer({
   onSend,
@@ -25,10 +26,10 @@ export function Composer({
    * - Build/Plan is a *code* mode (Plan narrows tools to read-only over a repo).
    *   A bot has no workstream - it already hides the workstream strip below -
    *   so the choice would name something that does not exist here.
-   * - Effort and context budget are standing config for a bot, not a per-turn
-   *   decision: its scheduled runs happen with no window open, so a footer
-   *   picker there promises control nobody is present to exercise. They move
-   *   to the bot's settings pane (`BotInferenceFields`).
+   * - Model, effort and context budget are standing config for a bot, not a
+   *   per-turn decision: its scheduled runs happen with no window open, so a
+   *   footer picker there promises control nobody is present to exercise. They
+   *   move to the bot's settings pane (`BotInferenceFields`).
    *
    * The meter stays - it describes the conversation you are actually looking at.
    */
@@ -42,6 +43,7 @@ export function Composer({
   const mirror = useRef<HTMLDivElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const bots = useRoxyStore((s) => s.bots)
+  const recipients = [{ id: 'roxy', username: 'roxy' }, ...bots]
   const [caret, setCaret] = useState(0)
   const [mentionIndex, setMentionIndex] = useState(0)
   const [mentionDismissed, setMentionDismissed] = useState(false)
@@ -50,10 +52,10 @@ export function Composer({
   const [error, setError] = useState('')
   // A mention can start anywhere, as long as the "@" opens a word (start of
   // input or after whitespace) — matching how you actually type "ask @bob to…".
-  const prefix = /(?:^|\s)@([a-z0-9_-]*)$/i.exec(value.slice(0, caret))
+  const prefix = /(?:^|[\s,;:!?()[\]{}\u00bf\u00a1])@([a-z0-9_-]*)$/i.exec(value.slice(0, caret))
   const mentions =
     focused && prefix && !mentionDismissed
-      ? bots.filter((bot) => bot.username.startsWith(prefix[1].toLowerCase())).slice(0, 8)
+      ? recipients.filter((bot) => bot.username.startsWith(prefix[1].toLowerCase())).slice(0, 8)
       : []
   const selectedMention = Math.min(mentionIndex, Math.max(0, mentions.length - 1))
   const chooseMention = (username: string): void => {
@@ -156,21 +158,25 @@ export function Composer({
     }
   }
 
-  // Same split the transcript uses: "@" must open a word to count as a mention.
+  // Only known collaborators get a tint. A mention never chooses the responder.
   const highlighted = value
-    .split(/((?:^|\s)@[a-z0-9_-]+)/gi)
+    .split(new RegExp(`(${MENTION.source})`, MENTION.flags))
     .map((chunk, i) => {
-      const at = chunk.search(/@/)
-      if (i % 2 === 0 || at < 0)
+      if (
+        i % 2 === 0 ||
+        !isKnownMention(
+          chunk,
+          bots.map((bot) => bot.username)
+        )
+      )
         return (
           <span key={i} className="text-text">
             {chunk}
           </span>
         )
       return (
-        <span key={i} className="text-text">
-          {chunk.slice(0, at)}
-          <span className="font-semibold text-accent">{chunk.slice(at)}</span>
+        <span key={i} className="font-semibold text-accent">
+          {chunk}
         </span>
       )
     })
@@ -316,6 +322,7 @@ export function Composer({
             }
             onChange={(e) => {
               setValue(e.target.value)
+              setError('')
               setCaret(e.target.selectionStart)
               setMentionIndex(0)
               setMentionDismissed(false)
@@ -344,9 +351,9 @@ export function Composer({
             >
               <Plus className="h-3.5 w-3.5" />
             </button>
-            <ModelPicker />
             {variant === 'session' && (
               <>
+                <ModelPicker />
                 <AgentPicker />
                 <ThinkingPicker />
                 <ContextPicker />

@@ -23,10 +23,52 @@ export function chatBot(chatId: string): Bot | undefined {
     | undefined
 }
 
-export function createBot(username: string, instructions = ''): Bot {
+/** Recent contributions, not a second transcript or evidence of task completion. */
+export function botActivity(
+  bot: Bot,
+  currentChatId = bot.chatId
+): {
+  sessionId: string
+  title: string
+  messageId: string
+  createdAt: number
+  text: string
+}[] {
+  return getDb()
+    .prepare(
+      `SELECT m.chat_id AS sessionId, substr(c.title, 1, 120) AS title,
+        m.id AS messageId, m.created_at AS createdAt,
+        substr((SELECT group_concat(json_extract(p.value, '$.text'), char(10))
+          FROM json_each(CASE WHEN json_valid(m.parts) THEN m.parts ELSE '[]' END) p WHERE json_extract(p.value, '$.type') = 'text'), 1, 1000) AS text
+       FROM messages m JOIN chats c ON c.id = m.chat_id
+       WHERE m.bot_id = ? AND m.role = 'assistant' AND m.chat_id != ? AND m.chat_id != ?
+         AND EXISTS (SELECT 1 FROM json_each(CASE WHEN json_valid(m.parts) THEN m.parts ELSE '[]' END) p
+           WHERE json_extract(p.value, '$.type') = 'text'
+             AND length(trim(json_extract(p.value, '$.text'))) > 0)
+       ORDER BY m.created_at DESC, m.rowid DESC LIMIT 4`
+    )
+    .all(bot.id, bot.chatId, currentChatId) as ReturnType<typeof botActivity>
+}
+
+/**
+ * A free handle, so a bot can exist BEFORE it has a name.
+ *
+ * Naming was the one thing creation demanded up front, and it is the thing a
+ * user can least answer before talking to the bot: the name usually falls out
+ * of the role ("you are Creators"). So a nameless bot opens as `bot`, `bot-2`,
+ * ... and renames itself once the conversation says who it is.
+ */
+function freeUsername(): string {
+  for (let n = 1; ; n++) {
+    const candidate = n === 1 ? 'bot' : `bot-${n}`
+    if (!getBot(candidate)) return candidate
+  }
+}
+
+export function createBot(username = '', instructions = ''): Bot {
   if (typeof username !== 'string' || typeof instructions !== 'string')
     throw new Error('Bot username and instructions must be text')
-  username = botUsername(username)
+  username = username.trim() ? botUsername(username) : freeUsername()
   if (getBot(username)) throw new Error('That bot username is already taken')
   return getDb().transaction(() => {
     const chat = repo.createChat({ title: username, kind: 'bot' })

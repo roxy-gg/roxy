@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Brain, Check, Loader2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import type { MessagePart, ReasoningEffort } from '@shared/types'
@@ -27,7 +27,10 @@ import { cn } from '../lib/cn'
  * hidden`, so "hangs off" means "is silently cut". `width` is the menu's width
  * in px and must match the class it renders with.
  */
-function usePopover(width: number): {
+function usePopover(
+  width: number,
+  side: 'top' | 'bottom' = 'top'
+): {
   open: boolean
   setOpen: (v: boolean) => void
   ref: React.RefObject<HTMLDivElement>
@@ -35,7 +38,7 @@ function usePopover(width: number): {
 } {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
-  const anchor = useMenuAnchor(ref, open, width, { gap: 8 })
+  const anchor = useMenuAnchor(ref, open, width, { gap: 8, side })
   useEffect(() => {
     if (!open) return
     const onClick = (e: MouseEvent): void => {
@@ -123,6 +126,9 @@ export const triggerClass =
  */
 const popoverClass =
   'animate-pop-in absolute bottom-full z-50 mb-2 flex flex-col overflow-y-auto sq-frame sq-xl sq-fill-elevated sq-ring edge edge-strong edge-panel rounded-xl border border-border bg-elevated shadow-float origin-bottom-left'
+/** The same menu, opening DOWNWARD — for pickers that sit in a side panel. */
+const popoverDownClass =
+  'animate-pop-in absolute top-full z-50 mt-2 flex flex-col overflow-y-auto sq-frame sq-xl sq-fill-elevated sq-ring edge edge-strong edge-panel rounded-xl border border-border bg-elevated shadow-float origin-top-left'
 /** Menu widths in px, matching what each picker renders. */
 const POPOVER_W = 288
 /** Just wide enough for "Build"/"Plan" + the check, now that blurbs are gone. */
@@ -221,16 +227,32 @@ export function ThinkingPicker(): JSX.Element | null {
  * harness resolves this agent id, layers its `plan.txt` reminder onto the system
  * prompt, and narrows the tool allowlist (no write/edit). Build is the default.
  */
-export function AgentPicker(): JSX.Element {
+export function AgentPicker({
+  side = 'top'
+}: {
+  side?: 'top' | 'bottom'
+} = {}): JSX.Element {
   const { t } = useTranslation()
   const activeAgentId = useRoxyStore((s) => s.activeAgentId)
   const setActiveAgent = useRoxyStore((s) => s.setActiveAgent)
-  const { open, setOpen, ref, anchor } = usePopover(AGENT_POPOVER_W)
+  const { open, setOpen, ref, anchor } = usePopover(AGENT_POPOVER_W, side)
 
   const active = getAgent(activeAgentId) ?? getAgent(DEFAULT_AGENT_ID)!
 
   return (
-    <div ref={ref} className="relative">
+    <div
+      ref={ref}
+      className="relative"
+      // Same reason as ModelPicker: this picker also renders inside the bot
+      // settings pane, which closes itself on Escape. Dismissing the menu must
+      // not take the unsaved form behind it along with it.
+      onKeyDown={(e) => {
+        if (open && e.key === 'Escape') {
+          e.stopPropagation()
+          setOpen(false)
+        }
+      }}
+    >
       <button
         type="button"
         onClick={() => setOpen(!open)}
@@ -241,7 +263,7 @@ export function AgentPicker(): JSX.Element {
         <span>{active.name}</span>
       </button>
       {open && (
-        <div className={popoverClass} style={anchor}>
+        <div className={side === 'bottom' ? popoverDownClass : popoverClass} style={anchor}>
           <div className="p-1">
             {PRIMARY_AGENTS.map((a) => {
               const selected = a.id === active.id
@@ -374,8 +396,11 @@ export function ContextPicker(): JSX.Element | null {
  *
  * It still writes through the same session actions: the pane only renders for
  * the bot whose chat is open, so "the active session" IS this bot's chat.
+ *
+ * `modelPicker` is injected rather than imported: `ModelPicker` takes
+ * `triggerClass` from this module, so importing it back would close a cycle.
  */
-export function BotInferenceFields(): JSX.Element | null {
+export function BotInferenceFields({ modelPicker }: { modelPicker: ReactNode }): JSX.Element {
   const { t } = useTranslation()
   const info = useActiveModelInfo()
   const config = useSessionConfig()
@@ -388,16 +413,35 @@ export function BotInferenceFields(): JSX.Element | null {
       : EFFORTS
     : []
   const max = info ? effectiveContextMax(info) : 0
-  if (!efforts.length && !max) return null
 
   const fieldClass = 'flex flex-col gap-1.5 text-xs text-text-muted'
   const selectClass =
     'h-9 w-full rounded-lg border border-border bg-surface-2 px-2 text-sm text-text outline-none focus:border-accent'
+  // The trigger controls are sized for the composer's dense footer row; in a
+  // labelled column they read as fields, so they get a bordered box each.
+  const controlClass =
+    'flex h-9 items-center rounded-lg border border-border bg-surface-2 px-1.5 [&>div>button]:w-full [&>div>button]:justify-start'
 
   return (
     <section className="border-t border-border pt-4">
       <h3 className="mb-3 text-sm font-medium">{t('bots.inference')}</h3>
       <div className="flex flex-col gap-3">
+        {/* Model and mode are the same controls the composer uses, so the bot
+            pane can never drift from the picker a session gets.
+
+            Plain divs, not <label>s: a label forwards a click anywhere inside
+            it to its first labelable descendant, so picking a model re-fired
+            the trigger button and reopened the menu. */}
+        <div className={fieldClass}>
+          {t('bots.model')}
+          <div className={controlClass}>{modelPicker}</div>
+        </div>
+        <div className={fieldClass}>
+          {t('inference.agentMode')}
+          <div className={controlClass}>
+            <AgentPicker side="bottom" />
+          </div>
+        </div>
         {efforts.length > 0 && (
           <label className={fieldClass}>
             {t('inference.thinkingTitle')}

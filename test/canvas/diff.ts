@@ -823,6 +823,22 @@ check('bot replies use a round Facehash and username in both transcript layouts'
     new BlockCache()
   )
   assert.ok(JSON.stringify(live.blocks.at(-1)!.nodes).includes('@helper'))
+  for (const messages of [[own], longMessages]) {
+    const guest = layoutTranscript(
+      {
+        ...longInput(messages),
+        streaming: [],
+        streamingBot: { botId: bot.id, botUsername: 'old-name' },
+        bots: [bot],
+        botAvatar: (name) => `data:image/svg+xml,${name}`
+      },
+      new BlockCache()
+    )
+    const nodes = JSON.stringify(guest.blocks.at(-1)!.nodes)
+    assert.ok(nodes.includes('@helper'), 'a live guest is named in a project transcript')
+    assert.ok(nodes.includes('data:image/svg+xml,'))
+    assert.ok(!nodes.includes('__roxy__'))
+  }
 })
 
 check('Windows terminal lines survive CRLF and ANSI style changes', () => {
@@ -1081,5 +1097,47 @@ check('stream publishing stays frame-coalesced with a non-resetting timer fallba
     globalThis.clearTimeout = original.clear
   }
 })
+
+check(
+  'only known mentions highlight in both roles and layouts; roster changes invalidate caches',
+  () => {
+    const text =
+      'Hola @reviewer, @roxy. @unknown @modelcontextprotocol/sdk @reviewer/sdk user@reviewer.com'
+    const bot = {
+      id: 'mention-bot',
+      username: 'reviewer',
+      instructions: '',
+      chatId: 'bot-chat',
+      createdAt: 0
+    }
+    for (const role of ['user', 'assistant'] as const) {
+      const message = {
+        ...FIXTURES[0],
+        id: 'mention-message',
+        role,
+        parts: [{ type: 'text' as const, text }]
+      }
+      for (const messages of [[message], [...longMessages, message]]) {
+        const cache = new BlockCache()
+        const input = { ...longInput(messages), bots: [bot] }
+        const highlighted = (scene: Scene) =>
+          scene.blocks
+            .at(-1)!
+            .selectable.flatMap((line) => line.runs)
+            .filter((run) => run.color === theme.palette.accent)
+            .map((run) => run.text)
+            .join('')
+        assert.equal(highlighted(layoutTranscript(input, cache)), '@reviewer@roxy')
+        assert.equal(highlighted(layoutTranscript({ ...input, bots: [] }, cache)), '@roxy')
+        assert.equal(
+          highlighted(
+            layoutTranscript({ ...input, bots: [{ ...bot, username: 'unknown' }] }, cache)
+          ),
+          '@roxy@unknown'
+        )
+      }
+    }
+  }
+)
 
 console.log(`DIFF/CANVAS MODEL OK - ${checks} checks passed`)

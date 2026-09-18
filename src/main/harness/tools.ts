@@ -56,6 +56,16 @@ export interface ToolContext {
   /** The session (chat id) this turn runs in — the target of session-metadata tools. */
   sessionId?: string
   /**
+   * The bot SPEAKING this turn — what "me" means to the bot tools.
+   *
+   * Not the same as the session's owner: a guest invited into another chat runs
+   * with the host's `sessionId` but its own identity, so resolving self from the
+   * session let a visitor rename or schedule the bot it was visiting. Undefined
+   * for Roxy and for subagents, which must name the bot they intend to change
+   * instead of inheriting one.
+   */
+  botId?: string
+  /**
    * The key that isolates this turn's browser (window + tabs + console). Defaults
    * to sessionId, so each chat drives its own browser and concurrent chats never
    * clobber each other's tabs. Subagents inherit their PARENT's key so they share

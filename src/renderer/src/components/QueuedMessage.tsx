@@ -201,6 +201,7 @@ export function QueuedMessage({
             placeholder={t('queue.editPlaceholder')}
             onChange={(e) => {
               setDraft(e.target.value)
+              setError('')
               autoGrow()
             }}
             onKeyDown={onKeyDown}

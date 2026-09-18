@@ -61,6 +61,7 @@ export function CanvasTranscript({
   const prompts = useMemo(() => promptEntries(messages), [messages])
   const bots = useRoxyStore((s) => s.bots)
   const ownBot = bots.find((bot) => bot.chatId === chatId)
+  const speaker = useRoxyStore((s) => (chatId ? s.automationSpeakers[chatId] : undefined))
   const signature = streaming === null ? null : streamSignature(streaming)
   const quiet = signature !== null && quietSignature === signature
 
@@ -106,6 +107,7 @@ export function CanvasTranscript({
           messages,
           streaming,
           botUsername: ownBot?.username,
+          streamingBot: speaker,
           bots,
           botAvatar: botAvatarUrl,
           quiet,
@@ -120,7 +122,7 @@ export function CanvasTranscript({
         cache
       )
     },
-    [messages, streaming, quiet, clock, logo, cache, bots, ownBot?.username]
+    [messages, streaming, quiet, clock, logo, cache, bots, ownBot?.username, speaker]
   )
 
   const onAction = (action: HitAction): void => {

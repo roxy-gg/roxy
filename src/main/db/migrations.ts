@@ -31,6 +31,8 @@ function botSchema(db: Database): void {
   `)
   addColumnIfMissing(db, 'messages', 'bot_id', 'TEXT')
   addColumnIfMissing(db, 'messages', 'bot_username', 'TEXT')
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_messages_bot_activity
+    ON messages(bot_id, created_at) WHERE role = 'assistant'`)
   addColumnIfMissing(db, 'queue', 'source_chat_id', 'TEXT')
   addColumnIfMissing(db, 'queue', 'reply_to_chat_id', 'TEXT')
   addColumnIfMissing(db, 'queue', 'hops', 'INTEGER NOT NULL DEFAULT 0')
@@ -43,6 +45,7 @@ function botSchema(db: Database): void {
   addColumnIfMissing(db, 'queue', 'bot_id', 'TEXT')
   addColumnIfMissing(db, 'queue', 'bot_username', 'TEXT')
   addColumnIfMissing(db, 'queue', 'as_bot_id', 'TEXT')
+  addColumnIfMissing(db, 'queue', 'recipient_id', 'TEXT')
 }
 
 /** Whether a table already has a column — SQLite can't express this in DDL. */
@@ -593,7 +596,14 @@ export const MIGRATIONS: Migration[] = [
     }
     // Keep transcripts and queues in place; only the obsolete scheduler rows go away.
     db.exec(`UPDATE chats SET kind = 'main' WHERE kind = 'loop'; DELETE FROM loops;`)
-  }
+  },
+  // ---- v25: pin the responder chosen before sending ----
+  (db) => addColumnIfMissing(db, 'queue', 'recipient_id', 'TEXT'),
+
+  // ---- v26: user turns belong to the session owner, not a parsed mention ----
+  // Keep explicit tool handoffs and failure states; upgrading must not retry work.
+  `UPDATE queue SET recipient_id = NULL, as_bot_id = NULL
+   WHERE source_chat_id IS NULL;`
 ]
 
 /**

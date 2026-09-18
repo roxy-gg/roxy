@@ -7,11 +7,45 @@ tools, services, browser, and queue use the existing session harness.
 
 ## Collaboration
 
-- A leading `@username` in a session sends that request and a bounded slice of
-  session context to the bot's own chat. Its attributed answer appears back in
-  the source session. Mid-sentence mentions do not redirect a user's request.
+Each actor keeps its own saved role, model configuration and stable bot ID.
+Other participants' messages and tool activity are attributed background, not
+replayed as the current actor's native assistant/tool history. Renaming a bot
+does not turn its old messages into another participant's work.
+
+Invited bots receive bounded context from their own chat. Both private and
+invited turns also receive up to four text excerpts of their own contributions
+in other sessions, with source session/message IDs. `bot_manage read` exposes
+these excerpts too. This is recent activity, not exhaustive memory or proof of
+completion; the bot must inspect the source for details or current status.
+No transcript is copied, no new turn is scheduled, and task history never
+automatically replaces the saved role. Deleting a source removes that activity.
+
+- All project user messages reach Roxy first. Private bot chats stay with their
+  owner. No parser routes messages based on the presence or position of `@`.
+- Mentions highlight existing bots and Roxy only. Unknown handles and scoped
+  packages such as `@modelcontextprotocol/sdk` are plain text, never send errors.
+  There is no recipient selector or permanent explanatory UI.
+- The model interprets intent: a direct `Hola @reviewer` calls `bot_invoke`
+  without an announcement; `implement this, then ask @reviewer` keeps the work
+  with Roxy until its prerequisites are complete. Questions about a bot stay
+  with Roxy. This is model behavior, not a deterministic language classifier.
+- Explicit tool handoffs retain a stable destination across renames and retries.
+  User queues never select a guest, including queues left by the old mention
+  router. Failed entries remain paused for deliberate retry or removal.
 - Agents use `bot_invoke` to delegate explicitly. The response is persisted in
-  the caller's transcript and a continuation is queued for the caller.
+  the caller's transcript. A bot can hand actionable follow-up work back to the
+  project host with `bot_invoke({ bot: 'roxy', prompt: '...' })`. Roxy runs after
+  the bot's turn, using the project session's model, mode and workspace. A prose
+  `@Roxy` mention alone does not schedule work. There is no automatic return turn
+  for a completed result with no follow-up task.
+- Roxy is a reserved host destination, not a registered bot. A bot can invoke
+  Roxy inside its private chat using app inference defaults and that chat's
+  workspace. Work for a different project requires `session_manage send` with an
+  identified session; the app never guesses which project should receive changes.
+- An invited bot answers as itself: its own identity, instructions, model, mode,
+  thinking effort, and context budget, plus a bounded text-only slice of its own
+  chat as background. The host session still owns the transcript, workspace, and
+  queue.
 - `project_list` and `session_manage` discover projects, create/read/update/delete
   project sessions, and send prompts to them. New sessions honor workstream
   isolation. Busy sessions cannot be deleted through these tools.
@@ -57,10 +91,10 @@ transcripts, inference settings, workspace paths, pending messages, enabled
 state, and schedule times. Colliding legacy names get unique usernames. The old
 loop scheduler, tools, IPC, and navigation are removed.
 
-The useful ideas from PR #91 are preserved: persistent identities, standing
-roles, leading-mention routing, and attributed handoffs. Channel membership and
-prose-scanning automatic handoffs are deliberately not required. Bots always
-run in their own conversation; explicit tools handle agent-to-agent delegation.
+Persistent identities, standing roles and attributed handoffs remain separate
+from delegation. Schema v25's destination column remains internal to explicit
+tool handoffs; v26 clears obsolete auto-routed user destinations without retrying
+work. Tools and scheduled jobs own their destinations, not mentions.
 
 Run `npm run smoke:bots` for scheduling/mention unit checks and isolated Electron
 runtime tests covering migration, CRUD, queue ownership, failures, handoffs, and

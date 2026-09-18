@@ -52,48 +52,41 @@ async function run() {
   win.focus()
   await new Promise((resolve) => setTimeout(resolve, 2000))
   assert.ok(await text('New bot'))
+  // Creating a bot asks NOTHING: one click lands in its chat, ready to be told
+  // who it is. No dialog, no username, no empty form to abandon.
   await click('button[title="New bot"]')
-  await type('form[role="dialog"] input', '  @hel per\t\u00a0 ')
-  assert.equal(
-    await evaluate('return document.querySelector("form[role=dialog] input").value'),
-    'helper',
-    'pasted username removes whitespace before validation'
-  )
-  await win.webContents.debugger.sendCommand('Input.insertText', { text: ' ' })
-  await wait()
-  assert.equal(
-    await evaluate('return document.querySelector("form[role=dialog] input").value'),
-    'helper',
-    'typing a space does not leave an invalid username'
+  assert.ok(
+    await evaluate(`return !document.querySelector('[role=dialog]')`),
+    'creating a bot opens no dialog'
   )
   assert.ok(
-    await evaluate(
-      'return !document.querySelector("form[role=dialog] button[type=submit]").disabled'
-    )
-  )
-  await click('form[role="dialog"] button[type="submit"]')
-  assert.ok(
-    await text('What do you want me to be or do?'),
+    await text('Tell me who to be and what to do. I save it and keep it.'),
     await evaluate('return document.body.textContent')
   )
-  assert.equal(
-    await evaluate('return document.querySelectorAll("aside section button[title=helper]").length'),
-    0
-  )
   assert.ok(
     await evaluate(
-      `return [...document.querySelectorAll('button')].some((el) => el.title === '@helper' && el.querySelector('[data-facehash]'))`
-    )
+      `return [...document.querySelectorAll('button')].some((el) => el.title === '@bot' && el.querySelector('[data-facehash]'))`
+    ),
+    'the new bot is selected and carries a generated handle'
+  )
+  // Renamed in conversation, exactly as the bot itself would with bot_manage.
+  await evaluate(`return window.__renameBot('bot', 'helper')`)
+  await wait()
+  assert.ok(
+    await evaluate(
+      `return [...document.querySelectorAll('button')].some((el) => el.title === '@helper')`
+    ),
+    'a rename from the conversation shows up in the sidebar'
   )
   await click('button[title="New bot"]')
-  await type('form[role="dialog"] input', 'planner')
-  await click('form[role="dialog"] button[type="submit"]')
+  await evaluate(`return window.__renameBot('bot', 'planner')`)
+  await wait()
   await rightClick('button[title="@helper"]')
   assert.deepEqual(
     await evaluate(
       `return [...document.querySelectorAll('[data-bot-menu] button')].map(button => button.textContent.trim())`
     ),
-    ['Bot settings', 'Delete bot']
+    ['Edit settings', 'Delete bot']
   )
   assert.equal(
     await evaluate(
@@ -197,7 +190,7 @@ async function run() {
   win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'F10', modifiers: ['shift'] })
   win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'F10', modifiers: ['shift'] })
   await wait()
-  assert.equal(await evaluate(`return document.activeElement.textContent.trim()`), 'Bot settings')
+  assert.equal(await evaluate(`return document.activeElement.textContent.trim()`), 'Edit settings')
   assert.ok(
     await evaluate(
       `const r = document.querySelector('[data-bot-menu]').getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth && r.bottom <= innerHeight`
@@ -239,9 +232,11 @@ async function run() {
   })
   await wait()
   assert.ok(await text('This cannot be undone.'), 'menu deletion requires confirmation')
-  assert.equal(
-    await evaluate(`return document.querySelector('#bot-settings-pane input').value`),
-    'planner'
+  assert.ok(
+    await evaluate(
+      `return document.querySelector('[role=alertdialog]').textContent.includes('@planner')`
+    ),
+    'the confirm names the bot picked in the menu, not the active one'
   )
   assert.ok(
     await evaluate(`return !!document.querySelector('button[title="@planner"]')`),
@@ -282,6 +277,18 @@ async function run() {
   )
   await click('button[form="bot-profile-form"]')
   assert.ok(await text('Saved'))
+  // Saving is the end of an edit, so the pane confirms and closes itself.
+  for (
+    let i = 0;
+    i < 20 && (await evaluate(`return !!document.querySelector('#bot-settings-pane')`));
+    i++
+  )
+    await wait()
+  assert.ok(
+    await evaluate(`return !document.querySelector('#bot-settings-pane')`),
+    'a saved profile closes the pane'
+  )
+  await click('button[title="Bot settings"]')
   await type('#bot-profile-form input', 'x')
   await click('button[form="bot-profile-form"]')
   assert.ok(

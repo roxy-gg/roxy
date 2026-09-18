@@ -1347,7 +1347,7 @@ export function listQueue(chatId: string): QueueItem[] {
     error: r.error ?? undefined,
     botId: r.bot_id ?? undefined,
     botUsername: r.bot_username ?? undefined,
-    asBotId: r.as_bot_id ?? undefined
+    asBotId: r.source_chat_id ? (r.as_bot_id ?? undefined) : undefined
   }))
 }
 

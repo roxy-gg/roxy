@@ -44,12 +44,23 @@ const notify = (): void => {
 Object.assign(window.roxy, {
   bots: {
     list: async () => [...bots],
-    create: async (username: string) => {
-      if (bots.some((bot) => bot.username === username.toLowerCase()))
+    create: async (username?: string) => {
+      // Mirrors main: with no name the bot still gets one, so it can be created
+      // first and named later in the conversation.
+      if (!username?.trim()) {
+        for (let n = 1; ; n++) {
+          const candidate = n === 1 ? 'bot' : `bot-${n}`
+          if (!bots.some((bot) => bot.username === candidate)) {
+            username = candidate
+            break
+          }
+        }
+      }
+      if (bots.some((bot) => bot.username === username!.toLowerCase()))
         throw new Error('Username already exists')
       const bot = {
         id: crypto.randomUUID(),
-        username: username.toLowerCase(),
+        username: username!.toLowerCase(),
         instructions: '',
         chatId: crypto.randomUUID(),
         createdAt: Date.now()
@@ -62,6 +73,8 @@ Object.assign(window.roxy, {
     update: async (id: string, patch: Partial<Bot>) => {
       const bot = bots.find((bot) => bot.id === id)!
       Object.assign(bot, patch)
+      const chat = chats.find((chat) => chat.id === bot.chatId)
+      if (chat && patch.username) chat.title = patch.username
       notify()
       return bot
     },
@@ -153,6 +166,20 @@ Object.assign(window.roxy, {
   }
 })
 
+/**
+ * Rename a bot the way the BOT does it — through the same IPC `bot_manage`
+ * calls, not by poking the store. The sidebar and an open settings pane must
+ * survive a profile that changes underneath them mid-conversation.
+ */
+;(window as unknown as { __renameBot: (from: string, to: string) => Promise<void> }).__renameBot =
+  async (from, to) => {
+    const bot = bots.find((bot) => bot.username === from)
+    if (!bot) throw new Error(`No bot @${from}`)
+    await window.roxy.bots.update(bot.id, { username: to })
+    await useRoxyStore.getState().refreshBots()
+    await useRoxyStore.getState().refreshChats()
+  }
+
 export function BotsHarness(): JSX.Element {
   const [ready, setReady] = useState(false)
   useEffect(() => {
@@ -169,6 +196,12 @@ export function BotsHarness(): JSX.Element {
   return (
     <HashRouter>
       <div className="bar">
+        <button
+          id="busy"
+          onClick={() => useRoxyStore.setState({ sendingChats: { 'project-chat': true } })}
+        >
+          Busy project fixture
+        </button>
         <button
           id="failed"
           onClick={() => {

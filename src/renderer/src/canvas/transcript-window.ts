@@ -85,6 +85,7 @@ export class TranscriptWindow {
             ...input.messages,
             {
               id: '__streaming__',
+              ...input.streamingBot,
               chatId: '',
               role: 'assistant' as const,
               content: '',
@@ -278,7 +279,13 @@ export class TranscriptWindow {
           this.entries.delete(item.id)
           this.entries.set(item.id, hit)
         } else {
-          const builder = new Builder(input.metrics, input.theme, { value: 0 }, input.t)
+          const builder = new Builder(
+            input.metrics,
+            input.theme,
+            { value: 0 },
+            input.t,
+            input.bots?.map((bot) => bot.username)
+          )
           let height: number
           if (item.kind === 'header') {
             const username = messageBotUsername(input, message)

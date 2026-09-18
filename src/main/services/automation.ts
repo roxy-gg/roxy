@@ -4,7 +4,6 @@ import { randomUUID } from 'node:crypto'
 import type { QueueImage, QueueItem, MessagePart } from '../../shared/types'
 import type { ChatMessage, RemoteDelta } from '../../shared/api'
 import { CHANNELS } from '../../shared/ipc'
-import { mentionedBot } from '../../shared/bots'
 import { PartsFold, partsToContent } from '../../shared/parts'
 import { reconstructTurn } from '../../shared/tool-history'
 import { pruneToolMessages, KEEP_RECENT_TOKENS } from '../../shared/context'
@@ -32,14 +31,14 @@ import {
 
 let timer: ReturnType<typeof setInterval> | null = null
 const live = new Map<string, PartsFold>()
+const speakers = new Map<string, { botId: string; botUsername: string }>()
 
 /**
  * How far a request may be handed on before it needs a human again.
  *
  * Every route that passes work to another bot counts against this one budget:
- * an explicit `bot_invoke`, a reply nudge, and a redirect by @mention. They
- * used to be capped separately (and the mention path not at all), so bots
- * could volley a message between themselves indefinitely.
+ * an explicit `bot_invoke` and a reply nudge. One shared budget prevents
+ * bots from volleying a message between themselves indefinitely.
  */
 const MAX_HOPS = 8
 
@@ -74,8 +73,17 @@ function emit(delta: RemoteDelta): void {
   }
 }
 
-export function automationSnapshot(): { sessionId: string; parts: MessagePart[] }[] {
-  return [...live].map(([sessionId, fold]) => ({ sessionId, parts: fold.parts }))
+export function automationSnapshot(): {
+  sessionId: string
+  parts: MessagePart[]
+  botId?: string
+  botUsername?: string
+}[] {
+  return [...live].map(([sessionId, fold]) => ({
+    sessionId,
+    parts: fold.parts,
+    ...speakers.get(sessionId)
+  }))
 }
 
 export function enqueuePrompt(
@@ -94,11 +102,17 @@ export function enqueuePrompt(
     botUsername?: string
     /** Bot that should ANSWER this prompt, when it isn't the session's own bot. */
     asBotId?: string
+    recipientId?: string
   } = {}
 ): QueueItem {
   if (!repo.getChat(chatId)) throw new Error('Session not found')
   if (typeof content !== 'string' || (!content.trim() && !images?.length))
     throw new Error('A prompt is required')
+  // Only explicit machine handoffs choose a responder. User text always goes
+  // to the session owner, who interprets intent and may call bot_invoke.
+  const recipientId = options.sourceChatId ? (options.recipientId ?? options.asBotId) : undefined
+  if (recipientId !== undefined && recipientId !== 'roxy' && !bots.getBot(recipientId))
+    throw new Error('The invited bot no longer exists')
   if (
     options.hops !== undefined &&
     (!Number.isSafeInteger(options.hops) || options.hops > MAX_HOPS || options.hops < 0)
@@ -119,7 +133,7 @@ export function enqueuePrompt(
     const item = repo.enqueue(chatId, content.trim(), images)
     getDb()
       .prepare(
-        'UPDATE queue SET source_chat_id = ?, reply_to_chat_id = ?, hops = ?, not_before = ?, continue_reply = ?, bot_id = ?, bot_username = ?, as_bot_id = ? WHERE id = ?'
+        'UPDATE queue SET source_chat_id = ?, reply_to_chat_id = ?, hops = ?, not_before = ?, continue_reply = ?, bot_id = ?, bot_username = ?, as_bot_id = ?, recipient_id = ? WHERE id = ?'
       )
       .run(
         options.sourceChatId ?? null,
@@ -129,7 +143,8 @@ export function enqueuePrompt(
         Number(!!options.continueReply),
         options.botId ?? null,
         options.botUsername ?? null,
-        options.asBotId ?? null,
+        options.sourceChatId ? (options.asBotId ?? null) : null,
+        recipientId ?? null,
         item.id
       )
     return item
@@ -174,34 +189,6 @@ export function wakeAutomation(): void {
       if (sessionBusy(chatId) || queuePaused(chatId) || subagentSnapshot(chatId) !== null) continue
       const item = repo.listQueue(chatId)[0]
       if (!item || item.state !== 'pending' || (item.notBefore ?? 0) > Date.now()) continue
-      // Addressing a bot by name invites it into THIS conversation — it answers
-      // here, with the thread as its context. The message itself still belongs to
-      // whoever wrote it; only the responder changes.
-      //
-      // Skipped when the item already names its responder: `bot_invoke` picked
-      // that bot deliberately, and a mention inside the brief it wrote ("review
-      // this, then tell @qa") must not quietly hand the turn to someone else.
-      const target = item.asBotId ? undefined : mentionedBot(item.content, bots.listBots())
-      if (target && target.chatId !== chatId) {
-        // Each redirect is a hop, and the cap is the same one `enqueuePrompt`
-        // enforces — this path wrote `hops` with raw SQL, so a chain that
-        // handed off by mention never met the limit that stops bots from
-        // volleying a message between themselves forever.
-        const hops = (item.hops ?? 0) + 1
-        if (hops > MAX_HOPS) {
-          getDb()
-            .prepare(
-              `UPDATE queue SET state = 'failed', error = ? WHERE id = ? AND state = 'pending'`
-            )
-            .run('Handoff limit reached. Ask the user before starting another chain.', item.id)
-          notifyAutomation(chatId)
-          continue
-        }
-        getDb()
-          .prepare('UPDATE queue SET as_bot_id = ?, hops = ? WHERE id = ?')
-          .run(target.id, hops, item.id)
-        notifyAutomation(chatId)
-      }
       void deliver(item).catch((error) => console.error('[bots] delivery failed', error))
     }
   } catch (error) {
@@ -222,10 +209,11 @@ function history(
   chatId: string,
   budget: number,
   outputReserve: number,
-  speaker?: string
+  speaker?: ReturnType<typeof bots.getBot>,
+  asHost = false
 ): ChatMessage[] {
   const since = repo.getChat(chatId)?.contextSummaryAt ?? 0
-  const self = speaker ?? bots.chatBot(chatId)?.username
+  const self = asHost ? undefined : (speaker ?? bots.chatBot(chatId))
   const groups = repo
     .listMessages(chatId)
     .filter((m) => (m.role === 'user' || m.role === 'assistant') && m.createdAt > since)
@@ -256,6 +244,36 @@ function history(
   return flat
 }
 
+/**
+ * Restate a handoff's assignment as its final user message, even when history kept it.
+ *
+ * The prompt a guest is invited with is persisted as `assistant` (an agent, not
+ * the user, wrote it), and the leading-edge normalization above drops messages
+ * until the window starts on a user turn. A guest runs on ITS OWN, possibly much
+ * narrower, context budget, so that window can close over exactly the delegation
+ * being delivered: the bot then arrived to "Continue with the pending request."
+ * and no request. Even without trimming, a generic continue asks the guest to
+ * continue the host's behavior instead of accepting its own assignment.
+ */
+function withRequest(messages: ChatMessage[], request: string, assignee?: string): ChatMessage[] {
+  const text = request.trim()
+  if (!text) return messages
+  if (!assignee && messages.some((m) => m.content.includes(text))) return messages
+  // A handoff is a NEW request to its recipient, including work returned to
+  // Roxy. Never leave it continuing the previous participant's tool history.
+  const restated = {
+    role: 'user' as const,
+    content: assignee
+      ? `This turn is assigned to you, @${assignee}. The preceding assistant messages include other participants' work, not actions you performed. Carry out the following request yourself and answer here. Do not wait for or invoke @${assignee}: that is you.\n\n${text}`
+      : text
+  }
+  // Replace the placeholder rather than trail it: they say the same thing, and
+  // the real request is the better last word.
+  return messages.at(-1)?.content === 'Continue with the pending request.'
+    ? [...messages.slice(0, -1), restated]
+    : [...messages, restated]
+}
+
 async function deliver(item: QueueItem): Promise<void> {
   const controller = new AbortController()
   const release = claimTurn(item.chatId, controller)
@@ -269,36 +287,62 @@ async function deliver(item: QueueItem): Promise<void> {
   }
   const fold = new PartsFold()
   live.set(item.chatId, fold)
-  emit({ sessionId: item.chatId, kind: 'turn', state: 'running' })
+  let bot: ReturnType<typeof bots.getBot>
   const relay = relayLocalTurnStart(item.chatId)
   try {
-    const config = resolveSessionConfig(repo.getChat(item.chatId), repo.getSettings())
-    const providers = repo.listConnectedProviders().filter((p) => p.enabled)
-    const provider = config.providerId
-      ? providers.find((p) => p.id === config.providerId)
-      : providers[0]
-    if (!provider)
-      throw new Error(
-        'Connect the provider selected for this session, then edit the queued message to retry.'
-      )
-    const catalog = await listModels(provider.id).catch(() => [])
-    const model =
-      (config.providerId === provider.id ? config.model : null) ||
-      provider.defaultModel ||
-      pickDefaultModel(catalog)
-    if (!model) throw new Error('Select a model for this session, then retry.')
-    if (controller.signal.aborted) throw new Error('Stopped.')
+    // Read persisted handoff metadata before choosing the speaker and config.
     const previous = getDb()
-      .prepare('SELECT message_id, bot_id, bot_username, as_bot_id FROM queue WHERE id = ?')
+      .prepare(
+        'SELECT message_id, bot_id, bot_username, as_bot_id, recipient_id FROM queue WHERE id = ?'
+      )
       .get(item.id) as
       | {
           message_id: string | null
           bot_id: string | null
           bot_username: string | null
           as_bot_id: string | null
+          recipient_id: string | null
         }
       | undefined
     if (!previous) return
+    // A guest answers with ITS OWN model, mode, thinking effort, and context
+    // budget. Inheriting the host session's config silently downgraded the
+    // specialist you configured: a reviewer pinned to a strong model at high
+    // effort answered on whatever the host happened to be set to, which is not
+    // the bot you called. Everything else stays the host's — transcript,
+    // workspace, queue.
+    // Older releases auto-routed user messages by mention. Even an unmigrated
+    // or restored row must not turn that stale destination into a tool handoff.
+    const asHost = !!item.sourceChatId && previous.recipient_id === 'roxy'
+    const targetId =
+      item.sourceChatId && !asHost ? (previous.recipient_id ?? previous.as_bot_id) : undefined
+    const target = targetId ? bots.getBot(targetId) : undefined
+    if (targetId && !target) throw new Error('The invited bot no longer exists')
+    const guest = target?.chatId !== item.chatId ? target : undefined
+    bot = asHost ? undefined : (target ?? bots.chatBot(item.chatId))
+    const speaker = bot ? { botId: bot.id, botUsername: bot.username } : undefined
+    if (speaker) speakers.set(item.chatId, speaker)
+    emit({ sessionId: item.chatId, kind: 'turn', state: 'running', ...speaker })
+    const config = resolveSessionConfig(
+      asHost && bots.chatBot(item.chatId) ? undefined : repo.getChat(guest?.chatId ?? item.chatId),
+      repo.getSettings()
+    )
+    const owner = guest ? `@${guest.username}` : 'this session'
+    const providers = repo.listConnectedProviders().filter((p) => p.enabled)
+    const provider = config.providerId
+      ? providers.find((p) => p.id === config.providerId)
+      : providers[0]
+    if (!provider)
+      throw new Error(
+        `Connect the provider selected for ${owner}, then edit the queued message to retry.`
+      )
+    const catalog = await listModels(provider.id).catch(() => [])
+    const model =
+      (config.providerId === provider.id ? config.model : null) ||
+      provider.defaultModel ||
+      pickDefaultModel(catalog)
+    if (!model) throw new Error(`Select a model for ${owner}, then retry.`)
+    if (controller.signal.aborted) throw new Error('Stopped.')
     if (!previous.message_id)
       getDb().transaction(() => {
         const message = repo.addMessage({
@@ -327,7 +371,10 @@ async function deliver(item: QueueItem): Promise<void> {
       .listMessages(item.chatId)
       .filter((m) => m.createdAt > (chat?.contextSummaryAt ?? 0))
       .reduce((sum, m) => sum + Math.ceil(m.content.length / 4), 0)
-    if (estimated > budget * 0.8)
+    // Compaction is permanent and belongs to the session, so a GUEST never
+    // triggers it: a visitor on a small window would otherwise summarize away
+    // the host's history on its way through. It just gets the narrower window.
+    if (!guest && !(asHost && bots.chatBot(item.chatId)) && estimated > budget * 0.8)
       await compactChat(item.chatId, provider.id, model, controller.signal)
     if (controller.signal.aborted) throw new Error('Stopped.')
     const result = await runSessionTurn(
@@ -336,17 +383,17 @@ async function deliver(item: QueueItem): Promise<void> {
         sessionId: item.chatId,
         providerId: provider.id,
         model,
-        messages: history(
-          item.chatId,
-          budget,
-          info?.outputLimit ?? 4096,
-          previous.as_bot_id ? bots.getBot(previous.as_bot_id)?.username : undefined
+        messages: withRequest(
+          history(item.chatId, budget, info?.outputLimit ?? 4096, guest, asHost),
+          item.content,
+          guest?.username ?? (previous.bot_id && !bot ? 'Roxy' : undefined)
         ),
         agentId: config.agentId,
         reasoning: info?.reasoning,
         reasoningEffort: clampReasoningEffort(config.reasoningEffort, info?.reasoningEfforts),
         contextLimit: budget,
-        ...(previous.as_bot_id ? { asBotId: previous.as_bot_id } : {})
+        ...(guest ? { asBotId: guest.id } : {}),
+        asHost
       },
       (event) => {
         fold.apply(event)
@@ -357,8 +404,8 @@ async function deliver(item: QueueItem): Promise<void> {
     )
     // Whoever spoke this turn owns the reply: the invited bot in a shared
     // session, otherwise the session's own bot.
-    const bot = previous.as_bot_id ? bots.getBot(previous.as_bot_id) : bots.chatBot(item.chatId)
     const parts = fold.parts
+    if (bot) bot = bots.getBot(bot.id) ?? bot
     getDb().transaction(() => {
       if (!repo.getChat(item.chatId)) return
       if (parts.length)
@@ -423,7 +470,6 @@ async function deliver(item: QueueItem): Promise<void> {
       item.replyToChatId !== item.chatId &&
       repo.getChat(item.replyToChatId)
     ) {
-      const bot = bots.chatBot(item.chatId)
       repo.addMessage({
         chatId: item.replyToChatId,
         role: 'assistant',
@@ -435,7 +481,6 @@ async function deliver(item: QueueItem): Promise<void> {
       notifyTranscriptChanged(item.replyToChatId)
     }
     if (fold.parts.length && repo.getChat(item.chatId)) {
-      const bot = bots.chatBot(item.chatId)
       repo.addMessage({
         chatId: item.chatId,
         role: 'assistant',
@@ -447,6 +492,7 @@ async function deliver(item: QueueItem): Promise<void> {
     }
   } finally {
     live.delete(item.chatId)
+    speakers.delete(item.chatId)
     release()
     if (relay) relayLocalTurnEnd(relay)
     notifyTranscriptChanged(item.chatId)
