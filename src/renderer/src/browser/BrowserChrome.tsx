@@ -1,10 +1,21 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ArrowLeft, ArrowRight, Cookie, Globe, Plus, RotateCw, Search, X } from 'lucide-react'
+import {
+  ArrowLeft,
+  ArrowRight,
+  Cookie,
+  Globe,
+  Plus,
+  RotateCw,
+  Search,
+  ShieldCheck,
+  X
+} from 'lucide-react'
 import type { BrowserState, BrowserTab } from '@shared/api'
 import { useTranslation } from 'react-i18next'
 import { api } from '../lib/api'
 import { cn } from '../lib/cn'
 import { CookiePanel } from '../components/CookiePanel'
+import { ProxyPanel } from '../components/ProxyPanel'
 
 const BLANK: BrowserState = {
   url: '',
@@ -27,7 +38,10 @@ export function BrowserChrome(): JSX.Element {
   const [draft, setDraft] = useState('')
   const [editing, setEditing] = useState(false)
   const [dragId, setDragId] = useState<string | null>(null)
-  const [cookiesOpen, setCookiesOpen] = useState(false)
+  const [panel, setPanel] = useState<'cookies' | 'proxy' | null>(null)
+  const [proxyEnabled, setProxyEnabled] = useState(false)
+  const cookiesOpen = panel === 'cookies'
+  const proxyOpen = panel === 'proxy'
 
   // The host the cookie panel scopes to -- the active tab's, like the
   // Cookie-Editor popup. Undefined on a blank tab, which shows the whole jar.
@@ -44,23 +58,26 @@ export function BrowserChrome(): JSX.Element {
   // of the way first. Growing the reserved chrome height does exactly that,
   // and 0 hands the space back.
   useEffect(() => {
-    void api.browser.setChromeHeight(cookiesOpen ? window.innerHeight : 0)
-  }, [cookiesOpen])
+    void api.browser.setChromeHeight(panel ? window.innerHeight : 0)
+  }, [panel])
 
   // Reserved height is absolute pixels, so a window resize while the panel is
   // open would leave the page peeking out below it.
   useEffect(() => {
-    if (!cookiesOpen) return
+    if (!panel) return
     const onResize = (): void => void api.browser.setChromeHeight(window.innerHeight)
     window.addEventListener('resize', onResize)
     return () => window.removeEventListener('resize', onResize)
-  }, [cookiesOpen])
+  }, [panel])
   useEffect(() => {
     const offState = api.browser.onState(setNav)
     const offTabs = api.browser.onTabs(setTabs)
+    const offProxy = api.browser.onProxyChanged((config) => setProxyEnabled(config.enabled))
+    void api.browser.getProxy().then((config) => setProxyEnabled(config.enabled))
     return () => {
       offState()
       offTabs()
+      offProxy()
     }
   }, [])
 
@@ -189,11 +206,18 @@ export function BrowserChrome(): JSX.Element {
           />
         </div>
         <NavButton
-          onClick={() => setCookiesOpen((v) => !v)}
+          onClick={() => setPanel((value) => (value === 'cookies' ? null : 'cookies'))}
           title={t('browserChrome.cookies')}
           active={cookiesOpen}
         >
           <Cookie className="h-4 w-4" />
+        </NavButton>
+        <NavButton
+          onClick={() => setPanel((value) => (value === 'proxy' ? null : 'proxy'))}
+          title={t('browserChrome.proxy')}
+          active={proxyOpen}
+        >
+          <ShieldCheck className={cn('h-4 w-4', proxyEnabled && 'text-success')} />
         </NavButton>
       </div>
 
@@ -206,13 +230,23 @@ export function BrowserChrome(): JSX.Element {
           className="min-h-0 flex-1"
           action={
             <NavButton
-              onClick={() => setCookiesOpen(false)}
+              onClick={() => setPanel(null)}
               title={t('browserChrome.closeCookies')}
             >
               <X className="h-3.5 w-3.5" />
             </NavButton>
           }
         />
+      )}
+      {proxyOpen && (
+        <div className="min-h-0 flex-1 overflow-auto border-t border-border bg-surface">
+          <div className="flex justify-end px-2 pt-2">
+            <NavButton onClick={() => setPanel(null)} title={t('browserChrome.closeProxy')}>
+              <X className="h-3.5 w-3.5" />
+            </NavButton>
+          </div>
+          <ProxyPanel compact />
+        </div>
       )}
     </div>
   )

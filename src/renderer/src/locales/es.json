@@ -2,10 +2,12 @@
   "browserChrome": {
     "back": "Atrás",
     "closeCookies": "Cerrar las cookies",
+    "closeProxy": "Close browser proxy",
     "closeTab": "Cerrar la pestaña",
     "cookies": "Cookies",
     "forward": "Adelante",
     "newTab": "Pestaña nueva",
+    "proxy": "Browser proxy",
     "urlPlaceholder": "Busca o escribe una URL"
   },
   "chat": {
@@ -295,6 +297,25 @@
   },
   "page": {
     "back": "Atrás"
+  },
+  "proxy": {
+    "activeSummary": "Active: {{scheme}}://{{host}}:{{port}}",
+    "clearPassword": "Remove the saved password",
+    "connected": "Proxy enabled. Existing browser connections were restarted.",
+    "description": "Route only the dedicated Roxy browser through a custom proxy. Roxy's models, updates, and other app traffic stay on your normal connection.",
+    "direct": "Direct connection",
+    "disabled": "Proxy disabled. The browser is using your direct connection.",
+    "host": "Host",
+    "hostPlaceholder": "proxy.example.com",
+    "optional": "Optional",
+    "password": "Password",
+    "passwordSaved": "Saved password",
+    "port": "Port",
+    "protocol": "Protocol",
+    "saveFailed": "Couldn't save the browser proxy.",
+    "socksAuth": "Chromium does not support username/password authentication for SOCKS proxies.",
+    "title": "Browser proxy",
+    "username": "Username"
   },
   "queue": {
     "attachImages": "Adjuntar imágenes",

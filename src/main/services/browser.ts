@@ -30,9 +30,10 @@ import { getSettings } from '../db/repo'
 import { CHANNELS } from '../../shared/ipc'
 import type { BrowserState, BrowserTab } from '../../shared/api'
 import { attachNativeContextMenu } from './context-menu'
+import { BROWSER_PARTITION, ensureApplied as ensureProxyApplied } from './browser-proxy'
 
 /** Persisted session â†’ cookies, localStorage and logins survive app restarts. */
-export const PARTITION = 'persist:roxy-browser'
+export const PARTITION = BROWSER_PARTITION
 const MAX_CONSOLE = 500
 /** Height of the chrome overlaid at the top: tab strip + URL-bar toolbar. */
 const CHROME_H = 80
@@ -240,7 +241,9 @@ function createTab(s: Session, rawUrl?: string): string {
   s.activeTabId = id
   layout(s)
   pushTabs(s)
-  void view.webContents.loadURL(rawUrl ? normalizeUrl(rawUrl) : HOME_URL).catch(() => undefined)
+  void ensureProxyApplied()
+    .then(() => view.webContents.loadURL(rawUrl ? normalizeUrl(rawUrl) : HOME_URL))
+    .catch(() => undefined)
   return id
 }
 
@@ -354,6 +357,7 @@ export async function open(
   s.win?.showInactive()
   let error: string | undefined
   try {
+    await ensureProxyApplied()
     await wc.loadURL(url)
   } catch (e) {
     error = e instanceof Error ? e.message : String(e)
@@ -496,13 +500,18 @@ export function openWindow(key: string = DEFAULT_KEY): void {
   if (s.win?.isMinimized()) s.win.restore()
   s.win?.show()
   s.win?.focus()
-  if (!pageContents(key).getURL()) void pageContents(key).loadURL(HOME_URL)
+  if (!pageContents(key).getURL()) {
+    void ensureProxyApplied()
+      .then(() => pageContents(key).loadURL(HOME_URL))
+      .catch(() => undefined)
+  }
 }
 
 export async function navigate(rawUrl: string, key: string = DEFAULT_KEY): Promise<void> {
   const s = getSession(key)
   ensureWindow(s)
   try {
+    await ensureProxyApplied()
     await pageContents(key).loadURL(normalizeUrl(rawUrl))
   } catch {
     // surfaced via did-fail-load / the toolbar

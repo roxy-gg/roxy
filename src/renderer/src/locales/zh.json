@@ -2,10 +2,12 @@
   "browserChrome": {
     "back": "后退",
     "closeCookies": "关闭 Cookie",
+    "closeProxy": "Close browser proxy",
     "closeTab": "关闭标签页",
     "cookies": "Cookie",
     "forward": "前进",
     "newTab": "新建标签页",
+    "proxy": "Browser proxy",
     "urlPlaceholder": "搜索或输入网址"
   },
   "chat": {
@@ -295,6 +297,25 @@
   },
   "page": {
     "back": "返回"
+  },
+  "proxy": {
+    "activeSummary": "Active: {{scheme}}://{{host}}:{{port}}",
+    "clearPassword": "Remove the saved password",
+    "connected": "Proxy enabled. Existing browser connections were restarted.",
+    "description": "Route only the dedicated Roxy browser through a custom proxy. Roxy's models, updates, and other app traffic stay on your normal connection.",
+    "direct": "Direct connection",
+    "disabled": "Proxy disabled. The browser is using your direct connection.",
+    "host": "Host",
+    "hostPlaceholder": "proxy.example.com",
+    "optional": "Optional",
+    "password": "Password",
+    "passwordSaved": "Saved password",
+    "port": "Port",
+    "protocol": "Protocol",
+    "saveFailed": "Couldn't save the browser proxy.",
+    "socksAuth": "Chromium does not support username/password authentication for SOCKS proxies.",
+    "title": "Browser proxy",
+    "username": "Username"
   },
   "queue": {
     "attachImages": "附加图片",

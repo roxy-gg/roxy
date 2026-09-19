@@ -212,6 +212,10 @@ export const CHANNELS = {
   browserCloseTab: 'browser:close-tab',
   browserActivateTab: 'browser:activate-tab',
   browserMoveTab: 'browser:move-tab',
+  browserProxyGet: 'browser:proxy-get',
+  browserProxySet: 'browser:proxy-set',
+  /** main -> renderer/browser toolbar: the dedicated browser proxy changed */
+  browserProxyChanged: 'browser:proxy-changed',
   /** main -> browser toolbar: navigation state */
   browserState: 'browser:state',
   /** main -> browser toolbar: open tab list */

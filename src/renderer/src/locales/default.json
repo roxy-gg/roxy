@@ -6,7 +6,9 @@
     "forward": "Forward",
     "urlPlaceholder": "Search or enter a URL",
     "cookies": "Cookies",
-    "closeCookies": "Close cookies"
+    "closeCookies": "Close cookies",
+    "proxy": "Browser proxy",
+    "closeProxy": "Close browser proxy"
   },
   "chat": {
     "copilotReconnectBody": "GitHub Copilot auth sucks sometimes. Your authorization expired or was revoked, and automatic refresh could not recover it. Refresh your login here to keep chatting.",
@@ -274,6 +276,25 @@
   },
   "page": {
     "back": "Back"
+  },
+  "proxy": {
+    "title": "Browser proxy",
+    "description": "Route only the dedicated Roxy browser through a custom proxy. Roxy's models, updates, and other app traffic stay on your normal connection.",
+    "protocol": "Protocol",
+    "host": "Host",
+    "hostPlaceholder": "proxy.example.com",
+    "port": "Port",
+    "username": "Username",
+    "password": "Password",
+    "optional": "Optional",
+    "passwordSaved": "Saved password",
+    "clearPassword": "Remove the saved password",
+    "socksAuth": "Chromium does not support username/password authentication for SOCKS proxies.",
+    "saveFailed": "Couldn't save the browser proxy.",
+    "connected": "Proxy enabled. Existing browser connections were restarted.",
+    "disabled": "Proxy disabled. The browser is using your direct connection.",
+    "direct": "Direct connection",
+    "activeSummary": "Active: {{scheme}}://{{host}}:{{port}}"
   },
   "queue": {
     "removeImage": "Remove image",

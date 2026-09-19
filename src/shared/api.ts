@@ -564,6 +564,36 @@ export interface BrowserTab {
   active: boolean
 }
 
+export type BrowserProxyScheme = 'http' | 'https' | 'socks4' | 'socks5'
+
+/** The dedicated proxy used only by the persistent Roxy browser partition. */
+export interface BrowserProxyConfig {
+  enabled: boolean
+  scheme: BrowserProxyScheme
+  host: string
+  port: number
+  username: string
+  /** Passwords are never sent back to the renderer; this only reports whether one is saved. */
+  hasPassword: boolean
+}
+
+/** A proxy edit. An omitted password preserves the encrypted password already on disk. */
+export interface BrowserProxyInput {
+  enabled: boolean
+  scheme: BrowserProxyScheme
+  host: string
+  port: number
+  username: string
+  password?: string
+  clearPassword?: boolean
+}
+
+export interface BrowserProxySaveResult {
+  ok: boolean
+  config: BrowserProxyConfig
+  error?: string
+}
+
 /**
  * One cookie in the Cookie-Editor / EditThisCookie interchange shape - the
  * format the built-in cookie editor imports, exports and renders. It is that
@@ -1039,6 +1069,10 @@ export interface RoxyApi {
      * inside the browser window itself.
      */
     setChromeHeight(height: number): Promise<void>
+    /** Read/update the proxy for the dedicated browser partition only. */
+    getProxy(): Promise<BrowserProxyConfig>
+    setProxy(input: BrowserProxyInput): Promise<BrowserProxySaveResult>
+    onProxyChanged(callback: (config: BrowserProxyConfig) => void): () => void
     /** Subscribe to the browser toolbar's navigation state; returns an unsubscribe fn. */
     onState(callback: (state: BrowserState) => void): () => void
     /** Subscribe to the open tab list; returns an unsubscribe fn. */

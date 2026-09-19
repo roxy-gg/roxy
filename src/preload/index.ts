@@ -7,6 +7,7 @@ import type {
   TaskUpdate,
   BrowserState,
   BrowserTab,
+  BrowserProxyConfig,
   RemoteState,
   RemoteDelta,
   SessionsUpdated,
@@ -241,6 +242,14 @@ const roxy: RoxyApi = {
     activateTab: (id) => ipcRenderer.invoke(CHANNELS.browserActivateTab, id),
     moveTab: (id, toIndex) => ipcRenderer.invoke(CHANNELS.browserMoveTab, id, toIndex),
     setChromeHeight: (height) => ipcRenderer.invoke(CHANNELS.browserChromeHeight, height),
+    getProxy: () => ipcRenderer.invoke(CHANNELS.browserProxyGet),
+    setProxy: (input) => ipcRenderer.invoke(CHANNELS.browserProxySet, input),
+    onProxyChanged: (callback) => {
+      const handler = (_event: Electron.IpcRendererEvent, config: BrowserProxyConfig): void =>
+        callback(config)
+      ipcRenderer.on(CHANNELS.browserProxyChanged, handler)
+      return () => ipcRenderer.removeListener(CHANNELS.browserProxyChanged, handler)
+    },
     onState: (callback) => {
       const handler = (_event: Electron.IpcRendererEvent, state: BrowserState): void =>
         callback(state)
