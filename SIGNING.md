@@ -79,6 +79,10 @@ release builds.
   Electron needs plus `disable-library-validation` so native modules
   (`better-sqlite3`) load.
 - `electron-builder.yml` → `mac.notarize: true` + `hardenedRuntime: true`.
+- `script/bundle-cliproxy.cjs` runs in electron-builder's `afterPack` hook. It
+  downloads the latest platform-native CLIProxyAPI release, verifies the
+  published SHA-256, and inserts the executable before signing so it is covered
+  by Roxy's app signature and notarization ticket.
 - `script/build-mac.sh` — loads `.env`, checks the identity + credentials, then
   runs the build.
 
@@ -211,4 +215,6 @@ new run rebuilds all three platforms and publishes only after they all succeed.
 Not configured yet. The plan is to use **Azure Artifact Signing** (formerly
 Trusted Signing / Azure Code Signing) rather than a physical EV token — cheaper,
 no hardware, and available to individual US/Canada developers. See the project
-notes for status.
+notes for status. Bundling CLIProxyAPI prevents a separate browser/runtime
+download and its Mark-of-the-Web/integrity failures, but it does not replace
+signing the Windows installer and application for SmartScreen reputation.

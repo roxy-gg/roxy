@@ -2,9 +2,10 @@
  * CLIProxyAPI sidecar — lets a user spend their own AI subscriptions (ChatGPT /
  * Codex, and Google's Gemini plan) inside Roxy.
  *
- * The shape of the thing: Roxy downloads a pinned CLIProxyAPI release into
- * userData, writes a config that binds it to 127.0.0.1 on a free port, spawns
- * it, and drives its Management API to run an OAuth login. From then on the
+ * The shape of the thing: release builds embed a checksum-verified CLIProxyAPI
+ * executable before Roxy is signed. Roxy writes a config that binds it to
+ * 127.0.0.1 on a free port, spawns it, and drives its Management API to run an
+ * OAuth login. From then on the
  * sidecar is just an OpenAI-compatible endpoint at http://127.0.0.1:<port>/v1 —
  * a wire Roxy already speaks — and the provider row for it looks like any other
  * `openai-chat` provider.
@@ -29,21 +30,21 @@
  *    management key are generated per install. A CLIProxyAPI on 0.0.0.0 with a
  *    known key is an open relay to the user's paid subscription.
  *
- * 3. The version is PINNED and the download is checksum-verified. This process
- *    holds subscription credentials, so "whatever `latest` is today" is not an
- *    acceptable input, and neither is an unverified binary.
+ * 3. Packaged builds execute only the sidecar embedded before app signing, and
+ *    verify its binary hash again before launch. Development keeps the pinned,
+ *    checksum-verified download path as a fallback for the live smoke test.
  *
- * Lifecycle is lazily driven: nothing is downloaded or spawned until someone
- * actually clicks Sign in, and `ensureRunning` is idempotent so every later
+ * Lifecycle is lazily driven: nothing is spawned until someone actually clicks
+ * Sign in, and `ensureRunning` is idempotent so every later
  * caller (a turn, a model list) just gets the already-running instance.
  */
 import { spawn, type ChildProcess } from 'node:child_process'
 import { createHash, randomBytes } from 'node:crypto'
-import { createReadStream, createWriteStream } from 'node:fs'
+import { createReadStream, createWriteStream, readFileSync } from 'node:fs'
 import { promises as fsp } from 'node:fs'
 import net from 'node:net'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import { pipeline } from 'node:stream/promises'
 import { Readable } from 'node:stream'
 import { execFile } from 'node:child_process'
@@ -124,6 +125,47 @@ const LOGIN_POLL_MS = 1_000
  */
 const CALLBACK_BIND_TIMEOUT_MS = 5_000
 
+interface BundledCliProxyManifest {
+  version: string
+  platform: NodeJS.Platform
+  arch: string
+  binary: string
+  binarySha256: string
+  asset: string
+  archiveSha256: string
+  source: string
+}
+
+/** Metadata written by the electron-builder hook before app signing. */
+function loadBundledManifest(): BundledCliProxyManifest | null {
+  try {
+    const parsed = JSON.parse(
+      readFileSync(join(process.resourcesPath, 'cliproxy', 'manifest.json'), 'utf8')
+    ) as BundledCliProxyManifest
+    if (
+      !/^\d+\.\d+\.\d+$/.test(parsed.version) ||
+      !/^[a-f0-9]{64}$/.test(parsed.binarySha256) ||
+      basename(parsed.binary) !== parsed.binary
+    ) {
+      return null
+    }
+    return parsed
+  } catch {
+    return null
+  }
+}
+
+const bundledManifest = loadBundledManifest()
+let bundledVerification: Promise<void> | null = null
+
+function sidecarVersion(): string {
+  return bundledManifest?.version ?? CLIPROXY_VERSION
+}
+
+function bundledBinPath(): string | null {
+  return bundledManifest ? join(process.resourcesPath, 'cliproxy', bundledManifest.binary) : null
+}
+
 // ---- Paths -------------------------------------------------------------------
 
 /** Root for everything this service owns, under Electron's userData. */
@@ -136,9 +178,18 @@ function installDir(): string {
   return join(root(), `v${CLIPROXY_VERSION}`)
 }
 
-/** The executable inside the install dir. */
+/** The signed bundled executable, or the development install fallback. */
 function binPath(): string {
+  const bundled = bundledBinPath()
+  if (bundled) return bundled
+  if (app.isPackaged) {
+    throw new Error('This Roxy build is missing its bundled CLIProxyAPI executable.')
+  }
   return join(installDir(), process.platform === 'win32' ? 'cli-proxy-api.exe' : 'cli-proxy-api')
+}
+
+function binDir(): string {
+  return dirname(binPath())
 }
 
 /** Generated config. Rewritten on every start (the port can move). */
@@ -168,7 +219,7 @@ interface Secrets {
   managementKey: string
 }
 
-let state: CliProxyState = { ...IDLE_CLIPROXY_STATE }
+let state: CliProxyState = { ...IDLE_CLIPROXY_STATE, version: sidecarVersion() }
 let child: ChildProcess | null = null
 let secrets: Secrets | null = null
 /** Serializes start/stop/install so a double-click can't spawn two processes. */
@@ -219,8 +270,60 @@ function enqueue<T>(fn: () => Promise<T>): Promise<T> {
 
 // ---- Install -----------------------------------------------------------------
 
-/** Whether the pinned release is already extracted and executable. */
+/** Verify the exact embedded executable that will be spawned. */
+async function verifyBundledBinary(): Promise<void> {
+  if (bundledVerification) return bundledVerification
+  bundledVerification = (async () => {
+    if (!bundledManifest) {
+      throw new Error('This Roxy build is missing a valid CLIProxyAPI manifest.')
+    }
+    if (bundledManifest.platform !== process.platform || bundledManifest.arch !== process.arch) {
+      throw new Error(
+        `This Roxy build contains CLIProxyAPI for ${bundledManifest.platform}/${bundledManifest.arch}, ` +
+          `not ${process.platform}/${process.arch}.`
+      )
+    }
+    const binary = bundledBinPath()
+    if (!binary) throw new Error('This Roxy build is missing its bundled CLIProxyAPI executable.')
+
+    if (process.platform === 'darwin') {
+      const bundle = dirname(dirname(dirname(process.execPath)))
+      let signed = false
+      try {
+        await execFileAsync('/usr/bin/codesign', ['-dv', bundle])
+        signed = true
+      } catch {
+        // Unsigned local packages keep the pristine upstream binary, so the
+        // portable hash check below remains useful for development builds.
+      }
+      if (signed) {
+        try {
+          await execFileAsync('/usr/bin/codesign', ['--verify', '--deep', '--strict', bundle])
+          return
+        } catch {
+          throw new Error('Roxy or its bundled CLIProxyAPI failed macOS code-signature validation.')
+        }
+      }
+    }
+
+    const actual = await sha256OfFile(binary)
+    if (actual !== bundledManifest.binarySha256) {
+      throw new Error('The CLIProxyAPI bundled with Roxy failed its integrity check.')
+    }
+  })()
+  return bundledVerification
+}
+
+/** Whether the release is available without a runtime download. */
 async function isInstalled(): Promise<boolean> {
+  if (app.isPackaged) {
+    try {
+      await verifyBundledBinary()
+      return true
+    } catch {
+      return false
+    }
+  }
   try {
     await fsp.access(binPath())
     return true
@@ -280,6 +383,12 @@ async function fetchWithFallback(url: string): Promise<Response> {
  * into "this feature is broken".
  */
 async function install(): Promise<void> {
+  if (app.isPackaged) {
+    await verifyBundledBinary()
+    update({ progress: 100 })
+    return
+  }
+
   const asset = releaseAsset(process.platform, process.arch)
   if (!asset) {
     throw new Error(
@@ -805,7 +914,7 @@ export function ensureRunning(): Promise<string> {
 
       stopping = false
       const proc = spawn(binPath(), ['-config', configPath()], {
-        cwd: installDir(),
+        cwd: binDir(),
         stdio: ['ignore', 'pipe', 'pipe'],
         // Don't hand the child a console window on Windows, and don't let it
         // outlive the app in its own process group.
@@ -1181,6 +1290,10 @@ export async function listProxyModels(
  * a different delivery route, not a reason to run unverified code.
  */
 export async function installFromFile(archivePath: string): Promise<CliProxyState> {
+  if (app.isPackaged) {
+    throw new Error('CLIProxyAPI is included with Roxy and cannot be replaced at runtime.')
+  }
+
   return enqueue(async () => {
     const asset = releaseAsset(process.platform, process.arch)
     if (!asset) throw new Error('Codex sign-in is unavailable on this platform.')

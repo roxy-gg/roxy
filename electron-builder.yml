@@ -11,6 +11,10 @@ files:
   - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
 asarUnpack:
   - resources/**
+# Fetch the latest CLIProxyAPI release for this OS/architecture, verify its
+# published checksum, and place the native executable in app resources before
+# code signing. Packaged apps never download the sidecar at runtime.
+afterPack: script/bundle-cliproxy.cjs
 win:
   executableName: roxy
 nsis:

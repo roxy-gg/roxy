@@ -31,6 +31,7 @@ jobs:
     outputs:
       should_release: ${{ steps.check.outputs.should_release }}
       version: ${{ steps.check.outputs.version }}
+      cliproxy_version: ${{ steps.check.outputs.cliproxy_version }}
     steps:
       - uses: actions/checkout@v4
       - id: check
@@ -38,7 +39,9 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           VERSION=$(node -p "require('./package.json').version")
+          CLIPROXY_VERSION=$(gh api repos/router-for-me/CLIProxyAPI/releases/latest --jq '.tag_name | ltrimstr("v")')
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "cliproxy_version=$CLIPROXY_VERSION" >> "$GITHUB_OUTPUT"
           if gh release view "v$VERSION" --json isDraft --jq '.isDraft' 2>/dev/null | grep -q '^false$'; then
             echo "v$VERSION is already published — nothing to do."
             echo "should_release=false" >> "$GITHUB_OUTPUT"
@@ -122,6 +125,8 @@ jobs:
         env:
           # Provided automatically by Actions; lets electron-builder upload assets.
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Resolve latest once in the guard so every OS embeds the same release.
+          CLIPROXY_VERSION: ${{ needs.guard.outputs.cliproxy_version }}
 
           # ----- macOS signing + notarization (Apple Developer ID) -----
           # Scoped to the macOS runner on purpose: CSC_LINK is ALSO the Windows

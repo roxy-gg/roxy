@@ -380,7 +380,7 @@ export const SEED_PROVIDERS: SeedProvider[] = [
   },
 
   // ---- F. Subscription-backed (your own paid plan, brokered locally) ----
-  // Roxy downloads + runs a pinned CLIProxyAPI on 127.0.0.1, which holds the
+  // Roxy bundles + runs CLIProxyAPI on 127.0.0.1, which holds the
   // OAuth tokens and re-exposes each subscription as an ordinary
   // OpenAI-compatible endpoint. baseURL is therefore assigned at runtime (the
   // port is picked per start), not fixed here.

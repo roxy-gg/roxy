@@ -2,10 +2,10 @@
  * Subscription sign-in — the panel behind every `auth: 'subscription'` provider
  * (ChatGPT/Codex today, Google Gemini alongside it).
  *
- * Everything real happens in the main process (download the pinned CLIProxyAPI
- * release, run it on loopback, drive the provider's OAuth flow). This component
- * is deliberately thin: one button, an honest description of what gets
- * installed, and live status pushed from `cliproxy:state`.
+ * Everything real happens in the main process (run the bundled CLIProxyAPI on
+ * loopback, drive the provider's OAuth flow). This component is deliberately
+ * thin: one button, an honest description of what gets installed, and live
+ * status pushed from `cliproxy:state`.
  *
  * One sidecar process serves every subscription, so the pushed state is SHARED:
  * install status, port and progress are global, while the account list covers
@@ -113,28 +113,6 @@ export function SubscriptionSetup({
     }
   }
 
-  /**
-   * Escape hatch for networks that block or rewrite the download: the user
-   * supplies the archive themselves, then sign-in continues as normal.
-   */
-  const installManually = async (): Promise<void> => {
-    setBusy(true)
-    setError(null)
-    try {
-      const next = await api.cliproxy.installFromFile()
-      // A cancelled picker leaves the state untouched - don't claim success.
-      if (next.status === 'not-installed') {
-        if (next.error) setError(next.error)
-        return
-      }
-      await signIn()
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
-    } finally {
-      setBusy(false)
-    }
-  }
-
   // Only THIS provider's accounts. The state carries every upstream's.
   const accounts = accountsFor(state, providerId)
   const connected = accounts.length > 0
@@ -159,22 +137,7 @@ export function SubscriptionSetup({
 
       {busy && <Progress state={state} browserLabel={copy.browser} />}
 
-      {error && (
-        <div className="flex flex-col gap-2">
-          <p className="text-xs text-danger">{error}</p>
-          {/* Only offered after a failure. Some networks rewrite or block the
-              download outright, and retrying cannot fix that — but the user can
-              fetch the file another way. It is still checksum-verified. */}
-          <button
-            type="button"
-            onClick={installManually}
-            disabled={busy}
-            className="self-start text-xs text-text-subtle underline-offset-2 transition-colors hover:text-text hover:underline disabled:opacity-40"
-          >
-            Download blocked? Install from a file instead
-          </button>
-        </div>
-      )}
+      {error && <p className="text-xs text-danger">{error}</p>}
 
       <Button variant="primary" onClick={signIn} disabled={busy}>
         {busy ? (
@@ -238,7 +201,7 @@ function HowItWorks({ version }: { version: string }): JSX.Element {
     <div className="flex gap-2.5 sq sq-xl sq-ring rounded-xl border border-border bg-surface p-3">
       <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-text-subtle" />
       <div className="text-xs leading-relaxed text-text-subtle">
-        Roxy downloads{' '}
+        Roxy includes{' '}
         <button
           type="button"
           onClick={() =>
@@ -248,9 +211,10 @@ function HowItWorks({ version }: { version: string }): JSX.Element {
         >
           CLIProxyAPI v{version}
         </button>{' '}
-        (checksum-verified) and runs it on 127.0.0.1 while Roxy is open. It holds the login on this
-        machine and exposes it to Roxy as a normal model endpoint — your credentials never reach
-        Roxy&apos;s servers, and the proxy is closed when you quit.
+        (checksum-verified during the build and validated before launch) and runs it on 127.0.0.1
+        while Roxy is open. It holds the login on this machine and exposes it to Roxy as a normal
+        model endpoint — your credentials never reach Roxy&apos;s servers, and the proxy is closed
+        when you quit.
       </div>
     </div>
   )
