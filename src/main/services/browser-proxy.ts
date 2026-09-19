@@ -64,9 +64,7 @@ function normalizeStored(raw: unknown): StoredProxy {
     host,
     port,
     username: typeof value.username === 'string' ? value.username : '',
-    ...(password &&
-    typeof password.data === 'string' &&
-    typeof password.encrypted === 'boolean'
+    ...(password && typeof password.data === 'string' && typeof password.encrypted === 'boolean'
       ? { password }
       : {})
   }

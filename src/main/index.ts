@@ -123,7 +123,8 @@ app.whenReady().then(() => {
   })
 
   app.on('login', (event, webContents, _details, authInfo, callback) => {
-    if (!authInfo.isProxy || webContents.session !== session.fromPartition(BROWSER_PARTITION)) return
+    if (!authInfo.isProxy || webContents.session !== session.fromPartition(BROWSER_PARTITION))
+      return
     event.preventDefault()
     void browserProxyCredentials(authInfo).then((credentials) => {
       if (credentials) callback(credentials.username, credentials.password)

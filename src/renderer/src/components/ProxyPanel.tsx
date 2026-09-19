@@ -126,7 +126,9 @@ export function ProxyPanel({ compact = false }: { compact?: boolean }): JSX.Elem
       <div className={cn('flex items-start justify-between gap-4', compact ? 'px-4 py-3' : 'p-4')}>
         <div className="min-w-0">
           <div className="flex items-center gap-2 text-sm font-medium text-text">
-            <ShieldCheck className={cn('h-4 w-4', saved.enabled ? 'text-success' : 'text-text-subtle')} />
+            <ShieldCheck
+              className={cn('h-4 w-4', saved.enabled ? 'text-success' : 'text-text-subtle')}
+            />
             {t('proxy.title')}
           </div>
           <p className="mt-1 text-xs text-text-muted">{t('proxy.description')}</p>
@@ -134,7 +136,9 @@ export function ProxyPanel({ compact = false }: { compact?: boolean }): JSX.Elem
         <Switch checked={enabled} onChange={(value) => void toggle(value)} disabled={busy} />
       </div>
 
-      <div className={cn('grid gap-3 border-t border-border', compact ? 'p-4' : 'p-4 sm:grid-cols-6')}>
+      <div
+        className={cn('grid gap-3 border-t border-border', compact ? 'p-4' : 'p-4 sm:grid-cols-6')}
+      >
         <Field label={t('proxy.protocol')} className={compact ? '' : 'sm:col-span-2'}>
           <select
             value={scheme}
@@ -192,7 +196,12 @@ export function ProxyPanel({ compact = false }: { compact?: boolean }): JSX.Elem
           </p>
         )}
         {saved.hasPassword && !authUnsupported && (
-          <label className={cn('flex items-center gap-2 text-xs text-text-muted', compact ? '' : 'sm:col-span-6')}>
+          <label
+            className={cn(
+              'flex items-center gap-2 text-xs text-text-muted',
+              compact ? '' : 'sm:col-span-6'
+            )}
+          >
             <input
               type="checkbox"
               checked={clearPassword}
@@ -205,7 +214,9 @@ export function ProxyPanel({ compact = false }: { compact?: boolean }): JSX.Elem
           </label>
         )}
 
-        <div className={cn('flex items-center justify-between gap-3', compact ? '' : 'sm:col-span-6')}>
+        <div
+          className={cn('flex items-center justify-between gap-3', compact ? '' : 'sm:col-span-6')}
+        >
           <div
             className={cn(
               'min-h-4 text-xs',

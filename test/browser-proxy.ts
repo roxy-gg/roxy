@@ -43,7 +43,10 @@ async function main(): Promise<void> {
     password: 'not-plain-text'
   })
   check('saves an HTTP proxy', saved.ok && saved.config.enabled, saved.error ?? '')
-  check('reports but does not return the password', saved.config.hasPassword && !('password' in saved.config))
+  check(
+    'reports but does not return the password',
+    saved.config.hasPassword && !('password' in saved.config)
+  )
 
   const raw = await fs.readFile(path.join(root, 'browser-proxy.json'), 'utf8')
   check('does not persist the password in plain text', !raw.includes('not-plain-text'))
@@ -90,7 +93,9 @@ async function main(): Promise<void> {
   )
 
   console.log(
-    failures ? `\nBROWSER PROXY FAILED - ${failures} failing\n` : '\nAll browser proxy checks passed.\n'
+    failures
+      ? `\nBROWSER PROXY FAILED - ${failures} failing\n`
+      : '\nAll browser proxy checks passed.\n'
   )
   app.exit(failures ? 1 : 0)
 }

@@ -229,10 +229,7 @@ export function BrowserChrome(): JSX.Element {
           host={host}
           className="min-h-0 flex-1"
           action={
-            <NavButton
-              onClick={() => setPanel(null)}
-              title={t('browserChrome.closeCookies')}
-            >
+            <NavButton onClick={() => setPanel(null)} title={t('browserChrome.closeCookies')}>
               <X className="h-3.5 w-3.5" />
             </NavButton>
           }
