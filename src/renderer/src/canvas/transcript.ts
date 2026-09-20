@@ -25,6 +25,7 @@ import { layoutToolCard, type ToolCardInput } from './tool-card'
 import { PROMPT_GUTTER } from './prompt-history'
 import { TranscriptWindow } from './transcript-window'
 import type { Bot } from '@shared/bots'
+import { isHostSpeaker } from '../../../shared/bots'
 import { MENTION, isKnownMention } from '../../../shared/mentions'
 
 export interface LayoutInput {
@@ -197,12 +198,17 @@ function layoutMessage(
 }
 
 export function messageBotUsername(input: LayoutInput, message: Message): string | undefined {
-  if (message.role !== 'assistant') return undefined
-  return (
-    input.bots?.find((bot) => bot.id === message.botId)?.username ??
-    message.botUsername ??
-    input.botUsername
-  )
+  // The host answering inside a bot's chat is recorded explicitly, because the
+  // fallback below means "this chat's bot": without the marker Roxy's reply was
+  // drawn under the owner's name and avatar, both live and after a reload.
+  if (isHostSpeaker(message.botId, message.botUsername)) return undefined
+  const signed =
+    input.bots?.find((bot) => bot.id === message.botId)?.username ?? message.botUsername
+  // Work arriving from another session is stored as a user turn (it is a prompt
+  // for this one), but it was written by a bot and says so. Reading the role
+  // alone drew it as "You", crediting the person to whom it was delivered.
+  if (message.role !== 'assistant') return signed
+  return signed ?? input.botUsername
 }
 
 export function layoutMessageHeader(

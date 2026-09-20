@@ -46,6 +46,8 @@ function botSchema(db: Database): void {
   addColumnIfMissing(db, 'queue', 'bot_username', 'TEXT')
   addColumnIfMissing(db, 'queue', 'as_bot_id', 'TEXT')
   addColumnIfMissing(db, 'queue', 'recipient_id', 'TEXT')
+  addColumnIfMissing(db, 'queue', 'reply_to_bot_id', 'TEXT')
+  addColumnIfMissing(db, 'queue', 'reply_to_bot_username', 'TEXT')
 }
 
 /** Whether a table already has a column — SQLite can't express this in DDL. */
@@ -603,7 +605,15 @@ export const MIGRATIONS: Migration[] = [
   // ---- v26: user turns belong to the session owner, not a parsed mention ----
   // Keep explicit tool handoffs and failure states; upgrading must not retry work.
   `UPDATE queue SET recipient_id = NULL, as_bot_id = NULL
-   WHERE source_chat_id IS NULL;`
+   WHERE source_chat_id IS NULL;`,
+
+  // ---- v27: a delegation returns to the actor that sent it ----
+  // In-flight rows keep resuming the session owner, which is what they were
+  // queued expecting; only new handoffs record their sender.
+  (db) => {
+    addColumnIfMissing(db, 'queue', 'reply_to_bot_id', 'TEXT')
+    addColumnIfMissing(db, 'queue', 'reply_to_bot_username', 'TEXT')
+  }
 ]
 
 /**

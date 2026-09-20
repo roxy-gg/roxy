@@ -43,6 +43,7 @@ import {
 import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import * as repo from '../db/repo'
+import { isHostSpeaker } from '../../shared/bots'
 import { botActivity, chatBot, getBot, listBots, listJobs } from '../db/bots'
 import { runTool } from './tools'
 import { boundToolOutput } from '../services/tool-output-store'
@@ -555,11 +556,13 @@ function botMemory(bot: Bot): string | undefined {
     const own = m.botId ? m.botId === bot.id : m.botUsername === bot.username
     const speaker = own
       ? 'You'
-      : m.botUsername
-        ? `@${m.botUsername}`
-        : m.role === 'assistant'
-          ? 'Roxy'
-          : 'User'
+      : isHostSpeaker(m.botId, m.botUsername)
+        ? 'Roxy'
+        : m.botUsername
+          ? `@${m.botUsername}`
+          : m.role === 'assistant'
+            ? 'Roxy'
+            : 'User'
     const line = `${speaker}: ${
       text.length > GUEST_MEMORY_LINE_CHARS ? `${text.slice(0, GUEST_MEMORY_LINE_CHARS)}…` : text
     }`
@@ -707,6 +710,11 @@ function buildSystemMessage(
       )
   }
   const hostSummary = chatId ? (repo.getChat(chatId)?.contextSummary ?? undefined) : undefined
+  // The host invited into a bot's private chat is a visitor for the same reason
+  // a guest bot is: the summary was compacted to fit THAT chat's budget, while
+  // she answers on the app defaults, which may be far narrower. She also never
+  // compacts a chat she does not own, so nothing else bounds it.
+  const visiting = guest || (asHost && !!chatId && !!chatBot(chatId))
   // A guest brought its own, narrower window into someone else's session, but
   // the host's summary was compacted to fit the HOST's. It rides in the system
   // message, which trimming never drops, so on a small enough budget it is spent
@@ -714,7 +722,7 @@ function buildSystemMessage(
   // instead of the session. Truncated as a VIEW only: the stored summary is
   // untouched, for the same reason a guest never compacts the host.
   const contextSummary =
-    guest && contextLimit && hostSummary
+    visiting && contextLimit && hostSummary
       ? truncateSummary(hostSummary, Math.floor(contextLimit * HOST_SUMMARY_SHARE) * 4)
       : hostSummary
   return assembleSystemPrompt({

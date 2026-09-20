@@ -198,9 +198,71 @@ credenciales ni prometer fiabilidad universal. Probar desktop y viewport estrech
 
 ## Estado actual
 
-Revision hecha leyendo el diff sin commit y ejecutando la verificacion listada
-abajo. Las fases A, B, C y D ya NO son solo propuesta: estan en el working tree,
-sin commit, sobre HEAD 89f2cea (rama jair/turbo-daemon-warden).
+Las fases A, B, C y D estan implementadas y commiteadas en la rama
+jair/turbo-daemon-warden (597d6f2 y 2b2e20c, sobre 89f2cea).
+
+Dos revisiones posteriores encontraron diez defectos en ese trabajo, hoy
+corregidos. Cada uno se verifico revirtiendo su arreglo y comprobando que la
+prueba correspondiente falla sin el:
+
+1. Roxy invitada a un chat privado resolvia su config con `resolveSessionConfig`,
+   que deliberadamente NO hereda el `agentId` global: contestaba en Build con la
+   app en Plan. Ahora usa `seedSessionConfig` (automation.ts, `hostVisiting`).
+2. Su respuesta se guardaba sin autor, y en el chat de un bot "sin autor" ya
+   significa el dueno: aparecia firmada por ese bot en vivo y tras recargar.
+   Ahora firma con `HOST_USERNAME` (`src/shared/bots.ts`), respetado por el
+   transcript y por `reconstructTurn`.
+3. Un fallo al crear un bot no se mostraba: el unico render del error vivia en el
+   dialogo de borrado, que esta cerrado. Ahora se muestra junto al boton.
+4. Crear un bot no enfocaba el composer, pese a que configurarlo es escribirle.
+   Ahora `composerFocusChatId` lo pide para ese chat y el composer lo consume.
+5. El resumen del anfitrion se acotaba solo para bots invitados; Roxy visitante
+   recibia el resumen completo con una ventana potencialmente menor. El limite se
+   aplica a cualquier visitante (`visiting` en agent.ts). Este es el unico de los
+   cinco primeros sin prueba aislada propia: lo cubre la bateria de contexto de
+   `test/bots.ts`, no un caso especifico para Roxy visitante.
+
+La segunda revision encontro que la delegacion estaba arreglada solo a medias:
+la respuesta de Roxy se firmaba, pero ni sus peticiones ni los retornos. Todo el
+viaje -- peticion, respuesta, error y actor que retoma -- tenia que ser coherente.
+
+6. `bot_invoke` comparaba contra el DUENO del chat, no contra quien habla, asi
+   que un invitado (o Roxy) no podia devolverle el trabajo al bot anfitrion: se
+   rechazaba como auto-invocacion. Ahora la guarda es `bot.id === self?.id`
+   (`bot-tools.ts`), que es lo que ya significaba "yo mismo".
+7. Las peticiones que Roxy encolaba desde el chat de un bot iban sin autor, y
+   ahi "sin autor" ya significa el dueno: su delegacion aparecia firmada por ese
+   bot. `bot-tools.ts` calcula `author` una vez y lo usa en `bot_invoke` y en
+   `session_manage send`.
+8. Lo mismo al volver: las respuestas y los errores copiados a la sesion que
+   delego usaban solo `bot?.id`, de modo que una respuesta de Roxy llegaba a
+   nombre del bot de ese chat. `automation.ts` mantiene `returnAuthor`.
+9. La continuacion tras una entrega reanudaba al dueno de la sesion, no al actor
+   que delego: un bot que nunca pidio ese trabajo seguia la tarea con su
+   identidad y su config. La cola recuerda al remitente
+   (`reply_to_bot_id`/`reply_to_bot_username`, migracion v27) y el nudge lo
+   direcciona.
+10. Al recargar a mitad de turno, cualquier token que llegara durante la ida y
+    vuelta del snapshot descartaba tambien la identidad, aunque los tokens no
+    dicen quien habla: la respuesta de un invitado seguia bajo el nombre del
+    dueno hasta terminar. Ahora solo una transicion de TURNO posterior invalida
+    al hablante del snapshot (`automationTurnRevisions` en store.ts).
+
+Ademas, dos defectos que venian de antes de esta rama y que la delegacion vuelve
+visibles:
+
+- El trabajo que llega de otra sesion se guarda como turno `user` (es un prompt
+  para esta), pero lo escribio un bot y la fila lo dice. `messageBotUsername`
+  descartaba el autor por el rol y lo dibujaba como "Tu", acreditandoselo a quien
+  lo recibia.
+- Las filas sin firma anteriores a que se registrara la autoria son del bot en su
+  PROPIO chat. `reconstructTurn` las leia como de Roxy: devolvia el historial del
+  bot como citas `[@Roxy]` y le quitaba las tool calls nativas. Ahora, sin firma,
+  decide el chat; una firma explicita siempre manda.
+
+El foco del composer (4) tenia ademas una carrera: se pedia despues de esperar la
+carga del historial, asi que podia robar el cursor si el usuario navegaba mientras
+tanto. Se pide junto con la seleccion y `selectChat` lo cancela al cambiar de chat.
 
 Implementado y verificado por diff + pruebas:
 
@@ -276,10 +338,7 @@ Verificacion ejecutada en esta revision (no heredada):
 - `git diff --check` limpio. Prettier fallaba en `session-turn.ts` y
   `default.json`; se corrigio con `prettier --write` y ahora `--check` pasa.
 
-Sin commit ni push: el arbol sigue sucio a proposito.
-`script/tmp-*.mjs` y `script/tmp-payload.json` son scratch del turno anterior
-(buscar/editar archivos con CRLF); no forman parte de la funcionalidad y deberian
-borrarse antes de commitear.
+Los scratch `script/tmp-*.mjs` y `script/tmp-payload.json` ya se borraron.
 
 ## Estado heredado
 

@@ -45,6 +45,14 @@ Object.assign(window.roxy, {
   bots: {
     list: async () => [...bots],
     create: async (username?: string) => {
+      // Lets the smoke prove a FAILED creation is reported. The button is the
+      // only entry point now that the dialog is gone, so a silent failure
+      // leaves the user with no bot and no reason why.
+      const forced = (window as unknown as { __failNextCreate?: string }).__failNextCreate
+      if (forced) {
+        delete (window as unknown as { __failNextCreate?: string }).__failNextCreate
+        throw new Error(forced)
+      }
       // Mirrors main: with no name the bot still gets one, so it can be created
       // first and named later in the conversation.
       if (!username?.trim()) {

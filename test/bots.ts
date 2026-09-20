@@ -6,6 +6,7 @@ import { app, BrowserWindow } from 'electron'
 import Database from 'better-sqlite3'
 import { registerIpc } from '../src/main/ipc'
 import { resolveSessionConfig } from '../src/shared/session-config'
+import { HOST_USERNAME, isHostSpeaker } from '../src/shared/bots'
 import { MIGRATIONS, repairSchema } from '../src/main/db/migrations'
 import { getDb, closeDb } from '../src/main/db/database'
 import * as repo from '../src/main/db/repo'
@@ -329,6 +330,30 @@ async function main(): Promise<void> {
     assert.equal(item.replyToChatId, undefined, 'no automatic reply loop')
     repo.removeQueueItem(item.id)
   }
+  // Handing the thread BACK to the bot that owns this chat is delegation to
+  // someone else whenever the speaker is a guest - or Roxy. Comparing against
+  // the owner rejected the ordinary round trip and left no way to return work.
+  const visitorCtx = { cwd: sessionCwd(bot.chatId), sessionId: bot.chatId }
+  const handBack = await runTool(
+    'bot_invoke',
+    { bot: 'reviewer', prompt: 'Verify the fix in your own chat.' },
+    visitorCtx
+  )
+  assert.ok(handBack.ok, handBack.output)
+  const handedBack = repo.listQueue(bot.chatId)[0]
+  assert.equal(handedBack.asBotId, bot.id, 'the owner answers next')
+  assert.equal(handedBack.botUsername, HOST_USERNAME, 'and the visiting host signs the request')
+  assert.equal(handedBack.botId, undefined, 'the host has no bot row')
+  repo.removeQueueItem(handedBack.id)
+  // The owner talking to itself is still the no-op the guard is for.
+  const ownerToItself = await runTool(
+    'bot_invoke',
+    { bot: 'reviewer', prompt: 'Call myself' },
+    { ...visitorCtx, botId: bot.id }
+  )
+  assert.ok(!ownerToItself.ok)
+  assert.match(ownerToItself.output, /already executing this turn/)
+
   const selfHost = await runTool('bot_invoke', { bot: 'roxy', prompt: 'Call myself' }, ctx)
   assert.ok(!selfHost.ok)
   assert.match(selfHost.output, /You are Roxy/)
@@ -595,6 +620,7 @@ async function main(): Promise<void> {
     assert.equal(repo.listQueue(worker.chatId).length, 1)
     assert.equal(repo.listMessages(worker.chatId).at(-1)?.content, 'Reviewed by the bot.')
     assert.equal(repo.listMessages(session.id).at(-1)?.botUsername, 'worker')
+
     assert.equal(requests[0].messages.at(-1)?.role, 'user')
     assert.ok(JSON.stringify(requests[0].messages[0]).includes('You are @worker'))
     const workerSystem = String(requests[0].messages[0].content)
@@ -1345,7 +1371,29 @@ async function main(): Promise<void> {
     assert.ok(sent.ok, sent.output)
     assert.equal(repo.listQueue(memorySession.id)[0].botId, memoryBot.id)
     assert.equal(repo.listQueue(memorySession.id)[0].botUsername, 'final-reviewer')
-    repo.removeQueueItem(repo.listQueue(memorySession.id)[0].id)
+    for (const item of repo.listQueue(memorySession.id)) repo.removeQueueItem(item.id)
+    // Delegating from ANOTHER bot's chat: the work is the guest's, so the answer
+    // has to come back to the guest. Resuming the chat's owner handed the
+    // continuation to a bot that never asked for it, with its identity and config.
+    const visitor = bots.createBot('visitor', 'Visit and delegate.')
+    const visitorSend = await runTool(
+      'session_manage',
+      { action: 'send', id: memorySession.id, prompt: 'Guest follow-up' },
+      { cwd: sessionCwd(memoryBot.chatId), sessionId: memoryBot.chatId, botId: visitor.id }
+    )
+    assert.ok(visitorSend.ok, visitorSend.output)
+    const guestHandoff = repo.listQueue(memorySession.id).at(-1)!
+    assert.equal(guestHandoff.botId, visitor.id, "the request is the guest's, not the owner's")
+    wakeAutomation()
+    await settle(memorySession.id)
+    const guestNudge = repo
+      .listQueue(memoryBot.chatId)
+      .find((q) => q.content.includes('answered above'))
+    assert.ok(guestNudge, 'the delegating actor is nudged to continue')
+    assert.equal(guestNudge?.asBotId, visitor.id, 'and it is the guest that resumes, not the owner')
+    for (const item of repo.listQueue(memoryBot.chatId)) repo.removeQueueItem(item.id)
+    for (const item of repo.listQueue(memorySession.id)) repo.removeQueueItem(item.id)
+    bots.removeBot(visitor.id)
     repo.removeChat(memorySession.id)
     assert.equal(
       bots.botActivity(memoryBot).length,
@@ -1396,11 +1444,53 @@ async function main(): Promise<void> {
       'guest-model',
       'host does not overwrite private config'
     )
-    assert.equal(repo.listMessages(memoryBot.chatId).at(-1)?.botId, undefined)
+    // Roxy signs her reply HERE, where an unsigned assistant row already means
+    // the bot that owns the chat: unsigned, her answer was drawn under
+    // @final-reviewer's name and avatar, live and after a reload.
+    const hostReply = repo.listMessages(memoryBot.chatId).at(-1)!
+    assert.equal(hostReply.botId, undefined, 'the host has no bot row')
+    assert.equal(hostReply.botUsername, HOST_USERNAME, 'and says so explicitly')
+    assert.ok(isHostSpeaker(hostReply.botId, hostReply.botUsername))
     enqueuePrompt(memoryBot.chatId, 'Back to the owner')
     wakeAutomation()
     await settle(memoryBot.chatId)
-    assert.equal(repo.listMessages(memoryBot.chatId).at(-1)?.botId, memoryBot.id)
+    const ownerReply = repo.listMessages(memoryBot.chatId).at(-1)!
+    assert.equal(ownerReply.botId, memoryBot.id, 'while the owner keeps its own name')
+    assert.ok(!isHostSpeaker(ownerReply.botId, ownerReply.botUsername))
+
+    // A host returning to a bot's private chat runs on the app defaults, and
+    // the global MODE is part of them: resolveSessionConfig never inherits a
+    // global agentId, so reusing it answered in Build while the app said Plan.
+    repo.setChatConfig(memoryBot.chatId, { agentId: 'build' })
+    repo.setActiveAgent('plan')
+    const planned = await runTool(
+      'bot_invoke',
+      { bot: 'roxy', prompt: 'Plan the next step.' },
+      { cwd: sessionCwd(memoryBot.chatId), sessionId: memoryBot.chatId, botId: memoryBot.id }
+    )
+    assert.ok(planned.ok, planned.output)
+    wakeAutomation()
+    await settle(memoryBot.chatId)
+    assert.equal(repo.listQueue(memoryBot.chatId).length, 0)
+    assert.ok(
+      !requests.at(-1)?.tools?.some((tool) => tool.function.name === 'write'),
+      'the global Plan mode reaches a host visiting a bot chat'
+    )
+    assert.ok(requests.at(-1)?.tools?.some((tool) => tool.function.name === 'read'))
+    assert.equal(
+      repo.getChat(memoryBot.chatId)?.agentId,
+      'build',
+      'and the visit does not repin the private chat'
+    )
+    // The owner still answers in the mode ITS chat is pinned to.
+    enqueuePrompt(memoryBot.chatId, 'And now you.')
+    wakeAutomation()
+    await settle(memoryBot.chatId)
+    assert.ok(
+      requests.at(-1)?.tools?.some((tool) => tool.function.name === 'write'),
+      'the global mode does not leak into the bot that owns the chat'
+    )
+    repo.setActiveAgent('build')
   } finally {
     stopAutomation()
     setPromptText({})

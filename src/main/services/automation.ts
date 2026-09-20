@@ -9,10 +9,12 @@ import { reconstructTurn } from '../../shared/tool-history'
 import { pruneToolMessages, KEEP_RECENT_TOKENS } from '../../shared/context'
 import {
   resolveSessionConfig,
+  seedSessionConfig,
   contextBudgetFor,
   clampReasoningEffort
 } from '../../shared/session-config'
 import { pickDefaultModel } from '../../shared/models'
+import { HOST_USERNAME, isHostSpeaker } from '../../shared/bots'
 import * as repo from '../db/repo'
 import * as bots from '../db/bots'
 import { getDb } from '../db/database'
@@ -31,7 +33,12 @@ import {
 
 let timer: ReturnType<typeof setInterval> | null = null
 const live = new Map<string, PartsFold>()
-const speakers = new Map<string, { botId: string; botUsername: string }>()
+/**
+ * Who is speaking in each live turn. A bot carries both fields; the HOST
+ * answering inside a bot's chat carries only the reserved username, because she
+ * has no bot row - and staying unnamed there would read as that chat's bot.
+ */
+const speakers = new Map<string, { botId?: string; botUsername: string }>()
 
 /**
  * How far a request may be handed on before it needs a human again.
@@ -103,6 +110,9 @@ export function enqueuePrompt(
     /** Bot that should ANSWER this prompt, when it isn't the session's own bot. */
     asBotId?: string
     recipientId?: string
+    /** Actor to resume when the answer comes back, when it is not the owner of
+     *  `replyToChatId`: a guest (or Roxy) delegating from someone else's chat. */
+    replyToActor?: { botId?: string; botUsername?: string }
   } = {}
 ): QueueItem {
   if (!repo.getChat(chatId)) throw new Error('Session not found')
@@ -133,7 +143,7 @@ export function enqueuePrompt(
     const item = repo.enqueue(chatId, content.trim(), images)
     getDb()
       .prepare(
-        'UPDATE queue SET source_chat_id = ?, reply_to_chat_id = ?, hops = ?, not_before = ?, continue_reply = ?, bot_id = ?, bot_username = ?, as_bot_id = ?, recipient_id = ? WHERE id = ?'
+        'UPDATE queue SET source_chat_id = ?, reply_to_chat_id = ?, hops = ?, not_before = ?, continue_reply = ?, bot_id = ?, bot_username = ?, as_bot_id = ?, recipient_id = ?, reply_to_bot_id = ?, reply_to_bot_username = ? WHERE id = ?'
       )
       .run(
         options.sourceChatId ?? null,
@@ -145,6 +155,8 @@ export function enqueuePrompt(
         options.botUsername ?? null,
         options.sourceChatId ? (options.asBotId ?? null) : null,
         recipientId ?? null,
+        options.replyToActor?.botId ?? null,
+        options.replyToActor?.botUsername ?? null,
         item.id
       )
     return item
@@ -288,12 +300,18 @@ async function deliver(item: QueueItem): Promise<void> {
   const fold = new PartsFold()
   live.set(item.chatId, fold)
   let bot: ReturnType<typeof bots.getBot>
+  // Declared out here so the failure path below attributes a partial answer to
+  // the same speaker the successful path would have.
+  let hostVisiting = false
+  // How a reply copied to the CALLER's transcript is signed. Same reason, one
+  // transcript over: unsigned there means "the bot that owns that chat".
+  let returnAuthor: { botId?: string; botUsername?: string } = {}
   const relay = relayLocalTurnStart(item.chatId)
   try {
     // Read persisted handoff metadata before choosing the speaker and config.
     const previous = getDb()
       .prepare(
-        'SELECT message_id, bot_id, bot_username, as_bot_id, recipient_id FROM queue WHERE id = ?'
+        'SELECT message_id, bot_id, bot_username, as_bot_id, recipient_id, reply_to_bot_id, reply_to_bot_username FROM queue WHERE id = ?'
       )
       .get(item.id) as
       | {
@@ -302,6 +320,8 @@ async function deliver(item: QueueItem): Promise<void> {
           bot_username: string | null
           as_bot_id: string | null
           recipient_id: string | null
+          reply_to_bot_id: string | null
+          reply_to_bot_username: string | null
         }
       | undefined
     if (!previous) return
@@ -320,13 +340,26 @@ async function deliver(item: QueueItem): Promise<void> {
     if (targetId && !target) throw new Error('The invited bot no longer exists')
     const guest = target?.chatId !== item.chatId ? target : undefined
     bot = asHost ? undefined : (target ?? bots.chatBot(item.chatId))
-    const speaker = bot ? { botId: bot.id, botUsername: bot.username } : undefined
+    // Inside a BOT's chat, "no author" already means the bot that owns it, so
+    // the host has to name herself or her reply is shown and replayed as that
+    // bot's own words. Elsewhere Roxy is the default speaker and stays unnamed.
+    hostVisiting = asHost && !!bots.chatBot(item.chatId)
+    const speaker = bot
+      ? { botId: bot.id, botUsername: bot.username }
+      : hostVisiting
+        ? { botUsername: HOST_USERNAME }
+        : undefined
     if (speaker) speakers.set(item.chatId, speaker)
+    returnAuthor = speaker ?? {}
     emit({ sessionId: item.chatId, kind: 'turn', state: 'running', ...speaker })
-    const config = resolveSessionConfig(
-      asHost && bots.chatBot(item.chatId) ? undefined : repo.getChat(guest?.chatId ?? item.chatId),
-      repo.getSettings()
-    )
+    // A host invited into a bot's private chat runs on the app defaults, which
+    // include the CURRENT global mode. `resolveSessionConfig` deliberately never
+    // inherits a global `agentId` (a session owns its mode for its whole life),
+    // so reusing it here silently answered in Build while the app said Plan -
+    // handing write tools to a turn the user had restricted to planning.
+    const config = hostVisiting
+      ? seedSessionConfig(repo.getSettings())
+      : resolveSessionConfig(repo.getChat(guest?.chatId ?? item.chatId), repo.getSettings())
     const owner = guest ? `@${guest.username}` : 'this session'
     const providers = repo.listConnectedProviders().filter((p) => p.enabled)
     const provider = config.providerId
@@ -374,7 +407,7 @@ async function deliver(item: QueueItem): Promise<void> {
     // Compaction is permanent and belongs to the session, so a GUEST never
     // triggers it: a visitor on a small window would otherwise summarize away
     // the host's history on its way through. It just gets the narrower window.
-    if (!guest && !(asHost && bots.chatBot(item.chatId)) && estimated > budget * 0.8)
+    if (!guest && !hostVisiting && estimated > budget * 0.8)
       await compactChat(item.chatId, provider.id, model, controller.signal)
     if (controller.signal.aborted) throw new Error('Stopped.')
     const result = await runSessionTurn(
@@ -406,6 +439,14 @@ async function deliver(item: QueueItem): Promise<void> {
     // session, otherwise the session's own bot.
     const parts = fold.parts
     if (bot) bot = bots.getBot(bot.id) ?? bot
+    // Who this row belongs to, written down rather than inferred later: in a
+    // bot's own chat an unattributed assistant row reads as that bot.
+    const author = bot
+      ? { botId: bot.id, botUsername: bot.username }
+      : hostVisiting
+        ? { botUsername: HOST_USERNAME }
+        : {}
+    returnAuthor = author
     getDb().transaction(() => {
       if (!repo.getChat(item.chatId)) return
       if (parts.length)
@@ -414,8 +455,7 @@ async function deliver(item: QueueItem): Promise<void> {
           role: 'assistant',
           content: partsToContent(parts),
           parts,
-          botId: bot?.id,
-          botUsername: bot?.username
+          ...author
         })
       if (!result.ok) throw new Error(result.error ?? 'Model request failed')
       if (
@@ -428,12 +468,14 @@ async function deliver(item: QueueItem): Promise<void> {
           .filter((p): p is Extract<MessagePart, { type: 'text' }> => p.type === 'text')
           .map((p) => p.text)
           .join('\n')
+        // Signed with whoever actually answered. Sending only `bot` left the
+        // host's replies unattributed, and in a bot's chat unattributed already
+        // reads as that bot - so Roxy's answer came back in its name.
         repo.addMessage({
           chatId: item.replyToChatId,
           role: 'assistant',
           content: text || partsToContent(parts),
-          botId: bot?.id,
-          botUsername: bot?.username
+          ...returnAuthor
         })
         const continuation = getDb()
           .prepare('SELECT continue_reply FROM queue WHERE id = ?')
@@ -445,11 +487,29 @@ async function deliver(item: QueueItem): Promise<void> {
           // The reply was just persisted to this transcript, so the nudge must
           // NOT repeat it: quoting it again produced a second copy of the whole
           // answer, attributed to "You" because a queued prompt is a user turn.
+          // Back to whoever sent the work. Resuming the session's owner instead
+          // handed the continuation to a bot that never asked for it, answering
+          // with its identity and its config.
+          const sender = previous.reply_to_bot_id
+            ? bots.getBot(previous.reply_to_bot_id)
+            : undefined
+          const senderIsHost = isHostSpeaker(
+            previous.reply_to_bot_id ?? undefined,
+            previous.reply_to_bot_username ?? undefined
+          )
           enqueuePrompt(
             item.replyToChatId,
             `${bot ? `@${bot.username}` : `Session ${item.chatId}`} answered above. Continue the original task if needed, or report the result. Do not reflexively invoke the sender again.`,
             undefined,
-            { sourceChatId: item.chatId, hops: (item.hops ?? 0) + 1 }
+            {
+              sourceChatId: item.chatId,
+              hops: (item.hops ?? 0) + 1,
+              ...(sender
+                ? { recipientId: sender.id, asBotId: sender.id }
+                : senderIsHost
+                  ? { recipientId: HOST_USERNAME }
+                  : {})
+            }
           )
         }
       }
@@ -474,8 +534,7 @@ async function deliver(item: QueueItem): Promise<void> {
         chatId: item.replyToChatId,
         role: 'assistant',
         content: `The delegated request could not finish: ${message}\nThe request remains in ${bot ? `@${bot.username}'s` : "the target session's"} queue for retry or removal.`,
-        botId: bot?.id,
-        botUsername: bot?.username
+        ...returnAuthor
       })
       notifyAutomation(item.replyToChatId)
       notifyTranscriptChanged(item.replyToChatId)
@@ -486,8 +545,11 @@ async function deliver(item: QueueItem): Promise<void> {
         role: 'assistant',
         content: partsToContent(fold.parts),
         parts: fold.parts,
-        botId: bot?.id,
-        botUsername: bot?.username
+        ...(bot
+          ? { botId: bot.id, botUsername: bot.username }
+          : hostVisiting
+            ? { botUsername: HOST_USERNAME }
+            : {})
       })
     }
   } finally {

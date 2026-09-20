@@ -818,6 +818,86 @@ check('bot replies use a round Facehash and username in both transcript layouts'
     assert.ok(!nodes.includes('__roxy__'))
     assert.ok(!nodes.includes('@old-name'))
   }
+  // Work handed over from another session is stored as a USER turn - it is a
+  // prompt for this one - but a bot wrote it and the row says so. Reading the
+  // role alone drew it as "You", crediting it to whoever received it.
+  const fromAnotherSession = {
+    ...own,
+    id: 'cross-session-request',
+    role: 'user' as const,
+    botId: 'bot-1',
+    botUsername: 'helper',
+    parts: [{ type: 'text' as const, text: 'Please review the diff.' }]
+  }
+  for (const messages of [[fromAnotherSession], [...longMessages, fromAnotherSession]]) {
+    const scene = layoutTranscript(
+      {
+        ...longInput(messages),
+        bots: [bot],
+        botAvatar: (name) => `data:image/svg+xml,${name}`
+      },
+      new BlockCache()
+    )
+    const nodes = JSON.stringify(scene.blocks.at(-1)!.nodes)
+    assert.ok(nodes.includes('@helper'), 'a delegated request keeps its author')
+    assert.ok(!nodes.includes('__roxy__'), 'and is not drawn as the person reading it')
+  }
+  // An ordinary user turn is still the user's, with no bot name attached.
+  const typedHere = {
+    ...fromAnotherSession,
+    id: 'typed-here',
+    botId: undefined,
+    botUsername: undefined
+  }
+  assert.ok(
+    !JSON.stringify(
+      layoutTranscript({ ...longInput([typedHere]), bots: [bot] }, new BlockCache()).blocks.at(-1)!
+        .nodes
+    ).includes('@helper'),
+    'what the user typed here is not attributed to a bot'
+  )
+
+  // The HOST answering inside a bot's chat: `botUsername` names the chat owner,
+  // so an unsigned row is drawn as that bot. Roxy signs hers, and must come out
+  // as the plain assistant - not as @helper wearing the bot's avatar.
+  const bySigningHost = {
+    ...own,
+    id: 'host-reply',
+    botUsername: 'roxy',
+    parts: [{ type: 'text' as const, text: 'Roxy here.' }]
+  }
+  for (const messages of [[bySigningHost], [...longMessages, bySigningHost]]) {
+    const scene = layoutTranscript(
+      {
+        ...longInput(messages),
+        botUsername: 'helper',
+        bots: [bot],
+        botAvatar: (name) => `data:image/svg+xml,${name}`
+      },
+      new BlockCache()
+    )
+    const nodes = JSON.stringify(scene.blocks.at(-1)!.nodes)
+    assert.ok(!nodes.includes('@helper'), 'the host is not drawn as the chat owner')
+    assert.ok(!nodes.includes('@roxy'), 'and the marker is not shown as a bot handle')
+    assert.ok(nodes.includes('__roxy__'), 'it keeps the host avatar')
+  }
+  // The same row streaming live, which is the other half of the bug: the
+  // speaker arrives on the turn event before anything is persisted.
+  const liveHost = layoutTranscript(
+    {
+      ...longInput(longMessages),
+      streaming: [],
+      botUsername: 'helper',
+      streamingBot: { botUsername: 'roxy' },
+      bots: [bot],
+      botAvatar: (name) => `data:image/svg+xml,${name}`
+    },
+    new BlockCache()
+  )
+  const liveHostNodes = JSON.stringify(liveHost.blocks.at(-1)!.nodes)
+  assert.ok(!liveHostNodes.includes('@helper'), 'a streaming host is not the chat owner either')
+  assert.ok(liveHostNodes.includes('__roxy__'))
+
   const live = layoutTranscript(
     { ...longInput(longMessages), streaming: [], botUsername: 'helper' },
     new BlockCache()

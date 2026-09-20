@@ -123,6 +123,18 @@ interface RoxyStore {
   /** Main-owned queued turns, distinct from renderer-owned direct sends. */
   runningAutomation: Record<string, true>
   automationSpeakers: Record<string, { botId?: string; botUsername?: string }>
+  /**
+   * The chat whose composer should take focus, because it was opened for
+   * someone to start TYPING immediately (creating a bot is the only such case
+   * today). A plain `selectChat` deliberately leaves this alone, so clicking
+   * through the sidebar to read never steals the caret.
+   *
+   * It names the CHAT rather than counting requests: the composer is keyed by
+   * chat id and remounts on every switch, so a counter read at mount time is
+   * indistinguishable from one that was already consumed. The composer clears
+   * this once it has focused.
+   */
+  composerFocusChatId: string | null
   /** Pending prompts queued on the active chat (FIFO). */
   queue: QueueItem[]
   /** Chats with a pending stop request, keyed by chat id. */
@@ -390,6 +402,9 @@ let hiddenModelsLoaded = false
 const remoteMirror = { deferred: false }
 let automationRevision = 0
 const automationRevisions = new Map<string, number>()
+/** Turn starts/ends only. A snapshot is stale about WHO is speaking once the
+ *  turn itself has moved on, but streamed tokens say nothing about identity. */
+const automationTurnRevisions = new Map<string, number>()
 const automationLoads = new Map<string, number>()
 const deferredAutomation = new Set<string>()
 
@@ -415,6 +430,7 @@ function applyAutomationDelta(payload: RemoteDelta): void {
   const id = payload.sessionId
   automationRevisions.set(id, ++automationRevision)
   if (payload.kind === 'turn') {
+    automationTurnRevisions.set(id, automationRevision)
     useRoxyStore.setState((s) => {
       const automationSpeakers = { ...s.automationSpeakers }
       if (payload.state === 'running')
@@ -986,6 +1002,7 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
   },
   runningAutomation: {},
   automationSpeakers: {},
+  composerFocusChatId: null,
   queue: [],
   stopChats: {},
   compactingChats: {},
@@ -1054,10 +1071,11 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
         .snapshot()
         .then((running) => {
           for (const run of running) {
-            if ((automationRevisions.get(run.sessionId) ?? 0) > revision) continue
-            const fold = new PartsFold()
-            fold.seed(run.parts)
-            remoteTurns.set(run.sessionId, fold)
+            // A newer TURN transition knows better than this snapshot. A token
+            // that merely raced it does not: identity is announced once, when
+            // the turn starts, so dropping the snapshot over a delta left a
+            // guest's reply streaming under the host's name until it finished.
+            if ((automationTurnRevisions.get(run.sessionId) ?? 0) > revision) continue
             set((s) => ({
               runningAutomation: { ...s.runningAutomation, [run.sessionId]: true },
               automationSpeakers: {
@@ -1065,6 +1083,10 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
                 [run.sessionId]: { botId: run.botId, botUsername: run.botUsername }
               }
             }))
+            if ((automationRevisions.get(run.sessionId) ?? 0) > revision) continue
+            const fold = new PartsFold()
+            fold.seed(run.parts)
+            remoteTurns.set(run.sessionId, fold)
             if (get().activeChatId === run.sessionId && !get().sendingChats[run.sessionId]) {
               publishStream(run.sessionId, fold.parts)
             }
@@ -1190,6 +1212,14 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
     if (instructions?.trim()) await api.bots.update(bot.id, { instructions })
     await get().refreshBots()
     await get().refreshChats()
+    // A new bot is configured by talking to it, so the one thing to do next is
+    // type. Without this the click landed on an empty chat with no caret in it.
+    //
+    // Asked for WITH the selection, not after it finishes loading: the caret
+    // belongs in the composer the moment the chat appears, and a request that
+    // outlives the navigation steals focus from wherever the user went next
+    // (selectChat drops it for exactly that reason).
+    set({ composerFocusChatId: bot.chatId })
     await get().selectChat(bot.chatId)
     return bot
   },
@@ -1623,9 +1653,13 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
     // mode when you come back to it. The model/effort/context pickers read the
     // chat row directly via `resolveSessionConfig`, so they need no mirror here.
     const chat = get().chats.find((c) => c.id === id)
-    set({
+    set((s) => ({
       activeChatId: id,
       botSettings: null,
+      // A pending "focus the composer" belongs to the chat that asked for it.
+      // Going somewhere else cancels it, so it cannot fire later and pull the
+      // caret out of whatever the user is typing in by then.
+      composerFocusChatId: s.composerFocusChatId === id ? id : null,
       messages: [],
       // `null` = loading. Without this the pane cannot tell a session that is
       // still fetching from one with no messages, and shows the empty state for
@@ -1634,7 +1668,7 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
       messagesError: false,
       queue: [],
       activeAgentId: chat?.agentId ?? DEFAULT_AGENT_ID
-    })
+    }))
     const workspace = chat?.workspacePath
     if (workspace) void get().ensureProjectInstructions(workspace)
     // Tell main which sub session is on screen so the end-of-turn prune spares

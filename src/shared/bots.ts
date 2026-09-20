@@ -35,9 +35,25 @@ export interface BotJobInput {
   remainingRuns?: number | null
 }
 
+/**
+ * Roxy's reserved handle. She is the HOST, not a bot: she never has a row in
+ * `bots`, so an author naming her can never be resolved by id.
+ *
+ * It doubles as the marker for "the host spoke here", which matters inside a
+ * bot's own chat: there, an assistant row with NO author is indistinguishable
+ * from the chat's owner, so Roxy's reply was attributed to the bot that invited
+ * her. Recording the handle makes "Roxy answered" explicit and survives reload.
+ */
+export const HOST_USERNAME = 'roxy'
+
+/** Whether a persisted author is the host rather than one of the bots. */
+export function isHostSpeaker(botId?: string, botUsername?: string): boolean {
+  return !botId && botUsername === HOST_USERNAME
+}
+
 export function botUsername(value: string): string {
   const name = value.trim().replace(/^@/, '').toLowerCase()
-  if (!/^[a-z][a-z0-9_-]{1,31}$/.test(name) || name === 'roxy') {
+  if (!/^[a-z][a-z0-9_-]{1,31}$/.test(name) || name === HOST_USERNAME) {
     throw new Error(
       'Use 2-32 letters, numbers, underscores or hyphens, starting with a letter. Roxy is reserved.'
     )

@@ -1,4 +1,11 @@
-import { useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent } from 'react'
+import {
+  useEffect,
+  useRef,
+  useState,
+  type ClipboardEvent,
+  type DragEvent,
+  type KeyboardEvent
+} from 'react'
 import { useTranslation } from 'react-i18next'
 import { ArrowUp, Plus, Square, X } from 'lucide-react'
 import { ModelPicker } from './ModelPicker'
@@ -72,6 +79,16 @@ export function Composer({
       autoGrow()
     })
   }
+
+  // Take the caret only for the chat that asked for it (a bot just created),
+  // then clear the request so switching back later does not refocus.
+  const focusChatId = useRoxyStore((s) => s.composerFocusChatId)
+  const activeChatId = useRoxyStore((s) => s.activeChatId)
+  useEffect(() => {
+    if (!focusChatId || focusChatId !== activeChatId) return
+    ref.current?.focus()
+    useRoxyStore.setState({ composerFocusChatId: null })
+  }, [focusChatId, activeChatId])
 
   const addFiles = async (files: File[]): Promise<void> => {
     if (files.length === 0) return

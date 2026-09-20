@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { botUsername, nextBotRun, type Bot } from '../src/shared/bots'
+import { HOST_USERNAME, botUsername, isHostSpeaker, nextBotRun, type Bot } from '../src/shared/bots'
 import { MENTION, isKnownMention } from '../src/shared/mentions'
 import { reconstructTurn } from '../src/shared/tool-history'
 import type { Message } from '../src/shared/types'
@@ -99,6 +99,7 @@ assert.equal(reconstructTurn(renamed, bot)[0].role, 'assistant')
 assert.equal(reconstructTurn({ ...reply, role: 'user' }, bot)[0].content, '[@helper]\nDone.')
 const host: Message = {
   ...reply,
+  chatId: 'shared-1',
   botUsername: undefined,
   parts: [
     { type: 'text', text: 'I am Roxy.' },
@@ -123,4 +124,57 @@ assert.ok(
   reconstructTurn(host).some((turn) => turn.toolCalls?.length),
   'Roxy retains its own native tool history'
 )
+// The host answering inside a BOT's chat signs her rows, because there an
+// unsigned assistant row already means "the bot that owns this chat".
+assert.ok(isHostSpeaker(undefined, HOST_USERNAME))
+assert.ok(isHostSpeaker(undefined, undefined) === false, 'unsigned is not a claim of authorship')
+assert.ok(!isHostSpeaker('bot-1', HOST_USERNAME), 'a real bot row is never the host')
+assert.throws(() => botUsername(HOST_USERNAME), 'the handle stays reserved')
+
+const signedHost: Message = { ...host, chatId: bot.chatId, botUsername: HOST_USERNAME }
+// To a bot, a signed host turn is still someone else talking - and is labelled
+// Roxy, not @roxy, so it cannot be mistaken for a bot in the roster.
+const seenByBot = reconstructTurn(signedHost, bot)
+assert.equal(seenByBot.length, 1)
+assert.equal(seenByBot[0].role, 'user')
+assert.match(seenByBot[0].content, /^\[@Roxy\]\n/)
+// To Roxy herself, it is her OWN history: replaying it as a foreign block would
+// strip the tool calls she made in that chat and make her read her words as a
+// colleague's.
+assert.ok(
+  reconstructTurn(signedHost).some((turn) => turn.toolCalls?.length),
+  'the host replays her signed turn as her own'
+)
+assert.equal(reconstructTurn(signedHost)[0].role, 'assistant')
+
+// Authorship was only written down once a chat could have more than one speaker.
+// Every reply a bot gave before that is unsigned, and it is still ITS OWN: read
+// as the host's, a bot's history came back as "[@Roxy]" quotes with the tool
+// calls stripped out, so it answered its own past work as a colleague's.
+const legacy: Message = {
+  ...host,
+  chatId: bot.chatId,
+  botId: undefined,
+  botUsername: undefined
+}
+const seenByOwner = reconstructTurn(legacy, bot)
+assert.equal(seenByOwner[0].role, 'assistant', "an unsigned row in the bot's own chat is its own")
+assert.ok(
+  seenByOwner.some((turn) => turn.toolCalls?.length),
+  'and keeps the native tool history that a foreign block would flatten'
+)
+assert.ok(!seenByOwner[0].content.startsWith('[@'), 'so it is never quoted back at itself')
+// Elsewhere the same unsigned row is the host talking, and stays foreign.
+assert.match(
+  reconstructTurn({ ...legacy, chatId: 'someone-else' }, bot)[0].content,
+  /^\[@Roxy\]/,
+  'an unsigned row in a SHARED session is still the host'
+)
+// A signed row wins over the chat it sits in: renames and guests both rely on it.
+assert.match(
+  reconstructTurn({ ...legacy, botUsername: 'other' }, bot)[0].content,
+  /^\[@other\]/,
+  'an explicit author is never overridden by the chat'
+)
+
 console.log('BOT SHARED OK')

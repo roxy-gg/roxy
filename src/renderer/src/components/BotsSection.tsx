@@ -53,6 +53,9 @@ export function BotsSection({ rail = false }: { rail?: boolean }): JSX.Element {
     try {
       await createBot()
     } catch (e) {
+      // Surfaced next to the button below. The only other place this state is
+      // rendered is the delete dialog, which is closed here, so a failed
+      // creation used to just re-enable the button and say nothing.
       setError(e instanceof Error ? e.message : String(e))
     } finally {
       setBusy(false)
@@ -120,6 +123,11 @@ export function BotsSection({ rail = false }: { rail?: boolean }): JSX.Element {
           {!bots.length && !rail && t('bots.new')}
         </button>
       </div>
+      {error && !deleting && (
+        <p role="alert" className="break-words px-1 pb-2 text-xs text-danger">
+          {error}
+        </p>
+      )}
       {menu && menuBot && (
         <ContextMenuSurface
           x={menu.x}

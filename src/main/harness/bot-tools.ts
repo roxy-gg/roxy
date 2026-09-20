@@ -1,5 +1,5 @@
 import type { ToolResult } from '../../shared/types'
-import type { BotJobInput } from '../../shared/bots'
+import { HOST_USERNAME, type BotJobInput } from '../../shared/bots'
 import type { ToolContext } from './tools'
 import * as bots from '../db/bots'
 import * as repo from '../db/repo'
@@ -27,6 +27,14 @@ export async function runBotTool(
   // guest answering in someone else's session must configure itself, never its
   // host. Roxy and subagents have no self here, so they must name their target.
   const self = ctx.botId ? bots.getBot(ctx.botId) : undefined
+  // Roxy answering inside a bot's chat has no `self`, but she is not anonymous
+  // there: "unsigned" in a bot's transcript already means that bot, so anything
+  // she writes has to carry her name or it is replayed as the owner's own words.
+  const author = self
+    ? { botId: self.id, botUsername: self.username }
+    : source && bots.chatBot(source)
+      ? { botUsername: HOST_USERNAME }
+      : {}
   const running = source
     ? (getDb()
         .prepare(`SELECT hops FROM queue WHERE chat_id = ? AND state = 'running'`)
@@ -118,11 +126,15 @@ export async function runBotTool(
       if (host) {
         if (!self) throw new Error('You are Roxy, already executing this turn. Do the work here.')
       } else if (!bot) throw new Error('Bot not found; use bot_manage list, or roxy for the host')
+      // Self-invocation is decided by WHO IS SPEAKING, not by who owns the
+      // chat. Comparing against the owner rejected the ordinary round trip: a
+      // guest - or Roxy - invited into a bot's chat handing the thread back to
+      // that bot is delegation to someone else, and the only way to return work
+      // without ending the conversation.
       if (bot && bot.id === self?.id)
         throw new Error(
           `You are @${bot.username}, already executing this turn. Do the assigned work and answer here; do not invoke yourself or wait for your own reply.`
         )
-      if (bot?.chatId === source) throw new Error('Use queue_manage to queue work for yourself')
       // The invited bot answers HERE, in the shared session, the way a group chat
       // works: everyone sees the exchange and the context is the conversation
       // itself. Sending it to the bot's own chat instead split the thread in two
@@ -130,7 +142,7 @@ export async function runBotTool(
       //
       // The request belongs to whoever is asking — attributing it to the invited
       // bot made its own question appear above its answer, signed with its name.
-      const asker = self
+      const asker = author
       // Named explicitly in the transcript regardless of the caller's wording:
       // asking without an @-prefix still reaches the bot, but showing WHO was
       // called (not just what was asked) is what makes a delegation read as one
@@ -144,9 +156,8 @@ export async function runBotTool(
         sourceChatId: source,
         hops,
         asBotId: bot?.id,
-        recipientId: bot?.id ?? 'roxy',
-        botId: asker?.id,
-        botUsername: asker?.username
+        recipientId: bot?.id ?? HOST_USERNAME,
+        ...asker
       })
       break
     }
@@ -210,8 +221,11 @@ export async function runBotTool(
             replyToChatId: source,
             hops,
             continueReply: id !== source,
-            botId: self?.id,
-            botUsername: self?.username
+            // The actor that delegated has to be the one the answer comes back
+            // to: resuming the session's owner instead handed the continuation
+            // to a bot that never asked for it, with its identity and config.
+            replyToActor: author,
+            ...author
           })
         } else if (action === 'stop') {
           stopTurn(id)

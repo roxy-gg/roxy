@@ -69,6 +69,13 @@ async function run() {
     ),
     'the new bot is selected and carries a generated handle'
   )
+  // You configure a bot by TALKING to it, so the caret has to already be in the
+  // composer: otherwise one click creates the bot and a second is needed before
+  // you can type the sentence that defines it.
+  assert.ok(
+    await evaluate(`return document.activeElement === document.querySelector('textarea')`),
+    'the composer is focused, ready for the first instruction'
+  )
   // Renamed in conversation, exactly as the bot itself would with bot_manage.
   await evaluate(`return window.__renameBot('bot', 'helper')`)
   await wait()
@@ -78,7 +85,13 @@ async function run() {
     ),
     'a rename from the conversation shows up in the sidebar'
   )
+  // A creation that fails has to say so. Its error used to render only inside
+  // the delete dialog, which is closed here, so the button just re-enabled.
+  await evaluate(`window.__failNextCreate = 'Bot limit reached'`)
   await click('button[title="New bot"]')
+  assert.ok(await text('Bot limit reached'), 'a failed creation reports why')
+  await click('button[title="New bot"]')
+  assert.ok(!(await text('Bot limit reached')), 'and the next attempt clears it')
   await evaluate(`return window.__renameBot('bot', 'planner')`)
   await wait()
   await rightClick('button[title="@helper"]')

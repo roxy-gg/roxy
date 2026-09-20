@@ -13,7 +13,7 @@
  */
 import type { ChatMessage } from './api'
 import type { Message, MessagePart } from './types'
-import type { Bot } from './bots'
+import { isHostSpeaker, type Bot } from './bots'
 import { previewText } from './context'
 
 /** Cap a replayed tool result to what the live loop sent (agent.ts runLoop bounds big outputs). */
@@ -120,12 +120,29 @@ const SPEAKER_MARKER = /^(?:\[@[a-z0-9_-]+\]\s*)+/i
  * rebuild prefixes *that* too, every round added another one ("[@bobo] [@bobo] …").
  * Marking only other speakers keeps the tag meaningful and the loop impossible.
  */
-export function reconstructTurn(m: Message, self?: Pick<Bot, 'id' | 'username'>): ChatMessage[] {
+export function reconstructTurn(
+  m: Message,
+  self?: Pick<Bot, 'id' | 'username' | 'chatId'>
+): ChatMessage[] {
+  // No `self` means the HOST is reading: her own rows are the unattributed ones,
+  // plus any explicitly marked as hers (which is how she signs a reply inside a
+  // bot's chat, where "unattributed" already belongs to that bot).
   // IDs survive renames. Fall back to the handle only for older saved messages.
-  const own = m.botId ? m.botId === self?.id : m.botUsername === self?.username
+  //
+  // An unsigned row inside the bot's OWN chat is the bot's: authorship was only
+  // written down once a chat could have several speakers, so every reply from
+  // before that is bare. Treating those as the host's turned a bot's own history
+  // into "[@Roxy]" quotes and dropped the tool calls it had made.
+  const own = self
+    ? m.botId
+      ? m.botId === self.id
+      : m.botUsername
+        ? m.botUsername === self.username
+        : m.chatId === self.chatId
+    : !m.botId && (!m.botUsername || isHostSpeaker(m.botId, m.botUsername))
   const foreign = !own && (m.role === 'assistant' || !!m.botId || !!m.botUsername)
   if (foreign) {
-    const speaker = m.botUsername ?? 'Roxy'
+    const speaker = isHostSpeaker(m.botId, m.botUsername) ? 'Roxy' : (m.botUsername ?? 'Roxy')
     const content = m.parts
       .flatMap((part) => {
         if (part.type === 'text') return [part.text.replace(SPEAKER_MARKER, '')]
