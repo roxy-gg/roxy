@@ -242,6 +242,7 @@
     "title": "MCP सर्वर"
   },
   "models": {
+    "accountDisconnected": "This session’s provider account is disconnected. Choose an account in the model picker before sending again.",
     "allHidden": "हर मॉडल छिपा हुआ है। कुछ को <settings>सेटिंग्स → मॉडल</settings> में वापस लाएँ।",
     "copilotUnavailable": "कोई उपलब्ध GitHub Copilot मॉडल चयनित नहीं है। एक सक्षम मॉडल चुनें, या अपने खाते के मॉडल एक्सेस और कनेक्शन की जांच करें, फिर पुनः प्रयास करें।",
     "loadFailed": "models.dev से मॉडल लोड नहीं हो सके — आप अभी भी वर्तमान मॉडल के साथ भेज सकते हैं।",
@@ -456,12 +457,17 @@
       "title": "अनाम उपयोग डेटा भेजें"
     },
     "providers": {
+      "accountName": "Account name",
       "active": "सक्रिय",
       "add": "प्रदाता जोड़ें",
+      "addAccount": "Add account",
       "disconnect": "डिस्कनेक्ट करें",
       "heading": "प्रदाता",
       "keyStored": "कुंजी संग्रहीत",
       "noCredential": "कोई क्रेडेंशियल नहीं",
+      "reconnect": "Reconnect",
+      "rename": "Rename account",
+      "renameAccount": "Rename {{name}}",
       "signedInLocally": "स्थानीय रूप से साइन इन किया गया"
     },
     "title": "सेटिंग्स",

@@ -5,9 +5,11 @@ import { CopilotSetup } from './CopilotSetup'
 
 /** Kept outside the canvas so recovery stays keyboard-accessible and visible. */
 export function CopilotReconnect({
+  connectionId,
   needed,
   onConnected
 }: {
+  connectionId: string
   needed: boolean
   onConnected: () => Promise<void>
 }): JSX.Element | null {
@@ -19,6 +21,7 @@ export function CopilotReconnect({
       <div className="mx-auto max-h-[45vh] max-w-3xl overflow-y-auto rounded-xl border border-border bg-surface p-4">
         {needed ? (
           <CopilotSetup
+            connectionId={connectionId}
             reconnect
             onConnected={async () => {
               await onConnected()

@@ -464,9 +464,16 @@ async function runTurn(
     const settings = repo.getSettings()
     const config = resolveSessionConfig(repo.getChat(sessionId), settings)
     const providers = repo.listConnectedProviders()
-    const provider = providers.find((p) => p.id === config.providerId) ?? providers[0] ?? null
+    const provider = config.providerId
+      ? providers.find((p) => p.id === config.providerId)
+      : providers[0]
     if (!provider) {
-      sendFrameFor(active, { t: 'error', message: 'No provider is connected on the desktop.' })
+      sendFrameFor(active, {
+        t: 'error',
+        message: config.providerId
+          ? 'The selected account is no longer connected. Select an account on the desktop.'
+          : 'No provider is connected on the desktop.'
+      })
       return
     }
     // Fetch the catalog first so we can pick the provider's latest tool-capable

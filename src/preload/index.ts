@@ -49,6 +49,7 @@ const roxy: RoxyApi = {
     listConnected: () => ipcRenderer.invoke(CHANNELS.providersList),
     connect: (input) => ipcRenderer.invoke(CHANNELS.providersConnect, input),
     disconnect: (id) => ipcRenderer.invoke(CHANNELS.providersDisconnect, id),
+    rename: (id, name) => ipcRenderer.invoke(CHANNELS.providersRename, id, name),
     reorder: (ids) => ipcRenderer.invoke(CHANNELS.providersReorder, ids)
   },
   chats: {
@@ -130,13 +131,16 @@ const roxy: RoxyApi = {
     }
   },
   copilot: {
-    needsReauthentication: () => ipcRenderer.invoke(CHANNELS.copilotNeedsReauthentication),
+    needsReauthentication: (connectionId) =>
+      ipcRenderer.invoke(CHANNELS.copilotNeedsReauthentication, connectionId),
     start: () => ipcRenderer.invoke(CHANNELS.copilotStart),
-    poll: (deviceCode, interval) => ipcRenderer.invoke(CHANNELS.copilotPoll, deviceCode, interval)
+    poll: (deviceCode, interval, connectionId) =>
+      ipcRenderer.invoke(CHANNELS.copilotPoll, deviceCode, interval, connectionId)
   },
   cliproxy: {
     status: () => ipcRenderer.invoke(CHANNELS.cliproxyStatus),
-    login: (providerId) => ipcRenderer.invoke(CHANNELS.cliproxyLogin, providerId),
+    login: (providerId, connectionId) =>
+      ipcRenderer.invoke(CHANNELS.cliproxyLogin, providerId, connectionId),
     signOut: (providerId, file) => ipcRenderer.invoke(CHANNELS.cliproxySignOut, providerId, file),
     stop: () => ipcRenderer.invoke(CHANNELS.cliproxyStop),
     installFromFile: () => ipcRenderer.invoke(CHANNELS.cliproxyInstallFile),

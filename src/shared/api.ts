@@ -767,6 +767,7 @@ export interface RoxyApi {
     listConnected(): Promise<ConnectedProvider[]>
     connect(input: ConnectProviderInput): Promise<ConnectedProvider>
     disconnect(id: string): Promise<void>
+    rename(id: string, name: string): Promise<ConnectedProvider>
     /** Reorder connected providers; `ids` is the full Settings list, top-to-bottom. */
     reorder(ids: string[]): Promise<void>
   }
@@ -902,9 +903,9 @@ export interface RoxyApi {
     onStatus(callback: (state: UpdateState) => void): () => void
   }
   copilot: {
-    needsReauthentication(): Promise<boolean>
+    needsReauthentication(connectionId?: string): Promise<boolean>
     start(): Promise<DeviceFlowStart>
-    poll(deviceCode: string, interval: number): Promise<ConnectedProvider>
+    poll(deviceCode: string, interval: number, connectionId?: string): Promise<ConnectedProvider>
   }
   /**
    * The CLIProxyAPI sidecar behind the subscription providers (ChatGPT/Codex and
@@ -921,13 +922,13 @@ export interface RoxyApi {
     /**
      * Run one provider's whole sign-in: install + start the sidecar if needed,
      * open its OAuth page in the user's browser, wait for the callback, then
-     * connect the provider. Resolves when the flow reaches a terminal state.
+     * connect an account. `providerId` is the catalog seed; optional
+     * `connectionId` reconnects an existing account instead of adding one.
      */
-    login(providerId: string): Promise<CliProxyLoginResult>
+    login(providerId: string, connectionId?: string): Promise<CliProxyLoginResult>
     /**
-     * Sign one account out by deleting its token file. The provider id is what
-     * decides whether that was its LAST account, and so whether the provider row
-     * should be dropped.
+     * Sign one account out by deleting its bound token file. `providerId` is
+     * the connection ID; sibling accounts remain connected.
      */
     signOut(providerId: string, file: string): Promise<CliProxyState>
     /** Stop the local proxy (keeps the install and the signed-in accounts). */

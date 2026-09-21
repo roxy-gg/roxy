@@ -18,6 +18,7 @@
  * sentence beats a multi-step wizard.
  */
 import { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Check, ExternalLink, Loader2, ShieldCheck } from 'lucide-react'
 import {
   CODEX_PROVIDER_ID,
@@ -86,11 +87,14 @@ export function useCliProxyState(): CliProxyState {
 
 export function SubscriptionSetup({
   providerId,
+  connectionId,
   onConnected
 }: {
   providerId: string
+  connectionId?: string
   onConnected: () => void
 }): JSX.Element {
+  const { t } = useTranslation()
   const state = useCliProxyState()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -100,7 +104,7 @@ export function SubscriptionSetup({
     setBusy(true)
     setError(null)
     try {
-      const result = await api.cliproxy.login(providerId)
+      const result = await api.cliproxy.login(providerId, connectionId)
       if (!result.ok) {
         setError(result.error ?? 'Sign-in failed.')
         return
@@ -144,8 +148,10 @@ export function SubscriptionSetup({
           <>
             <Loader2 className="h-4 w-4 animate-spin" /> Waiting for sign-in…
           </>
+        ) : connectionId ? (
+          t('settings.providers.reconnect')
         ) : connected ? (
-          'Add another account'
+          t('settings.providers.addAccount')
         ) : (
           <>
             {copy.cta} <ExternalLink className="h-4 w-4" />

@@ -105,13 +105,13 @@ const actions = ['ensureModels', 'refreshProviders'].map((name) => {
   return match[0]
 })
 const compiled = transformSync(`const actions = {${actions.join('\n')}}`, { loader: 'ts' }).code
-const copilot = { id: 'github-copilot' }
+const copilot = { id: 'copilot-account-a', seedId: 'github-copilot', accountNumber: 1 }
 const model = (id) => ({ id, name: id, reasoning: false, toolCall: true })
 let providers = [copilot]
 let list = async () => [model('enabled')]
 let calls = 0
 let needsReauthentication = false
-const state = { providers, modelCatalog: {}, modelsTried: {}, copilotNeedsReauthentication: false }
+const state = { providers, modelCatalog: {}, modelsTried: {}, copilotNeedsReauthentication: {} }
 const bridge = {
   copilot: { needsReauthentication: async () => needsReauthentication },
   models: {
@@ -171,13 +171,13 @@ list = async () => []
 await state.ensureModels(copilot.id)
 check(
   'Copilot: terminal auth failure offers reconnect even with an empty model list',
-  state.copilotNeedsReauthentication
+  state.copilotNeedsReauthentication[copilot.id]
 )
 needsReauthentication = false
 await state.ensureModels(copilot.id)
 check(
   'Copilot: policy and network failures do not ask for another login',
-  !state.copilotNeedsReauthentication
+  !state.copilotNeedsReauthentication[copilot.id]
 )
 const beforeStatic = calls
 await state.ensureModels('openai')
@@ -221,7 +221,10 @@ check(
   'model cache: reconnect leaves other providers intact',
   state.modelCatalog.openai[0]?.id === 'custom'
 )
-check('Copilot: reconnect clears the recovery action', !state.copilotNeedsReauthentication)
+check(
+  'Copilot: reconnect clears the recovery action',
+  !state.copilotNeedsReauthentication[copilot.id]
+)
 
 const disconnecting = deferred()
 list = () => disconnecting.promise
@@ -239,12 +242,30 @@ check(
 )
 check('model cache: disconnected providers are not fetched', calls === beforeDisconnected)
 
+const otherCopilot = { id: 'copilot-account-b', seedId: 'github-copilot', accountNumber: 2 }
+providers = [copilot, otherCopilot]
+const authReads = []
+bridge.copilot.needsReauthentication = async (id) => {
+  authReads.push(id)
+  return id === copilot.id
+}
+list = async (id) => [model(`model-${id}`)]
+await state.refreshProviders()
+check(
+  'Copilot: discovery and reauthentication are scoped to UUID connections',
+  authReads.includes(copilot.id) &&
+    authReads.includes(otherCopilot.id) &&
+    state.copilotNeedsReauthentication[copilot.id] === true &&
+    state.copilotNeedsReauthentication[otherCopilot.id] === false &&
+    state.modelCatalog[otherCopilot.id][0].id === `model-${otherCopilot.id}`
+)
+
 const app = readFileSync(new URL('../src/renderer/src/App.tsx', import.meta.url), 'utf8').replace(
   /\r\n/g,
   '\n'
 )
 const refreshEffect = app.match(
-  /useEffect\(\(\) => \{\n(    if \(!ready \|\| !copilotConnected\)[\s\S]*?)\n  \}, \[ready, copilotConnected, ensureModels\]\)/
+  /useEffect\(\(\) => \{\n(    const copilots = providers.filter[\s\S]*?)\n  \}, \[ready, providers, ensureModels\]\)/
 )?.[1]
 if (!refreshEffect) throw new Error('Missing app-level Copilot refresh lifecycle')
 const windowEvents = new Map()
@@ -270,7 +291,7 @@ const fakeDocument = {
 }
 const effect = new Function(
   'ready',
-  'copilotConnected',
+  'providers',
   'ensureModels',
   'window',
   'document',
@@ -281,21 +302,89 @@ const ensure = () => {
 }
 check(
   'model refresh: disconnected accounts never install a timer',
-  effect(true, false, ensure, fakeWindow, fakeDocument) === undefined && !tick
+  effect(true, [], ensure, fakeWindow, fakeDocument) === undefined && !tick
 )
-const dispose = effect(true, true, ensure, fakeWindow, fakeDocument)
+const dispose = effect(true, [copilot, otherCopilot], ensure, fakeWindow, fakeDocument)
 tick()
 windowEvents.get('focus')()
 windowEvents.get('online')()
 documentEvents.get('visibilitychange')()
-check('model refresh: mount, timer, focus, online and visibility all refresh', refreshCalls === 5)
+check(
+  'model refresh: mount, timer, focus, online and visibility refresh every account',
+  refreshCalls === 10
+)
 fakeDocument.visibilityState = 'hidden'
 tick()
-check('model refresh: hidden windows do not poll', refreshCalls === 5)
+check('model refresh: hidden windows do not poll', refreshCalls === 10)
 dispose()
 check(
   'model refresh: disconnect/unmount removes the timer and listeners',
   !tick && !windowEvents.size && !documentEvents.size
+)
+
+// A removed account pin is NOT permission to send history to the first other
+// account. Execute compaction's real resolver with a surviving sibling account.
+console.log('store: pinned account isolation')
+const compactAction = src.match(/^  compactConversation: async \([^)]*\) => \{\n[\s\S]*?\n  \},/m)
+if (!compactAction) throw new Error('Missing compactConversation action')
+const compactCompiled = transformSync(`const actions = {${compactAction[0]}}`, {
+  loader: 'ts'
+}).code
+const sibling = {
+  id: 'account-b',
+  seedId: 'github-copilot',
+  accountNumber: 2,
+  hasCredential: true,
+  auth: 'oauth'
+}
+let compactions = 0
+let catalogRequests = 0
+const compactState = {
+  activeChatId: 'pinned-chat',
+  chats: [{ id: 'pinned-chat', providerId: 'missing-account-a', model: 'private-model' }],
+  settings: {},
+  providers: [sibling],
+  compactingChats: {},
+  modelCatalog: {},
+  ensureModels: async () => {
+    catalogRequests++
+  },
+  refreshChats: async () => {}
+}
+const compactActions = new Function(
+  'api',
+  'set',
+  'get',
+  'asChatId',
+  'resolveSessionConfig',
+  'resolveProviderModel',
+  `${compactCompiled}\nreturn actions`
+)(
+  {
+    context: {
+      compact: async () => {
+        compactions++
+      }
+    },
+    messages: { list: async () => [] }
+  },
+  (patch) => Object.assign(compactState, typeof patch === 'function' ? patch(compactState) : patch),
+  () => compactState,
+  asChatId,
+  (chat) => chat,
+  (_provider, _models, selected) => selected || 'sibling-default'
+)
+await compactActions.compactConversation('pinned-chat')
+check(
+  'compaction: missing pinned account does not fetch or send through a surviving account',
+  compactions === 0 && catalogRequests === 0
+)
+compactState.chats[0].providerId = sibling.id
+compactions = catalogRequests = 0
+await compactActions.compactConversation('pinned-chat')
+check(
+  'compaction: an existing pinned account still works',
+  compactions === 1 && catalogRequests === 1
 )
 
 console.log(failures === 0 ? '\nSTORE GUARD OK' : `\nSTORE GUARD FAILED \u2014 ${failures} failing`)

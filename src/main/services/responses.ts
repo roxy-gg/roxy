@@ -46,6 +46,12 @@ export function isResponsesOnly(providerId: string, model: string): boolean {
   return responsesOnly.has(key(providerId, model))
 }
 
+export function invalidateResponsesOnly(providerId: string): void {
+  for (const entry of responsesOnly) {
+    if (entry.startsWith(`${providerId}:`)) responsesOnly.delete(entry)
+  }
+}
+
 // ---- Request translation -----------------------------------------------------
 
 /** The OpenAI-chat message shape both callers already build. */

@@ -13,6 +13,7 @@ import { pathToFileURL } from 'node:url'
 import { app, BrowserWindow } from 'electron'
 
 import * as repo from '../src/main/db/repo'
+import { testProviderPersistence } from './provider-persistence'
 import { getActivityStats } from '../src/main/services/activity'
 import { localDay } from '../src/shared/cost'
 import { closeDb } from '../src/main/db/database'
@@ -185,6 +186,7 @@ app.setPath('userData', tmp)
 app.on('window-all-closed', () => undefined)
 
 async function main(): Promise<void> {
+  testProviderPersistence()
   await testCopilot()
   const ws = path.join(tmp, 'workspace')
   await fs.mkdir(ws, { recursive: true })
@@ -3909,21 +3911,22 @@ async function main(): Promise<void> {
         })
       return Response.json(body, { status })
     }
+    let accountId: string | undefined
     try {
-      repo.storeCopilotCredential({ accessToken: 'test-account-a' })
-      const a = await openaiEndpoint('github-copilot')
+      accountId = repo.storeCopilotCredential({ accessToken: 'test-account-a' }).id
+      const a = await openaiEndpoint(accountId!)
       check('Copilot: exchanges the stored OAuth token', exchanges[0] === 'token test-account-a')
       check(
         'Copilot: requests use the exchanged token',
         a.headers.Authorization === 'Bearer copilot-test-account-a'
       )
-      await openaiEndpoint('github-copilot')
+      await openaiEndpoint(accountId!)
       check('Copilot: a live token is reused for the same account', exchanges.length === 1)
       check(
         'Copilot: inference uses the assigned tenant API host',
         a.url === 'https://api.business.githubcopilot.com/chat/completions'
       )
-      const responses = await openaiEndpoint('github-copilot', { responses: true, vision: true })
+      const responses = await openaiEndpoint(accountId!, { responses: true, vision: true })
       check(
         'Copilot: responses and vision use the same tenant',
         responses.url === 'https://api.business.githubcopilot.com/responses' &&
@@ -3931,8 +3934,8 @@ async function main(): Promise<void> {
       )
 
       const [models, concurrent] = await Promise.all([
-        listModels('github-copilot'),
-        listModels('github-copilot')
+        listModels(accountId!),
+        listModels(accountId!)
       ])
       check(
         'Copilot: concurrent discovery is deduplicated',
@@ -3960,12 +3963,12 @@ async function main(): Promise<void> {
         'Copilot: absent capability flags are not invented',
         !models[2].toolCall && !models[2].reasoning
       )
-      await listModels('github-copilot')
+      await listModels(accountId!)
       check('Copilot: opening several pickers reuses a fresh list', requests.length === 1)
 
       body = { data: [{ ...enabled, id: 'just-enabled' }] }
       now += 60_001
-      const refreshed = await listModels('github-copilot')
+      const refreshed = await listModels(accountId!)
       check(
         'Copilot: expiry removes revoked models and discovers newly enabled models',
         refreshed.length === 1 && refreshed[0].id === 'just-enabled' && requests.length === 2
@@ -3975,27 +3978,27 @@ async function main(): Promise<void> {
       status = 403
       check(
         'Copilot: denied discovery does not reuse stale or public models',
-        (await listModels('github-copilot')).length === 0
+        (await listModels(accountId!)).length === 0
       )
       status = 200
       now += 60_001
       body = { data: [] }
       check(
         'Copilot: an empty tenant list stays empty',
-        (await listModels('github-copilot')).length === 0
+        (await listModels(accountId!)).length === 0
       )
       now += 60_001
       body = { unexpected: [] }
       check(
         'Copilot: malformed discovery fails closed',
-        (await listModels('github-copilot')).length === 0
+        (await listModels(accountId!)).length === 0
       )
       now += 60_001
       body = { data: [enabled] }
       networkError = true
       check(
         'Copilot: an offline tenant never falls back to models.dev',
-        (await listModels('github-copilot')).length === 0
+        (await listModels(accountId!)).length === 0
       )
       networkError = false
       now += 60_001
@@ -4003,19 +4006,19 @@ async function main(): Promise<void> {
       const beforeRetry = exchanges.length
       check(
         'Copilot: a rejected short-lived token is refreshed and retried',
-        (await listModels('github-copilot')).length === 1 && exchanges.length === beforeRetry + 1
+        (await listModels(accountId!)).length === 1 && exchanges.length === beforeRetry + 1
       )
 
-      repo.storeCopilotCredential({ accessToken: 'test-account-b' })
+      repo.storeCopilotCredential({ accessToken: 'test-account-b' }, accountId)
       const beforeSwitch = exchanges.length
-      const b = await openaiEndpoint('github-copilot')
+      const b = await openaiEndpoint(accountId!)
       check(
         'Copilot: switching accounts never reuses the previous token',
         exchanges.length === beforeSwitch + 1 &&
           b.headers.Authorization === 'Bearer copilot-test-account-b'
       )
       body = { data: [{ ...enabled, id: 'account-b-model' }] }
-      const accountB = await listModels('github-copilot')
+      const accountB = await listModels(accountId!)
       check(
         'Copilot: switching accounts bypasses the previous model cache',
         accountB[0]?.id === 'account-b-model'
@@ -4027,12 +4030,12 @@ async function main(): Promise<void> {
 
       paused = true
       now += 60_001
-      const stale = listModels('github-copilot')
+      const stale = listModels(accountId!)
       while (!pending.release) await new Promise((resolve) => setTimeout(resolve, 0))
-      repo.storeCopilotCredential({ accessToken: 'test-account-a' })
+      repo.storeCopilotCredential({ accessToken: 'test-account-a' }, accountId)
       paused = false
       body = { data: [{ ...enabled, id: 'account-a-model' }] }
-      const accountA = await listModels('github-copilot')
+      const accountA = await listModels(accountId!)
       pending.release(Response.json({ data: [{ ...enabled, id: 'stale-account-b-model' }] }))
       check(
         'Copilot: an old account response is discarded after switching',
@@ -4040,38 +4043,38 @@ async function main(): Promise<void> {
       )
       check(
         'Copilot: an old response cannot overwrite the new account cache',
-        (await listModels('github-copilot')) === accountA
+        (await listModels(accountId!)) === accountA
       )
 
       const previousRelease = pending.release
       paused = true
       now += 60_001
-      const invalidated = listModels('github-copilot')
+      const invalidated = listModels(accountId!)
       while (pending.release === previousRelease) {
         await new Promise((resolve) => setTimeout(resolve, 0))
       }
-      invalidateCopilotModels()
+      invalidateCopilotModels(accountId!)
       paused = false
       body = { data: [{ ...enabled, id: 'reconnected-model' }] }
-      const reconnected = await listModels('github-copilot')
+      const reconnected = await listModels(accountId!)
       pending.release(Response.json({ data: [enabled] }))
       check(
         'Copilot: reconnecting the same account discards in-flight discovery',
-        (await invalidated).length === 0 && (await listModels('github-copilot')) === reconnected
+        (await invalidated).length === 0 && (await listModels(accountId!)) === reconnected
       )
 
-      repo.disconnectProvider('github-copilot')
+      repo.disconnectProvider(accountId!)
       const beforeDisconnect = exchanges.length + requests.length
       let disconnected = false
       try {
-        await openaiEndpoint('github-copilot')
+        await openaiEndpoint(accountId!)
       } catch {
         disconnected = true
       }
       check('Copilot: disconnect cannot keep using a cached token', disconnected)
       check(
         'Copilot: disconnect hides the cached models',
-        (await listModels('github-copilot')).length === 0
+        (await listModels(accountId!)).length === 0
       )
       check(
         'Copilot: disconnect makes no network request',
@@ -4084,9 +4087,9 @@ async function main(): Promise<void> {
     } finally {
       Date.now = realNow
       globalThis.fetch = realFetch
-      invalidateCopilotModels()
-      invalidateCopilotToken()
-      repo.disconnectProvider('github-copilot')
+      invalidateCopilotModels(accountId!)
+      invalidateCopilotToken(undefined, accountId!)
+      repo.disconnectProvider(accountId!)
     }
   }
 

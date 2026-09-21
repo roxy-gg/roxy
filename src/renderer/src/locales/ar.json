@@ -242,6 +242,7 @@
     "title": "خوادم MCP"
   },
   "models": {
+    "accountDisconnected": "This session’s provider account is disconnected. Choose an account in the model picker before sending again.",
     "allHidden": "كل النماذج مخفية. أعد بعضها في <settings>الإعدادات ← النماذج</settings>.",
     "copilotUnavailable": "لم يتم تحديد نموذج GitHub Copilot متاح. اختر نموذجًا ممكّنًا، أو تحقق من وصول حسابك إلى النموذج والاتصال، ثم حاول مرة أخرى.",
     "loadFailed": "تعذر تحميل النماذج من models.dev — لا يزال بإمكانك الإرسال بالنموذج الحالي.",
@@ -456,12 +457,17 @@
       "title": "إرسال بيانات الاستخدام المجهولة"
     },
     "providers": {
+      "accountName": "Account name",
       "active": "نشط",
       "add": "إضافة موفر",
+      "addAccount": "Add account",
       "disconnect": "قطع الاتصال",
       "heading": "الموفرون",
       "keyStored": "المفتاح مخزن",
       "noCredential": "لا توجد بيانات اعتماد",
+      "reconnect": "Reconnect",
+      "rename": "Rename account",
+      "renameAccount": "Rename {{name}}",
       "signedInLocally": "تم تسجيل الدخول محليًا"
     },
     "title": "الإعدادات",

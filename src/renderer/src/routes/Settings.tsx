@@ -4,11 +4,11 @@ import { useTranslation, Trans } from 'react-i18next'
 import { GripVertical, Globe, Plus, Trash2 } from 'lucide-react'
 import type { AppVersions, ConnectedProvider } from '@shared/types'
 import type { UpdateInfo } from '@shared/api'
-import { AUTH_LABELS } from '@shared/providers'
+import { AUTH_LABELS, resolveSeed } from '@shared/providers'
 import { LANGUAGES, SOURCE_LANGUAGE, normalizeLanguage } from '@shared/i18n'
 import { api } from '../lib/api'
 import { CodeHosts } from '../components/CodeHosts'
-import { Button, Switch } from '../components/ui'
+import { Button, Input, Switch } from '../components/ui'
 import { cn } from '../lib/cn'
 import {
   DEFAULT_BRANCH_PREFIX,
@@ -24,7 +24,7 @@ import { ProxyPanel } from '../components/ProxyPanel'
 import { ConfigBackup } from '../components/ConfigBackup'
 import { ActivitySection } from '../components/ActivitySection'
 import { ProviderLogo } from '../lib/providerLogos'
-import { SubscriptionAccounts } from '../components/SubscriptionSetup'
+import { ProviderSetup } from './onboarding/ProviderStep'
 import { ModelVisibility } from '../components/ModelVisibility'
 import { useRoxyStore } from '../lib/store'
 import { MotionSettings } from '../components/MotionSettings'
@@ -59,6 +59,7 @@ export default function Settings(): JSX.Element {
   const [dragProviderId, setDragProviderId] = useState<string | null>(null)
   const [dragOverProviderId, setDragOverProviderId] = useState<string | null>(null)
   const [dropAfterProvider, setDropAfterProvider] = useState(false)
+  const [setup, setSetup] = useState<{ seedId: string; connectionId?: string } | null>(null)
 
   const reorderWithinProviders = (
     sourceId: string,
@@ -135,6 +136,14 @@ export default function Settings(): JSX.Element {
 
   return (
     <PageShell title={t('settings.title')} onBack={() => navigate('/')}>
+      {setup && (
+        <ProviderSetup
+          modal
+          seed={resolveSeed(setup.seedId)}
+          connectionId={setup.connectionId}
+          onClose={() => setSetup(null)}
+        />
+      )}
       <ActivitySection />
       <MotionSettings onChange={setMotion} />
 
@@ -187,6 +196,9 @@ export default function Settings(): JSX.Element {
                 draggable={providers.length > 1}
                 dragging={dragProviderId === p.id}
                 onDisconnect={() => disconnect(p.id)}
+                onAddAccount={() => setSetup({ seedId: p.seedId })}
+                onReconnect={() => setSetup({ seedId: p.seedId, connectionId: p.id })}
+                onRenamed={refreshProviders}
               />
             </div>
           ))}
@@ -447,15 +459,39 @@ function ProviderRow({
   active,
   draggable,
   dragging,
-  onDisconnect
+  onDisconnect,
+  onAddAccount,
+  onReconnect,
+  onRenamed
 }: {
   provider: ConnectedProvider
   active: boolean
   draggable: boolean
   dragging: boolean
   onDisconnect: () => void
+  onAddAccount: () => void
+  onReconnect: () => void
+  onRenamed: () => Promise<void>
 }): JSX.Element {
   const { t } = useTranslation()
+  const [editing, setEditing] = useState(false)
+  const [name, setName] = useState(provider.name)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const saveName = async (): Promise<void> => {
+    if (saving || !name.trim()) return
+    setSaving(true)
+    setError(null)
+    try {
+      await api.providers.rename(provider.id, name.trim())
+      await onRenamed()
+      setEditing(false)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setSaving(false)
+    }
+  }
   return (
     <div
       className={cn(
@@ -472,11 +508,59 @@ function ProviderRow({
         aria-hidden="true"
       />
       <div className="flex h-8 w-8 items-center justify-center sq sq-lg sq-ring rounded-lg border border-border bg-surface-2">
-        <ProviderLogo id={provider.id} name={provider.name} size={18} />
+        <ProviderLogo id={provider.seedId} name={provider.name} size={18} />
       </div>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
-          <span className="text-sm font-medium text-text">{provider.name}</span>
+          {editing ? (
+            <form
+              className="flex min-w-0 flex-1 flex-wrap items-center gap-2"
+              onSubmit={(e) => {
+                e.preventDefault()
+                void saveName()
+              }}
+              onDragStart={(e) => e.stopPropagation()}
+            >
+              <Input
+                autoFocus
+                aria-label={t('settings.providers.accountName')}
+                value={name}
+                maxLength={100}
+                disabled={saving}
+                className="min-w-24 flex-1"
+                onChange={(e) => setName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape' && !saving) setEditing(false)
+                }}
+              />
+              <Button type="submit" size="sm" disabled={saving || !name.trim()}>
+                {t('common.save')}
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                disabled={saving}
+                onClick={() => setEditing(false)}
+              >
+                {t('common.cancel')}
+              </Button>
+            </form>
+          ) : (
+            <button
+              type="button"
+              className="truncate text-left text-sm font-medium text-text hover:underline"
+              title={t('settings.providers.rename')}
+              aria-label={t('settings.providers.renameAccount', { name: provider.name })}
+              onClick={() => {
+                setName(provider.name)
+                setError(null)
+                setEditing(true)
+              }}
+            >
+              {provider.name}
+            </button>
+          )}
           {active && (
             <span className="rounded-full bg-success/15 px-2 py-0.5 text-[11px] text-success">
               {t('settings.providers.active')}
@@ -491,11 +575,35 @@ function ProviderRow({
               ? t('settings.providers.keyStored')
               : t('settings.providers.noCredential')}
         </p>
-        {/* Subscription providers hold their credential in the sidecar, not in
-            Roxy - so the row lists the signed-in accounts instead of a key. The
-            id is required: one sidecar holds every subscription's accounts, and
-            a row must show only its own. */}
-        {provider.auth === 'subscription' && <SubscriptionAccounts providerId={provider.id} />}
+        {provider.identity && (
+          <p className="mt-1 truncate text-xs text-text-muted">{provider.identity}</p>
+        )}
+        {error && (
+          <p role="alert" className="mt-1 text-xs text-danger">
+            {error}
+          </p>
+        )}
+        <div className="mt-2 flex flex-wrap gap-2">
+          {!editing && (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => {
+                setName(provider.name)
+                setError(null)
+                setEditing(true)
+              }}
+            >
+              {t('settings.providers.rename')}
+            </Button>
+          )}
+          <Button size="sm" variant="ghost" onClick={onAddAccount}>
+            <Plus className="h-3 w-3" /> {t('settings.providers.addAccount')}
+          </Button>
+          <Button size="sm" variant="ghost" onClick={onReconnect}>
+            {t('settings.providers.reconnect')}
+          </Button>
+        </div>
       </div>
       <Button size="sm" variant="ghost" onClick={onDisconnect}>
         {t('settings.providers.disconnect')}

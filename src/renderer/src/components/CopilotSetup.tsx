@@ -8,9 +8,11 @@ import { Button } from './ui'
 
 export function CopilotSetup({
   onConnected,
+  connectionId,
   reconnect = false
 }: {
   onConnected: () => void | Promise<void>
+  connectionId?: string
   reconnect?: boolean
 }): JSX.Element {
   const { t } = useTranslation()
@@ -29,7 +31,7 @@ export function CopilotSetup({
       const started = await api.copilot.start()
       setFlow(started)
       await api.system.openExternal(started.verificationUri)
-      await api.copilot.poll(started.deviceCode, started.interval)
+      await api.copilot.poll(started.deviceCode, started.interval, connectionId)
       await onConnected()
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))

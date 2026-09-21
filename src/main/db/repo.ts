@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { resolveSeed } from '../../shared/providers'
+import { isCliProxyProvider } from '../../shared/cliproxy'
+import { providerAccountName } from './migrations'
 import { normalizeServerConfig, type McpServerConfig, type McpServerRecord } from '../../shared/mcp'
 import { DEFAULT_BRANCH_PREFIX, normalizeBranchPrefix } from '../../shared/branch'
 import { DEFAULT_LANGUAGE, normalizeLanguage } from '../../shared/i18n'
@@ -43,6 +45,11 @@ import { decryptSecret, encryptSecret } from '../services/secure'
 
 interface ProviderRow {
   id: string
+  seed_id: string
+  account_number: number
+  identity: string | null
+  proxy_auth_file: string | null
+  proxy_prefix: string | null
   name: string
   wire: string
   auth: string
@@ -258,6 +265,7 @@ export function resetAll(): void {
        DELETE FROM hidden_models;
        DELETE FROM credentials;
        DELETE FROM providers;
+       DELETE FROM provider_account_counters;
        DELETE FROM integrations;
        DELETE FROM mcp_servers;
        DELETE FROM activity;
@@ -272,6 +280,11 @@ export function resetAll(): void {
 function rowToProvider(row: ProviderRow): ConnectedProvider {
   return {
     id: row.id,
+    seedId: row.seed_id,
+    accountNumber: row.account_number,
+    identity: row.identity ?? undefined,
+    proxyAuthFile: row.proxy_auth_file ?? undefined,
+    proxyPrefix: row.proxy_prefix ?? undefined,
     name: row.name,
     wire: row.wire as ProviderWire,
     auth: row.auth as ProviderAuth,
@@ -318,51 +331,103 @@ function getProvider(id: string): ConnectedProvider | undefined {
 }
 
 export function connectProvider(input: ConnectProviderInput): ConnectedProvider {
-  const seed = resolveSeed(input.id)
-  const now = Date.now()
-  const baseURL = input.baseURL?.trim() || seed.baseURL || null
-  const defaultModel = input.defaultModel?.trim() || null
   const db = getDb()
-
-  const tx = db.transaction(() => {
-    db.prepare(
-      `INSERT INTO providers(id, name, wire, auth, base_url, default_model, enabled, sort_order, created_at)
-       VALUES(@id, @name, @wire, @auth, @base_url, @default_model, 1, @sort_order, @created_at)
-       ON CONFLICT(id) DO UPDATE SET
-         name = excluded.name,
-         wire = excluded.wire,
-         auth = excluded.auth,
-         base_url = excluded.base_url,
-         default_model = excluded.default_model,
-         enabled = 1`
-    ).run({
-      id: seed.id,
-      name: seed.name,
-      wire: seed.wire,
-      auth: seed.auth,
-      base_url: baseURL,
-      default_model: defaultModel,
-      sort_order: -now,
-      created_at: now
+  const id = db
+    .transaction(() => {
+      const id = saveProviderConnection(input)
+      const key = input.apiKey?.trim()
+      if (key) {
+        saveProviderSecret(id, 'key', key)
+      }
+      return id
     })
+    .immediate()
+  db.pragma('wal_checkpoint(TRUNCATE)')
+  return getProvider(id)!
+}
 
-    const key = input.apiKey?.trim()
-    if (key) {
-      const { data, encrypted } = encryptSecret(key)
-      db.prepare(
-        `INSERT INTO credentials(provider_id, type, data, encrypted, created_at)
-         VALUES(?, 'key', ?, ?, ?)
-         ON CONFLICT(provider_id) DO UPDATE SET
-           type = excluded.type, data = excluded.data, encrypted = excluded.encrypted`
-      ).run(seed.id, data, encrypted ? 1 : 0, now)
-    }
-  })
-  tx()
+/** Catalog/test callers can still pass seed ids; never resolve to another account. */
+export function getProviderSeedId(id: string): string {
+  const row = getDb().prepare('SELECT seed_id FROM providers WHERE id = ?').get(id) as
+    | { seed_id: string }
+    | undefined
+  return row?.seed_id ?? id
+}
 
-  const provider = getProvider(seed.id)
-  if (!provider) throw new Error(`Failed to connect provider ${seed.id}`)
-  getDb().pragma('wal_checkpoint(TRUNCATE)')
-  return provider
+export function renameProvider(id: string, name: string): ConnectedProvider {
+  if (typeof name !== 'string' || !name.trim() || name.trim().length > 100) {
+    throw new Error('Provider name must contain between 1 and 100 characters.')
+  }
+  const result = getDb().prepare('UPDATE providers SET name = ? WHERE id = ?').run(name.trim(), id)
+  if (!result.changes) throw new Error('Provider connection not found.')
+  return getProvider(id)!
+}
+
+/** Must run inside the caller's transaction so allocation and insertion are atomic. */
+function saveProviderConnection(input: ConnectProviderInput): string {
+  const db = getDb()
+  const seed = resolveSeed(input.id)
+  const existing = input.connectionId === undefined ? undefined : getProvider(input.connectionId)
+  if (input.connectionId !== undefined && (!existing || existing.seedId !== seed.id)) {
+    throw new Error('Provider connection not found or belongs to a different provider.')
+  }
+  const baseURL =
+    input.baseURL === undefined && existing
+      ? (existing.baseURL ?? null)
+      : input.baseURL?.trim() || seed.baseURL || null
+  const defaultModel =
+    input.defaultModel === undefined && existing
+      ? (existing.defaultModel ?? null)
+      : input.defaultModel?.trim() || null
+  if (existing) {
+    db.prepare(
+      'UPDATE providers SET base_url = ?, default_model = ?, enabled = 1 WHERE id = ?'
+    ).run(baseURL, defaultModel, existing.id)
+    return existing.id
+  }
+  const counter = db
+    .prepare(
+      `
+    INSERT INTO provider_account_counters(seed_id, last_number) VALUES(?, 1)
+    ON CONFLICT(seed_id) DO UPDATE SET last_number = last_number + 1
+    RETURNING last_number
+  `
+    )
+    .get(seed.id) as { last_number: number }
+  const id = randomUUID()
+  const now = Date.now()
+  db.prepare(
+    `
+    INSERT INTO providers(id, seed_id, account_number, name, wire, auth, base_url,
+      default_model, enabled, sort_order, created_at)
+    VALUES(?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+  `
+  ).run(
+    id,
+    seed.id,
+    counter.last_number,
+    providerAccountName(seed.id, counter.last_number),
+    seed.wire,
+    seed.auth,
+    baseURL,
+    defaultModel,
+    -now,
+    now
+  )
+  return id
+}
+
+function saveProviderSecret(id: string, type: 'key' | 'oauth', secret: string): void {
+  const { data, encrypted } = encryptSecret(secret)
+  getDb()
+    .prepare(
+      `
+    INSERT INTO credentials(provider_id, type, data, encrypted, created_at) VALUES(?, ?, ?, ?, ?)
+    ON CONFLICT(provider_id) DO UPDATE SET
+      type = excluded.type, data = excluded.data, encrypted = excluded.encrypted
+  `
+    )
+    .run(id, type, data, encrypted ? 1 : 0, Date.now())
 }
 
 export function disconnectProvider(id: string): void {
@@ -453,7 +518,7 @@ function getProviderSecret(providerId: string): string | null {
   try {
     return decryptSecret({ data: row.data, encrypted: row.encrypted > 0 })
   } catch {
-    if (providerId === 'github-copilot') {
+    if (getProviderSeedId(providerId) === 'github-copilot') {
       throw new Error(
         'Cannot unlock the saved GitHub Copilot credential. Check your OS keychain and restart Roxy.'
       )
@@ -472,8 +537,9 @@ export interface CopilotCredential {
 }
 
 /** Older installs stored only the GitHub access token, not a JSON credential. */
-export function getCopilotCredential(): CopilotCredential | null {
-  const raw = getProviderSecret('github-copilot')
+export function getCopilotCredential(connectionId = 'github-copilot'): CopilotCredential | null {
+  if (getProviderSeedId(connectionId) !== 'github-copilot') return null
+  const raw = getProviderSecret(connectionId)
   if (!raw) return null
   if (!raw.startsWith('{')) return { accessToken: raw }
   try {
@@ -496,72 +562,72 @@ export function getCopilotCredential(): CopilotCredential | null {
 }
 
 /** Model catalogs belong to a login, not to its rotating access token. */
-export function getCopilotSessionKey(): string | null {
-  const credential = getCopilotCredential()
+export function getCopilotSessionKey(connectionId = 'github-copilot'): string | null {
+  const credential = getCopilotCredential(connectionId)
   return credential ? (credential.sessionId ?? credential.accessToken) : null
 }
 
 /** Read a provider's access token, keeping OAuth refresh secrets in the main process. */
 export function getProviderToken(providerId: string): string | null {
-  return providerId === 'github-copilot'
-    ? (getCopilotCredential()?.accessToken ?? null)
+  return getProviderSeedId(providerId) === 'github-copilot'
+    ? (getCopilotCredential(providerId)?.accessToken ?? null)
     : getProviderSecret(providerId)
 }
 
 /** Rotate without reconnecting a removed account or overwriting a newer login. */
 export function updateCopilotCredential(
   previous: CopilotCredential,
-  credential: CopilotCredential
+  credential: CopilotCredential,
+  connectionId = 'github-copilot'
 ): boolean {
   const db = getDb()
   return db
     .transaction(() => {
-      if (JSON.stringify(getCopilotCredential()) !== JSON.stringify(previous)) return false
+      if (JSON.stringify(getCopilotCredential(connectionId)) !== JSON.stringify(previous))
+        return false
       const { data, encrypted } = encryptSecret(JSON.stringify(credential))
       return (
         db
           .prepare('UPDATE credentials SET data = ?, encrypted = ? WHERE provider_id = ?')
-          .run(data, encrypted ? 1 : 0, 'github-copilot').changes === 1
+          .run(data, encrypted ? 1 : 0, connectionId).changes === 1
       )
     })
     .immediate()
 }
 
 /** Persist the complete GitHub OAuth credential using the OS secret storage. */
-export function storeCopilotCredential(credential: CopilotCredential): ConnectedProvider {
-  const seed = resolveSeed('github-copilot')
-  const now = Date.now()
+export function storeCopilotCredential(
+  credential: CopilotCredential,
+  connectionId?: string,
+  identity?: string
+): ConnectedProvider {
   const db = getDb()
-  const tx = db.transaction(() => {
-    db.prepare(
-      `INSERT INTO providers(id, name, wire, auth, base_url, default_model, enabled, sort_order, created_at)
-       VALUES(@id, @name, @wire, @auth, @base_url, NULL, 1, @sort_order, @now)
-       ON CONFLICT(id) DO UPDATE SET
-         name = excluded.name, wire = excluded.wire, auth = excluded.auth, enabled = 1`
-    ).run({
-      id: seed.id,
-      name: seed.name,
-      wire: seed.wire,
-      auth: seed.auth,
-      base_url: seed.baseURL ?? null,
-      sort_order: -now,
-      now
+  const id = db
+    .transaction(() => {
+      const login = identity?.trim() || undefined
+      if (login) {
+        // GitHub's numeric user id is stable even when its display login changes.
+        const accountId = login.split(':')[0].toLowerCase()
+        const existing = connectionId ? getProvider(connectionId) : undefined
+        if (existing?.identity && existing.identity.split(':')[0].toLowerCase() !== accountId) {
+          throw new Error('This is a different GitHub account. Use Add account instead.')
+        }
+        const duplicate = listConnectedProviders().find(
+          (p) =>
+            p.seedId === 'github-copilot' &&
+            p.id !== connectionId &&
+            p.identity?.split(':')[0].toLowerCase() === accountId
+        )
+        if (duplicate) throw new Error('This GitHub account is already connected.')
+      }
+      const id = saveProviderConnection({ id: 'github-copilot', connectionId })
+      if (login) db.prepare('UPDATE providers SET identity = ? WHERE id = ?').run(login, id)
+      saveProviderSecret(id, 'oauth', JSON.stringify({ ...credential, sessionId: randomUUID() }))
+      return id
     })
-    const { data, encrypted } = encryptSecret(
-      JSON.stringify({ ...credential, sessionId: randomUUID() })
-    )
-    db.prepare(
-      `INSERT INTO credentials(provider_id, type, data, encrypted, created_at)
-       VALUES(?, 'oauth', ?, ?, ?)
-       ON CONFLICT(provider_id) DO UPDATE SET
-         type = 'oauth', data = excluded.data, encrypted = excluded.encrypted`
-    ).run(seed.id, data, encrypted ? 1 : 0, now)
-  })
-  tx()
-  const provider = listConnectedProviders().find((p) => p.id === seed.id)
-  if (!provider) throw new Error('Failed to connect GitHub Copilot')
-  getDb().pragma('wal_checkpoint(TRUNCATE)')
-  return provider
+    .immediate()
+  db.pragma('wal_checkpoint(TRUNCATE)')
+  return getProvider(id)!
 }
 
 /**
@@ -575,42 +641,51 @@ export function storeCopilotCredential(credential: CopilotCredential): Connected
  * OAuth tokens live in the sidecar's auth-dir and never enter this table.
  */
 export function storeCliProxyProvider(
-  providerId: string,
+  seedId: string,
   baseURL: string,
-  localKey: string
+  localKey: string,
+  account?: { connectionId?: string } & (
+    | { file: string; email?: string; prefix: string }
+    | { proxyAuthFile: string; identity?: string; proxyPrefix: string }
+  )
 ): ConnectedProvider {
-  const seed = resolveSeed(providerId)
-  const now = Date.now()
+  if (!isCliProxyProvider(seedId)) throw new Error('Not a subscription provider.')
   const db = getDb()
-  const tx = db.transaction(() => {
-    db.prepare(
-      `INSERT INTO providers(id, name, wire, auth, base_url, default_model, enabled, sort_order, created_at)
-       VALUES(@id, @name, @wire, @auth, @base_url, NULL, 1, @sort_order, @now)
-       ON CONFLICT(id) DO UPDATE SET
-         name = excluded.name, wire = excluded.wire, auth = excluded.auth,
-         base_url = excluded.base_url, enabled = 1`
-    ).run({
-      id: seed.id,
-      name: seed.name,
-      wire: seed.wire,
-      auth: seed.auth,
-      base_url: baseURL,
-      sort_order: -now,
-      now
+  const id = db
+    .transaction(() => {
+      const file = account && ('file' in account ? account.file : account.proxyAuthFile)
+      const prefix = account && ('prefix' in account ? account.prefix : account.proxyPrefix)
+      const identity = account && ('file' in account ? account.email : account.identity)
+      if (account && (!file?.trim() || !prefix?.trim())) {
+        throw new Error('Subscription account requires a credential file and routing prefix.')
+      }
+      const bound = file
+        ? (db.prepare('SELECT id, seed_id FROM providers WHERE proxy_auth_file = ?').get(file) as
+            | { id: string; seed_id: string }
+            | undefined)
+        : undefined
+      if (
+        bound &&
+        (bound.seed_id !== seedId || (account?.connectionId && bound.id !== account.connectionId))
+      ) {
+        throw new Error('This subscription account is already connected.')
+      }
+      const id = saveProviderConnection({
+        id: seedId,
+        baseURL,
+        connectionId: account?.connectionId ?? bound?.id
+      })
+      if (account)
+        db.prepare(
+          `UPDATE providers SET proxy_auth_file = ?, proxy_prefix = ?,
+      identity = ? WHERE id = ?`
+        ).run(file, prefix, identity?.trim() || null, id)
+      saveProviderSecret(id, 'key', localKey)
+      return id
     })
-    const { data, encrypted } = encryptSecret(localKey)
-    db.prepare(
-      `INSERT INTO credentials(provider_id, type, data, encrypted, created_at)
-       VALUES(?, 'key', ?, ?, ?)
-       ON CONFLICT(provider_id) DO UPDATE SET
-         type = 'key', data = excluded.data, encrypted = excluded.encrypted`
-    ).run(seed.id, data, encrypted ? 1 : 0, now)
-  })
-  tx()
-  const provider = listConnectedProviders().find((p) => p.id === seed.id)
-  if (!provider) throw new Error(`Failed to connect ${seed.name}`)
-  getDb().pragma('wal_checkpoint(TRUNCATE)')
-  return provider
+    .immediate()
+  db.pragma('wal_checkpoint(TRUNCATE)')
+  return getProvider(id)!
 }
 
 /**

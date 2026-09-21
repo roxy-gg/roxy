@@ -242,6 +242,7 @@
     "title": "Serveurs MCP"
   },
   "models": {
+    "accountDisconnected": "This session’s provider account is disconnected. Choose an account in the model picker before sending again.",
     "allHidden": "Tous les modèles sont masqués. Réactivez-en dans <settings>Paramètres → Modèles</settings>.",
     "copilotUnavailable": "Aucun modèle GitHub Copilot disponible n'est sélectionné. Choisissez un modèle activé, ou vérifiez l'accès aux modèles de votre compte et votre connexion, puis réessayez.",
     "loadFailed": "Impossible de charger les modèles depuis models.dev — vous pouvez toujours envoyer avec le modèle actuel.",
@@ -456,12 +457,17 @@
       "title": "Envoyer des données d'utilisation anonymes"
     },
     "providers": {
+      "accountName": "Account name",
       "active": "Actif",
       "add": "Ajouter un fournisseur",
+      "addAccount": "Add account",
       "disconnect": "Déconnecter",
       "heading": "Fournisseurs",
       "keyStored": "clé stockée",
       "noCredential": "pas d'identifiant",
+      "reconnect": "Reconnect",
+      "rename": "Rename account",
+      "renameAccount": "Rename {{name}}",
       "signedInLocally": "connecté localement"
     },
     "title": "Paramètres",

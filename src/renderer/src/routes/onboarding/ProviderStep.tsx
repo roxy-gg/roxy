@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useTranslation, Trans } from 'react-i18next'
 import { ArrowLeft, ArrowRight, Check, ChevronRight, ExternalLink, Search } from 'lucide-react'
 import { AUTH_LABELS, SEED_PROVIDERS, isConnectableNow, resolveSeed } from '@shared/providers'
@@ -19,7 +19,7 @@ const LISTED_PROVIDERS = SEED_PROVIDERS
 export function ProviderStep(): JSX.Element {
   const { t } = useTranslation()
   const providers = useRoxyStore((s) => s.providers)
-  const connectedIds = new Set(providers.map((p) => p.id))
+  const connectedIds = new Set(providers.map((p) => p.seedId))
   const [query, setQuery] = useState('')
   const [setupId, setSetupId] = useState<string | null>(null)
 
@@ -168,17 +168,28 @@ function ProviderRow({
   )
 }
 
-function ProviderSetup({
+export function ProviderSetup({
   seed,
+  connectionId,
+  modal = false,
   onClose
 }: {
   seed: SeedProvider
+  connectionId?: string
+  modal?: boolean
   onClose: () => void
 }): JSX.Element {
   const { t } = useTranslation()
   const refreshProviders = useRoxyStore((s) => s.refreshProviders)
+  const existing = useRoxyStore((s) => s.providers.find((p) => p.id === connectionId))
+  const dialogRef = useRef<HTMLDialogElement>(null)
+  useEffect(() => {
+    const dialog = dialogRef.current
+    dialog?.showModal()
+    return () => dialog?.close()
+  }, [])
   const [apiKey, setApiKey] = useState('')
-  const [baseURL, setBaseURL] = useState(seed.baseURL ?? '')
+  const [baseURL, setBaseURL] = useState(existing?.baseURL ?? seed.baseURL ?? '')
   const [connecting, setConnecting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -201,6 +212,7 @@ function ProviderSetup({
     try {
       const provider = await api.providers.connect({
         id: seed.id,
+        connectionId,
         apiKey: apiKey.trim() || undefined,
         baseURL: baseURL.trim() || undefined
       })
@@ -231,8 +243,26 @@ function ProviderSetup({
   }
 
   return (
-    <div className="animate-fade-in fixed inset-0 z-50 flex flex-col bg-bg">
-      <header className="titlebar reserve-controls-left reserve-controls-right flex h-14 shrink-0 items-center gap-3 border-b border-border px-5">
+    <dialog
+      ref={dialogRef}
+      aria-label={
+        connectionId
+          ? t('settings.providers.reconnect')
+          : t('onboarding.setUp', { name: seed.name })
+      }
+      onCancel={(e) => {
+        e.preventDefault()
+        onClose()
+      }}
+      className={
+        modal
+          ? 'animate-fade-in fixed inset-0 z-50 m-auto flex max-h-[85vh] w-[min(32rem,calc(100vw-2rem))] flex-col overflow-hidden rounded-xl border border-border bg-bg p-0 text-text shadow-float backdrop:bg-black/50'
+          : 'animate-fade-in fixed inset-0 z-50 m-0 flex h-full max-h-none w-full max-w-none flex-col border-0 bg-bg p-0 text-text'
+      }
+    >
+      <header
+        className={`${modal ? '' : 'titlebar reserve-controls-left reserve-controls-right'} flex h-14 shrink-0 items-center gap-3 border-b border-border px-5`}
+      >
         <button
           onClick={onClose}
           title={t('onboarding.back')}
@@ -252,9 +282,17 @@ function ProviderSetup({
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto max-w-md px-6 py-10">
           {isCopilot ? (
-            <CopilotSetup onConnected={onConnected} />
+            <CopilotSetup
+              connectionId={connectionId}
+              reconnect={!!connectionId}
+              onConnected={onConnected}
+            />
           ) : isSubscription ? (
-            <SubscriptionSetup providerId={seed.id} onConnected={onConnected} />
+            <SubscriptionSetup
+              providerId={seed.id}
+              connectionId={connectionId}
+              onConnected={onConnected}
+            />
           ) : isConnectableNow(seed) ? (
             <div className="flex flex-col gap-4">
               <div>
@@ -328,7 +366,7 @@ function ProviderSetup({
           )}
         </div>
       </div>
-    </div>
+    </dialog>
   )
 }
 

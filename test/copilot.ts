@@ -6,6 +6,7 @@ import { encryptSecret } from '../src/main/services/secure'
 import { pollForToken } from '../src/main/services/copilot'
 import { invalidateCopilotModels, listModels } from '../src/main/services/models'
 import {
+  copilotEndpoint,
   copilotNeedsReauthentication,
   invalidateCopilotToken,
   ModelHttpError,
@@ -18,6 +19,25 @@ export async function testCopilot(): Promise<void> {
   const originalNow = Date.now
   let now = originalNow()
   Date.now = () => now
+  // Keep the original singleton regression suite on an explicit migrated-row
+  // fixture. Production sign-ins now allocate independent UUID connections.
+  const saveLegacy = (credential: repo.CopilotCredential): void => {
+    getDb()
+      .prepare(
+        `INSERT OR IGNORE INTO providers
+      (id, seed_id, account_number, name, wire, auth, enabled, sort_order, created_at)
+      VALUES ('github-copilot', 'github-copilot', 1, 'GitHub Copilot', 'openai-chat', 'oauth', 1, 0, 0)`
+      )
+      .run()
+    getDb()
+      .prepare(
+        `INSERT INTO provider_account_counters(seed_id, last_number)
+      VALUES ('github-copilot', 1) ON CONFLICT(seed_id) DO UPDATE SET
+      last_number = MAX(last_number, 1)`
+      )
+      .run()
+    repo.storeCopilotCredential(credential, 'github-copilot')
+  }
   const endpoint = (): ReturnType<typeof openaiEndpoint> => openaiEndpoint('github-copilot')
   const ide = (token = 'ide-test', lifetime = 1800, refreshIn = 900, skew = 0): Response =>
     Response.json(
@@ -57,7 +77,7 @@ export async function testCopilot(): Promise<void> {
     return oauth(body)
   }
   const reset = (credential: repo.CopilotCredential = { accessToken: 'github-test' }): void => {
-    repo.storeCopilotCredential(credential)
+    saveLegacy(credential)
     invalidateCopilotToken()
     invalidateCopilotModels()
     exchangeCount = refreshCount = modelCount = 0
@@ -89,7 +109,7 @@ export async function testCopilot(): Promise<void> {
       expiresAt: now + 28800_000,
       refreshTokenExpiresAt: now + 15897600_000
     })
-    repo.storeCopilotCredential(credential)
+    saveLegacy(credential)
     const saved = repo.getCopilotCredential()!
     assert.equal(typeof saved.sessionId, 'string')
     assert.deepEqual(saved, { ...credential, sessionId: saved.sessionId })
@@ -247,7 +267,7 @@ export async function testCopilot(): Promise<void> {
     await endpoint()
 
     // Account switching and disconnect must be respected even while a token is cached.
-    repo.storeCopilotCredential({ accessToken: 'other-account' })
+    saveLegacy({ accessToken: 'other-account' })
     exchange = (headers) => {
       assert.equal(headers.get('authorization'), 'token other-account')
       return ide('other-ide')
@@ -267,7 +287,7 @@ export async function testCopilot(): Promise<void> {
       const request = endpoint()
       const rejected = assert.rejects(request, httpError(409))
       if (disconnect) repo.disconnectProvider('github-copilot')
-      else repo.storeCopilotCredential({ accessToken: 'new-account' })
+      else saveLegacy({ accessToken: 'new-account' })
       finish(Response.json({ access_token: 'late-token', refresh_token: 'late-refresh' }))
       await rejected
       assert.equal(repo.getProviderToken('github-copilot'), disconnect ? null : 'new-account')
@@ -280,7 +300,7 @@ export async function testCopilot(): Promise<void> {
         finishExchange = resolve
       })
     const staleExchange = assert.rejects(endpoint(), httpError(409))
-    repo.storeCopilotCredential({ accessToken: 'new-account' })
+    saveLegacy({ accessToken: 'new-account' })
     exchange = () => ide('new-account-ide')
     await endpoint()
     finishExchange(ide('old-account-ide'))
@@ -440,7 +460,7 @@ export async function testCopilot(): Promise<void> {
       true,
       'revoked legacy authorization offers reconnect'
     )
-    repo.storeCopilotCredential({ accessToken: 'github-test' })
+    saveLegacy({ accessToken: 'github-test' })
     assert.equal(
       copilotNeedsReauthentication(),
       false,
@@ -489,7 +509,7 @@ export async function testCopilot(): Promise<void> {
         rejectOld = resolve
       })
     const rejectedAccount = assert.rejects(endpoint(), httpError(401))
-    repo.storeCopilotCredential({ accessToken: 'new-account' })
+    saveLegacy({ accessToken: 'new-account' })
     rejectOld(new Response('', { status: 401 }))
     await rejectedAccount
     assert.equal(
@@ -510,6 +530,7 @@ export async function testCopilot(): Promise<void> {
       aborted.signal
     )
     assert.equal(copilotNeedsReauthentication(), false, 'aborted retries do not request sign-in')
+    await testIndependentAccounts()
     console.log('  Copilot auth: persistence, renewal, expiry, failures, and concurrency passed')
   } finally {
     globalThis.fetch = originalFetch
@@ -517,5 +538,148 @@ export async function testCopilot(): Promise<void> {
     invalidateCopilotToken()
     invalidateCopilotModels()
     repo.disconnectProvider('github-copilot')
+  }
+}
+
+/** UUID connections must never share tokens, recovery state, or tenant catalogs. */
+async function testIndependentAccounts(): Promise<void> {
+  const originalFetch = globalThis.fetch
+  const a = repo.storeCopilotCredential({ accessToken: 'multi-a' })
+  const b = repo.storeCopilotCredential({ accessToken: 'multi-b' })
+  const accounts = [a, b]
+  const exchanges = { a: 0, b: 0 }
+  const catalogs = { a: 0, b: 0 }
+  const denied = new Set<string>()
+  const endpoint = (id: string) => copilotEndpoint('/chat/completions', false, id)
+  globalThis.fetch = async (input, init) => {
+    const url = String(input)
+    const auth = new Headers(init?.headers).get('authorization')
+    if (url === 'https://api.github.com/copilot_internal/v2/token') {
+      assert.ok(auth === 'token multi-a' || auth === 'token multi-b')
+      const account = auth === 'token multi-a' ? 'a' : 'b'
+      exchanges[account]++
+      if (denied.has(account)) return new Response('', { status: 401 })
+      return Response.json({
+        token: `ide-${account}`,
+        expires_at: Date.now() / 1000 + 3600,
+        endpoints: {
+          api: `https://api.${account === 'a' ? 'business' : 'enterprise'}.githubcopilot.com/`
+        }
+      })
+    }
+    assert.ok(
+      url === 'https://api.business.githubcopilot.com/models' ||
+        url === 'https://api.enterprise.githubcopilot.com/models',
+      'multi-account tests make no unexpected network calls'
+    )
+    const account = url.includes('business') ? 'a' : 'b'
+    assert.equal(auth, `Bearer ide-${account}`, 'tenant request uses its own account token')
+    catalogs[account]++
+    return Response.json({
+      data: [{ id: `model-${account}`, model_picker_enabled: true, capabilities: { type: 'chat' } }]
+    })
+  }
+  try {
+    assert.notEqual(a.id, b.id)
+    assert.notEqual(a.id, 'github-copilot')
+    assert.notEqual(b.id, 'github-copilot')
+    assert.equal(a.seedId, 'github-copilot')
+    assert.equal(b.seedId, 'github-copilot')
+    assert.ok(b.accountNumber > a.accountNumber)
+    assert.equal(repo.getCopilotCredential(a.id)?.accessToken, 'multi-a')
+    assert.equal(repo.getCopilotCredential(b.id)?.accessToken, 'multi-b')
+    assert.notEqual(repo.getCopilotSessionKey(a.id), repo.getCopilotSessionKey(b.id))
+
+    const [endpointA, endpointB, modelsA, modelsB] = await Promise.all([
+      endpoint(a.id),
+      endpoint(b.id),
+      listModels(a.id),
+      listModels(b.id)
+    ])
+    assert.equal(endpointA.url, 'https://api.business.githubcopilot.com/chat/completions')
+    assert.equal(endpointB.url, 'https://api.enterprise.githubcopilot.com/chat/completions')
+    assert.equal(endpointA.headers.Authorization, 'Bearer ide-a')
+    assert.equal(endpointB.headers.Authorization, 'Bearer ide-b')
+    assert.equal(modelsA[0]?.id, 'model-a')
+    assert.equal(modelsB[0]?.id, 'model-b')
+    assert.deepEqual(exchanges, { a: 1, b: 1 }, 'single-flight is scoped to each connection')
+    assert.deepEqual(catalogs, { a: 1, b: 1 })
+    assert.equal(await listModels(a.id), modelsA)
+    assert.equal(await listModels(b.id), modelsB)
+    invalidateCopilotModels(a.id)
+    invalidateCopilotToken(undefined, a.id)
+    await listModels(a.id)
+    assert.equal(await listModels(b.id), modelsB, 'invalidating A preserves B catalog identity')
+    assert.deepEqual(exchanges, { a: 2, b: 1 })
+    assert.deepEqual(catalogs, { a: 2, b: 1 })
+
+    for (const [failed, healthy, label] of [
+      [a, b, 'a'],
+      [b, a, 'b']
+    ] as const) {
+      denied.add(label)
+      invalidateCopilotToken(undefined, failed.id)
+      await assert.rejects(
+        endpoint(failed.id),
+        (error: unknown) => error instanceof ModelHttpError && error.status === 401
+      )
+      assert.equal(copilotNeedsReauthentication(failed.id), true)
+      assert.equal(copilotNeedsReauthentication(healthy.id), false)
+      assert.ok((await endpoint(healthy.id)).headers.Authorization)
+      const previousSession = repo.getCopilotSessionKey(failed.id)
+      const reconnected = repo.storeCopilotCredential({ accessToken: `multi-${label}` }, failed.id)
+      assert.equal(reconnected.id, failed.id, 'explicit reconnect preserves connection identity')
+      assert.equal(reconnected.accountNumber, failed.accountNumber)
+      assert.notEqual(repo.getCopilotSessionKey(failed.id), previousSession)
+      assert.equal(copilotNeedsReauthentication(failed.id), false)
+      denied.delete(label)
+      await endpoint(failed.id)
+    }
+
+    let sends = 0
+    let sent!: () => void
+    const firstSend = new Promise<void>((resolve) => {
+      sent = resolve
+    })
+    const retry = withCopilotRetry(
+      true,
+      async (record) => {
+        record((await endpoint(a.id)).headers.Authorization)
+        sends++
+        sent()
+        return new Response('', { status: 401 })
+      },
+      undefined,
+      a.id
+    )
+    const rejectedRetry = assert.rejects(
+      retry,
+      (error: unknown) => error instanceof ModelHttpError && error.status === 409
+    )
+    await firstSend
+    await new Promise((resolve) => setImmediate(resolve))
+    repo.storeCopilotCredential({ accessToken: 'multi-a' }, a.id)
+    await rejectedRetry
+    assert.equal(sends, 1, 'reconnect during retry fails closed without sending under a new login')
+    assert.equal(copilotNeedsReauthentication(a.id), false)
+    assert.equal(copilotNeedsReauthentication(b.id), false)
+
+    const cachedB = await listModels(b.id)
+    const beforeDisconnect = { ...exchanges }
+    repo.disconnectProvider(a.id)
+    await assert.rejects(endpoint(a.id), /not linked/)
+    assert.deepEqual(await listModels(a.id), [])
+    assert.equal(repo.getCopilotCredential(a.id), null)
+    assert.equal(repo.getCopilotCredential(b.id)?.accessToken, 'multi-b')
+    assert.equal((await endpoint(b.id)).headers.Authorization, 'Bearer ide-b')
+    assert.equal(await listModels(b.id), cachedB, 'disconnect A leaves B cached catalog untouched')
+    assert.deepEqual(exchanges, beforeDisconnect, 'disconnect never falls back to another account')
+  } finally {
+    globalThis.fetch = originalFetch
+    for (const account of accounts) {
+      invalidateCopilotToken(undefined, account.id)
+      invalidateCopilotModels(account.id)
+      repo.disconnectProvider(account.id)
+    }
   }
 }

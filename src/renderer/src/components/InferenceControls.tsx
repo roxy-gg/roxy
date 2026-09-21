@@ -80,13 +80,14 @@ function useActiveModelInfo(): ModelInfo | undefined {
   const modelCatalog = useRoxyStore((s) => s.modelCatalog)
   const ensureModels = useRoxyStore((s) => s.ensureModels)
   const config = useSessionConfig()
-  const activeProvider = providers.find((p) => p.id === config.providerId) ?? providers[0] ?? null
+  const activeProvider =
+    (config.providerId ? providers.find((p) => p.id === config.providerId) : providers[0]) ?? null
   useEffect(() => {
     if (activeProvider) void ensureModels(activeProvider.id)
   }, [activeProvider, ensureModels])
   if (!activeProvider) return undefined
   const catalog = modelCatalog[activeProvider.id] ?? []
-  if (activeProvider.id === 'github-copilot') {
+  if (activeProvider.seedId === 'github-copilot') {
     const model = resolveProviderModel(
       activeProvider,
       catalog,

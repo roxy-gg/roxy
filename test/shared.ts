@@ -938,7 +938,12 @@ check(
   pickDefaultModel([mkModel('latest', true), mkModel('older', true)]) === 'latest'
 )
 
-const copilotProvider = { id: 'github-copilot', defaultModel: 'revoked-default' }
+const copilotProvider = {
+  id: 'copilot-account-uuid',
+  seedId: 'github-copilot',
+  accountNumber: 2,
+  defaultModel: 'revoked-default'
+}
 const enabledModels = [mkModel('enabled', true), mkModel('other', true)]
 check(
   'Copilot selection: an enabled saved model is preserved',
@@ -5375,8 +5380,8 @@ async function main(): Promise<void> {
   // Asserts provider model rows generation, hidden filtering and search matching.
   const mkModel = (id: string, name: string) => ({ id, name, reasoning: true, toolCall: true })
   const pickerProviders = [
-    { id: 'github-copilot', name: 'GitHub Copilot' },
-    { id: 'roxy', name: 'Roxy.gg Inference' }
+    { id: 'github-copilot', seedId: 'github-copilot', accountNumber: 1, name: 'GitHub Copilot' },
+    { id: 'roxy', seedId: 'roxy', accountNumber: 1, name: 'Roxy.gg Inference' }
   ]
   const pickerCatalogs = {
     'github-copilot': [
@@ -5390,7 +5395,7 @@ async function main(): Promise<void> {
 
   // ---- provider model rows for carousel picker (renderer/lib/modelRows) -----
   const copilotRows = buildProviderModelRows({
-    provider: { id: 'github-copilot', name: 'GitHub Copilot' },
+    provider: pickerProviders[0],
     catalog: pickerCatalogs['github-copilot'],
     index: pickerIndex,
     query: '',
@@ -5403,7 +5408,7 @@ async function main(): Promise<void> {
   )
 
   const copilotSearched = buildProviderModelRows({
-    provider: { id: 'github-copilot', name: 'GitHub Copilot' },
+    provider: pickerProviders[0],
     catalog: pickerCatalogs['github-copilot'],
     index: pickerIndex,
     query: 'sol',

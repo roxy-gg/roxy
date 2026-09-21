@@ -21,11 +21,12 @@ export function pickDefaultModel(models: ModelInfo[]): string | undefined {
 
 /** A saved Copilot selection is not proof that the account can still use it. */
 export function resolveProviderModel(
-  provider: Pick<ConnectedProvider, 'id' | 'defaultModel'>,
+  provider: Pick<ConnectedProvider, 'id' | 'defaultModel'> &
+    Partial<Pick<ConnectedProvider, 'seedId'>>,
   models: ModelInfo[],
   selected: string | null
 ): string | undefined {
-  if (provider.id === 'github-copilot') {
+  if ((provider.seedId ?? provider.id) === 'github-copilot') {
     if (selected) return models.some((m) => m.id === selected) ? selected : undefined
     if (models.some((m) => m.id === provider.defaultModel)) return provider.defaultModel
     return pickDefaultModel(models)

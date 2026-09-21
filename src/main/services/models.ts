@@ -5,9 +5,15 @@
 import type { ModelInfo, ModelCost } from '../../shared/api'
 import type { ReasoningEffort } from '../../shared/types'
 import { REASONING_EFFORTS } from '../../shared/session-config'
-import { getCopilotSessionKey, getProviderToken, listConnectedProviders } from '../db/repo'
+import { isSeedProviderId, resolveSeed } from '../../shared/providers'
+import {
+  getCopilotSessionKey,
+  getProviderToken,
+  getProviderSeedId,
+  listConnectedProviders
+} from '../db/repo'
 import { isCliProxyProvider } from '../../shared/cliproxy'
-import { ensureRunning as ensureCliProxy, listProxyModels } from './cliproxy'
+import { listConnectionModels } from './cliproxy'
 import { copilotEndpoint, withCopilotRetry } from './llm'
 
 const CATALOG_URL = 'https://models.dev/api.json'
@@ -45,28 +51,31 @@ interface CopilotModel {
 }
 
 const COPILOT_TTL_MS = 60_000
-let copilotCache: {
-  credential: string
-  at: number
-  data: ModelInfo[]
-  pending?: Promise<ModelInfo[]>
-} | null = null
+const copilotCaches = new Map<
+  string,
+  {
+    credential: string
+    at: number
+    data: ModelInfo[]
+    pending?: Promise<ModelInfo[]>
+  }
+>()
 
-export function invalidateCopilotModels(): void {
-  copilotCache = null
+export function invalidateCopilotModels(connectionId = 'github-copilot'): void {
+  copilotCaches.delete(connectionId)
 }
 
 /** The public catalog cannot know the signed-in account's model policies. */
-async function listCopilotModels(): Promise<ModelInfo[]> {
-  const credential = getCopilotSessionKey()
+async function listCopilotModels(connectionId: string): Promise<ModelInfo[]> {
+  const credential = getCopilotSessionKey(connectionId)
   if (!credential) {
-    copilotCache = null
+    copilotCaches.delete(connectionId)
     return []
   }
-  if (copilotCache?.credential !== credential) {
-    copilotCache = { credential, at: 0, data: [] }
+  if (copilotCaches.get(connectionId)?.credential !== credential) {
+    copilotCaches.set(connectionId, { credential, at: 0, data: [] })
   }
-  const entry = copilotCache
+  const entry = copilotCaches.get(connectionId)!
   if (entry.pending) return entry.pending
   if (Date.now() - entry.at < COPILOT_TTL_MS) return entry.data
 
@@ -76,14 +85,15 @@ async function listCopilotModels(): Promise<ModelInfo[]> {
       const res = await withCopilotRetry(
         true,
         async (recordAuthorization) => {
-          if (getCopilotSessionKey() !== credential) {
+          if (getCopilotSessionKey(connectionId) !== credential) {
             throw new Error('GitHub Copilot account changed.')
           }
-          const { url, headers } = await copilotEndpoint('/models')
+          const { url, headers } = await copilotEndpoint('/models', false, connectionId)
           recordAuthorization(headers.Authorization)
           return fetch(url, { headers: { ...headers, Accept: 'application/json' }, signal })
         },
-        signal
+        signal,
+        connectionId
       )
       if (!res.ok) throw new Error(`GitHub Copilot models returned ${res.status}`)
       const body = (await res.json()) as { data?: CopilotModel[] }
@@ -114,7 +124,11 @@ async function listCopilotModels(): Promise<ModelInfo[]> {
             outputLimit: m.capabilities?.limits?.max_output_tokens
           }
         })
-      if (copilotCache !== entry || getCopilotSessionKey() !== credential) return []
+      if (
+        copilotCaches.get(connectionId) !== entry ||
+        getCopilotSessionKey(connectionId) !== credential
+      )
+        return []
       entry.data = models
     } catch {
       // Fail closed: a stale or public list can advertise models the tenant revoked.
@@ -140,7 +154,7 @@ const ROXY_DEFAULT_BASE = 'https://roxy.gg/v1'
 // Shorter than the models.dev TTL: this list is team/policy-sensitive now, so an
 // owner toggling Managed mode should reflect on the desktop within minutes.
 const ROXY_TTL_MS = 5 * 60 * 1000
-let roxyCache: { at: number; data: ModelInfo[] } | null = null
+const roxyCaches = new Map<string, { source: string; at: number; data: ModelInfo[] }>()
 
 /**
  * A model as roxy.gg's gateway reports it (an OpenRouter-shaped record).
@@ -227,11 +241,11 @@ function roxyReasoning(m: RoxyModel): boolean {
 }
 
 /** Where to fetch the Roxy catalog from + how to authenticate, if at all. */
-function roxyCatalogSource(): { url: string; token: string | null } {
-  const token = getProviderToken('roxy')
+function roxyCatalogSource(connectionId: string): { url: string; token: string | null } {
+  const token = getProviderToken(connectionId)
   if (!token) return { url: ROXY_PUBLIC_CATALOG_URL, token: null }
   const base = (
-    listConnectedProviders().find((p) => p.id === 'roxy')?.baseURL || ROXY_DEFAULT_BASE
+    listConnectedProviders().find((p) => p.id === connectionId)?.baseURL || ROXY_DEFAULT_BASE
   ).replace(/\/+$/, '')
   return { url: `${base}/models`, token }
 }
@@ -264,23 +278,24 @@ function toModelInfo(body: { data?: RoxyModel[] }): ModelInfo[] {
     .sort((a, b) => a.name.localeCompare(b.name))
 }
 
-async function listRoxyModels(): Promise<ModelInfo[]> {
-  if (roxyCache && Date.now() - roxyCache.at < ROXY_TTL_MS) return roxyCache.data
-  const { url, token } = roxyCatalogSource()
+async function listRoxyModels(connectionId: string): Promise<ModelInfo[]> {
+  const { url, token } = roxyCatalogSource(connectionId)
+  const source = JSON.stringify([url, token])
+  const cached = roxyCaches.get(connectionId)
+  if (cached?.source === source && Date.now() - cached.at < ROXY_TTL_MS) return cached.data
+  roxyCaches.delete(connectionId)
   const headers: Record<string, string> = { Accept: 'application/json' }
   if (token) headers.Authorization = `Bearer ${token}`
   try {
-    let res = await fetch(url, { headers })
-    // If the authenticated call fails (bad/expired key, etc.), fall back to the
-    // public catalog so the picker still shows something usable.
-    if (!res.ok && token)
-      res = await fetch(ROXY_PUBLIC_CATALOG_URL, { headers: { Accept: 'application/json' } })
+    const res = await fetch(url, { headers, signal: AbortSignal.timeout(20_000) })
     if (!res.ok) throw new Error(`roxy.gg models returned ${res.status}`)
     const list = toModelInfo((await res.json()) as { data?: RoxyModel[] })
-    roxyCache = { at: Date.now(), data: list }
+    const current = roxyCatalogSource(connectionId)
+    if (JSON.stringify([current.url, current.token]) !== source) return []
+    roxyCaches.set(connectionId, { source, at: Date.now(), data: list })
     return list
   } catch {
-    return roxyCache?.data ?? []
+    return []
   }
 }
 
@@ -295,28 +310,13 @@ async function listRoxyModels(): Promise<ModelInfo[]> {
  * has signed in yet, which the picker renders as "no models" rather than as a
  * wrong list.
  *
- * The provider id is passed through because one sidecar serves every signed-in
- * subscription from a single model list; `listProxyModels` splits it by upstream
- * so the ChatGPT picker never offers a Gemini model it cannot route.
+ * The connection id selects one auth file's catalog, never the shared pool.
  *
  * Every model here is a frontier reasoning model with tool calling, so both
  * capability flags are asserted rather than guessed per id.
  */
 async function listSubscriptionModels(providerId: string): Promise<ModelInfo[]> {
-  // Boot the sidecar first when the provider is connected. After an app restart
-  // the proxy is installed but not running, and an un-booted proxy reports no
-  // models - which would render as an empty picker for a provider the user can
-  // demonstrably use. Connected implies installed (you cannot connect without a
-  // completed login), so this is a spawn, never a download.
-  if (listConnectedProviders().some((p) => p.id === providerId)) {
-    try {
-      await ensureCliProxy()
-    } catch {
-      // Couldn't start - fall through to the empty list rather than break the
-      // whole picker for every other provider.
-    }
-  }
-  const models = await listProxyModels(providerId)
+  const models = await listConnectionModels(providerId).catch(() => [])
   return models
     .map((m) => ({
       id: m.id,
@@ -353,12 +353,36 @@ function toModelCost(c: ModelsDevModel['cost']): ModelCost | undefined {
 
 /** List a provider's available models, preferring its account-aware API. */
 export async function listModels(providerId: string): Promise<ModelInfo[]> {
-  if (providerId === 'github-copilot') return listCopilotModels()
-  if (providerId === 'roxy') return listRoxyModels()
-  if (isCliProxyProvider(providerId)) return listSubscriptionModels(providerId)
+  const provider = listConnectedProviders().find((p) => p.id === providerId)
+  if (!provider && !isSeedProviderId(providerId)) return []
+  const seedId = getProviderSeedId(providerId)
+  if (seedId === 'github-copilot') return listCopilotModels(providerId)
+  if (seedId === 'roxy') return listRoxyModels(providerId)
+  if (isCliProxyProvider(seedId)) return listSubscriptionModels(providerId)
+  if (
+    provider?.baseURL &&
+    (resolveSeed(seedId).group === 'local' || seedId === 'openai-compatible')
+  ) {
+    try {
+      const token = getProviderToken(providerId)
+      const response = await fetch(`${provider.baseURL.replace(/\/+$/, '')}/models`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        signal: AbortSignal.timeout(10_000)
+      })
+      if (!response.ok) return []
+      const body = (await response.json()) as { data?: { id?: string; name?: string }[] }
+      return (Array.isArray(body.data) ? body.data : [])
+        .filter(
+          (m): m is { id: string; name?: string } => typeof m?.id === 'string' && m.id.length > 0
+        )
+        .map((m) => ({ id: m.id, name: m.name || m.id, reasoning: false, toolCall: true }))
+    } catch {
+      return []
+    }
+  }
   try {
     const data = await getCatalog()
-    const models = data[providerId]?.models
+    const models = data[seedId]?.models
     if (!models) return []
     return Object.values(models)
       .map((m) => ({
@@ -398,11 +422,12 @@ export function modelCost(providerId: string, modelId: string): ModelCost | unde
   // Roxy's gateway isn't in models.dev and prices its own (marked-up) catalog,
   // so read the price the user is actually charged from the roxy cache. Without
   // this every roxy turn records $0 and the usage meter reports no spend at all.
-  if (providerId === 'roxy') {
-    return roxyCache?.data.find((m) => m.id === modelId)?.cost
+  const seedId = getProviderSeedId(providerId)
+  if (seedId === 'roxy') {
+    return roxyCaches.get(providerId)?.data.find((m) => m.id === modelId)?.cost
   }
   if (!cache) return undefined
-  const models = cache.data[providerId]?.models
+  const models = cache.data[seedId]?.models
   if (!models) return undefined
   // models.dev keys by id; fall back to a scan for aliased/proxied ids.
   const m = models[modelId] ?? Object.values(models).find((x) => x.id === modelId)

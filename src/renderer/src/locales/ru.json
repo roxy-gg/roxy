@@ -242,6 +242,7 @@
     "title": "MCP-серверы"
   },
   "models": {
+    "accountDisconnected": "This session’s provider account is disconnected. Choose an account in the model picker before sending again.",
     "allHidden": "Все модели скрыты. Верните некоторые в <settings>Настройки → Модели</settings>.",
     "copilotUnavailable": "Не выбрана доступная модель GitHub Copilot. Выберите включённую модель или проверьте доступ к модели и подключение вашей учётной записи, затем повторите попытку.",
     "loadFailed": "Не удалось загрузить модели с models.dev — вы все еще можете отправлять запросы с текущей моделью.",
@@ -456,12 +457,17 @@
       "title": "Отправлять анонимные данные об использовании"
     },
     "providers": {
+      "accountName": "Account name",
       "active": "Активно",
       "add": "Добавить провайдера",
+      "addAccount": "Add account",
       "disconnect": "Отключить",
       "heading": "Провайдеры",
       "keyStored": "ключ сохранен",
       "noCredential": "нет учетных данных",
+      "reconnect": "Reconnect",
+      "rename": "Rename account",
+      "renameAccount": "Rename {{name}}",
       "signedInLocally": "выполнен вход локально"
     },
     "title": "Настройки",

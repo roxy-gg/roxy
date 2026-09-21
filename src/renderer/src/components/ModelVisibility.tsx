@@ -41,7 +41,7 @@ export function ModelVisibility(): JSX.Element {
   return (
     <div className="flex flex-col gap-2">
       {providers.map((p) => (
-        <ProviderModels key={p.id} providerId={p.id} providerName={p.name} />
+        <ProviderModels key={p.id} providerId={p.id} seedId={p.seedId} providerName={p.name} />
       ))}
     </div>
   )
@@ -49,9 +49,11 @@ export function ModelVisibility(): JSX.Element {
 
 function ProviderModels({
   providerId,
+  seedId,
   providerName
 }: {
   providerId: string
+  seedId: string
   providerName: string
 }): JSX.Element {
   const { t } = useTranslation()
@@ -84,10 +86,10 @@ function ProviderModels({
     () =>
       models.map((m) => ({
         model: m,
-        label: modelLabel(providerId, m.name, m.id),
+        label: modelLabel(seedId, m.name, m.id),
         haystack: `${m.name.toLowerCase()}\u0000${m.id.toLowerCase()}`
       })),
-    [models, providerId]
+    [models, seedId]
   )
   const q = query.trim().toLowerCase()
   const visible = useMemo(
@@ -131,7 +133,7 @@ function ProviderModels({
           )}
         />
         <div className="flex h-8 w-8 items-center justify-center sq sq-lg sq-ring rounded-lg border border-border bg-surface-2">
-          <ProviderLogo id={providerId} name={providerName} size={18} />
+          <ProviderLogo id={seedId} name={providerName} size={18} />
         </div>
         <div className="min-w-0 flex-1">
           <div className="text-sm font-medium text-text">{providerName}</div>

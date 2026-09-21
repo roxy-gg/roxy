@@ -62,7 +62,16 @@ export interface SeedProvider {
 /** A provider the user has connected. Persisted in SQLite. */
 export interface ConnectedProvider {
   id: string
+  /** Catalog provider id; connection ids are distinct even for the first account. */
+  seedId: string
+  /** Per-seed, monotonically allocated account number (never reused on disconnect). */
+  accountNumber: number
   name: string
+  /** Account email/login, when the auth flow supplies it. */
+  identity?: string
+  /** CLIProxy auth-file binding and its account-specific routing prefix. */
+  proxyAuthFile?: string
+  proxyPrefix?: string
   wire: ProviderWire
   auth: ProviderAuth
   baseURL?: string
@@ -75,7 +84,10 @@ export interface ConnectedProvider {
 }
 
 export interface ConnectProviderInput {
+  /** Catalog seed id, not a connection id. */
   id: string
+  /** Explicitly update an existing connection; omitted means create a new one. */
+  connectionId?: string
   apiKey?: string
   baseURL?: string
   defaultModel?: string

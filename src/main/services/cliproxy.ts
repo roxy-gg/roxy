@@ -50,6 +50,8 @@ import { Readable } from 'node:stream'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { app, BrowserWindow, net as electronNet } from 'electron'
+import * as repo from '../db/repo'
+import type { ConnectedProvider } from '../../shared/types'
 import { CHANNELS } from '../../shared/ipc'
 import {
   CLIPROXY_VERSION,
@@ -57,6 +59,7 @@ import {
   IDLE_CLIPROXY_STATE,
   accountsFor,
   checksumsUrl,
+  providerIdForUpstream,
   releaseAsset,
   releaseAssetUrl,
   sha256For,
@@ -844,6 +847,9 @@ interface AuthFileEntry {
   /** The runtime manager also reports health; a disabled credential can't serve. */
   disabled?: boolean
   unavailable?: boolean
+  status?: string
+  updated_at?: string
+  runtime_only?: boolean
 }
 
 /**
@@ -857,29 +863,57 @@ interface AuthFileEntry {
  * Best-effort: a failure means "we can't tell", which must not knock a working
  * proxy into an error state - so the previous list is kept.
  */
-async function readAccounts(): Promise<CliProxyAccount[]> {
+async function readAccounts(strict = false): Promise<CliProxyAccount[]> {
   try {
     const body = await management<{ files?: (AuthFileEntry | string)[] }>('/auth-files')
-    return (
-      (body.files ?? [])
-        .map((f) =>
-          typeof f === 'string'
-            ? { file: f, type: f.split('-')[0] ?? 'unknown', usable: true }
-            : {
-                file: f.name ?? '',
-                type: f.provider ?? f.type ?? 'unknown',
-                email: f.email,
-                usable: !f.disabled && !f.unavailable
-              }
-        )
-        // A credential the proxy marked disabled/unavailable cannot serve a
-        // request, so listing it as signed in would promise something that fails.
-        .filter((a) => a.file && a.usable)
-        .map(({ file, type, email }) => ({ file, type, ...(email ? { email } : {}) }))
-    )
-  } catch {
+    return (body.files ?? []).flatMap((f): CliProxyAccount[] => {
+      if (typeof f === 'string') return safeAuthFile(f) ? [{ file: f, type: f.split('-')[0] }] : []
+      if (!f.name || !safeAuthFile(f.name) || f.runtime_only) return []
+      return [
+        {
+          file: f.name,
+          type: f.provider ?? f.type ?? f.name.split('-')[0],
+          ...(f.email ? { email: f.email } : {}),
+          disabled: f.disabled,
+          unavailable: f.unavailable,
+          status: f.status,
+          updatedAt: f.updated_at
+        }
+      ]
+    })
+  } catch (error) {
+    if (strict) throw error
     return state.accounts
   }
+}
+
+/** Reject traversal on every platform, including Windows separators on macOS. */
+function safeAuthFile(file: string): boolean {
+  return (
+    !!file &&
+    !/[\\/\0]/.test(file) &&
+    !file.startsWith('.') &&
+    file.endsWith('.json') &&
+    basename(file) === file
+  )
+}
+
+/** Never surface JSON parser excerpts: malformed auth files still hold secrets. */
+async function readAuthMetadata(file: string): Promise<Record<string, unknown>> {
+  if (!safeAuthFile(file)) throw new Error('Invalid subscription auth filename.')
+  try {
+    const value: unknown = JSON.parse(await fsp.readFile(join(authDir(), file), 'utf8'))
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error()
+    return value as Record<string, unknown>
+  } catch {
+    throw new Error('Subscription credential could not be read. Reconnect this account.')
+  }
+}
+
+/** File identity, not email or provider, is the isolation boundary. */
+export function prefixForAuthFile(file: string): string {
+  if (!safeAuthFile(file)) throw new Error('Invalid subscription auth filename.')
+  return `roxy-${createHash('sha256').update(file).digest('hex')}`
 }
 
 /** Re-read the account list and publish it. */
@@ -887,6 +921,162 @@ async function refreshAccounts(): Promise<CliProxyAccount[]> {
   const accounts = await readAccounts()
   update({ accounts })
   return accounts
+}
+
+// ---- Connection-scoped routing -----------------------------------------------
+
+let connectionOperations: Promise<unknown> = Promise.resolve()
+function withConnections<T>(run: () => Promise<T>): Promise<T> {
+  const result = connectionOperations.then(run, run)
+  connectionOperations = result.catch(() => undefined)
+  return result
+}
+
+function connectionFor(id: string): ConnectedProvider {
+  const row = repo.listConnectedProviders().find((p) => p.id === id)
+  if (!row || !upstreamFor(row.seedId)) throw new Error('Subscription connection not found.')
+  return row
+}
+
+async function setAccountPrefix(file: string): Promise<string> {
+  const prefix = prefixForAuthFile(file)
+  const stat = await fsp.lstat(join(authDir(), file)).catch(() => null)
+  if (!stat?.isFile() || stat.isSymbolicLink())
+    throw new Error('Subscription credential is missing. Reconnect this account.')
+  await management('/auth-files/fields', {
+    method: 'PATCH',
+    body: JSON.stringify({ name: file, prefix })
+  })
+  // The management response alone is not enough: routing must survive restart.
+  const stored = await readAuthMetadata(file)
+  if (stored.prefix !== prefix) throw new Error('Could not persist subscription account isolation.')
+  return prefix
+}
+
+async function reconcileConnectionsUnlocked(): Promise<ConnectedProvider[]> {
+  const url = await ensureRunning()
+  const key = await localApiKey()
+  const accounts = await readAccounts(true)
+  update({ accounts })
+  const result: ConnectedProvider[] = []
+  // Stable ordering makes migration of an old provider-id row deterministic.
+  for (const account of [...accounts].sort((a, b) => a.file.localeCompare(b.file))) {
+    const seedId = providerIdForUpstream(account.type)
+    if (!seedId) continue
+    const rows = repo.listConnectedProviders()
+    const bound = rows.find((p) => p.proxyAuthFile === account.file)
+    if (bound && bound.seedId !== seedId)
+      throw new Error('Subscription credential changed upstream.')
+    const legacy = rows.find((p) => p.id === seedId && !p.proxyAuthFile)
+    const prefix = await setAccountPrefix(account.file)
+    result.push(
+      repo.storeCliProxyProvider(seedId, url, key, {
+        connectionId: bound?.id ?? legacy?.id,
+        proxyAuthFile: account.file,
+        proxyPrefix: prefix,
+        identity: account.email
+      })
+    )
+  }
+  return result
+}
+
+/** Import every auth file once, preserving a migrated legacy connection id. */
+export function reconcileConnections(): Promise<ConnectedProvider[]> {
+  return withConnections(reconcileConnectionsUnlocked)
+}
+
+/** Never fall back from a missing/unhealthy binding to another account. */
+export function prepareConnection(connectionId: string): Promise<ConnectedProvider> {
+  return withConnections(async () => {
+    let row = connectionFor(connectionId)
+    if (!row.enabled) throw new Error('This subscription connection is disabled.')
+    await ensureRunning()
+    if (!row.proxyAuthFile) {
+      await reconcileConnectionsUnlocked()
+      row = connectionFor(connectionId)
+    }
+    if (!row.proxyAuthFile)
+      throw new Error('Subscription account is not bound. Reconnect this account.')
+    const account = (await readAccounts(true)).find((a) => a.file === row.proxyAuthFile)
+    if (!account || account.type !== specFor(row.seedId).upstream) {
+      throw new Error('Subscription credential is missing. Reconnect this account.')
+    }
+    if (
+      account.disabled ||
+      account.unavailable ||
+      account.status === 'error' ||
+      account.status === 'disabled'
+    ) {
+      throw new Error('This subscription account is unavailable. Reconnect it or try again later.')
+    }
+    const prefix = await setAccountPrefix(account.file)
+    return repo.storeCliProxyProvider(row.seedId, baseUrl()!, await localApiKey(), {
+      connectionId: row.id,
+      proxyAuthFile: account.file,
+      proxyPrefix: prefix,
+      identity: account.email
+    })
+  })
+}
+
+/** Caller must prepare first; a model cannot escape the chosen file's prefix. */
+export function routeModel(connectionId: string, model: string): string {
+  const row = connectionFor(connectionId)
+  if (!row.proxyAuthFile || row.proxyPrefix !== prefixForAuthFile(row.proxyAuthFile)) {
+    throw new Error('Subscription connection has not been prepared.')
+  }
+  const prefix = `${row.proxyPrefix}/`
+  const bare = model.startsWith(prefix) ? model.slice(prefix.length) : model
+  if (!bare || /^roxy-[^/]+\//.test(bare))
+    throw new Error('Model belongs to another subscription account.')
+  return `${prefix}${bare}`
+}
+
+/** This endpoint enumerates one auth file, never the shared /v1/models pool. */
+export async function listConnectionModels(
+  connectionId: string
+): Promise<{ id: string; name?: string }[]> {
+  const row = await prepareConnection(connectionId)
+  const body = await management<{ models?: { id?: string; display_name?: string }[] }>(
+    `/auth-files/models?name=${encodeURIComponent(row.proxyAuthFile!)}`
+  )
+  const prefix = `${row.proxyPrefix}/`
+  const seen = new Set<string>()
+  return (body.models ?? []).flatMap((m) => {
+    if (!m.id) return []
+    const id = m.id.startsWith(prefix) ? m.id.slice(prefix.length) : m.id
+    if (!id || /^roxy-[^/]+\//.test(id) || seen.has(id)) return []
+    seen.add(id)
+    return [{ id, ...(m.display_name ? { name: m.display_name } : {}) }]
+  })
+}
+
+/** Removes precisely one binding, including when the sidecar cannot start. */
+export function disconnectConnection(connectionId: string): Promise<void> {
+  return withConnections(async () => {
+    const row = connectionFor(connectionId)
+    if (row.proxyAuthFile) {
+      const file = row.proxyAuthFile
+      if (!safeAuthFile(file)) throw new Error('Invalid subscription auth filename.')
+      let removedFromRuntime = false
+      if (isLive()) {
+        try {
+          await management(`/auth-files?name=${encodeURIComponent(file)}`, { method: 'DELETE' })
+          removedFromRuntime = true
+        } catch {
+          /* disk deletion below is authoritative */
+        }
+      }
+      // If runtime deletion failed, stop it before deleting so cached credentials
+      // cannot continue serving requests. Sibling files remain untouched.
+      if (isLive() && !removedFromRuntime) await stop()
+      await fsp.rm(join(authDir(), file), { force: true })
+      update({ accounts: state.accounts.filter((a) => a.file !== file) })
+    }
+    repo.disconnectProvider(connectionId)
+    if (!(await hasStoredCredentials())) await stop()
+  })
 }
 
 // ---- Lifecycle ---------------------------------------------------------------
@@ -979,6 +1169,7 @@ function killChild(): void {
   const proc = child
   if (!proc) return
   stopping = true
+  for (const loginState of loginAttempts.keys()) finishLogin(loginState)
   child = null
   try {
     proc.kill()
@@ -1014,6 +1205,128 @@ export async function status(): Promise<CliProxyState> {
 
 // ---- Login -------------------------------------------------------------------
 
+interface LoginAttempt {
+  providerId: string
+  before: Map<string, string>
+  deadline: number
+  timer: ReturnType<typeof setTimeout>
+}
+const loginAttempts = new Map<string, LoginAttempt>()
+const activeLogins = new Set<string>()
+
+/** Digests remain main-process-only: never publish auth JSON or token material. */
+async function authSnapshot(providerId: string): Promise<Map<string, string>> {
+  const spec = specFor(providerId)
+  const result = new Map<string, string>()
+  for (const account of await readAccounts(true)) {
+    if (account.type !== spec.upstream) continue
+    const file = join(authDir(), account.file)
+    const stat = await fsp.lstat(file).catch(() => null)
+    if (!stat?.isFile() || stat.isSymbolicLink()) continue
+    const raw = await readAuthMetadata(account.file)
+    // Our own prefix maintenance must not look like a completed OAuth login.
+    delete raw.prefix
+    result.set(account.file, createHash('sha256').update(stableAuthJson(raw)).digest('hex'))
+  }
+  return result
+}
+
+/** Ignore JSON key ordering changes caused by management metadata rewrites. */
+function stableAuthJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableAuthJson).join(',')}]`
+  if (value && typeof value === 'object') {
+    return `{${Object.entries(value)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([key, item]) => `${JSON.stringify(key)}:${stableAuthJson(item)}`)
+      .join(',')}}`
+  }
+  return JSON.stringify(value)
+}
+
+function finishLogin(loginState: string): void {
+  const attempt = loginAttempts.get(loginState)
+  if (!attempt) return
+  clearTimeout(attempt.timer)
+  activeLogins.delete(attempt.providerId)
+  loginAttempts.delete(loginState)
+}
+
+/** Reserve the upstream until pollLogin completes (not merely until URL return). */
+export async function startLogin(providerId = CODEX_PROVIDER_ID): Promise<CliProxyLoginStart> {
+  specFor(providerId)
+  if (activeLogins.has(providerId))
+    throw new Error('A sign-in for this subscription is already in progress.')
+  activeLogins.add(providerId)
+  try {
+    await ensureRunning()
+    const before = await authSnapshot(providerId)
+    const login = await startLoginUnlocked(providerId)
+    const timer = setTimeout(() => finishLogin(login.state), LOGIN_TIMEOUT_MS)
+    timer.unref?.()
+    loginAttempts.set(login.state, {
+      providerId,
+      before,
+      deadline: Date.now() + LOGIN_TIMEOUT_MS,
+      timer
+    })
+    return login
+  } catch (error) {
+    activeLogins.delete(providerId)
+    throw error
+  }
+}
+
+/** Full login orchestration for IPC; explicit reconnect cannot switch identity. */
+export async function loginConnection(
+  seedId: string,
+  connectionId?: string,
+  openExternal?: (url: string) => Promise<unknown> | void
+): Promise<CliProxyLoginResult> {
+  let existing = connectionId ? connectionFor(connectionId) : undefined
+  if (existing && existing.seedId !== seedId)
+    throw new Error('Cannot reconnect a different subscription provider.')
+  if (existing && !existing.proxyAuthFile) {
+    await reconcileConnections()
+    existing = connectionFor(existing.id)
+    if (!existing.proxyAuthFile)
+      throw new Error('This connection has no account to reconnect. Add an account instead.')
+  }
+  const login = await startLogin(seedId)
+  try {
+    if (!openExternal)
+      throw new Error('A browser opener is required to complete subscription sign-in.')
+    await openExternal(login.url)
+    const result = await pollLoginAttempt(login.state, false)
+    if (!result.ok || !result.accountFile) return result
+    const account = result.accounts.find((a) => a.file === result.accountFile)
+    if (
+      existing &&
+      ((existing.proxyAuthFile && existing.proxyAuthFile !== result.accountFile) ||
+        (existing.identity &&
+          account?.email &&
+          existing.identity.toLowerCase() !== account.email.toLowerCase()))
+    ) {
+      return {
+        ...result,
+        ok: false,
+        error: 'Sign in with the same account to reconnect this connection.'
+      }
+    }
+    const rows = await reconcileConnections()
+    const bound = rows.find((p) => p.proxyAuthFile === result.accountFile)
+    if (!bound || (existing && bound.id !== existing.id)) {
+      return {
+        ...result,
+        ok: false,
+        error: 'The signed-in account could not be bound to this connection.'
+      }
+    }
+    return { ...result, connectionId: bound.id }
+  } finally {
+    finishLogin(login.state)
+  }
+}
+
 /**
  * Begin one provider's OAuth login. Boots the sidecar if needed, then asks it
  * for an authorization URL; the caller opens that URL in the user's browser.
@@ -1024,7 +1337,7 @@ export async function status(): Promise<CliProxyState> {
  * free FIRST, because the failure otherwise happens *after* the user has signed
  * in, which is the worst possible moment to discover it.
  */
-export async function startLogin(
+async function startLoginUnlocked(
   providerId: string = CODEX_PROVIDER_ID
 ): Promise<CliProxyLoginStart> {
   const spec = specFor(providerId)
@@ -1107,32 +1420,58 @@ function waitForCallbackListener(port: number): Promise<boolean> {
  * a poll that arrives after completion still reads as success rather than as a
  * mysterious failure.
  */
-export async function pollLogin(loginState: string): Promise<CliProxyLoginResult> {
-  const deadline = Date.now() + LOGIN_TIMEOUT_MS
-  while (Date.now() < deadline) {
-    let body: { status?: string; error?: string }
-    try {
-      body = await management(`/get-auth-status?state=${encodeURIComponent(loginState)}`)
-    } catch (e) {
-      return {
-        ok: false,
-        error: e instanceof Error ? e.message : String(e),
-        accounts: state.accounts
+export function pollLogin(loginState: string): Promise<CliProxyLoginResult> {
+  return pollLoginAttempt(loginState, true)
+}
+
+async function pollLoginAttempt(
+  loginState: string,
+  release: boolean
+): Promise<CliProxyLoginResult> {
+  const attempt = loginAttempts.get(loginState)
+  if (!attempt)
+    return { ok: false, error: 'Unknown or expired sign-in attempt.', accounts: state.accounts }
+  try {
+    while (Date.now() < attempt.deadline) {
+      if (loginAttempts.get(loginState) !== attempt)
+        throw new Error('Sign-in was cancelled or expired.')
+      const body = await management<{ status?: string; error?: string }>(
+        `/get-auth-status?state=${encodeURIComponent(loginState)}`
+      )
+      if (body.status === 'ok') {
+        // Upstream reports ok for unknown states too. Require exactly one new
+        // or changed credential of the expected upstream, never "first account".
+        const after = await authSnapshot(attempt.providerId)
+        const changed = [...after].filter(([file, digest]) => attempt.before.get(file) !== digest)
+        if (changed.length !== 1) {
+          return {
+            ok: false,
+            error: 'Could not uniquely identify the signed-in account. Please try again.',
+            accounts: await refreshAccounts()
+          }
+        }
+        return { ok: true, accountFile: changed[0][0], accounts: await refreshAccounts() }
       }
+      if (body.status === 'error') {
+        return { ok: false, error: body.error || 'Sign-in failed.', accounts: state.accounts }
+      }
+      await new Promise((r) => setTimeout(r, LOGIN_POLL_MS))
     }
-    if (body.status === 'ok') {
-      return { ok: true, accounts: await refreshAccounts() }
+    return { ok: false, error: 'Timed out waiting for sign-in.', accounts: state.accounts }
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+      accounts: state.accounts
     }
-    if (body.status === 'error') {
-      return { ok: false, error: body.error || 'Sign-in failed.', accounts: state.accounts }
-    }
-    await new Promise((r) => setTimeout(r, LOGIN_POLL_MS))
+  } finally {
+    if (release) finishLogin(loginState)
   }
-  return { ok: false, error: 'Timed out waiting for sign-in.', accounts: state.accounts }
 }
 
 /** Sign an account out by deleting its token file from the sidecar's auth-dir. */
 export async function signOut(file: string): Promise<CliProxyAccount[]> {
+  if (!safeAuthFile(file)) throw new Error('Invalid subscription auth filename.')
   await management(`/auth-files?name=${encodeURIComponent(file)}`, { method: 'DELETE' })
   return refreshAccounts()
 }
@@ -1237,6 +1576,7 @@ async function removeAuthFilesFor(
     // No auth dir at all - nothing to remove.
   }
   for (const name of targets) {
+    if (!safeAuthFile(name)) continue
     await fsp.rm(join(dir, name), { force: true }).catch(() => undefined)
   }
 }

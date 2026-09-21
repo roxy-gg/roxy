@@ -242,6 +242,7 @@
     "title": "MCP サーバー"
   },
   "models": {
+    "accountDisconnected": "This session’s provider account is disconnected. Choose an account in the model picker before sending again.",
     "allHidden": "すべてのモデルが非表示になっています。<settings>設定 → モデル</settings>で一部を元に戻してください。",
     "copilotUnavailable": "利用可能なGitHub Copilotモデルが選択されていません。有効なモデルを選択するか、アカウントのモデルアクセスと接続を確認してから再試行してください。",
     "loadFailed": "models.dev からモデルを読み込めませんでした — 現在のモデルで送信することはできます。",
@@ -456,12 +457,17 @@
       "title": "匿名の使用状況データを送信する"
     },
     "providers": {
+      "accountName": "Account name",
       "active": "アクティブ",
       "add": "プロバイダーを追加",
+      "addAccount": "Add account",
       "disconnect": "接続解除",
       "heading": "プロバイダー",
       "keyStored": "キー保存済み",
       "noCredential": "認証情報なし",
+      "reconnect": "Reconnect",
+      "rename": "Rename account",
+      "renameAccount": "Rename {{name}}",
       "signedInLocally": "ローカルでサインイン済み"
     },
     "title": "設定",

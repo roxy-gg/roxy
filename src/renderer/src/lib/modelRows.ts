@@ -10,6 +10,7 @@ import { modelLabel } from '../../../shared/models'
 /** The subset of a connected provider this list needs. */
 export interface RowProvider {
   id: string
+  seedId?: string
   name: string
 }
 
@@ -77,7 +78,7 @@ export function buildProviderModelRows(input: {
       providerId: provider.id,
       providerName: provider.name,
       modelId: m.id,
-      label: modelLabel(provider.id, hit?.info.name ?? m.name ?? m.id, m.id),
+      label: modelLabel(provider.seedId ?? provider.id, hit?.info.name ?? m.name ?? m.id, m.id),
       info: hit?.info
     })
   }

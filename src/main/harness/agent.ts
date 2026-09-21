@@ -88,6 +88,7 @@ import {
   openAiContent,
   openAiReasoning,
   openaiEndpoint,
+  requestModel,
   streamChat,
   withCopilotRetry,
   ModelHttpError,
@@ -294,8 +295,15 @@ export async function streamTurn(
 ): Promise<{ text: string; toolCalls: ToolCallAccum[]; usage: TokenUsage | null }> {
   const runOnce = deps.runOnce ?? streamOnce
   const delay = deps.delay ?? abortableDelay
+  const copilotSession =
+    !deps.runOnce && repo.getProviderSeedId(providerId) === 'github-copilot'
+      ? repo.getCopilotSessionKey(providerId)
+      : undefined
   for (let attempt = 0; ; attempt++) {
     if (signal.aborted) return { text: '', toolCalls: [], usage: null }
+    if (copilotSession !== undefined && repo.getCopilotSessionKey(providerId) !== copilotSession) {
+      throw new ModelHttpError(409, 'GitHub Copilot account changed during the request. Try again.')
+    }
     let emitted = false
     try {
       return await runOnce(
@@ -467,7 +475,7 @@ function buildSystemMessage(
     devPort: devPortForPrompt(chatId),
     platform: process.platform,
     modelId: model,
-    providerId,
+    providerId: repo.getProviderSeedId(providerId),
     date: new Date().toDateString()
   })
   // Project instructions (AGENTS.md etc.) come after the env, then any discovered
@@ -961,15 +969,19 @@ export async function runAgentTurn(opts: RunTurnOptions): Promise<void> {
     reasoningEffort,
     contextLimit
   } = opts
+  const copilotSession =
+    repo.getProviderSeedId(providerId) === 'github-copilot'
+      ? repo.getCopilotSessionKey(providerId)
+      : undefined
   const wire =
-    providerId === 'github-copilot'
+    repo.getProviderSeedId(providerId) === 'github-copilot'
       ? 'openai-chat'
       : repo.listConnectedProviders().find((p) => p.id === providerId)?.wire
   // Tool-capable wires: the OpenAI SSE path (openai/openai-chat + Copilot) and
   // the AI SDK path (anthropic/google). Azure/Bedrock still fall back to a plain
   // answer until their tool transports land.
   const toolCapable =
-    providerId === 'github-copilot' ||
+    repo.getProviderSeedId(providerId) === 'github-copilot' ||
     wire === 'openai' ||
     wire === 'openai-chat' ||
     usesAiSdk(wire)
@@ -1035,6 +1047,9 @@ export async function runAgentTurn(opts: RunTurnOptions): Promise<void> {
   // The simple streamChat builders don't speak tool roles, so fold any structured
   // tool history from earlier turns back into plain text first.
   if (!toolCapable || !cwd) {
+    if (copilotSession !== undefined && repo.getCopilotSessionKey(providerId) !== copilotSession) {
+      throw new ModelHttpError(409, 'GitHub Copilot account changed during this turn. Try again.')
+    }
     await streamChat({
       providerId,
       model,
@@ -1057,6 +1072,7 @@ export async function runAgentTurn(opts: RunTurnOptions): Promise<void> {
   // a read-only agent (Plan) may only spawn read-only subagents (enforced below).
   await runLoop({
     providerId,
+    copilotSession,
     vision,
     model,
     convo,
@@ -1084,6 +1100,7 @@ export async function runAgentTurn(opts: RunTurnOptions): Promise<void> {
 interface LoopOptions {
   /** The connected provider — re-resolved each call so Copilot's token can refresh. */
   providerId: string
+  copilotSession?: string | null
   /** Whether the initial messages carry images (flips on vision headers). */
   vision: boolean
   model: string
@@ -1194,6 +1211,12 @@ async function runLoop(o: LoopOptions): Promise<string> {
   // finishes with prose (no tool calls) or the user stops it (signal aborts).
   for (;;) {
     if (signal.aborted) return lastText
+    if (
+      o.copilotSession !== undefined &&
+      repo.getCopilotSessionKey(providerId) !== o.copilotSession
+    ) {
+      throw new ModelHttpError(409, 'GitHub Copilot account changed during this turn. Try again.')
+    }
     const { text, toolCalls, usage } = await streamTurn(
       providerId,
       vision,
@@ -1262,6 +1285,7 @@ async function runLoop(o: LoopOptions): Promise<string> {
           callId: tc.id,
           input: parsed,
           providerId,
+          copilotSession: o.copilotSession,
           vision,
           model,
           cwd,
@@ -1417,6 +1441,7 @@ interface SubagentOptions {
   /** The parsed `task` arguments (description/prompt/subagent_type/background). */
   input: TaskInput
   providerId: string
+  copilotSession?: string | null
   vision: boolean
   model: string
   cwd: string
@@ -1589,6 +1614,7 @@ async function runSubagent(o: SubagentOptions): Promise<string> {
     try {
       const text = await runLoop({
         providerId,
+        copilotSession: o.copilotSession,
         vision,
         model,
         convo: [
@@ -1831,10 +1857,12 @@ async function streamOnce(
   // handles their tool-calling. The return shape matches the OpenAI path below,
   // so the loop stays wire-agnostic. (Copilot is always openai-chat → SSE path.)
   const provider =
-    providerId === 'github-copilot'
+    repo.getProviderSeedId(providerId) === 'github-copilot'
       ? undefined
       : repo.listConnectedProviders().find((p) => p.id === providerId)
-  const wire = providerId === 'github-copilot' ? 'openai-chat' : provider?.wire
+  const isCopilot = repo.getProviderSeedId(providerId) === 'github-copilot'
+  const copilotSession = isCopilot ? repo.getCopilotSessionKey(providerId) : null
+  const wire = isCopilot ? 'openai-chat' : provider?.wire
   // Sanitize every tool-call id before it leaves the process. GitHub Copilot
   // proxies Claude/Opus and validates tool_use.id against a letters/digits/hyphens
   // pattern (no underscores, dots, or colons), so replaying a prior turn's raw ids
@@ -1869,8 +1897,9 @@ async function streamOnce(
     })
   }
 
+  const routedModel = await requestModel(providerId, model)
   const chatPayload = JSON.stringify({
-    model,
+    model: routedModel,
     messages,
     tools,
     tool_choice: 'auto',
@@ -1888,7 +1917,7 @@ async function streamOnce(
   // chat-completions GPT models are untouched by this.
   const responsesPayload = (): string =>
     JSON.stringify({
-      model,
+      model: routedModel,
       input: toResponsesInput(messages),
       tools: toResponsesTools(tools),
       tool_choice: 'auto',
@@ -1902,22 +1931,28 @@ async function streamOnce(
   let useResponses = isResponsesOnly(providerId, model)
   const send = async (recordAuthorization: (authorization: string) => void): Promise<Response> => {
     const { url, headers } = await openaiEndpoint(providerId, { vision, responses: useResponses })
-    if (providerId === 'github-copilot') recordAuthorization(headers.Authorization)
+    if (isCopilot) recordAuthorization(headers.Authorization)
     const body = useResponses ? responsesPayload() : chatPayload
     return fetch(url, { method: 'POST', headers, body, signal })
   }
   // On a 401 the token was rejected (expiry race / clock skew) — drop it, wait,
   // and retry a few times before surfacing the error.
-  let res = await withCopilotRetry(providerId === 'github-copilot', send, signal)
+  let res = await withCopilotRetry(isCopilot, send, signal, providerId)
   // A Responses-only model answers /chat/completions with exactly one error:
   // 400 unsupported_api_for_model. Remember it (so later calls in this loop go
   // straight there) and replay the turn on the Responses API.
   if (!res.ok && !useResponses) {
     const errBody = await res.text().catch(() => '')
     if (isChatUnsupported(res.status, errBody)) {
+      if (isCopilot && repo.getCopilotSessionKey(providerId) !== copilotSession) {
+        throw new ModelHttpError(
+          409,
+          'GitHub Copilot account changed during the request. Try again.'
+        )
+      }
       markResponsesOnly(providerId, model)
       useResponses = true
-      res = await withCopilotRetry(providerId === 'github-copilot', send, signal)
+      res = await withCopilotRetry(isCopilot, send, signal, providerId)
     } else {
       throw new ModelHttpError(
         res.status,

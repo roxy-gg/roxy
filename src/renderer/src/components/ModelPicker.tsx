@@ -113,12 +113,14 @@ export function ModelPicker(): JSX.Element {
 
   const config = useMemo(() => resolveSessionConfig(activeChat, settings), [activeChat, settings])
   const activeProvider = useMemo(
-    () => providers.find((p) => p.id === config.providerId) ?? providers[0] ?? null,
+    () =>
+      (config.providerId ? providers.find((p) => p.id === config.providerId) : providers[0]) ??
+      null,
     [providers, config.providerId]
   )
   const selectedModel = activeProvider?.id === config.providerId ? config.model : null
   const activeModel =
-    activeProvider?.id === 'github-copilot'
+    activeProvider?.seedId === 'github-copilot'
       ? resolveProviderModel(activeProvider, models[activeProvider.id] ?? [], selectedModel)
       : selectedModel
 
@@ -147,7 +149,6 @@ export function ModelPicker(): JSX.Element {
 
   useEffect(() => {
     if (!open) return
-    void ensureModels('github-copilot')
     if (selectedProviderId) void ensureModels(selectedProviderId)
   }, [open, selectedProviderId, ensureModels])
 
@@ -223,6 +224,7 @@ export function ModelPicker(): JSX.Element {
       .filter((p) => p.id !== currentProvider?.id && (matchCounts[p.id] ?? 0) > 0)
       .map((p) => ({
         id: p.id,
+        seedId: p.seedId,
         name: p.name,
         count: matchCounts[p.id] ?? 0
       }))
@@ -252,7 +254,7 @@ export function ModelPicker(): JSX.Element {
     if (!activeModel) return t('models.selectModel')
     if (!activeProvider) return activeModel
     const name = index.get(`${activeProvider.id}:${activeModel}`)?.info.name
-    return name ? modelLabel(activeProvider.id, name, activeModel) : activeModel
+    return name ? modelLabel(activeProvider.seedId, name, activeModel) : activeModel
   }, [activeModel, activeProvider, index, t])
 
   const pick = useCallback(
@@ -275,7 +277,7 @@ export function ModelPicker(): JSX.Element {
     <div ref={rootRef} className="relative">
       <button type="button" onClick={() => setOpen((o) => !o)} className={triggerClass}>
         {activeProvider && (
-          <ProviderLogo id={activeProvider.id} name={activeProvider.name} size={14} />
+          <ProviderLogo id={activeProvider.seedId} name={activeProvider.name} size={14} />
         )}
         <span className="max-w-[200px] truncate">{triggerLabel}</span>
         <ChevronsUpDown className="h-3 w-3 shrink-0 opacity-60" />
@@ -323,13 +325,14 @@ export function ModelPicker(): JSX.Element {
                           : 'bg-white/[0.04] hover:bg-white/[0.08]'
                       )}
                     >
-                      <ProviderLogo id={p.id} name={p.name} size={20} />
+                      <ProviderLogo id={p.seedId} name={p.name} size={20} />
                       {hasQuery && count !== undefined && count > 0 && (
                         <span className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-accent/90 px-1.5 py-0.5 text-[10px] font-semibold text-white shadow-xs">
                           {count > 99 ? '99+' : count}
                         </span>
                       )}
                     </div>
+                    <span className="mt-1 max-w-28 truncate px-1 text-[11px]">{p.name}</span>
                     {/* Active indicator bar */}
                     <div
                       className={cn(
@@ -446,7 +449,7 @@ export function ModelPicker(): JSX.Element {
                           }}
                           className="flex items-center gap-1.5 rounded-md border border-border/60 bg-white/[0.04] px-2 py-1 text-xs text-text transition hover:bg-white/10"
                         >
-                          <ProviderLogo id={other.id} name={other.name} size={13} />
+                          <ProviderLogo id={other.seedId} name={other.name} size={13} />
                           <span>{other.name}</span>
                           <span className="rounded-full bg-accent/20 px-1 py-0.5 text-[10px] font-semibold text-accent">
                             {other.count}
@@ -481,7 +484,7 @@ export function ModelPicker(): JSX.Element {
 
             {rows.length === 0 && !loading && !q && !allHidden && (
               <div className="px-3 py-3 text-xs text-text-subtle">
-                {currentProvider?.id === 'github-copilot'
+                {currentProvider?.seedId === 'github-copilot'
                   ? t('models.copilotUnavailable')
                   : t('models.loadFailed')}
               </div>

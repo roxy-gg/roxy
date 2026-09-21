@@ -16,7 +16,7 @@ export { ModelHttpError } from './model-http-error'
 import type { ChatMessage } from '../../shared/api'
 import type { ReasoningEffort } from '../../shared/types'
 import { isCliProxyProvider } from '../../shared/cliproxy'
-import { ensureRunning as ensureCliProxy, localApiKey as cliProxyKey } from './cliproxy'
+import { prepareConnection, routeModel, localApiKey as cliProxyKey } from './cliproxy'
 import {
   applyResponsesEvent,
   isChatUnsupported,
@@ -42,16 +42,28 @@ interface CopilotToken {
   credentialKey: string
   apiUrl: string
 }
-let copilotCache: CopilotToken | null = null
-let copilotRefresh: { credentialKey: string; promise: Promise<CopilotToken> } | null = null
-let copilotRejectedCredential: string | null = null
+interface CopilotState {
+  cache: CopilotToken | null
+  refresh: { credentialKey: string; promise: Promise<CopilotToken> } | null
+  rejectedCredential: string | null
+}
+const copilotAccounts = new Map<string, CopilotState>()
+function copilotState(connectionId: string): CopilotState {
+  let state = copilotAccounts.get(connectionId)
+  if (!state) {
+    state = { cache: null, refresh: null, rejectedCredential: null }
+    copilotAccounts.set(connectionId, state)
+  }
+  return state
+}
 
 /** Expose only the recovery action, never credentials or provider error bodies. */
-export function copilotNeedsReauthentication(): boolean {
+export function copilotNeedsReauthentication(connectionId = 'github-copilot'): boolean {
+  const state = copilotState(connectionId)
   try {
     return (
-      copilotRejectedCredential !== null &&
-      copilotRejectedCredential === JSON.stringify(repo.getCopilotCredential())
+      state.rejectedCredential !== null &&
+      state.rejectedCredential === JSON.stringify(repo.getCopilotCredential(connectionId))
     )
   } catch {
     // A locked keychain is not fixed by signing in again.
@@ -112,18 +124,19 @@ function geminiParts(m: ChatMessage): unknown[] {
 }
 
 /** Exchange the stored GitHub token for a short-lived Copilot token (cached). */
-async function getCopilotToken(): Promise<CopilotToken> {
-  const stored = repo.getCopilotCredential()
+async function getCopilotToken(connectionId: string): Promise<CopilotToken> {
+  const state = copilotState(connectionId)
+  const stored = repo.getCopilotCredential(connectionId)
   if (!stored) {
-    copilotCache = null
+    state.cache = null
     throw new Error('GitHub Copilot is not linked. Connect it in onboarding or Settings.')
   }
   let credential = stored
   const credentialKey = JSON.stringify(credential)
-  if (copilotCache?.credentialKey === credentialKey && copilotCache.refreshAt > Date.now()) {
-    return copilotCache
+  if (state.cache?.credentialKey === credentialKey && state.cache.refreshAt > Date.now()) {
+    return state.cache
   }
-  if (copilotRefresh?.credentialKey === credentialKey) return copilotRefresh.promise
+  if (state.refresh?.credentialKey === credentialKey) return state.refresh.promise
 
   // One renewal per credential: refresh tokens rotate and must not be spent twice.
   const pending = { credentialKey, promise: null! as Promise<CopilotToken> }
@@ -131,7 +144,7 @@ async function getCopilotToken(): Promise<CopilotToken> {
     let renewed = false
     const renew = async (): Promise<void> => {
       const next = await refreshGitHubCredential(credential)
-      if (!repo.updateCopilotCredential(credential, next)) {
+      if (!repo.updateCopilotCredential(credential, next, connectionId)) {
         throw new ModelHttpError(
           409,
           'GitHub Copilot authorization changed while refreshing. Try again.'
@@ -213,33 +226,44 @@ async function getCopilotToken(): Promise<CopilotToken> {
       credentialKey: pending.credentialKey,
       apiUrl: (data.endpoints?.api || COPILOT_API_URL).replace(/\/+$/, '')
     }
-    if (JSON.stringify(repo.getCopilotCredential()) !== pending.credentialKey) {
+    if (
+      state.refresh !== pending ||
+      JSON.stringify(repo.getCopilotCredential(connectionId)) !== pending.credentialKey
+    ) {
       throw new ModelHttpError(
         409,
         'GitHub Copilot authorization changed while refreshing. Try again.'
       )
     }
-    copilotCache = token
-    copilotRejectedCredential = null
+    state.cache = token
+    state.rejectedCredential = null
     return token
   })()
-  copilotRefresh = pending
+  state.refresh = pending
   try {
     return await pending.promise
   } catch (error) {
-    if (error instanceof ModelHttpError && error.status === 401 && copilotRefresh === pending) {
-      copilotRejectedCredential = pending.credentialKey
+    if (error instanceof ModelHttpError && error.status === 401 && state.refresh === pending) {
+      state.rejectedCredential = pending.credentialKey
     }
     throw error
   } finally {
-    if (copilotRefresh === pending) copilotRefresh = null
+    if (state.refresh === pending) state.refresh = null
   }
 }
 
 /** Drop the cached Copilot token so the next call re-exchanges it (used on a 401). */
-export function invalidateCopilotToken(rejectedAuthorization?: string): void {
-  if (!rejectedAuthorization || rejectedAuthorization === `Bearer ${copilotCache?.token}`) {
-    copilotCache = null
+export function invalidateCopilotToken(
+  rejectedAuthorization?: string,
+  connectionId = 'github-copilot'
+): void {
+  const state = copilotState(connectionId)
+  if (!rejectedAuthorization || rejectedAuthorization === `Bearer ${state.cache?.token}`) {
+    state.cache = null
+  }
+  if (!rejectedAuthorization) {
+    state.refresh = null
+    state.rejectedCredential = null
   }
 }
 
@@ -252,8 +276,11 @@ export function invalidateCopilotToken(rejectedAuthorization?: string): void {
 export async function withCopilotRetry(
   isCopilot: boolean,
   send: (recordAuthorization: (authorization: string) => void) => Promise<Response>,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  connectionId = 'github-copilot'
 ): Promise<Response> {
+  const state = copilotState(connectionId)
+  const sessionKey = isCopilot ? repo.getCopilotSessionKey(connectionId) : null
   let authorization: string | undefined
   const recordAuthorization = (value: string): void => {
     authorization = value
@@ -261,20 +288,23 @@ export async function withCopilotRetry(
   let res = await send(recordAuthorization)
   for (let attempt = 0; isCopilot && res.status === 401 && attempt < 3; attempt++) {
     if (signal?.aborted) break
-    invalidateCopilotToken(authorization)
+    invalidateCopilotToken(authorization, connectionId)
     await res.body?.cancel().catch(() => undefined)
     await new Promise((resolve) => setTimeout(resolve, 400 * 2 ** attempt)) // 400ms, 800ms, 1.6s
     if (signal?.aborted) break
+    if (repo.getCopilotSessionKey(connectionId) !== sessionKey) {
+      throw new ModelHttpError(409, 'GitHub Copilot account changed during the request. Try again.')
+    }
     res = await send(recordAuthorization)
   }
   if (
     isCopilot &&
     !signal?.aborted &&
-    copilotCache &&
-    authorization === `Bearer ${copilotCache.token}`
+    state.cache &&
+    authorization === `Bearer ${state.cache.token}`
   ) {
-    if (res.status === 401) copilotRejectedCredential = copilotCache.credentialKey
-    else if (res.ok) copilotRejectedCredential = null
+    if (res.status === 401) state.rejectedCredential = state.cache.credentialKey
+    else if (res.ok) state.rejectedCredential = null
   }
   return res
 }
@@ -292,9 +322,10 @@ function copilotHeaders(token: string, vision = false): Record<string, string> {
 /** Discovery and inference must use the API host assigned to this account. */
 export async function copilotEndpoint(
   path: '/models' | '/chat/completions' | '/responses',
-  vision = false
+  vision = false,
+  connectionId = 'github-copilot'
 ): Promise<{ url: string; headers: Record<string, string> }> {
-  const auth = await getCopilotToken()
+  const auth = await getCopilotToken(connectionId)
   return { url: `${auth.apiUrl}${path}`, headers: copilotHeaders(auth.token, vision) }
 }
 
@@ -309,32 +340,39 @@ export async function copilotEndpoint(
  * share the one process, so they resolve to the same live URL.
  */
 async function resolveBaseUrl(providerId: string, stored: string | undefined): Promise<string> {
-  if (!isCliProxyProvider(providerId)) {
+  if (!isCliProxyProvider(repo.getProviderSeedId(providerId))) {
     return (stored || 'https://api.openai.com/v1').replace(/\/+$/, '')
   }
-  const live = await ensureCliProxy()
+  const connection = await prepareConnection(providerId)
+  const live = connection.baseURL!
   if (live !== stored) repo.setProviderBaseUrl(providerId, live)
   return live.replace(/\/+$/, '')
 }
 
-/**
- * Resolve the OpenAI-compatible chat endpoint + headers (Copilot or openai-chat).
- *
- * `responses: true` targets the Responses API instead, for the models that are
- * only served there (see services/responses.ts).
- */
+/** Add the account routing prefix only at the wire boundary. */
+export async function requestModel(providerId: string, model: string): Promise<string> {
+  if (!isCliProxyProvider(repo.getProviderSeedId(providerId))) return model
+  await prepareConnection(providerId)
+  return routeModel(providerId, model)
+}
+
+/** Resolve account credentials and the live OpenAI-compatible endpoint. */
 export async function openaiEndpoint(
   providerId: string,
   opts: { vision?: boolean; responses?: boolean } = {}
 ): Promise<{ url: string; headers: Record<string, string> }> {
-  if (providerId === 'github-copilot') {
-    return copilotEndpoint(opts.responses ? '/responses' : '/chat/completions', opts.vision)
+  if (repo.getProviderSeedId(providerId) === 'github-copilot') {
+    return copilotEndpoint(
+      opts.responses ? '/responses' : '/chat/completions',
+      opts.vision,
+      providerId
+    )
   }
   const provider = repo.listConnectedProviders().find((p) => p.id === providerId)
   if (!provider) throw new Error(`Provider "${providerId}" is not connected.`)
   // The sidecar's own key is generated per install and can be regenerated, so
   // read it from the service rather than trusting a possibly-stale stored copy.
-  const key = isCliProxyProvider(providerId)
+  const key = isCliProxyProvider(provider.seedId)
     ? await cliProxyKey()
     : repo.getProviderToken(providerId)
   const base = await resolveBaseUrl(providerId, provider.baseURL)
@@ -380,7 +418,10 @@ export function openAiReasoning(
   effort?: ReasoningEffort
 ): { reasoning_effort?: ReasoningEffort } {
   if (!reasoning || !effort) return {}
-  if (!FULL_EFFORT_LADDER_PROVIDERS.has(providerId) && (effort === 'xhigh' || effort === 'max')) {
+  if (
+    !FULL_EFFORT_LADDER_PROVIDERS.has(repo.getProviderSeedId(providerId)) &&
+    (effort === 'xhigh' || effort === 'max')
+  ) {
     return { reasoning_effort: 'high' }
   }
   return { reasoning_effort: effort }
@@ -419,7 +460,8 @@ export async function streamChat(opts: StreamChatOptions): Promise<void> {
     opts
 
   // GitHub Copilot: exchange the GitHub token, then an OpenAI-compatible endpoint.
-  if (providerId === 'github-copilot') {
+  if (repo.getProviderSeedId(providerId) === 'github-copilot') {
+    const sessionKey = repo.getCopilotSessionKey(providerId)
     const vision = messagesHaveImages(messages)
     const body = JSON.stringify({
       model,
@@ -430,7 +472,7 @@ export async function streamChat(opts: StreamChatOptions): Promise<void> {
     const send = async (
       recordAuthorization: (authorization: string) => void
     ): Promise<Response> => {
-      const { url, headers } = await copilotEndpoint('/chat/completions', vision)
+      const { url, headers } = await copilotEndpoint('/chat/completions', vision, providerId)
       recordAuthorization(headers.Authorization)
       return fetch(url, {
         method: 'POST',
@@ -443,7 +485,7 @@ export async function streamChat(opts: StreamChatOptions): Promise<void> {
     // the Responses API once we've learned that for this model; otherwise try
     // chat and fall back on that specific error. Claude stays on chat throughout.
     if (!isResponsesOnly(providerId, model)) {
-      const res = await withCopilotRetry(true, send, signal)
+      const res = await withCopilotRetry(true, send, signal, providerId)
       if (res.ok) return readSse(res, (j) => emitOpenAi(j, onDelta))
       const errBody = await res.text().catch(() => '')
       if (!isChatUnsupported(res.status, errBody)) {
@@ -452,9 +494,16 @@ export async function streamChat(opts: StreamChatOptions): Promise<void> {
           `Model request failed (${res.status}). ${errBody.slice(0, 300)}`
         )
       }
+      if (repo.getCopilotSessionKey(providerId) !== sessionKey) {
+        throw new ModelHttpError(
+          409,
+          'GitHub Copilot account changed during the request. Try again.'
+        )
+      }
       markResponsesOnly(providerId, model)
     }
     return streamCopilotResponses({
+      providerId,
       model,
       messages,
       vision,
@@ -467,7 +516,7 @@ export async function streamChat(opts: StreamChatOptions): Promise<void> {
 
   const provider = repo.listConnectedProviders().find((p) => p.id === providerId)
   if (!provider) throw new Error(`Provider "${providerId}" is not connected.`)
-  const key = isCliProxyProvider(providerId)
+  const key = isCliProxyProvider(provider.seedId)
     ? await cliProxyKey()
     : repo.getProviderToken(providerId)
 
@@ -518,6 +567,7 @@ export async function streamChat(opts: StreamChatOptions): Promise<void> {
       // the Codex subscription this also boots the local sidecar and refreshes
       // its (per-start) port.
       const base = await resolveBaseUrl(providerId, provider.baseURL)
+      const routedModel = await requestModel(providerId, model)
       const res = await fetch(`${base}/chat/completions`, {
         method: 'POST',
         headers: {
@@ -525,7 +575,7 @@ export async function streamChat(opts: StreamChatOptions): Promise<void> {
           ...(key ? { Authorization: `Bearer ${key}` } : {})
         },
         body: JSON.stringify({
-          model,
+          model: routedModel,
           messages: messages.map((m) => ({ role: m.role, content: openAiContent(m) })),
           ...openAiReasoning(providerId, reasoning, reasoningEffort),
           stream: true
@@ -544,6 +594,7 @@ export async function streamChat(opts: StreamChatOptions): Promise<void> {
  * `messages`, nested `reasoning.effort`, and semantic SSE events.
  */
 async function streamCopilotResponses(opts: {
+  providerId: string
   model: string
   messages: ChatMessage[]
   vision: boolean
@@ -561,7 +612,7 @@ async function streamCopilotResponses(opts: {
     stream: true
   })
   const send = async (recordAuthorization: (authorization: string) => void): Promise<Response> => {
-    const { url, headers } = await copilotEndpoint('/responses', opts.vision)
+    const { url, headers } = await copilotEndpoint('/responses', opts.vision, opts.providerId)
     recordAuthorization(headers.Authorization)
     return fetch(url, {
       method: 'POST',
@@ -570,7 +621,7 @@ async function streamCopilotResponses(opts: {
       signal: opts.signal
     })
   }
-  const res = await withCopilotRetry(true, send, opts.signal)
+  const res = await withCopilotRetry(true, send, opts.signal, opts.providerId)
   return readResponsesSse(res, opts.onDelta)
 }
 

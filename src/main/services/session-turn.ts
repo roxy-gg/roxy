@@ -69,12 +69,16 @@ export async function runSessionTurn(
   // never what was said or where.
   //
   // The provider rides along so roxy.gg/stats can show which backends people
-  // actually point Roxy at - the provider only, never the model id. Passed raw:
-  // `track` collapses it to the shipped seed list, which matters here because
-  // this fires BEFORE the turn resolves a provider, so an id that isn't even
-  // connected still reaches it. The agent mode goes through its own classifier.
+  // actually point Roxy at - only the catalog provider, never the account or
+  // model id. The agent mode goes through its own classifier.
   const agent = reportableAgent(input.agentId)
-  track('prompt', { provider: input.providerId, agent })
+  if (!repo.listConnectedProviders().some((provider) => provider.id === input.providerId)) {
+    return {
+      ok: false,
+      error: 'The selected account is no longer connected. Select an account to continue.'
+    }
+  }
+  track('prompt', { provider: repo.getProviderSeedId(input.providerId), agent })
   markActivation('first_prompt')
   // Plan mode is a distinct way of using the product (read-only, no edits), and
   // its share is the difference between "people trust it to write code" and

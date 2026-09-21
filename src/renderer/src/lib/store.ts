@@ -64,7 +64,7 @@ interface RoxyStore {
    */
   telemetryEnabled: boolean
   providers: ConnectedProvider[]
-  copilotNeedsReauthentication: boolean
+  copilotNeedsReauthentication: Record<string, boolean>
   /** Provider model lists; Copilot availability is refreshed from the account. */
   modelCatalog: Record<string, ModelInfo[]>
   /**
@@ -875,7 +875,7 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
   // the toggle would otherwise flicker off on every Settings open.
   telemetryEnabled: true,
   providers: [],
-  copilotNeedsReauthentication: false,
+  copilotNeedsReauthentication: {},
   modelCatalog: {},
   modelsTried: {},
   recentModels: {},
@@ -934,6 +934,7 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
       telemetryEnabled,
       modelCatalog: {},
       modelsTried: {},
+      copilotNeedsReauthentication: {},
       recentModels: {},
       hiddenModels: new Set(),
       ready: true
@@ -1112,17 +1113,23 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
     ])
     // A reconnect can keep the same provider id while changing the account.
     // Invalidate pending responses too, so an old account cannot refill the UI.
-    modelCatalogInflight.delete('github-copilot')
+    const invalidated = new Set([
+      ...get().providers.map((p) => p.id),
+      ...providers.map((p) => p.id)
+    ])
+    invalidated.forEach((id) => modelCatalogInflight.delete(id))
     set((s) => {
       const modelCatalog = { ...s.modelCatalog }
       const modelsTried = { ...s.modelsTried }
-      delete modelCatalog['github-copilot']
-      delete modelsTried['github-copilot']
-      return { providers, settings, modelCatalog, modelsTried, copilotNeedsReauthentication: false }
+      invalidated.forEach((id) => {
+        delete modelCatalog[id]
+        delete modelsTried[id]
+      })
+      return { providers, settings, modelCatalog, modelsTried, copilotNeedsReauthentication: {} }
     })
-    if (providers.some((p) => p.id === 'github-copilot')) {
-      await get().ensureModels('github-copilot')
-    }
+    await Promise.all(
+      providers.filter((p) => p.seedId === 'github-copilot').map((p) => get().ensureModels(p.id))
+    )
   },
 
   reorderProviders: async (ids) => {
@@ -1380,8 +1387,9 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
   },
 
   ensureModels: async (providerId) => {
-    const accountAware = providerId === 'github-copilot'
-    if (accountAware && !get().providers.some((p) => p.id === providerId)) return
+    const provider = get().providers.find((p) => p.id === providerId)
+    if (!provider) return
+    const accountAware = provider.seedId === 'github-copilot'
     const existing = get().modelCatalog[providerId]
     // Main owns Copilot's short TTL. Never keep its first success forever here.
     if (!accountAware && existing && existing.length > 0) return
@@ -1392,7 +1400,7 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
       try {
         const list = await api.models.list(providerId)
         const needsReauthentication = accountAware
-          ? await api.copilot.needsReauthentication()
+          ? await api.copilot.needsReauthentication(providerId)
           : false
         if (modelCatalogInflight.get(providerId) !== load) return
         // Copilot's empty list revokes old entries. Other providers still retry
@@ -1400,7 +1408,14 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
         if (accountAware || list.length > 0) {
           set((s) => ({
             modelCatalog: { ...s.modelCatalog, [providerId]: list },
-            ...(accountAware ? { copilotNeedsReauthentication: needsReauthentication } : {})
+            ...(accountAware
+              ? {
+                  copilotNeedsReauthentication: {
+                    ...s.copilotNeedsReauthentication,
+                    [providerId]: needsReauthentication
+                  }
+                }
+              : {})
           }))
         }
       } catch {
@@ -1905,7 +1920,15 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
       settings
     )
     const provider =
-      get().providers.find((p) => p.id === config.providerId) ?? get().providers[0] ?? null
+      (config.providerId
+        ? get().providers.find((p) => p.id === config.providerId)
+        : get().providers[0]) ?? null
+    if (config.providerId && !provider) {
+      parts = [...parts, { type: 'text', text: i18n.t('models.accountDisconnected') }]
+      setStreaming(parts)
+      await finishTurn()
+      return
+    }
     if (provider && (provider.hasCredential || provider.auth === 'none')) {
       // Resolve the model's capabilities (reasoning support + context window) so
       // we only send reasoning params when valid and cut history to the budget.
@@ -2042,11 +2065,17 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
         chatRequests.delete(chatId)
       }
       if (!result.ok && !stopped()) {
-        if (provider.id === 'github-copilot') {
+        if (provider.seedId === 'github-copilot') {
           // Read the failure without another discovery request masking its auth status.
           const providers = get().providers
-          const needed = await api.copilot.needsReauthentication().catch(() => false)
-          if (get().providers === providers) set({ copilotNeedsReauthentication: needed })
+          const needed = await api.copilot.needsReauthentication(provider.id).catch(() => false)
+          if (get().providers === providers)
+            set((s) => ({
+              copilotNeedsReauthentication: {
+                ...s.copilotNeedsReauthentication,
+                [provider.id]: needed
+              }
+            }))
         }
         parts = [
           ...parts,
@@ -2184,7 +2213,8 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
       get().chats.find((c) => c.id === chatId),
       settings
     )
-    const provider = providers.find((p) => p.id === config.providerId) ?? providers[0] ?? null
+    const provider =
+      (config.providerId ? providers.find((p) => p.id === config.providerId) : providers[0]) ?? null
     if (!provider || !(provider.hasCredential || provider.auth === 'none')) return
     await get().ensureModels(provider.id)
     const model = resolveProviderModel(

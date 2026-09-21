@@ -242,6 +242,7 @@
     "title": "MCP 服务器"
   },
   "models": {
+    "accountDisconnected": "This session’s provider account is disconnected. Choose an account in the model picker before sending again.",
     "allHidden": "所有模型都已隐藏。在<settings>设置 → 模型</settings>中恢复一些模型。",
     "copilotUnavailable": "未选择可用的 GitHub Copilot 模型。请选择一个已启用的模型，或检查您账户的模型访问权限和连接，然后重试。",
     "loadFailed": "无法从 models.dev 加载模型 — 您仍然可以使用当前模型发送。",
@@ -456,12 +457,17 @@
       "title": "发送匿名使用数据"
     },
     "providers": {
+      "accountName": "Account name",
       "active": "活跃",
       "add": "添加提供商",
+      "addAccount": "Add account",
       "disconnect": "断开连接",
       "heading": "提供商",
       "keyStored": "密钥已存储",
       "noCredential": "无凭据",
+      "reconnect": "Reconnect",
+      "rename": "Rename account",
+      "renameAccount": "Rename {{name}}",
       "signedInLocally": "本地登录"
     },
     "title": "设置",

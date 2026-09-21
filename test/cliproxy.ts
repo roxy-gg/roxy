@@ -23,6 +23,8 @@ import { pipeline } from 'node:stream/promises'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { app } from 'electron'
+import * as repo from '../src/main/db/repo'
+import { closeDb } from '../src/main/db/database'
 import {
   CLAUDE_PROVIDER_ID,
   CODEX_PROVIDER_ID,
@@ -40,6 +42,13 @@ import {
   extract,
   listProxyModels,
   localApiKey,
+  prefixForAuthFile,
+  reconcileConnections,
+  prepareConnection,
+  routeModel,
+  listConnectionModels,
+  disconnectConnection,
+  pollLogin,
   PINNED_SHA256,
   shutdownCliProxy,
   startLogin,
@@ -129,6 +138,128 @@ async function main(): Promise<void> {
     (await listProxyModels('openai')).length === 0
   )
 
+  // ---- two accounts of one upstream have disjoint durable routing ----
+  const authDir = path.join(tmp, 'cliproxy', 'auths')
+  const firstFile = 'codex-isolation-a.json'
+  const secondFile = 'codex-isolation-b.json'
+  await stop()
+  await fs.writeFile(
+    path.join(authDir, firstFile),
+    JSON.stringify({ type: 'codex', email: 'a@example.test', access_token: 'synthetic-a' })
+  )
+  await fs.writeFile(
+    path.join(authDir, secondFile),
+    JSON.stringify({ type: 'codex', email: 'b@example.test', access_token: 'synthetic-b' })
+  )
+  await ensureRunning()
+  const bindings = await reconcileConnections()
+  const first = bindings.find((p) => p.proxyAuthFile === firstFile)!
+  const second = bindings.find((p) => p.proxyAuthFile === secondFile)!
+  check(
+    'same-upstream files create distinct connections',
+    !!first && !!second && first.id !== second.id
+  )
+  check(
+    'each account has its own deterministic prefix',
+    first.proxyPrefix === prefixForAuthFile(firstFile) && first.proxyPrefix !== second.proxyPrefix
+  )
+  check(
+    'reconciliation is idempotent',
+    (await reconcileConnections()).map((p) => p.id).join() === bindings.map((p) => p.id).join()
+  )
+  const disk = JSON.parse(await fs.readFile(path.join(authDir, firstFile), 'utf8'))
+  check('management prefix PATCH persists to the auth file', disk.prefix === first.proxyPrefix)
+  check(
+    'request routing includes exactly the bound prefix',
+    routeModel(first.id, 'gpt-5') === `${first.proxyPrefix}/gpt-5`
+  )
+  let crossAccountRejected = false
+  try {
+    routeModel(first.id, `${second.proxyPrefix}/gpt-5`)
+  } catch {
+    crossAccountRejected = true
+  }
+  check('request routing rejects another account prefix', crossAccountRejected)
+  const scopedModels = await listConnectionModels(first.id)
+  check('per-file catalog is populated for a synthetic Codex account', scopedModels.length > 0)
+  check(
+    'per-file catalog returns bare model ids',
+    scopedModels.every((m) => !m.id.startsWith('roxy-'))
+  )
+  check(
+    'bare and prefixed catalog entries are deduplicated',
+    new Set(scopedModels.map((m) => m.id)).size === scopedModels.length
+  )
+  const localSecrets = JSON.parse(
+    await fs.readFile(path.join(tmp, 'cliproxy', 'secrets.json'), 'utf8')
+  ) as { managementKey: string }
+  const managementHeaders = {
+    Authorization: `Bearer ${localSecrets.managementKey}`,
+    'Content-Type': 'application/json'
+  }
+  const managementURL = baseUrl()!.replace('/v1', '/v0/management')
+  const disabled = await fetch(`${managementURL}/auth-files/status`, {
+    method: 'PATCH',
+    headers: managementHeaders,
+    body: JSON.stringify({ name: secondFile, disabled: true })
+  })
+  check('management can mark an account unhealthy', disabled.ok)
+  check(
+    'reconciliation retains disabled account bindings',
+    (await reconcileConnections()).some((p) => p.id === second.id)
+  )
+  check(
+    'published accounts retain their disabled health',
+    (await status()).accounts.some((a) => a.file === secondFile && a.disabled)
+  )
+  let unhealthyRejected = false
+  try {
+    await prepareConnection(second.id)
+  } catch {
+    unhealthyRejected = true
+  }
+  check('disabled account preparation fails closed', unhealthyRejected)
+  await fetch(`${managementURL}/auth-files/status`, {
+    method: 'PATCH',
+    headers: managementHeaders,
+    body: JSON.stringify({ name: secondFile, disabled: false })
+  })
+  await stop()
+  await ensureRunning()
+  check(
+    'bound account survives sidecar restart',
+    (await prepareConnection(first.id)).proxyPrefix === first.proxyPrefix
+  )
+  const restartedCatalog = (await fetch(`${baseUrl()}/models`, {
+    headers: { Authorization: `Bearer ${key}` }
+  }).then((r) => r.json())) as { data: { id: string }[] }
+  check(
+    'startup reload registers persisted per-file prefixes',
+    restartedCatalog.data.some((m) => m.id.startsWith(`${first.proxyPrefix}/`)) &&
+      restartedCatalog.data.some((m) => m.id.startsWith(`${second.proxyPrefix}/`))
+  )
+  await stop()
+  await disconnectConnection(first.id)
+  check(
+    'offline disconnect deletes only the bound file',
+    !(await exists(path.join(authDir, firstFile))) && (await exists(path.join(authDir, secondFile)))
+  )
+  check(
+    'offline disconnect preserves the sibling database connection',
+    repo.listConnectedProviders().some((p) => p.id === second.id)
+  )
+  await fs.rm(path.join(authDir, secondFile))
+  let missingRejected = false
+  try {
+    await prepareConnection(second.id)
+  } catch {
+    missingRejected = true
+  }
+  check('missing credential fails closed instead of using a sibling', missingRejected)
+  await disconnectConnection(second.id)
+  await ensureRunning()
+  check('unknown OAuth state is not reported as successful', !(await pollLogin('unknown-state')).ok)
+
   // ---- the management API is reachable and the Codex login flow starts ----
   const login = await startLogin(CODEX_PROVIDER_ID)
   check(
@@ -138,6 +269,13 @@ async function main(): Promise<void> {
   check('the auth URL targets the Codex client', login.url.includes('client_id=app_'))
   check('the auth URL uses PKCE', login.url.includes('code_challenge_method=S256'))
   check('startLogin returns a state token', login.state.length > 0)
+  let duplicateLoginRejected = false
+  try {
+    await startLogin(CODEX_PROVIDER_ID)
+  } catch (error) {
+    duplicateLoginRejected = /already in progress/.test(String(error))
+  }
+  check('an unfinished login holds the upstream lock', duplicateLoginRejected)
   check('the auth URL carries that state', login.url.includes(`state=${login.state}`))
 
   // The bug this guards against: the endpoint happily returns a valid URL while
@@ -557,6 +695,7 @@ app.whenReady().then(async () => {
   } finally {
     clearTimeout(watchdog)
     shutdownCliProxy()
+    closeDb()
     await fs.rm(tmp, { recursive: true, force: true }).catch(() => undefined)
     const ok = fails.length === 0
     console.log(

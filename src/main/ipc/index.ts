@@ -40,7 +40,8 @@ import * as cookies from '../services/cookies'
 import { invalidateCopilotModels, listModels } from '../services/models'
 import { copilotNeedsReauthentication, invalidateCopilotToken } from '../services/llm'
 import { pickDefaultModel } from '../../shared/models'
-import { CLIPROXY_PROVIDER_IDS, accountsFor, isCliProxyProvider } from '../../shared/cliproxy'
+import { CLIPROXY_PROVIDER_IDS, isCliProxyProvider } from '../../shared/cliproxy'
+import { invalidateResponsesOnly } from '../services/responses'
 import { getUsageStats } from '../services/usage'
 import { getActivityStats } from '../services/activity'
 import { compactChat } from '../services/compaction'
@@ -231,6 +232,13 @@ export function registerIpc(): void {
     for (const id of CLIPROXY_PROVIDER_IDS) {
       await cliproxy.disconnect(id).catch(() => undefined)
     }
+    for (const provider of repo.listConnectedProviders()) {
+      invalidateResponsesOnly(provider.id)
+      if (provider.seedId === 'github-copilot') {
+        invalidateCopilotModels(provider.id)
+        invalidateCopilotToken(undefined, provider.id)
+      }
+    }
     repo.resetAll()
     await browserProxy.reset()
     invalidateCopilotModels()
@@ -248,9 +256,20 @@ export function registerIpc(): void {
   )
 
   // ---- providers ----
-  ipcMain.handle(CHANNELS.providersList, () => repo.listConnectedProviders())
+  ipcMain.handle(CHANNELS.providersList, async () => {
+    if (
+      repo.listConnectedProviders().some((p) => isCliProxyProvider(p.seedId) && !p.proxyAuthFile)
+    ) {
+      await cliproxy.reconcileConnections().catch(() => undefined)
+    }
+    return repo.listConnectedProviders()
+  })
+  ipcMain.handle(CHANNELS.providersRename, (_e, id: string, name: string) =>
+    repo.renameProvider(id, name)
+  )
   ipcMain.handle(CHANNELS.providersConnect, (_e, input: ConnectProviderInput) => {
     const connected = repo.connectProvider(input)
+    invalidateResponsesOnly(connected.id)
     // "What did people set up" is a different question from "what did they end
     // up using", and the gap between the two is where broken onboarding hides -
     // a provider connected far more often than it serves a prompt is one whose
@@ -261,14 +280,15 @@ export function registerIpc(): void {
     return connected
   })
   ipcMain.handle(CHANNELS.providersDisconnect, async (_e, id: string) => {
+    invalidateResponsesOnly(id)
     // A subscription provider's credential lives in the sidecar, not in
     // `credentials` - so dropping the row alone would leave the OAuth tokens on
     // disk and the proxy running. Sign out first, then remove the row. The
     // sidecar keeps running if the OTHER subscription is still signed in.
-    if (isCliProxyProvider(id)) await cliproxy.disconnect(id)
-    if (id === 'github-copilot') {
-      invalidateCopilotModels()
-      invalidateCopilotToken()
+    if (isCliProxyProvider(repo.getProviderSeedId(id))) await cliproxy.disconnectConnection(id)
+    if (repo.getProviderSeedId(id) === 'github-copilot') {
+      invalidateCopilotModels(id)
+      invalidateCopilotToken(undefined, id)
     }
     return repo.disconnectProvider(id)
   })
@@ -577,16 +597,55 @@ export function registerIpc(): void {
   })
 
   // ---- github copilot device flow ----
-  ipcMain.handle(CHANNELS.copilotNeedsReauthentication, () => copilotNeedsReauthentication())
+  ipcMain.handle(CHANNELS.copilotNeedsReauthentication, (_e, connectionId?: string) =>
+    copilotNeedsReauthentication(connectionId)
+  )
   ipcMain.handle(CHANNELS.copilotStart, () => copilot.startDeviceFlow())
-  ipcMain.handle(CHANNELS.copilotPoll, async (_e, deviceCode: string, interval: number) => {
-    const token = await copilot.pollForToken(deviceCode, interval)
-    const provider = repo.storeCopilotCredential(token)
-    invalidateCopilotModels()
-    invalidateCopilotToken()
-    repo.setActiveProvider(provider.id, provider.defaultModel ?? null)
-    return provider
-  })
+  ipcMain.handle(
+    CHANNELS.copilotPoll,
+    async (_e, deviceCode: string, interval: number, connectionId?: string) => {
+      const target = connectionId
+        ? repo.listConnectedProviders().find((p) => p.id === connectionId)
+        : undefined
+      if (connectionId && target?.seedId !== 'github-copilot')
+        throw new Error('GitHub Copilot account is not connected.')
+      const previousSession = connectionId ? repo.getCopilotSessionKey(connectionId) : null
+      let expectedIdentity = target?.identity
+      if (connectionId && !expectedIdentity) {
+        const previousCredential = repo.getCopilotCredential(connectionId)
+        if (!previousCredential)
+          throw new Error('Cannot verify the original account. Add a new account instead.')
+        try {
+          expectedIdentity = await copilot.accountIdentity(previousCredential.accessToken)
+        } catch {
+          throw new Error(
+            'Cannot verify the original account. Add a new account and select it explicitly.'
+          )
+        }
+      }
+      const token = await copilot.pollForToken(deviceCode, interval)
+      const identity = await copilot.accountIdentity(token.accessToken)
+      if (connectionId && repo.getCopilotSessionKey(connectionId) !== previousSession) {
+        throw new Error('This account changed during sign-in. Try reconnecting again.')
+      }
+      const accountId = identity.split(':')[0]
+      if (expectedIdentity && expectedIdentity.split(':')[0] !== accountId) {
+        throw new Error('This is a different GitHub account. Use Add account instead.')
+      }
+      const duplicate = repo
+        .listConnectedProviders()
+        .find((p) => p.seedId === 'github-copilot' && p.identity?.split(':')[0] === accountId)
+      if (duplicate && duplicate.id !== connectionId) {
+        throw new Error('This GitHub account is already connected. Reconnect it in Settings.')
+      }
+      const provider = repo.storeCopilotCredential(token, connectionId, identity)
+      invalidateResponsesOnly(provider.id)
+      invalidateCopilotModels(provider.id)
+      invalidateCopilotToken(undefined, provider.id)
+      if (!connectionId) repo.setActiveProvider(provider.id, provider.defaultModel ?? null)
+      return provider
+    }
+  )
 
   // ---- subscription providers (CLIProxyAPI sidecar) ----
   // The renderer drives one high-level `login` rather than the individual
@@ -597,23 +656,16 @@ export function registerIpc(): void {
   // Every call carries a provider id. One sidecar process serves both ChatGPT
   // and Gemini, so "which subscription" is never inferable from the process.
   ipcMain.handle(CHANNELS.cliproxyStatus, () => cliproxy.status())
-  ipcMain.handle(CHANNELS.cliproxyLogin, async (_e, providerId: string) => {
+  ipcMain.handle(CHANNELS.cliproxyLogin, async (_e, providerId: string, connectionId?: string) => {
     try {
-      const { url, state } = await cliproxy.startLogin(providerId)
-      await shell.openExternal(url)
-      const result = await cliproxy.pollLogin(state)
-      if (result.ok) {
-        // Register the provider only once a credential actually exists, so a
-        // cancelled sign-in never leaves a connected-but-dead provider row.
-        const base = cliproxy.baseUrl()
-        if (base) {
-          const provider = repo.storeCliProxyProvider(
-            providerId,
-            base,
-            await cliproxy.localApiKey()
-          )
-          // Make it the active provider with its newest model, mirroring what
-          // connecting any other provider does.
+      const result = await cliproxy.loginConnection(providerId, connectionId, (url) =>
+        shell.openExternal(url)
+      )
+      if (result.ok && !connectionId) {
+        const provider = repo
+          .listConnectedProviders()
+          .find((p) => p.proxyAuthFile === result.accountFile)
+        if (provider) {
           const models = await listModels(provider.id)
           repo.setActiveProvider(provider.id, pickDefaultModel(models) ?? null)
         }
@@ -628,13 +680,13 @@ export function registerIpc(): void {
     }
   })
   ipcMain.handle(CHANNELS.cliproxySignOut, async (_e, providerId: string, file: string) => {
-    await cliproxy.signOut(file)
-    const next = await cliproxy.status()
-    // THIS provider's last account just went: it can no longer serve a request,
-    // so drop its row rather than leave a dead entry in the picker. Scoped by
-    // provider - the other subscription's accounts are none of its business.
-    if (accountsFor(next, providerId).length === 0) repo.disconnectProvider(providerId)
-    return next
+    const provider = repo
+      .listConnectedProviders()
+      .find((p) => p.proxyAuthFile === file && (p.id === providerId || p.seedId === providerId))
+    if (!provider) throw new Error('Subscription account is not connected.')
+    await cliproxy.disconnectConnection(provider.id)
+    repo.disconnectProvider(provider.id)
+    return cliproxy.status()
   })
   ipcMain.handle(CHANNELS.cliproxyStop, () => cliproxy.stop())
   ipcMain.handle(CHANNELS.cliproxyInstallFile, async (event) => {

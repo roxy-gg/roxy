@@ -178,6 +178,12 @@ export interface CliProxyAccount {
   type: string
   /** Account email, when the token file records one. */
   email?: string
+  /** Persist unhealthy accounts for Settings; requests must fail closed. */
+  disabled?: boolean
+  unavailable?: boolean
+  status?: string
+  /** Management revision, used to attribute a completed OAuth login. */
+  updatedAt?: string
 }
 
 /** Everything the renderer needs to render a subscription panel. */
@@ -212,6 +218,9 @@ export interface CliProxyLoginStart {
 export interface CliProxyLoginResult {
   ok: boolean
   error?: string
+  /** Exact credential written by this login (including reconnects). */
+  accountFile?: string
+  connectionId?: string
   accounts: CliProxyAccount[]
 }
 
@@ -312,6 +321,10 @@ export function sha256For(checksums: string, asset: string): string | null {
  */
 export function isUsable(state: CliProxyState, providerId = CODEX_PROVIDER_ID): boolean {
   return (
-    state.status === 'running' && state.port !== null && accountsFor(state, providerId).length > 0
+    state.status === 'running' &&
+    state.port !== null &&
+    accountsFor(state, providerId).some(
+      (a) => !a.disabled && !a.unavailable && a.status !== 'error' && a.status !== 'disabled'
+    )
   )
 }

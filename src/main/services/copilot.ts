@@ -151,6 +151,24 @@ export async function startDeviceFlow(): Promise<DeviceFlowStart> {
   }
 }
 
+/** Resolve the account before persisting a login so reconnect cannot change identity. */
+export async function accountIdentity(accessToken: string): Promise<string> {
+  const response = await fetch('https://api.github.com/user', {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      Accept: 'application/vnd.github+json',
+      'User-Agent': USER_AGENT
+    },
+    signal: AbortSignal.timeout(30_000)
+  })
+  if (!response.ok)
+    throw new Error(`Could not identify the GitHub account (${response.status}). Try again.`)
+  const user = (await response.json()) as { id?: number; login?: string }
+  if (!Number.isSafeInteger(user.id) || !user.login)
+    throw new Error('GitHub returned an invalid account identity.')
+  return `${user.id}:${user.login}`
+}
+
 /** Poll until authorized, retaining refresh/expiry fields when GitHub supplies them. */
 export async function pollForToken(
   deviceCode: string,

@@ -21,6 +21,7 @@ export const CHANNELS = {
   providersList: 'providers:listConnected',
   providersConnect: 'providers:connect',
   providersDisconnect: 'providers:disconnect',
+  providersRename: 'providers:rename',
   providersReorder: 'providers:reorder',
 
   chatsList: 'chats:list',
