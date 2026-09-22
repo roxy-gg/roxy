@@ -287,8 +287,8 @@ export class TranscriptWindow {
             input.bots?.map((bot) => bot.username)
           )
           let height: number
+          const username = messageBotUsername(input, message)
           if (item.kind === 'header') {
-            const username = messageBotUsername(input, message)
             height = layoutMessageHeader(
               builder,
               message.role === 'user',
@@ -304,7 +304,19 @@ export class TranscriptWindow {
             height =
               SPACE.messagePadY +
               (live && !message.parts.length
-                ? layoutParts(builder, [], bodyX, 0, bodyWidth, input, true, `${message.id}/`)
+                ? layoutParts(
+                    builder,
+                    [],
+                    bodyX,
+                    0,
+                    bodyWidth,
+                    input,
+                    true,
+                    `${message.id}/`,
+                    0,
+                    true,
+                    username
+                  )
                 : 0)
           else if (item.markdown)
             height =
@@ -323,7 +335,8 @@ export class TranscriptWindow {
               live && item.part === message.parts.length - 1,
               `${message.id}/`,
               item.part,
-              item.part === message.parts.length - 1
+              item.part === message.parts.length - 1,
+              username
             )
           block = builder.finish(item.id, 0, Math.max(0, height))
           const weight = block.selectable.reduce(

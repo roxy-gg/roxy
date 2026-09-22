@@ -859,7 +859,7 @@ check('bot replies use a round Facehash and username in both transcript layouts'
 
   // The HOST answering inside a bot's chat: `botUsername` names the chat owner,
   // so an unsigned row is drawn as that bot. Roxy signs hers, and must come out
-  // as the plain assistant - not as @helper wearing the bot's avatar.
+  // as @roxy with the host avatar - not as @helper wearing the bot's.
   const bySigningHost = {
     ...own,
     id: 'host-reply',
@@ -878,8 +878,14 @@ check('bot replies use a round Facehash and username in both transcript layouts'
     )
     const nodes = JSON.stringify(scene.blocks.at(-1)!.nodes)
     assert.ok(!nodes.includes('@helper'), 'the host is not drawn as the chat owner')
-    assert.ok(!nodes.includes('@roxy'), 'and the marker is not shown as a bot handle')
+    assert.ok(nodes.includes('@roxy'), 'the host is named like any other speaker')
     assert.ok(nodes.includes('__roxy__'), 'it keeps the host avatar')
+    // The avatar shape is what separates host from guest: square for Roxy,
+    // round for a bot. Naming the host must not hand it the guest treatment.
+    assert.ok(
+      !nodes.includes('data:image/svg+xml,roxy'),
+      'the host keeps its own avatar, not a generated bot one'
+    )
   }
   // The same row streaming live, which is the other half of the bug: the
   // speaker arrives on the turn event before anything is persisted.
@@ -897,6 +903,26 @@ check('bot replies use a round Facehash and username in both transcript layouts'
   const liveHostNodes = JSON.stringify(liveHost.blocks.at(-1)!.nodes)
   assert.ok(!liveHostNodes.includes('@helper'), 'a streaming host is not the chat owner either')
   assert.ok(liveHostNodes.includes('__roxy__'))
+  // While a turn streams there is no name on the row yet, so the pending
+  // indicator is the only thing saying WHO the wait belongs to.
+  assert.ok(liveHostNodes.includes('@roxy is thinking'), 'a streaming host says who is thinking')
+  const liveGuestIndicator = JSON.stringify(
+    layoutTranscript(
+      {
+        ...longInput(longMessages),
+        streaming: [],
+        botUsername: 'helper',
+        streamingBot: { botId: bot.id, botUsername: 'helper' },
+        bots: [bot],
+        botAvatar: (name) => `data:image/svg+xml,${name}`
+      },
+      new BlockCache()
+    ).blocks.at(-1)!.nodes
+  )
+  assert.ok(
+    liveGuestIndicator.includes('@helper is thinking'),
+    'and a streaming guest is named too, not left as a bare "thinking"'
+  )
 
   const live = layoutTranscript(
     { ...longInput(longMessages), streaming: [], botUsername: 'helper' },
