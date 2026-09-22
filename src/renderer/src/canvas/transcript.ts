@@ -34,6 +34,9 @@ export interface LayoutInput {
   bots?: Bot[]
   /** Active chat queue — drives bot_invoke status chips. */
   queue?: QueueItem[]
+  /** False while that queue is still loading; an empty one then means
+   *  "not known yet", not "the guest answered". */
+  queueLoaded?: boolean
   botAvatar?: (username: string) => string
   messages: Message[]
   /** The live turn's parts, or null when nothing is streaming. */
@@ -75,7 +78,10 @@ export function layoutTranscript(input: LayoutInput, cache: BlockCache): Scene {
     [
       input.botUsername ?? '',
       input.bots?.map((bot) => `${bot.id}:${bot.username}`).join('|') ?? '',
-      input.queue?.map((item) => `${item.id}:${item.state ?? ''}`).join('|') ?? ''
+      input.queue?.map((item) => `${item.id}:${item.state ?? ''}`).join('|') ?? '',
+      // Part of the identity: the same queue before and after it loads must not
+      // reuse a block that rendered "replied" out of ignorance.
+      input.queueLoaded === false ? 'q:loading' : 'q:loaded'
     ].join('|')
   )
   const { messages, streaming, width, theme, view } = input
@@ -387,6 +393,7 @@ export function layoutParts(
         live: part.state === 'running',
         cancellable: cancelReady(part, input),
         queue: input.queue,
+        queueLoaded: input.queueLoaded,
         view: input.view,
         renderNested: (nestedBuilder, children, nx, ny, nw, live, prefix) =>
           layoutParts(

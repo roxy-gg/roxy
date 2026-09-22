@@ -97,6 +97,9 @@ export interface ToolCardInput {
   cancellable: boolean
   /** Live chat queue — resolves bot_invoke Calling / Replied / Failed. */
   queue?: QueueItem[]
+  /** False while the queue for this chat is still loading, so an empty one
+   *  is not mistaken for "the guest already answered". */
+  queueLoaded?: boolean
   view: ViewState
   /** Renders a subagent's transcript. Supplied by the transcript layout. */
   renderNested?: (
@@ -276,8 +279,10 @@ function measureRail(builder: Builder, input: ToolCardInput): Rail {
   // knows when the call started; here it is just a flag.
   const showCancel = input.cancellable
   const gap = 6
-  const invoke = part.tool === 'bot_invoke' ? invokeChip(part, input.queue) : null
-  const invokeLabel = invoke ? invokeLabelFor(builder, invoke.kind, invoke.name) : null
+  const invoke =
+    part.tool === 'bot_invoke' ? invokeChip(part, input.queue, input.queueLoaded) : null
+  const invokeLabel =
+    invoke && invoke.kind !== 'none' ? invokeLabelFor(builder, invoke.kind, invoke.name) : null
   const invokeWidth = invokeLabel
     ? builder.metrics.measure(invokeLabel, font(FONT_SIZE.micro, 500, 'sans')) + 12
     : 0
@@ -366,6 +371,7 @@ function layoutRail(
 
 function invokeLabelFor(builder: Builder, kind: InvokeChipKind, name: string): string {
   if (kind === 'calling') return builder.t('transcript.invokeCalling', { name })
+  if (kind === 'none') return ''
   if (kind === 'replied') return builder.t('transcript.invokeReplied', { name })
   return builder.t('transcript.invokeFailed')
 }

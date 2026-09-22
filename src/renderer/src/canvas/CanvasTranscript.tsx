@@ -61,6 +61,9 @@ export function CanvasTranscript({
   const prompts = useMemo(() => promptEntries(messages), [messages])
   const bots = useRoxyStore((s) => s.bots)
   const queue = useRoxyStore((s) => s.queue)
+  // The queue is fetched with the messages, so it is only trustworthy once
+  // this chat's transcript has landed.
+  const queueLoaded = useRoxyStore((s) => s.messagesChatId === chatId)
   const ownBot = bots.find((bot) => bot.chatId === chatId)
   const speaker = useRoxyStore((s) => (chatId ? s.automationSpeakers[chatId] : undefined))
   const signature = streaming === null ? null : streamSignature(streaming)
@@ -111,6 +114,7 @@ export function CanvasTranscript({
           streamingBot: speaker,
           bots,
           queue,
+          queueLoaded,
           botAvatar: botAvatarUrl,
           quiet,
           canCancel: (part) => {
@@ -124,7 +128,19 @@ export function CanvasTranscript({
         cache
       )
     },
-    [messages, streaming, quiet, clock, logo, cache, bots, queue, ownBot?.username, speaker]
+    [
+      messages,
+      streaming,
+      quiet,
+      clock,
+      logo,
+      cache,
+      bots,
+      queue,
+      queueLoaded,
+      ownBot?.username,
+      speaker
+    ]
   )
 
   const onAction = (action: HitAction): void => {

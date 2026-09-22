@@ -1,6 +1,6 @@
 import type { MessagePart, QueueItem } from '@shared/types'
 
-export type InvokeChipKind = 'calling' | 'replied' | 'failed'
+export type InvokeChipKind = 'calling' | 'replied' | 'failed' | 'none'
 
 export interface InvokeChip {
   kind: InvokeChipKind
@@ -18,7 +18,8 @@ export interface InvokeChip {
  */
 export function invokeChip(
   part: Extract<MessagePart, { type: 'tool' }>,
-  queue: readonly QueueItem[] = []
+  queue: readonly QueueItem[] = [],
+  queueLoaded = true
 ): InvokeChip {
   const raw = typeof part.input?.bot === 'string' ? part.input.bot : ''
   const name = raw.replace(/^@/, '').trim() || 'bot'
@@ -27,7 +28,14 @@ export function invokeChip(
   if (part.state === 'running') return { kind: 'calling', name }
 
   const id = queueIdFromOutput(part.output)
-  const item = id ? queue.find((entry) => entry.id === id) : undefined
+  // No id to correlate: a transcript written before this field existed, or a
+  // result that did not serialize. Claiming "replied" would be inventing an
+  // outcome, so say nothing and leave the plain tool state.
+  if (!id) return { kind: 'none', name }
+  // The queue for this chat has not arrived yet (a reload, or a chat switch
+  // mid-flight). Absence here is ignorance, not evidence of an answer.
+  if (!queueLoaded) return { kind: 'calling', name }
+  const item = queue.find((entry) => entry.id === id)
   if (item?.state === 'failed') return { kind: 'failed', name }
   if (item) return { kind: 'calling', name }
   return { kind: 'replied', name }

@@ -1296,6 +1296,35 @@ check('bot_invoke chip tracks the queued guest', () => {
   assert.equal(invokeChip({ ...part, state: 'running' }, []).kind, 'calling')
   assert.equal(invokeChip({ ...part, state: 'error' }, []).kind, 'failed')
   assert.equal(invokeChip(part, []).name, 'reviewer')
+
+  // A pending row for a DIFFERENT call must not satisfy this card.
+  assert.equal(
+    invokeChip(part, [
+      { id: 'other', chatId: 'c', content: 'x', createdAt: 1, state: 'pending' } as QueueItem
+    ]).kind,
+    'replied'
+  )
+
+  // An empty queue is only evidence once it has actually loaded. On a reload
+  // the store starts at [] and fills in after the fetch, so reading absence as
+  // an answer announced "@reviewer replied" for a call still waiting.
+  assert.equal(invokeChip(part, [], false).kind, 'calling')
+  assert.equal(invokeChip(part, [], true).kind, 'replied')
+
+  // Output with no id cannot be correlated at all - a transcript older than
+  // this field, or a result that did not serialize. Claiming an outcome there
+  // is inventing one, so no chip is shown.
+  assert.equal(invokeChip({ ...part, output: 'queued' }, []).kind, 'none')
+  assert.equal(invokeChip({ ...part, output: undefined }, []).kind, 'none')
+  // ...but a live or failed call still reports itself without needing an id.
+  assert.equal(invokeChip({ ...part, output: undefined, state: 'running' }, []).kind, 'calling')
+  assert.equal(invokeChip({ ...part, output: undefined, state: 'error' }, []).kind, 'failed')
+
+  // The handle is display-only and must survive the shapes users actually type.
+  assert.equal(invokeChip({ ...part, input: { bot: '@reviewer' } }, []).name, 'reviewer')
+  assert.equal(invokeChip({ ...part, input: { bot: '  spaced  ' } }, []).name, 'spaced')
+  assert.equal(invokeChip({ ...part, input: {} }, []).name, 'bot')
+  assert.equal(invokeChip({ ...part, input: { bot: 42 } as never }, []).name, 'bot')
 })
 
 console.log(`DIFF/CANVAS MODEL OK - ${checks} checks passed`)
