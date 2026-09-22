@@ -133,7 +133,10 @@
     "placeholder": "Ask Roxy anything… (paste or drop images)",
     "queuePlaceholder": "Queue a follow-up…",
     "queuePlaceholderStop": "Queue a follow-up… (Esc to stop)",
-    "stop": "Stop (Esc)"
+    "stop": "Stop (Esc)",
+    "sendTo": "Send to @{{username}}",
+    "chooseSendTo": "Choose who to send to",
+    "sendToHint": "Send only to this collaborator. Enter still sends to Roxy."
   },
   "configBackup": {
     "export": "Export",

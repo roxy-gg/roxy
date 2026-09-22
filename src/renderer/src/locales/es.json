@@ -133,7 +133,10 @@
     "queuePlaceholderStop": "Pon un mensaje de seguimiento en cola… (Esc para detener)",
     "removeImage": "Quitar la imagen",
     "send": "Send",
-    "stop": "Detener (Esc)"
+    "stop": "Detener (Esc)",
+    "sendTo": "Enviar a @{{username}}",
+    "chooseSendTo": "Elige a quién enviar",
+    "sendToHint": "Enviar solo a este colaborador. Enter sigue enviando a Roxy."
   },
   "configBackup": {
     "export": "Exportar",

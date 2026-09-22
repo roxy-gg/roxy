@@ -15,7 +15,7 @@ import { ImagePreview } from './ImagePreview'
 import { useRoxyStore } from '../lib/store'
 import { BotAvatar } from './BotAvatar'
 import { cn } from '../lib/cn'
-import { MENTION, isKnownMention } from '@shared/mentions'
+import { MENTION, isKnownMention, mentionedBots } from '@shared/mentions'
 
 export function Composer({
   onSend,
@@ -57,6 +57,8 @@ export function Composer({
   const [focused, setFocused] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
+  /** Explicit pick when several known @bots appear; cleared when no longer mentioned. */
+  const [pickedSendId, setPickedSendId] = useState<string | null>(null)
   // A mention can start anywhere, as long as the "@" opens a word (start of
   // input or after whitespace) — matching how you actually type "ask @bob to…".
   const prefix = /(?:^|[\s,;:!?()[\]{}\u00bf\u00a1])@([a-z0-9_-]*)$/i.exec(value.slice(0, caret))
@@ -73,6 +75,8 @@ export function Composer({
     setValue(head + rest)
     setCaret(head.length)
     setMentionDismissed(true)
+    const picked = bots.find((bot) => bot.username.toLowerCase() === username.toLowerCase())
+    setPickedSendId(picked?.id ?? null)
     requestAnimationFrame(() => {
       ref.current?.focus()
       ref.current?.setSelectionRange(head.length, head.length)
@@ -99,22 +103,56 @@ export function Composer({
 
   const removeImage = (id: string): void => setImages((prev) => prev.filter((i) => i.id !== id))
 
-  const submit = async (): Promise<void> => {
+  // Project sessions only: known @bots in the draft. Mentions stay visual for
+  // default Enter (Roxy); "Send to @…" is the explicit guest route.
+  const knownTargets = variant === 'session' ? mentionedBots(value, bots) : []
+  const sendTarget =
+    knownTargets.length === 1
+      ? knownTargets[0]
+      : (knownTargets.find((bot) => bot.id === pickedSendId) ?? null)
+
+  useEffect(() => {
+    if (!pickedSendId) return
+    const stillMentioned = (variant === 'session' ? mentionedBots(value, bots) : []).some(
+      (bot) => bot.id === pickedSendId
+    )
+    if (!stillMentioned) setPickedSendId(null)
+  }, [pickedSendId, value, bots, variant])
+
+  const submit = async (toBotId?: string): Promise<void> => {
     const text = value.trim()
     if ((submitting && !sending) || (!text && images.length === 0)) return
+    if (toBotId) {
+      const allowed =
+        knownTargets.length === 1
+          ? knownTargets[0].id === toBotId
+          : knownTargets.some((bot) => bot.id === toBotId) && sendTarget?.id === toBotId
+      if (!allowed) {
+        setError(t('composer.chooseSendTo'))
+        return
+      }
+    }
     // Clear immediately so a long direct turn never locks the composer. If the
     // enqueue fails, restore this draft without dropping its image attachments.
+    const snapshotImages = images
     setValue('')
     setImages([])
     setMentionDismissed(true)
+    setPickedSendId(null)
     setError('')
     setSubmitting(true)
     if (ref.current) ref.current.style.height = 'auto'
     try {
-      await onSend(text, images.length ? images : undefined)
+      if (toBotId) {
+        await useRoxyStore
+          .getState()
+          .submitToCollaborator(text, toBotId, snapshotImages.length ? snapshotImages : undefined)
+      } else {
+        await onSend(text, snapshotImages.length ? snapshotImages : undefined)
+      }
     } catch (e) {
       setValue((draft) => draft || text)
-      setImages((draft) => (draft.length ? draft : images))
+      setImages((draft) => (draft.length ? draft : snapshotImages))
       setError(e instanceof Error ? e.message : String(e))
     } finally {
       setSubmitting(false)
@@ -387,14 +425,48 @@ export function Composer({
               <Square className="h-3 w-3 fill-current" />
             </button>
           ) : (
-            <button
-              onClick={() => void submit()}
-              disabled={!canSend || (submitting && !sending)}
-              title={sending ? t('composer.addToQueue') : t('composer.send')}
-              className="press-scale flex h-8 w-8 shrink-0 items-center justify-center sq sq-lg rounded-lg bg-white text-black hover:bg-white/90 disabled:opacity-30"
-            >
-              <ArrowUp className="h-4 w-4" />
-            </button>
+            <div className="flex max-w-[min(100%,22rem)] flex-col items-end gap-1">
+              {knownTargets.length > 1 && !sendTarget && (
+                <div
+                  role="group"
+                  aria-label={t('composer.chooseSendTo')}
+                  className="flex flex-wrap justify-end gap-1"
+                >
+                  <span className="px-1 text-[11px] text-text-muted">{t('composer.chooseSendTo')}</span>
+                  {knownTargets.map((bot) => (
+                    <button
+                      key={bot.id}
+                      type="button"
+                      onClick={() => setPickedSendId(bot.id)}
+                      className="press-scale rounded-md bg-white/5 px-2 py-0.5 text-[11px] font-medium text-accent hover:bg-white/10"
+                    >
+                      @{bot.username}
+                    </button>
+                  ))}
+                </div>
+              )}
+              <div className="flex items-center gap-1.5">
+                {sendTarget && (
+                  <button
+                    type="button"
+                    onClick={() => void submit(sendTarget.id)}
+                    disabled={!canSend || (submitting && !sending)}
+                    title={t('composer.sendToHint')}
+                    className="press-scale h-8 shrink-0 rounded-lg bg-accent/15 px-2.5 text-xs font-medium text-accent hover:bg-accent/25 disabled:opacity-30"
+                  >
+                    {t('composer.sendTo', { username: sendTarget.username })}
+                  </button>
+                )}
+                <button
+                  onClick={() => void submit()}
+                  disabled={!canSend || (submitting && !sending)}
+                  title={sending ? t('composer.addToQueue') : t('composer.send')}
+                  className="press-scale flex h-8 w-8 shrink-0 items-center justify-center sq sq-lg rounded-lg bg-white text-black hover:bg-white/90 disabled:opacity-30"
+                >
+                  <ArrowUp className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
           )}
         </div>
       </div>

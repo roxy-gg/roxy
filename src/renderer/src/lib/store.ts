@@ -261,6 +261,16 @@ interface RoxyStore {
   /** Persist the project (workspace) order (optimistic). `paths` = full list, top → bottom. */
   reorderProjects: (paths: string[]) => Promise<void>
   submit: (content: string, images?: ComposerImage[]) => Promise<void>
+  /**
+   * Explicit composer action: queue the prompt so ONLY this collaborator answers
+   * as a guest in the shared project session. Default Enter / submit still goes
+   * to Roxy.
+   */
+  submitToCollaborator: (
+    content: string,
+    botId: string,
+    images?: ComposerImage[]
+  ) => Promise<void>
   sendMessage: (content: string, chatId?: string, images?: ComposerImage[]) => Promise<void>
   removeQueued: (id: string) => Promise<void>
   moveQueued: (id: string, direction: 'up' | 'down') => Promise<void>
@@ -469,12 +479,19 @@ function isBotChat(chatId: string, state: RoxyStore): boolean {
 async function enqueuePrompt(
   chatId: string,
   text: string,
-  images?: ComposerImage[]
+  images?: ComposerImage[],
+  options?: {
+    sourceChatId?: string
+    asBotId?: string
+    recipientId?: string
+    fromUser?: boolean
+  }
 ): Promise<void> {
   await api.queue.add(
     chatId,
     text,
-    images?.map(({ dataUrl, mediaType, name }) => ({ dataUrl, mediaType, name }))
+    images?.map(({ dataUrl, mediaType, name }) => ({ dataUrl, mediaType, name })),
+    options
   )
   await useRoxyStore.getState().refreshQueue()
   await api.automation.wake()
@@ -1896,6 +1913,25 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
       return
     }
     await get().sendMessage(text, undefined, images)
+  },
+
+  submitToCollaborator: async (content, botId, images) => {
+    const chatId = get().activeChatId
+    if (!chatId) return
+    if (isBotChat(chatId, get())) {
+      throw new Error('Send to collaborator is only available in a project session')
+    }
+    const text = content.trim()
+    if (!text && (!images || images.length === 0)) return
+    const bot = get().bots.find((entry) => entry.id === botId)
+    if (!bot) throw new Error('Bot not found')
+    // Mirror bot_invoke: sourceChatId gates asBotId/recipientId on enqueuePrompt.
+    await enqueuePrompt(chatId, text, images, {
+      sourceChatId: chatId,
+      asBotId: bot.id,
+      recipientId: bot.id,
+      fromUser: true
+    })
   },
 
   sendMessage: async (content, targetChatId, images) => {

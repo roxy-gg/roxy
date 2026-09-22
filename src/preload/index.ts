@@ -189,8 +189,8 @@ const roxy: RoxyApi = {
   },
   queue: {
     list: (chatId) => ipcRenderer.invoke(CHANNELS.queueList, chatId),
-    add: (chatId, content, images) =>
-      ipcRenderer.invoke(CHANNELS.queueAdd, chatId, content, images),
+    add: (chatId, content, images, options) =>
+      ipcRenderer.invoke(CHANNELS.queueAdd, chatId, content, images, options),
     remove: (id) => ipcRenderer.invoke(CHANNELS.queueRemove, id),
     reorder: (chatId, ids) => ipcRenderer.invoke(CHANNELS.queueReorder, chatId, ids),
     update: (id, content, images) => ipcRenderer.invoke(CHANNELS.queueUpdate, id, content, images)

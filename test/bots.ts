@@ -910,7 +910,7 @@ async function main(): Promise<void> {
       )
       assert.equal(bots.getBot(viaBridge.id), undefined)
       const local = repo.createChat({ title: 'Local IPC turn' })
-      // Old renderer arguments cannot choose a responder through public IPC.
+      // A bare 4th argument cannot choose a responder through public IPC.
       const publicQueued = await win.webContents.executeJavaScript(
         `window.roxy.queue.add(${JSON.stringify(local.id)}, 'Install @unknown/package and ask @worker', undefined, ${JSON.stringify(worker.id)})`
       )
@@ -931,6 +931,28 @@ async function main(): Promise<void> {
       assert.equal(publicUpdated.asBotId, undefined)
       assert.ok(!('recipientId' in publicUpdated))
       repo.removeQueueItem(publicQueued.id)
+      // Explicit options (composer Send to @bot) do route — same contract as bot_invoke.
+      const routed = await win.webContents.executeJavaScript(
+        `window.roxy.queue.add(${JSON.stringify(local.id)}, 'Hola @worker, review this', undefined, ${JSON.stringify({
+          sourceChatId: local.id,
+          asBotId: worker.id,
+          recipientId: worker.id,
+          fromUser: true
+        })})`
+      )
+      assert.equal(routed.asBotId, worker.id)
+      assert.deepEqual(
+        getDb()
+          .prepare('SELECT recipient_id, as_bot_id, message_id FROM queue WHERE id = ?')
+          .get(routed.id),
+        {
+          recipient_id: worker.id,
+          as_bot_id: worker.id,
+          message_id: repo.listMessages(local.id).at(-1)!.id
+        }
+      )
+      assert.equal(repo.listMessages(local.id).at(-1)?.role, 'user')
+      repo.removeQueueItem(routed.id)
       repo.addMessage({ chatId: local.id, role: 'user', content: 'Direct turn' })
       const input = {
         requestId: 'test-local-lock',

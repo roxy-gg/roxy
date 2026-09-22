@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { HOST_USERNAME, botUsername, isHostSpeaker, nextBotRun, type Bot } from '../src/shared/bots'
-import { MENTION, isKnownMention } from '../src/shared/mentions'
+import { MENTION, isKnownMention, mentionedBots } from '../src/shared/mentions'
 import { reconstructTurn } from '../src/shared/tool-history'
 import type { Message } from '../src/shared/types'
 
@@ -52,6 +52,13 @@ for (const text of [
   )
 assert.equal(isKnownMention('@ROXY', []), true)
 assert.equal(isKnownMention('@reviewer', []), false)
+const helper: Bot = { ...bot, id: 'bot-2', username: 'helper', chatId: 'chat-2' }
+assert.deepEqual(
+  mentionedBots('Hola @reviewer y @helper, then @roxy', [bot, helper]).map((b) => b.username),
+  ['reviewer', 'helper']
+)
+assert.deepEqual(mentionedBots('only @roxy here', [bot, helper]), [])
+assert.deepEqual(mentionedBots('@reviewer and @reviewer again', [bot]), [bot])
 
 const now = Date.parse('2026-09-08T12:00:00Z')
 assert.equal(nextBotRun({ kind: 'interval', minutes: 5 }, now), now + 300_000)

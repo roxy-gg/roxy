@@ -17,6 +17,7 @@ import type {
   IntegrationConnection,
   Message,
   MessagePart,
+  QueueAddOptions,
   QueueImage,
   QueueItem,
   ReasoningEffort,
@@ -957,7 +958,12 @@ export interface RoxyApi {
   }
   queue: {
     list(chatId: string): Promise<QueueItem[]>
-    add(chatId: string, content: string, images?: QueueImage[]): Promise<QueueItem>
+    add(
+      chatId: string,
+      content: string,
+      images?: QueueImage[],
+      options?: QueueAddOptions
+    ): Promise<QueueItem>
     remove(id: string): Promise<void>
     /** Reorder a chat's queue; `ids` is the full queue front-to-back. */
     reorder(chatId: string, ids: string[]): Promise<void>

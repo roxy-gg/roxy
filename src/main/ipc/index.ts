@@ -26,6 +26,7 @@ import type {
 import type {
   AddMessageInput,
   ConnectProviderInput,
+  QueueAddOptions,
   QueueImage,
   ReasoningEffort
 } from '../../shared/types'
@@ -192,6 +193,18 @@ async function discoverSkillViews(cwd?: string): Promise<SkillView[]> {
     location,
     source
   }))
+}
+
+/** Accept only a plain QueueAddOptions object; ignore legacy/wrong 4th-arg shapes. */
+function queueAddOptions(value: unknown): QueueAddOptions | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const raw = value as Record<string, unknown>
+  const options: QueueAddOptions = {}
+  if (typeof raw.sourceChatId === 'string') options.sourceChatId = raw.sourceChatId
+  if (typeof raw.asBotId === 'string') options.asBotId = raw.asBotId
+  if (typeof raw.recipientId === 'string') options.recipientId = raw.recipientId
+  if (raw.fromUser === true) options.fromUser = true
+  return options
 }
 
 /**
@@ -831,8 +844,11 @@ export function registerIpc(): void {
   ipcMain.handle(CHANNELS.queueList, (_e, chatId: string) => repo.listQueue(chatId))
   ipcMain.handle(
     CHANNELS.queueAdd,
-    (_e, chatId: string, content: string, images?: QueueImage[]) => {
-      const item = enqueuePrompt(chatId, content, images)
+    (_e, chatId: string, content: string, images?: QueueImage[], options?: unknown) => {
+      // Only a plain options object may choose a guest. A bare string (legacy
+      // accidental 4th arg) must not route — see smoke:bots public IPC coverage.
+      const routing = queueAddOptions(options)
+      const item = enqueuePrompt(chatId, content, images, routing ?? {})
       remote.notifyQueueChanged()
       return item
     }

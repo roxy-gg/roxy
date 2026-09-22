@@ -320,6 +320,22 @@ export interface QueueImage {
   name?: string
 }
 
+/**
+ * Optional routing for `queue.add`. `asBotId` / `recipientId` only apply when
+ * `sourceChatId` is set — same contract as `bot_invoke` → `enqueuePrompt`.
+ * Plain `queue.add(chatId, text)` stays an ordinary user prompt to the session owner.
+ */
+export interface QueueAddOptions {
+  sourceChatId?: string
+  asBotId?: string
+  recipientId?: string
+  /**
+   * Composer "Send to @bot": persist the prompt as a user message before the
+   * guest turn runs. Tool handoffs omit this so the request stays an assistant row.
+   */
+  fromUser?: boolean
+}
+
 /** A pending prompt queued on a chat (FIFO). Generic across sessions/bots/subagents. */
 export interface QueueItem {
   id: string

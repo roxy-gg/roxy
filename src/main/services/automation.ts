@@ -113,6 +113,11 @@ export function enqueuePrompt(
     /** Actor to resume when the answer comes back, when it is not the owner of
      *  `replyToChatId`: a guest (or Roxy) delegating from someone else's chat. */
     replyToActor?: { botId?: string; botUsername?: string }
+    /**
+     * Composer "Send to @bot": write the prompt as a user message up front so
+     * drain does not re-attribute it as an assistant handoff row.
+     */
+    fromUser?: boolean
   } = {}
 ): QueueItem {
   if (!repo.getChat(chatId)) throw new Error('Session not found')
@@ -139,11 +144,25 @@ export function enqueuePrompt(
     .prepare('SELECT COUNT(*) AS n FROM queue WHERE chat_id = ?')
     .get(chatId) as { n: number }
   if (count.n >= 100) throw new Error('This session already has 100 queued messages')
+  const trimmed = content.trim()
   const item = getDb().transaction(() => {
-    const item = repo.enqueue(chatId, content.trim(), images)
+    let messageId: string | null = null
+    if (options.fromUser && options.sourceChatId) {
+      const message = repo.addMessage({
+        chatId,
+        role: 'user',
+        content: trimmed,
+        parts: [
+          { type: 'text', text: trimmed },
+          ...(images ?? []).map((image) => ({ type: 'image' as const, ...image }))
+        ]
+      })
+      messageId = message.id
+    }
+    const item = repo.enqueue(chatId, trimmed, images)
     getDb()
       .prepare(
-        'UPDATE queue SET source_chat_id = ?, reply_to_chat_id = ?, hops = ?, not_before = ?, continue_reply = ?, bot_id = ?, bot_username = ?, as_bot_id = ?, recipient_id = ?, reply_to_bot_id = ?, reply_to_bot_username = ? WHERE id = ?'
+        'UPDATE queue SET source_chat_id = ?, reply_to_chat_id = ?, hops = ?, not_before = ?, continue_reply = ?, bot_id = ?, bot_username = ?, as_bot_id = ?, recipient_id = ?, reply_to_bot_id = ?, reply_to_bot_username = ?, message_id = COALESCE(?, message_id) WHERE id = ?'
       )
       .run(
         options.sourceChatId ?? null,
@@ -157,12 +176,14 @@ export function enqueuePrompt(
         recipientId ?? null,
         options.replyToActor?.botId ?? null,
         options.replyToActor?.botUsername ?? null,
+        messageId,
         item.id
       )
     return item
   })()
   if (!options.sourceChatId) resumeQueue(chatId)
   notifyAutomation(chatId)
+  if (options.fromUser && options.sourceChatId) notifyTranscriptChanged(chatId)
   // Drain on the next event-loop pass, after callers have persisted their own tool result.
   if (timer)
     setImmediate(() => {

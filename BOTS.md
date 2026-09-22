@@ -20,11 +20,17 @@ completion; the bot must inspect the source for details or current status.
 No transcript is copied, no new turn is scheduled, and task history never
 automatically replaces the saved role. Deleting a source removes that activity.
 
-- All project user messages reach Roxy first. Private bot chats stay with their
-  owner. No parser routes messages based on the presence or position of `@`.
+- All project user messages reach Roxy first by default (including Enter in the
+  composer). Private bot chats stay with their owner. No parser routes messages
+  based on the presence or position of `@`.
 - Mentions highlight existing bots and Roxy only. Unknown handles and scoped
   packages such as `@modelcontextprotocol/sdk` are plain text, never send errors.
-  There is no recipient selector or permanent explanatory UI.
+- The composer offers an explicit **Send to @username** action when a known bot
+  is the clear target (one known `@mention`, or the user picked one among several).
+  That queues the prompt so only that collaborator answers as a guest in the
+  shared project session — the same `sourceChatId` / `asBotId` / `recipientId`
+  contract as `bot_invoke`. With several known `@bots` and no pick, the UI asks
+  which one; it never silently routes to the wrong bot.
 - The model interprets intent: a direct `Hola @reviewer` calls `bot_invoke`
   without an announcement; `implement this, then ask @reviewer` keeps the work
   with Roxy until its prerequisites are complete. Questions about a bot stay
