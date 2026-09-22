@@ -682,10 +682,12 @@
     "step_one": "{{count}} paso",
     "step_other": "{{count}} pasos",
     "thinking": "pensando",
+    "thinkingAs": "{{name}} is thinking…",
     "thinkingOpen": "Pensando…",
     "unchanged_one": "{{count}} línea sin cambios",
     "unchanged_other": "{{count}} líneas sin cambios",
     "working": "trabajando",
+    "writingAs": "{{name}} is writing…",
     "you": "Tú"
   },
   "usage": {

@@ -682,10 +682,12 @@
     "step_one": "{{count}} 步",
     "step_other": "{{count}} 步",
     "thinking": "思考中",
+    "thinkingAs": "{{name}} is thinking…",
     "thinkingOpen": "思考中…",
     "unchanged_one": "{{count}} 行未更改",
     "unchanged_other": "{{count}} 行未更改",
     "working": "工作中",
+    "writingAs": "{{name}} is writing…",
     "you": "你"
   },
   "usage": {

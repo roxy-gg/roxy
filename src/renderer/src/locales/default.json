@@ -645,6 +645,8 @@
     "thinkingOpen": "Thinking…",
     "thinking": "thinking",
     "working": "working",
+    "thinkingAs": "{{name}} is thinking…",
+    "writingAs": "{{name}} is writing…",
     "running": "Running…",
     "noOutput": "(no output)",
     "report": "Report",

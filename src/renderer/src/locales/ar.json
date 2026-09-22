@@ -682,10 +682,12 @@
     "step_one": "{{count}} خطوة",
     "step_other": "{{count}} خطوات",
     "thinking": "جاري التفكير",
+    "thinkingAs": "{{name}} is thinking…",
     "thinkingOpen": "جاري التفكير…",
     "unchanged_one": "{{count}} سطر غير متغير",
     "unchanged_other": "{{count}} سطرًا غير متغير",
     "working": "جاري العمل",
+    "writingAs": "{{name}} is writing…",
     "you": "أنت"
   },
   "usage": {

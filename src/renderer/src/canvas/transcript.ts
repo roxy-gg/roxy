@@ -25,7 +25,7 @@ import { layoutToolCard, type ToolCardInput } from './tool-card'
 import { PROMPT_GUTTER } from './prompt-history'
 import { TranscriptWindow } from './transcript-window'
 import type { Bot } from '@shared/bots'
-import { isHostSpeaker } from '../../../shared/bots'
+import { HOST_USERNAME, isHostSpeaker } from '../../../shared/bots'
 import { MENTION, isKnownMention } from '../../../shared/mentions'
 
 export interface LayoutInput {
@@ -176,7 +176,7 @@ function layoutMessage(
     y,
     width,
     username,
-    username ? input.botAvatar?.(username) : undefined
+    username && username !== HOST_USERNAME ? input.botAvatar?.(username) : undefined
   )
   let cursor = body.y
   if (message.role === 'user') {
@@ -190,7 +190,10 @@ function layoutMessage(
       body.width,
       input,
       streaming,
-      `${message.id}/`
+      `${message.id}/`,
+      0,
+      true,
+      username
     )
   }
   const height = cursor - y + SPACE.messagePadY
@@ -201,14 +204,17 @@ export function messageBotUsername(input: LayoutInput, message: Message): string
   // The host answering inside a bot's chat is recorded explicitly, because the
   // fallback below means "this chat's bot": without the marker Roxy's reply was
   // drawn under the owner's name and avatar, both live and after a reload.
-  if (isHostSpeaker(message.botId, message.botUsername)) return undefined
+  // Surface the host handle as @roxy so attribution matches every other speaker.
+  if (isHostSpeaker(message.botId, message.botUsername)) return HOST_USERNAME
   const signed =
     input.bots?.find((bot) => bot.id === message.botId)?.username ?? message.botUsername
   // Work arriving from another session is stored as a user turn (it is a prompt
   // for this one), but it was written by a bot and says so. Reading the role
   // alone drew it as "You", crediting the person to whom it was delivered.
   if (message.role !== 'assistant') return signed
-  return signed ?? input.botUsername
+  // Unsigned assistants in a project chat are the host; in a bot chat they are
+  // the chat's owner via input.botUsername.
+  return signed ?? input.botUsername ?? HOST_USERNAME
 }
 
 export function layoutMessageHeader(
@@ -245,8 +251,8 @@ export function layoutMessageHeader(
       y: avatarY,
       w: SPACE.avatar,
       h: SPACE.avatar,
-      src: botAvatarSrc ?? '__roxy__',
-      radius: botUsername ? SPACE.avatar / 2 : SPACE.radiusLg,
+      src: botUsername === HOST_USERNAME ? '__roxy__' : (botAvatarSrc ?? '__roxy__'),
+      radius: !botUsername || botUsername === HOST_USERNAME ? SPACE.radiusLg : SPACE.avatar / 2,
       border: palette.border
     })
   }
@@ -357,7 +363,8 @@ export function layoutParts(
   streaming: boolean,
   idPrefix: string,
   firstIndex = 0,
-  indicator = true
+  indicator = true,
+  speakingAs?: string
 ): number {
   const palette = builder.palette
   let cursor = y
@@ -375,7 +382,19 @@ export function layoutParts(
         cancellable: cancelReady(part, input),
         view: input.view,
         renderNested: (nestedBuilder, children, nx, ny, nw, live, prefix) =>
-          layoutParts(nestedBuilder, children, nx, ny, nw, input, streaming && live, prefix)
+          layoutParts(
+            nestedBuilder,
+            children,
+            nx,
+            ny,
+            nw,
+            input,
+            streaming && live,
+            prefix,
+            0,
+            true,
+            speakingAs
+          )
       }
       cursor += layoutToolCard(builder, card, x, cursor, width)
       return
@@ -428,11 +447,16 @@ export function layoutParts(
   const runningTool = last?.type === 'tool' && last.state === 'running'
   const liveText = (last?.type === 'text' || last?.type === 'reasoning') && last.text.trim() !== ''
   if (indicator && streaming && !runningTool && (!liveText || input.quiet)) {
+    const thinkingLabel = speakingAs
+      ? builder.t(last === undefined ? 'transcript.thinkingAs' : 'transcript.writingAs', {
+          name: `@${speakingAs}`
+        })
+      : builder.t(last === undefined ? 'transcript.thinking' : 'transcript.working')
     cursor += layoutThinking(
       builder,
       x,
       cursor,
-      builder.t(last === undefined ? 'transcript.thinking' : 'transcript.working'),
+      thinkingLabel,
       input.view.startedAt.get(TURN_STARTED_AT) ?? input.now
     )
   }

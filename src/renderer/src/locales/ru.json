@@ -682,10 +682,12 @@
     "step_one": "{{count}} шаг",
     "step_other": "{{count}} шагов",
     "thinking": "думает",
+    "thinkingAs": "{{name}} is thinking…",
     "thinkingOpen": "Думаю…",
     "unchanged_one": "{{count}} неизменённая строка",
     "unchanged_other": "{{count}} неизменённых строк",
     "working": "работает",
+    "writingAs": "{{name}} is writing…",
     "you": "Вы"
   },
   "usage": {

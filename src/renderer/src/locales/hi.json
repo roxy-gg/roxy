@@ -682,10 +682,12 @@
     "step_one": "{{count}} चरण",
     "step_other": "{{count}} चरण",
     "thinking": "सोच रहा है",
+    "thinkingAs": "{{name}} is thinking…",
     "thinkingOpen": "सोच रहा है…",
     "unchanged_one": "{{count}} अपरिवर्तित पंक्ति",
     "unchanged_other": "{{count}} अपरिवर्तित पंक्तियाँ",
     "working": "काम कर रहा है",
+    "writingAs": "{{name}} is writing…",
     "you": "आप"
   },
   "usage": {
