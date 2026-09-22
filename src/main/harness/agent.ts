@@ -2487,6 +2487,10 @@ function toolTitle(name: string, input: Record<string, unknown>): string {
       return s(input.title) || s(input.name) || 'session metadata'
     case 'skill':
       return s(input.name)
+    case 'bot_invoke': {
+      const bot = s(input.bot).replace(/^@/, '')
+      return bot ? `@${bot}` : ''
+    }
     default:
       return isMcpTool(name) ? mcpToolTitle(name) : ''
   }

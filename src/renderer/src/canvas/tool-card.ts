@@ -18,7 +18,8 @@
  */
 
 import type { TFunction } from 'i18next'
-import type { MessagePart } from '@shared/types'
+import type { MessagePart, QueueItem } from '@shared/types'
+import { invokeChip, type InvokeChipKind } from './invoke-status'
 import type { Builder } from './builder'
 import type { ViewState } from './scene'
 import type { IconName } from './icons'
@@ -70,7 +71,10 @@ const TOOL_ICON: Record<string, IconName> = {
   skill_manage: 'bookOpen',
   lsp: 'circleAlert',
   mcp: 'network',
-  change_session_metadata: 'listTree'
+  change_session_metadata: 'listTree',
+  bot_invoke: 'bot',
+  bot_manage: 'bot',
+  bot_schedule: 'bot'
 }
 
 export function toolIcon(tool: string): IconName {
@@ -91,6 +95,8 @@ export interface ToolCardInput {
   live: boolean
   /** Set when a cancel is genuinely available for this call. */
   cancellable: boolean
+  /** Live chat queue — resolves bot_invoke Calling / Replied / Failed. */
+  queue?: QueueItem[]
   view: ViewState
   /** Renders a subagent's transcript. Supplied by the transcript layout. */
   renderNested?: (
@@ -252,6 +258,8 @@ interface Rail {
   stepLabel: string | null
   stepWidth: number
   showCancel: boolean
+  invokeLabel: string | null
+  invokeKind: InvokeChipKind | null
 }
 
 function measureRail(builder: Builder, input: ToolCardInput): Rail {
@@ -268,10 +276,22 @@ function measureRail(builder: Builder, input: ToolCardInput): Rail {
   // knows when the call started; here it is just a flag.
   const showCancel = input.cancellable
   const gap = 6
-  let width = SIZE.iconSm
+  const invoke = part.tool === 'bot_invoke' ? invokeChip(part, input.queue) : null
+  const invokeLabel = invoke ? invokeLabelFor(builder, invoke.kind, invoke.name) : null
+  const invokeWidth = invokeLabel
+    ? builder.metrics.measure(invokeLabel, font(FONT_SIZE.micro, 500, 'sans')) + 12
+    : 0
+  let width = invokeLabel ? invokeWidth : SIZE.iconSm
   if (stepLabel) width += stepWidth + gap
   if (showCancel) width += 20 + gap
-  return { width, stepLabel, stepWidth, showCancel }
+  return {
+    width,
+    stepLabel,
+    stepWidth,
+    showCancel,
+    invokeLabel,
+    invokeKind: invoke?.kind ?? null
+  }
 }
 
 function layoutRail(
@@ -318,6 +338,11 @@ function layoutRail(
     cursor += size + 6
   }
 
+  if (rail.invokeLabel && rail.invokeKind) {
+    layoutInvokeChip(builder, cursor, centerY, rail.invokeLabel, rail.invokeKind)
+    return
+  }
+
   const statusY = centerY - SIZE.iconSm / 2
   if (part.state === 'running') {
     builder.push({
@@ -337,6 +362,38 @@ function layoutRail(
     // incident.
     builder.icon(cursor, statusY, SIZE.iconSm, 'triangleAlert', palette.textMuted)
   }
+}
+
+function invokeLabelFor(builder: Builder, kind: InvokeChipKind, name: string): string {
+  if (kind === 'calling') return builder.t('transcript.invokeCalling', { name })
+  if (kind === 'replied') return builder.t('transcript.invokeReplied', { name })
+  return builder.t('transcript.invokeFailed')
+}
+
+function layoutInvokeChip(
+  builder: Builder,
+  x: number,
+  centerY: number,
+  label: string,
+  kind: InvokeChipKind
+): void {
+  const palette = builder.palette
+  const f = font(FONT_SIZE.micro, 500, 'sans')
+  const padX = 6
+  const height = 18
+  const width = builder.metrics.measure(label, f) + padX * 2
+  const y = centerY - height / 2
+  const fill =
+    kind === 'calling'
+      ? alpha(palette.accent, 0.16)
+      : kind === 'replied'
+        ? alpha(palette.success, 0.16)
+        : alpha(palette.textMuted, 0.12)
+  const color =
+    kind === 'calling' ? palette.accent : kind === 'replied' ? palette.success : palette.textMuted
+  builder.rect(x, y, width, height, SPACE.radiusMd, fill)
+  builder.text(x + padX, centerY - builder.metrics.lineHeight(f) / 2, label, f, color)
+  if (kind === 'calling') builder.animate()
 }
 
 /**

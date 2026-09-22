@@ -13,7 +13,7 @@
  */
 
 import type { TFunction } from 'i18next'
-import type { Message, MessagePart } from '@shared/types'
+import type { Message, MessagePart, QueueItem } from '@shared/types'
 import { Builder } from './builder'
 import type { Block, Scene, ViewState } from './scene'
 import { TextMetrics, font, type InlineSpan } from './text'
@@ -32,6 +32,8 @@ export interface LayoutInput {
   botUsername?: string
   streamingBot?: { botId?: string; botUsername?: string }
   bots?: Bot[]
+  /** Active chat queue — drives bot_invoke status chips. */
+  queue?: QueueItem[]
   botAvatar?: (username: string) => string
   messages: Message[]
   /** The live turn's parts, or null when nothing is streaming. */
@@ -70,7 +72,11 @@ const TURN_STARTED_AT = '__turn__'
 
 export function layoutTranscript(input: LayoutInput, cache: BlockCache): Scene {
   cache.setIdentity(
-    `${input.botUsername ?? ''}|${input.bots?.map((bot) => `${bot.id}:${bot.username}`).join('|') ?? ''}`
+    [
+      input.botUsername ?? '',
+      input.bots?.map((bot) => `${bot.id}:${bot.username}`).join('|') ?? '',
+      input.queue?.map((item) => `${item.id}:${item.state ?? ''}`).join('|') ?? ''
+    ].join('|')
   )
   const { messages, streaming, width, theme, view } = input
   if (streaming === null) view.startedAt.delete(TURN_STARTED_AT)
@@ -380,6 +386,7 @@ export function layoutParts(
         open: input.view.open.has(id),
         live: part.state === 'running',
         cancellable: cancelReady(part, input),
+        queue: input.queue,
         view: input.view,
         renderNested: (nestedBuilder, children, nx, ny, nw, live, prefix) =>
           layoutParts(

@@ -30,6 +30,8 @@ import type { Message, MessagePart } from '../../src/shared/types'
 import { parseMarkdown } from '../../src/renderer/src/canvas/markdown'
 import { ansiLineText, parseAnsi } from '../../src/renderer/src/canvas/ansi'
 import { layoutToolCard } from '../../src/renderer/src/canvas/tool-card'
+import { invokeChip } from '../../src/renderer/src/canvas/invoke-status'
+import type { QueueItem } from '../../src/shared/types'
 import { layoutTerminalBody } from '../../src/renderer/src/canvas/terminal'
 import { createStreamPublisher } from '../../src/renderer/src/lib/stream-publisher'
 
@@ -1245,5 +1247,55 @@ check(
     }
   }
 )
+
+check('bot_invoke chip tracks the queued guest', () => {
+  const part = {
+    type: 'tool' as const,
+    tool: 'bot_invoke',
+    state: 'done' as const,
+    input: { bot: 'reviewer', prompt: 'look' },
+    output: JSON.stringify({ id: 'q1', content: '@reviewer look' })
+  }
+  assert.equal(
+    invokeChip(part, [
+      {
+        id: 'q1',
+        chatId: 'c',
+        content: '@reviewer look',
+        createdAt: 1,
+        state: 'pending'
+      } as QueueItem
+    ]).kind,
+    'calling'
+  )
+  assert.equal(
+    invokeChip(part, [
+      {
+        id: 'q1',
+        chatId: 'c',
+        content: '@reviewer look',
+        createdAt: 1,
+        state: 'running'
+      } as QueueItem
+    ]).kind,
+    'calling'
+  )
+  assert.equal(
+    invokeChip(part, [
+      {
+        id: 'q1',
+        chatId: 'c',
+        content: '@reviewer look',
+        createdAt: 1,
+        state: 'failed'
+      } as QueueItem
+    ]).kind,
+    'failed'
+  )
+  assert.equal(invokeChip(part, []).kind, 'replied')
+  assert.equal(invokeChip({ ...part, state: 'running' }, []).kind, 'calling')
+  assert.equal(invokeChip({ ...part, state: 'error' }, []).kind, 'failed')
+  assert.equal(invokeChip(part, []).name, 'reviewer')
+})
 
 console.log(`DIFF/CANVAS MODEL OK - ${checks} checks passed`)
