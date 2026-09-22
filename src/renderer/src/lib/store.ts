@@ -266,11 +266,7 @@ interface RoxyStore {
    * as a guest in the shared project session. Default Enter / submit still goes
    * to Roxy.
    */
-  submitToCollaborator: (
-    content: string,
-    botId: string,
-    images?: ComposerImage[]
-  ) => Promise<void>
+  submitToCollaborator: (content: string, botId: string, images?: ComposerImage[]) => Promise<void>
   sendMessage: (content: string, chatId?: string, images?: ComposerImage[]) => Promise<void>
   removeQueued: (id: string) => Promise<void>
   moveQueued: (id: string, direction: 'up' | 'down') => Promise<void>

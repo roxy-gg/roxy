@@ -128,11 +128,14 @@
   "composer": {
     "addToQueue": "Add to queue",
     "attachImages": "画像を添付",
+    "chooseSendTo": "Choose who to send to",
     "placeholder": "Roxy に何でも質問…（画像を貼り付けるかドロップ）",
     "queuePlaceholder": "次のメッセージをキューに追加…",
     "queuePlaceholderStop": "次のメッセージをキューに追加…（Esc で停止）",
     "removeImage": "画像を削除",
     "send": "Send",
+    "sendTo": "Send to @{{username}}",
+    "sendToHint": "Send only to this collaborator. Enter still sends to Roxy.",
     "stop": "停止 (Esc)"
   },
   "configBackup": {

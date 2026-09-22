@@ -128,15 +128,15 @@
   "composer": {
     "addToQueue": "Add to queue",
     "attachImages": "Adjuntar imágenes",
+    "chooseSendTo": "Elige a quién enviar",
     "placeholder": "Pregúntale lo que quieras a Roxy… (pega o suelta imágenes)",
     "queuePlaceholder": "Pon un mensaje de seguimiento en cola…",
     "queuePlaceholderStop": "Pon un mensaje de seguimiento en cola… (Esc para detener)",
     "removeImage": "Quitar la imagen",
     "send": "Send",
-    "stop": "Detener (Esc)",
     "sendTo": "Enviar a @{{username}}",
-    "chooseSendTo": "Elige a quién enviar",
-    "sendToHint": "Enviar solo a este colaborador. Enter sigue enviando a Roxy."
+    "sendToHint": "Enviar solo a este colaborador. Enter sigue enviando a Roxy.",
+    "stop": "Detener (Esc)"
   },
   "configBackup": {
     "export": "Exportar",

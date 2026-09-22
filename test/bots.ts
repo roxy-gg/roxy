@@ -933,12 +933,14 @@ async function main(): Promise<void> {
       repo.removeQueueItem(publicQueued.id)
       // Explicit options (composer Send to @bot) do route — same contract as bot_invoke.
       const routed = await win.webContents.executeJavaScript(
-        `window.roxy.queue.add(${JSON.stringify(local.id)}, 'Hola @worker, review this', undefined, ${JSON.stringify({
-          sourceChatId: local.id,
-          asBotId: worker.id,
-          recipientId: worker.id,
-          fromUser: true
-        })})`
+        `window.roxy.queue.add(${JSON.stringify(local.id)}, 'Hola @worker, review this', undefined, ${JSON.stringify(
+          {
+            sourceChatId: local.id,
+            asBotId: worker.id,
+            recipientId: worker.id,
+            fromUser: true
+          }
+        )})`
       )
       assert.equal(routed.asBotId, worker.id)
       assert.deepEqual(

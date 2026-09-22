@@ -128,11 +128,14 @@
   "composer": {
     "addToQueue": "Add to queue",
     "attachImages": "Прикрепить изображения",
+    "chooseSendTo": "Choose who to send to",
     "placeholder": "Спросите Roxy о чём угодно… (вставьте или перетащите изображения)",
     "queuePlaceholder": "Добавить следующий запрос в очередь…",
     "queuePlaceholderStop": "Добавить следующий запрос в очередь… (Esc — остановить)",
     "removeImage": "Удалить изображение",
     "send": "Send",
+    "sendTo": "Send to @{{username}}",
+    "sendToHint": "Send only to this collaborator. Enter still sends to Roxy.",
     "stop": "Остановить (Esc)"
   },
   "configBackup": {

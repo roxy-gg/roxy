@@ -128,11 +128,14 @@
   "composer": {
     "addToQueue": "Add to queue",
     "attachImages": "Bilder anhängen",
+    "chooseSendTo": "Choose who to send to",
     "placeholder": "Frag Roxy alles… (Bilder einfügen oder ablegen)",
     "queuePlaceholder": "Eine Folgeanfrage einreihen…",
     "queuePlaceholderStop": "Eine Folgeanfrage einreihen… (Esc zum Stoppen)",
     "removeImage": "Bild entfernen",
     "send": "Send",
+    "sendTo": "Send to @{{username}}",
+    "sendToHint": "Send only to this collaborator. Enter still sends to Roxy.",
     "stop": "Stopp (Esc)"
   },
   "configBackup": {

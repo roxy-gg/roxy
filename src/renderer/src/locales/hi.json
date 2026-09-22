@@ -128,11 +128,14 @@
   "composer": {
     "addToQueue": "Add to queue",
     "attachImages": "छवियाँ संलग्न करें",
+    "chooseSendTo": "Choose who to send to",
     "placeholder": "Roxy से कुछ भी पूछें… (चित्र चिपकाएँ या यहाँ छोड़ें)",
     "queuePlaceholder": "अगला संदेश कतार में जोड़ें…",
     "queuePlaceholderStop": "अगला संदेश कतार में जोड़ें… (रोकने के लिए Esc)",
     "removeImage": "छवि हटाएँ",
     "send": "Send",
+    "sendTo": "Send to @{{username}}",
+    "sendToHint": "Send only to this collaborator. Enter still sends to Roxy.",
     "stop": "रोकें (Esc)"
   },
   "configBackup": {

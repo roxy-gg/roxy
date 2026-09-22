@@ -128,11 +128,14 @@
   "composer": {
     "addToQueue": "Add to queue",
     "attachImages": "附加图片",
+    "chooseSendTo": "Choose who to send to",
     "placeholder": "问 Roxy 任何问题…（粘贴或拖放图片）",
     "queuePlaceholder": "将后续消息加入队列…",
     "queuePlaceholderStop": "将后续消息加入队列…（按 Esc 停止）",
     "removeImage": "移除图片",
     "send": "Send",
+    "sendTo": "Send to @{{username}}",
+    "sendToHint": "Send only to this collaborator. Enter still sends to Roxy.",
     "stop": "停止 (Esc)"
   },
   "configBackup": {

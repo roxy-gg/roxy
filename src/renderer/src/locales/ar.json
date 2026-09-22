@@ -128,11 +128,14 @@
   "composer": {
     "addToQueue": "Add to queue",
     "attachImages": "إرفاق الصور",
+    "chooseSendTo": "Choose who to send to",
     "placeholder": "اسأل Roxy عن أي شيء… (الصق الصور أو أفلتها)",
     "queuePlaceholder": "ضع متابعة في قائمة الانتظار…",
     "queuePlaceholderStop": "ضع متابعة في قائمة الانتظار… (Esc للإيقاف)",
     "removeImage": "إزالة الصورة",
     "send": "Send",
+    "sendTo": "Send to @{{username}}",
+    "sendToHint": "Send only to this collaborator. Enter still sends to Roxy.",
     "stop": "إيقاف (Esc)"
   },
   "configBackup": {

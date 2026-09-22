@@ -432,7 +432,9 @@ export function Composer({
                   aria-label={t('composer.chooseSendTo')}
                   className="flex flex-wrap justify-end gap-1"
                 >
-                  <span className="px-1 text-[11px] text-text-muted">{t('composer.chooseSendTo')}</span>
+                  <span className="px-1 text-[11px] text-text-muted">
+                    {t('composer.chooseSendTo')}
+                  </span>
                   {knownTargets.map((bot) => (
                     <button
                       key={bot.id}
