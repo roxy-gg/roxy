@@ -1,14 +1,14 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useTranslation, Trans } from 'react-i18next'
-import { GripVertical, Globe, Plus, Trash2 } from 'lucide-react'
-import type { AppVersions, ConnectedProvider } from '@shared/types'
+import { Globe, Plus, Trash2 } from 'lucide-react'
+import type { AppVersions } from '@shared/types'
 import type { UpdateInfo } from '@shared/api'
-import { AUTH_LABELS, resolveSeed } from '@shared/providers'
+import { resolveSeed } from '@shared/providers'
 import { LANGUAGES, SOURCE_LANGUAGE, normalizeLanguage } from '@shared/i18n'
 import { api } from '../lib/api'
 import { CodeHosts } from '../components/CodeHosts'
-import { Button, Input, Switch } from '../components/ui'
+import { Button, Switch } from '../components/ui'
 import { cn } from '../lib/cn'
 import {
   DEFAULT_BRANCH_PREFIX,
@@ -23,9 +23,8 @@ import { CookiePanel } from '../components/CookiePanel'
 import { ProxyPanel } from '../components/ProxyPanel'
 import { ConfigBackup } from '../components/ConfigBackup'
 import { ActivitySection } from '../components/ActivitySection'
-import { ProviderLogo } from '../lib/providerLogos'
-import { ProviderSetup } from './onboarding/ProviderStep'
-import { ModelVisibility } from '../components/ModelVisibility'
+import { ProviderSetup, AddAccount } from './onboarding/ProviderStep'
+import { ProviderAccount } from '../components/ProviderAccount'
 import { useRoxyStore } from '../lib/store'
 import { MotionSettings } from '../components/MotionSettings'
 
@@ -60,6 +59,11 @@ export default function Settings(): JSX.Element {
   const [dragOverProviderId, setDragOverProviderId] = useState<string | null>(null)
   const [dropAfterProvider, setDropAfterProvider] = useState(false)
   const [setup, setSetup] = useState<{ seedId: string; connectionId?: string } | null>(null)
+  const [addingAccount, setAddingAccount] = useState(false)
+  const addAccountRef = useRef<HTMLButtonElement | null>(null)
+  useEffect(() => {
+    if (!addingAccount) addAccountRef.current?.focus()
+  }, [addingAccount])
 
   const reorderWithinProviders = (
     sourceId: string,
@@ -100,11 +104,6 @@ export default function Settings(): JSX.Element {
     return off
   }, [refreshProviders])
 
-  const disconnect = async (id: string): Promise<void> => {
-    await api.providers.disconnect(id)
-    await refreshProviders()
-  }
-
   const resetEverything = async (): Promise<void> => {
     setResetting(true)
     await api.settings.reset()
@@ -136,6 +135,13 @@ export default function Settings(): JSX.Element {
 
   return (
     <PageShell title={t('settings.title')} onBack={() => navigate('/')}>
+      {addingAccount && (
+        <AddAccount
+          onClose={() => {
+            setAddingAccount(false)
+          }}
+        />
+      )}
       {setup && (
         <ProviderSetup
           modal
@@ -148,17 +154,26 @@ export default function Settings(): JSX.Element {
       <MotionSettings onChange={setMotion} />
 
       <section className="mb-8">
-        <h2 className={SECTION_HEADING}>{t('settings.providers.heading')}</h2>
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+          <h2 className="text-xs font-semibold uppercase tracking-wide text-text-subtle">
+            {t('settings.providers.heading')}
+          </h2>
+          <Button
+            size="sm"
+            onClick={(e) => {
+              addAccountRef.current = e.currentTarget
+              setAddingAccount(true)
+            }}
+          >
+            <Plus className="h-3.5 w-3.5" />
+            {t('settings.providers.addAccount')}
+          </Button>
+        </div>
+        <p className="mb-4 text-xs text-text-muted">{t('settings.providers.description')}</p>
         <div className="flex flex-col gap-2">
-          {providers.map((p) => (
+          {providers.map((p, index) => (
             <div
               key={p.id}
-              draggable={providers.length > 1}
-              onDragStart={(e) => {
-                setDragProviderId(p.id)
-                e.dataTransfer.effectAllowed = 'move'
-                e.dataTransfer.setData('text/plain', p.id)
-              }}
               onDragEnter={() =>
                 dragProviderId && dragProviderId !== p.id && setDragOverProviderId(p.id)
               }
@@ -190,32 +205,45 @@ export default function Settings(): JSX.Element {
                     : 'before:absolute before:inset-x-2 before:-top-1 before:h-0.5 before:rounded-full before:bg-accent')
               )}
             >
-              <ProviderRow
+              <ProviderAccount
                 provider={p}
                 active={settings?.activeProviderId === p.id}
-                draggable={providers.length > 1}
-                dragging={dragProviderId === p.id}
-                onDisconnect={() => disconnect(p.id)}
+                onDragStart={(e) => {
+                  setDragProviderId(p.id)
+                  e.dataTransfer.effectAllowed = 'move'
+                  e.dataTransfer.setData('text/plain', p.id)
+                }}
+                onMoveUp={
+                  index > 0
+                    ? () => {
+                        const order = reorderWithinProviders(
+                          p.id,
+                          providers[index - 1].id,
+                          'before'
+                        )
+                        if (order) void reorderProviders(order)
+                      }
+                    : undefined
+                }
+                onMoveDown={
+                  index < providers.length - 1
+                    ? () => {
+                        const order = reorderWithinProviders(p.id, providers[index + 1].id, 'after')
+                        if (order) void reorderProviders(order)
+                      }
+                    : undefined
+                }
                 onAddAccount={() => setSetup({ seedId: p.seedId })}
                 onReconnect={() => setSetup({ seedId: p.seedId, connectionId: p.id })}
-                onRenamed={refreshProviders}
               />
             </div>
           ))}
-          <button
-            type="button"
-            onClick={() => navigate('/onboarding')}
-            className="press-scale flex items-center justify-center gap-2 sq sq-xl sq-ring sq-dashed rounded-xl border border-dashed border-border bg-surface/40 p-3.5 text-sm text-text-muted hover:border-border-strong hover:[--sq-ring:var(--color-border-strong)] hover:bg-surface hover:text-text"
-          >
-            <Plus className="h-4 w-4" /> {t('settings.providers.add')}
-          </button>
+          {providers.length === 0 && (
+            <p className="rounded-xl border border-dashed border-border p-6 text-center text-sm text-text-subtle">
+              {t('settings.providers.empty')}
+            </p>
+          )}
         </div>
-      </section>
-
-      {/* Under Providers: same list, minus what you never use. */}
-      <section className="mb-8">
-        <h2 className={SECTION_HEADING}>{t('settings.models.heading')}</h2>
-        <ModelVisibility />
       </section>
 
       {/* A native <select> on purpose. The picker is read once and then never
@@ -451,163 +479,5 @@ export default function Settings(): JSX.Element {
         </div>
       </section>
     </PageShell>
-  )
-}
-
-function ProviderRow({
-  provider,
-  active,
-  draggable,
-  dragging,
-  onDisconnect,
-  onAddAccount,
-  onReconnect,
-  onRenamed
-}: {
-  provider: ConnectedProvider
-  active: boolean
-  draggable: boolean
-  dragging: boolean
-  onDisconnect: () => void
-  onAddAccount: () => void
-  onReconnect: () => void
-  onRenamed: () => Promise<void>
-}): JSX.Element {
-  const { t } = useTranslation()
-  const [editing, setEditing] = useState(false)
-  const [name, setName] = useState(provider.name)
-  const [saving, setSaving] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const saveName = async (): Promise<void> => {
-    if (saving || !name.trim()) return
-    setSaving(true)
-    setError(null)
-    try {
-      await api.providers.rename(provider.id, name.trim())
-      await onRenamed()
-      setEditing(false)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
-    } finally {
-      setSaving(false)
-    }
-  }
-  return (
-    <div
-      className={cn(
-        'flex items-center gap-3 sq sq-xl sq-ring rounded-xl border border-border bg-surface p-3.5 transition',
-        dragging && 'cursor-grabbing',
-        draggable && !dragging && 'cursor-grab'
-      )}
-    >
-      <GripVertical
-        className={cn(
-          'h-4 w-4 shrink-0 text-text-subtle transition',
-          draggable ? 'opacity-70' : 'opacity-20'
-        )}
-        aria-hidden="true"
-      />
-      <div className="flex h-8 w-8 items-center justify-center sq sq-lg sq-ring rounded-lg border border-border bg-surface-2">
-        <ProviderLogo id={provider.seedId} name={provider.name} size={18} />
-      </div>
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2">
-          {editing ? (
-            <form
-              className="flex min-w-0 flex-1 flex-wrap items-center gap-2"
-              onSubmit={(e) => {
-                e.preventDefault()
-                void saveName()
-              }}
-              onDragStart={(e) => e.stopPropagation()}
-            >
-              <Input
-                autoFocus
-                aria-label={t('settings.providers.accountName')}
-                value={name}
-                maxLength={100}
-                disabled={saving}
-                className="min-w-24 flex-1"
-                onChange={(e) => setName(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Escape' && !saving) setEditing(false)
-                }}
-              />
-              <Button type="submit" size="sm" disabled={saving || !name.trim()}>
-                {t('common.save')}
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant="ghost"
-                disabled={saving}
-                onClick={() => setEditing(false)}
-              >
-                {t('common.cancel')}
-              </Button>
-            </form>
-          ) : (
-            <button
-              type="button"
-              className="truncate text-left text-sm font-medium text-text hover:underline"
-              title={t('settings.providers.rename')}
-              aria-label={t('settings.providers.renameAccount', { name: provider.name })}
-              onClick={() => {
-                setName(provider.name)
-                setError(null)
-                setEditing(true)
-              }}
-            >
-              {provider.name}
-            </button>
-          )}
-          {active && (
-            <span className="rounded-full bg-success/15 px-2 py-0.5 text-[11px] text-success">
-              {t('settings.providers.active')}
-            </span>
-          )}
-        </div>
-        <p className="mt-0.5 text-xs text-text-subtle">
-          {AUTH_LABELS[provider.auth]} ·{' '}
-          {provider.auth === 'subscription'
-            ? t('settings.providers.signedInLocally')
-            : provider.hasCredential
-              ? t('settings.providers.keyStored')
-              : t('settings.providers.noCredential')}
-        </p>
-        {provider.identity && (
-          <p className="mt-1 truncate text-xs text-text-muted">{provider.identity}</p>
-        )}
-        {error && (
-          <p role="alert" className="mt-1 text-xs text-danger">
-            {error}
-          </p>
-        )}
-        <div className="mt-2 flex flex-wrap gap-2">
-          {!editing && (
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => {
-                setName(provider.name)
-                setError(null)
-                setEditing(true)
-              }}
-            >
-              {t('settings.providers.rename')}
-            </Button>
-          )}
-          <Button size="sm" variant="ghost" onClick={onAddAccount}>
-            <Plus className="h-3 w-3" /> {t('settings.providers.addAccount')}
-          </Button>
-          <Button size="sm" variant="ghost" onClick={onReconnect}>
-            {t('settings.providers.reconnect')}
-          </Button>
-        </div>
-      </div>
-      <Button size="sm" variant="ghost" onClick={onDisconnect}>
-        {t('settings.providers.disconnect')}
-      </Button>
-    </div>
   )
 }

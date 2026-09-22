@@ -1,5 +1,14 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { Brain, Check, ChevronsUpDown, Search, Wrench, X } from 'lucide-react'
+import {
+  Brain,
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  ChevronsUpDown,
+  Search,
+  Wrench,
+  X
+} from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { Trans, useTranslation } from 'react-i18next'
 import { buildModelIndex, buildProviderModelRows, countMatchesByProvider } from '../lib/modelRows'
@@ -97,6 +106,8 @@ export function ModelPicker(): JSX.Element {
   const selectModel = useRoxyStore((s) => s.selectModel)
   const models = useRoxyStore((s) => s.modelCatalog)
   const modelsTried = useRoxyStore((s) => s.modelsTried)
+  const modelErrors = useRoxyStore((s) => s.modelErrors)
+  const modelsLoading = useRoxyStore((s) => s.modelsLoading)
   const ensureModels = useRoxyStore((s) => s.ensureModels)
   const hiddenModels = useRoxyStore((s) => s.hiddenModels)
   const ensureHiddenModels = useRoxyStore((s) => s.ensureHiddenModels)
@@ -111,6 +122,7 @@ export function ModelPicker(): JSX.Element {
   const anchor = useMenuAnchor(rootRef, open, MENU_W, { gap: 8, maxHeight: 380 })
   const { band, reset: resetScroll } = useWindow(listRef, open)
 
+  const [accountOverflow, setAccountOverflow] = useState({ before: false, after: false })
   const config = useMemo(() => resolveSessionConfig(activeChat, settings), [activeChat, settings])
   const activeProvider = useMemo(
     () =>
@@ -179,14 +191,48 @@ export function ModelPicker(): JSX.Element {
     const tab = activeTabRef.current
     const rail = carouselRef.current
     if (!open || !tab || !rail) return
-    rail.scrollLeft = tab.offsetLeft - rail.clientWidth / 2 + tab.clientWidth / 2
+    const tabRect = tab.getBoundingClientRect()
+    const railRect = rail.getBoundingClientRect()
+    rail.scrollLeft += tabRect.left - railRect.left + (tabRect.width - railRect.width) / 2
   }, [open, selectedProviderId])
 
-  const handleCarouselWheel = useCallback((e: React.WheelEvent<HTMLDivElement>) => {
-    if (e.deltaY !== 0) {
-      e.currentTarget.scrollLeft += e.deltaY
+  useLayoutEffect(() => {
+    const rail = carouselRef.current
+    if (!open || !rail) return
+    const measure = (): void => {
+      const offset = Math.abs(rail.scrollLeft)
+      const before = offset > 1
+      const after = rail.scrollWidth - rail.clientWidth - offset > 1
+      setAccountOverflow((previous) =>
+        previous.before === before && previous.after === after ? previous : { before, after }
+      )
     }
-  }, [])
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(rail)
+    rail.addEventListener('scroll', measure, { passive: true })
+    return () => {
+      observer.disconnect()
+      rail.removeEventListener('scroll', measure)
+    }
+  }, [open, providers.length])
+
+  useEffect(() => {
+    const rail = carouselRef.current
+    if (!open || !rail) return
+    const onWheel = (e: WheelEvent): void => {
+      // Leave horizontal/diagonal trackpad gestures and pinch zoom native.
+      if (e.ctrlKey || e.shiftKey || e.deltaX !== 0 || !e.deltaY) return
+      if (rail.scrollWidth <= rail.clientWidth) return
+      const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? rail.clientWidth : 1
+      const direction = getComputedStyle(rail).direction === 'rtl' ? -1 : 1
+      e.preventDefault()
+      rail.scrollLeft += e.deltaY * unit * direction
+    }
+    // React wheel handlers are passive; cancel the default vertical scroll here.
+    rail.addEventListener('wheel', onWheel, { passive: false })
+    return () => rail.removeEventListener('wheel', onWheel)
+  }, [open])
 
   const index = useMemo(() => buildModelIndex(models), [models])
   const q = query.trim().toLowerCase()
@@ -243,7 +289,9 @@ export function ModelPicker(): JSX.Element {
   const visibleRows = rows.slice(first, last)
 
   const loading = Boolean(
-    currentProvider && !models[currentProvider.id] && !modelsTried[currentProvider.id]
+    currentProvider &&
+    (modelsLoading[currentProvider.id] ||
+      (!models[currentProvider.id] && !modelsTried[currentProvider.id]))
   )
 
   const allHidden = Boolean(
@@ -289,17 +337,83 @@ export function ModelPicker(): JSX.Element {
           style={anchor}
         >
           {/* Provider Carousel */}
-          <div className="relative border-b border-border/70 bg-surface/40">
+          <div className="shrink-0 border-b border-border/70 px-2 pb-2 pt-2">
+            <div className="mb-1 flex h-6 items-center justify-between px-1">
+              <span className="text-[10px] font-medium tracking-wide text-text-subtle">
+                {t('models.accounts')}
+                <span aria-hidden="true" className="ms-1.5 font-normal tabular-nums opacity-70">
+                  {providers.length}
+                </span>
+              </span>
+              {(accountOverflow.before || accountOverflow.after) && (
+                <div className="flex items-center gap-0.5">
+                  {(['before', 'after'] as const).map((direction) => (
+                    <button
+                      key={direction}
+                      type="button"
+                      aria-label={t(
+                        direction === 'before' ? 'models.previousAccounts' : 'models.nextAccounts'
+                      )}
+                      title={t(
+                        direction === 'before' ? 'models.previousAccounts' : 'models.nextAccounts'
+                      )}
+                      disabled={!accountOverflow[direction]}
+                      onClick={() => {
+                        const rail = carouselRef.current
+                        if (!rail) return
+                        const sign = getComputedStyle(rail).direction === 'rtl' ? -1 : 1
+                        rail.scrollLeft +=
+                          (direction === 'before' ? -1 : 1) *
+                          sign *
+                          Math.max(80, rail.clientWidth - 80)
+                      }}
+                      className="flex h-6 w-6 items-center justify-center rounded-md text-text-muted hover:bg-surface-2 active:bg-accent/10 focus-visible:outline-2 focus-visible:outline-accent/60 disabled:pointer-events-none disabled:opacity-25"
+                    >
+                      {direction === 'before' ? (
+                        <ChevronLeft aria-hidden="true" className="h-3.5 w-3.5 rtl:rotate-180" />
+                      ) : (
+                        <ChevronRight aria-hidden="true" className="h-3.5 w-3.5 rtl:rotate-180" />
+                      )}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
             <div
               ref={carouselRef}
-              onWheel={handleCarouselWheel}
-              className="flex items-center gap-1 overflow-x-auto px-2 py-1.5 scroll-smooth [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+              data-provider-carousel
+              role="group"
+              aria-label={t('models.accounts')}
+              onKeyDown={(e) => {
+                if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return
+                const tabs = Array.from(e.currentTarget.querySelectorAll('button'))
+                const index = tabs.indexOf(e.target as HTMLButtonElement)
+                if (index < 0) return
+                const rtl = getComputedStyle(e.currentTarget).direction === 'rtl'
+                let next: number
+                if (e.key === 'Home') next = 0
+                else if (e.key === 'End') next = tabs.length - 1
+                else if (e.key === 'ArrowRight') next = index + (rtl ? -1 : 1)
+                else if (e.key === 'ArrowLeft') next = index + (rtl ? 1 : -1)
+                else return
+                e.preventDefault()
+                const tab = tabs[Math.max(0, Math.min(tabs.length - 1, next))]
+                tab.focus({ preventScroll: true })
+                tab.click()
+              }}
+              className="flex items-start gap-1 overflow-x-auto overscroll-x-contain p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
             >
               {providers.map((p) => {
                 const isSelected = p.id === currentProvider?.id
                 const count = matchCounts[p.id]
                 const hasQuery = Boolean(q)
                 const hasMatches = (count ?? 0) > 0
+                const characters = Array.from(p.name)
+                // Preserve the suffix to distinguish numbered sibling accounts.
+                const label =
+                  characters.length > 24
+                    ? `${characters.slice(0, 17).join('')}…${characters.slice(-6).join('')}`
+                    : p.name
 
                 return (
                   <button
@@ -311,35 +425,35 @@ export function ModelPicker(): JSX.Element {
                       void ensureModels(p.id)
                     }}
                     title={p.name}
+                    aria-label={p.name}
+                    aria-pressed={isSelected}
                     className={cn(
-                      'group relative flex shrink-0 flex-col items-center justify-center rounded-lg p-1 transition-all',
-                      isSelected ? 'text-text' : 'text-text-subtle hover:text-text',
+                      'group relative flex w-[76px] shrink-0 flex-col items-center rounded-lg px-1 py-2 focus-visible:outline-2 focus-visible:outline-accent/60',
+                      isSelected
+                        ? 'bg-accent/10 text-text-muted ring-1 ring-inset ring-accent/25'
+                        : 'text-text-subtle hover:bg-surface-2 hover:text-text-muted active:bg-accent/5',
                       hasQuery && !hasMatches && !isSelected && 'opacity-40 hover:opacity-75'
                     )}
                   >
-                    <div
-                      className={cn(
-                        'relative flex h-9 w-9 items-center justify-center rounded-lg transition-all',
-                        isSelected
-                          ? 'bg-accent/15 ring-1 ring-accent/30 shadow-xs'
-                          : 'bg-white/[0.04] hover:bg-white/[0.08]'
-                      )}
-                    >
+                    <div className="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-surface">
                       <ProviderLogo id={p.seedId} name={p.name} size={20} />
+                      {isSelected && !hasQuery && (
+                        <span className="absolute -bottom-0.5 -end-0.5 flex h-3 w-3 items-center justify-center rounded-full bg-accent text-white ring-2 ring-elevated">
+                          <Check aria-hidden="true" className="h-2 w-2" strokeWidth={3} />
+                        </span>
+                      )}
                       {hasQuery && count !== undefined && count > 0 && (
                         <span className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-accent/90 px-1.5 py-0.5 text-[10px] font-semibold text-white shadow-xs">
                           {count > 99 ? '99+' : count}
                         </span>
                       )}
                     </div>
-                    <span className="mt-1 max-w-28 truncate px-1 text-[11px]">{p.name}</span>
-                    {/* Active indicator bar */}
-                    <div
-                      className={cn(
-                        'mt-1 h-[2.5px] rounded-full transition-all duration-150',
-                        isSelected ? 'w-5 bg-accent opacity-100' : 'w-0 bg-transparent opacity-0'
-                      )}
-                    />
+                    <span
+                      aria-hidden="true"
+                      className="mt-1.5 line-clamp-2 h-7 w-full break-words px-0.5 text-center text-[10px] leading-[14px] tracking-[0.01em]"
+                    >
+                      {label}
+                    </span>
                   </button>
                 )
               })}
@@ -484,9 +598,34 @@ export function ModelPicker(): JSX.Element {
 
             {rows.length === 0 && !loading && !q && !allHidden && (
               <div className="px-3 py-3 text-xs text-text-subtle">
-                {currentProvider?.seedId === 'github-copilot'
-                  ? t('models.copilotUnavailable')
-                  : t('models.loadFailed')}
+                <p role="status">
+                  {currentProvider?.seedId === 'github-copilot'
+                    ? t('models.copilotUnavailable')
+                    : currentProvider && modelErrors[currentProvider.id] === 'authentication'
+                      ? t('models.authenticationFailed', { provider: currentProvider.name })
+                      : t('models.accountUnavailable', { provider: currentProvider?.name ?? '' })}
+                </p>
+                <div className="mt-2 flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (currentProvider) void ensureModels(currentProvider.id)
+                    }}
+                    className="text-accent hover:underline"
+                  >
+                    {t('models.retry')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setOpen(false)
+                      navigate('/settings')
+                    }}
+                    className="text-text-muted hover:underline"
+                  >
+                    {t('models.checkConnection')}
+                  </button>
+                </div>
               </div>
             )}
           </div>

@@ -7,6 +7,16 @@
   </head>
   <body>
     <div id="root"></div>
-    <script type="module" src="/providers.tsx"></script>
+    <script type="module">
+      // Also supports /@fs/ on the app's dev server, which bypasses HTML transforms.
+      import RefreshRuntime from '/@react-refresh'
+      if (!window.__vite_plugin_react_preamble_installed__) {
+        RefreshRuntime.injectIntoGlobalHook(window)
+        window.$RefreshReg$ = () => {}
+        window.$RefreshSig$ = () => (type) => type
+        window.__vite_plugin_react_preamble_installed__ = true
+      }
+    </script>
+    <script type="module" src="./providers.tsx"></script>
   </body>
 </html>

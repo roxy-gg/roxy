@@ -46,7 +46,7 @@ import net from 'node:net'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 import { pipeline } from 'node:stream/promises'
-import { Readable } from 'node:stream'
+import { Readable, Transform } from 'node:stream'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { app, BrowserWindow, net as electronNet } from 'electron'
@@ -461,17 +461,22 @@ async function downloadAndExtract(asset: string, expected: string): Promise<void
     // file after we wrote it" - and we were guessing between those.
     const streamHash = createHash('sha256')
     const source = Readable.fromWeb(res.body as Parameters<typeof Readable.fromWeb>[0])
-    source.on('data', (chunk: Buffer) => {
-      streamHash.update(chunk)
-      received += chunk.length
-      if (total > 0) {
-        // Cap at 99: the last percent is extraction, so the bar doesn't sit at
-        // 100 while the archive is still being unpacked.
-        const pct = Math.min(99, Math.floor((received / total) * 100))
-        if (pct !== state.progress) update({ progress: pct })
+    const progress = new Transform({
+      transform(chunk: Buffer, _encoding, callback) {
+        // Chromium-owned response buffers can change during synchronous progress
+        // IPC. Own the bytes before broadcasting or queuing an async disk write.
+        const bytes = Buffer.from(chunk)
+        streamHash.update(bytes)
+        received += bytes.length
+        if (total > 0) {
+          // Reserve the last percent for verification and extraction.
+          const pct = Math.min(99, Math.floor((received / total) * 100))
+          if (pct !== state.progress) update({ progress: pct })
+        }
+        callback(null, bytes)
       }
     })
-    await pipeline(source, out)
+    await pipeline(source, progress, out)
 
     // Verify the FILE ON DISK, not the bytes that streamed past on the way in.
     //

@@ -5,11 +5,14 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { app } from 'electron'
 import * as repo from '../src/main/db/repo'
-import { closeDb } from '../src/main/db/database'
-import { listModels, modelCost } from '../src/main/services/models'
+import { closeDb, getDb } from '../src/main/db/database'
+import { listModelCatalog, listModels, modelCost } from '../src/main/services/models'
 import { openaiEndpoint, openAiReasoning, streamChat } from '../src/main/services/llm'
 import { isResponsesOnly } from '../src/main/services/responses'
 import { accountIdentity } from '../src/main/services/copilot'
+import { CODEX_PROVIDER_ID } from '../src/shared/cliproxy'
+import { SEED_PROVIDERS } from '../src/shared/providers'
+import { connectVerifiedProvider } from '../src/main/services/provider-connect'
 
 const root = mkdtempSync(join(tmpdir(), 'roxy-provider-models-'))
 app.setPath('userData', root)
@@ -19,6 +22,188 @@ void app
   .whenReady()
   .then(async () => {
     try {
+      // Verify every API-key seed using only mocked, read-only HTTP.
+      for (const seed of SEED_PROVIDERS.filter((p) => p.auth === 'api-key')) {
+        let requests = 0
+        globalThis.fetch = async (url, options) => {
+          requests++
+          assert.equal(options?.method ?? 'GET', 'GET')
+          assert.equal(options?.body, undefined, 'verification never sends a paid prompt')
+          assert.equal(options?.redirect, 'error', 'credentials never follow redirects')
+          assert.ok(options?.signal)
+          const headers = new Headers(options?.headers)
+          const token = headers.get(
+            seed.wire === 'google'
+              ? 'x-goog-api-key'
+              : seed.wire === 'anthropic'
+                ? 'x-api-key'
+                : 'Authorization'
+          )
+          if (requests === 2) return new Response('', { status: 401 })
+          assert.equal(
+            token,
+            seed.wire === 'google' || seed.wire === 'anthropic' ? 'test-key' : 'Bearer test-key'
+          )
+          if (seed.id === 'roxy') assert.equal(String(url), 'https://roxy.gg/v1/models')
+          if (seed.id === 'openrouter')
+            assert.equal(String(url), 'https://openrouter.ai/api/v1/key')
+          if (seed.id === 'anthropic') {
+            assert.equal(String(url), 'https://api.anthropic.com/v1/models')
+            assert.equal(headers.get('anthropic-version'), '2023-06-01')
+          }
+          if (seed.id === 'google')
+            assert.equal(String(url), 'https://generativelanguage.googleapis.com/v1beta/models')
+          return Response.json(
+            seed.id === 'openrouter'
+              ? { data: { label: 'test' } }
+              : seed.wire === 'google'
+                ? { models: [] }
+                : { data: [] }
+          )
+        }
+        const result = await connectVerifiedProvider({
+          id: seed.id,
+          apiKey: ' test-key ',
+          ...(!seed.baseURL && seed.wire !== 'google' ? { baseURL: 'https://custom.test/v1' } : {})
+        })
+        assert.equal(result.ok, true, seed.id)
+        assert.equal(requests, 2, `${seed.id}: verifies catalog is not public`)
+        if (result.ok) assert.equal(repo.getProviderToken(result.provider.id), 'test-key')
+      }
+      const saved = repo.listConnectedProviders().find((p) => p.seedId === 'roxy')!
+      const before = repo.listConnectedProviders()
+      for (const [status, error] of [
+        [401, 'invalidKey'],
+        [403, 'forbidden'],
+        [429, 'rateLimited'],
+        [503, 'unavailable'],
+        [404, 'unsupported']
+      ] as const) {
+        globalThis.fetch = async () => new Response('secret upstream details', { status })
+        for (const connectionId of [undefined, saved.id]) {
+          assert.deepEqual(
+            await connectVerifiedProvider({ id: 'roxy', apiKey: 'rejected-key', connectionId }),
+            { ok: false, error }
+          )
+          assert.deepEqual(repo.listConnectedProviders(), before)
+          assert.equal(
+            repo.getProviderToken(saved.id),
+            'test-key',
+            'failed reconnect keeps old key'
+          )
+        }
+      }
+      for (const status of [401, 403, 429, 503]) {
+        globalThis.fetch = async () => new Response('', { status })
+        assert.equal(
+          (await connectVerifiedProvider({ id: 'roxy', apiKey: 'bad-key', allowUnverified: true }))
+            .ok,
+          false,
+          'consent never bypasses authentication or transient failures'
+        )
+      }
+      globalThis.fetch = async () => {
+        throw new Error('secret URL and credential')
+      }
+      assert.deepEqual(await connectVerifiedProvider({ id: 'roxy', apiKey: 'key' }), {
+        ok: false,
+        error: 'unavailable'
+      })
+      globalThis.fetch = async () => {
+        throw new DOMException('timeout', 'TimeoutError')
+      }
+      assert.deepEqual(await connectVerifiedProvider({ id: 'roxy', apiKey: 'key' }), {
+        ok: false,
+        error: 'unavailable'
+      })
+      globalThis.fetch = async () => Response.json({ data: [] })
+      assert.deepEqual(
+        await connectVerifiedProvider({
+          id: 'openai-compatible',
+          apiKey: 'anything',
+          baseURL: 'http://localhost:8080/v1'
+        }),
+        { ok: false, error: 'unsupported' },
+        'public catalog cannot verify a key'
+      )
+      assert.deepEqual(repo.listConnectedProviders(), before)
+      const unverified = await connectVerifiedProvider({
+        id: 'openai-compatible',
+        apiKey: 'anything',
+        baseURL: 'http://localhost:8080/v1',
+        allowUnverified: true
+      })
+      assert.equal(unverified.ok, true, 'explicit consent permits unsupported free checks')
+      globalThis.fetch = async () =>
+        Response.json({ data: { label: 'management', is_management_key: true } })
+      assert.deepEqual(await connectVerifiedProvider({ id: 'openrouter', apiKey: 'key' }), {
+        ok: false,
+        error: 'forbidden'
+      })
+      globalThis.fetch = async () =>
+        Response.json({ error: { details: [{ reason: 'API_KEY_INVALID' }] } }, { status: 400 })
+      assert.deepEqual(await connectVerifiedProvider({ id: 'google', apiKey: 'key' }), {
+        ok: false,
+        error: 'invalidKey'
+      })
+      for (const body of ['<html>Not an API</html>', JSON.stringify({ error: 'secret' })]) {
+        globalThis.fetch = async () => new Response(body)
+        assert.deepEqual(await connectVerifiedProvider({ id: 'roxy', apiKey: 'key' }), {
+          ok: false,
+          error: 'unsupported'
+        })
+      }
+      globalThis.fetch = async () => {
+        throw new Error('must not fetch')
+      }
+      for (const baseURL of [
+        'file:///tmp/key',
+        'http://remote.test/v1',
+        'https://user:pass@api.test',
+        'https://api.test?key=secret',
+        'not a URL'
+      ]) {
+        assert.deepEqual(
+          await connectVerifiedProvider({ id: 'openai-compatible', apiKey: 'key', baseURL }),
+          { ok: false, error: 'invalidEndpoint' }
+        )
+      }
+      for (const apiKey of ['', '  ', 'key\nvalue']) {
+        assert.deepEqual(await connectVerifiedProvider({ id: 'roxy', apiKey }), {
+          ok: false,
+          error: 'invalidKey'
+        })
+      }
+      assert.equal(
+        (await connectVerifiedProvider({ id: 'ollama' })).ok,
+        true,
+        'keyless local endpoints do not verify'
+      )
+      // Reconnection checks the existing custom endpoint, never a sibling or seed default.
+      const custom = repo.connectProvider({
+        id: 'openai',
+        apiKey: 'old',
+        baseURL: 'https://private.test/v1'
+      })
+      let verificationCalls = 0
+      globalThis.fetch = async (url) => {
+        assert.equal(String(url), 'https://private.test/v1/models')
+        return ++verificationCalls === 1
+          ? Response.json({ data: [] })
+          : new Response('', { status: 401 })
+      }
+      const reconnected = await connectVerifiedProvider({
+        id: 'openai',
+        connectionId: custom.id,
+        apiKey: 'new'
+      })
+      assert.equal(reconnected.ok, true)
+      if (reconnected.ok) assert.equal(reconnected.provider.id, custom.id)
+      assert.equal(repo.getProviderToken(custom.id), 'new')
+      console.log(
+        'PROVIDER VERIFICATION OK: all API-key seeds, free requests, rejected keys, reconnect preservation, public catalogs, explicit consent, safe errors'
+      )
+
       const a = repo.connectProvider({ id: 'ollama', baseURL: 'http://local-a.test/v1' })
       const b = repo.connectProvider({ id: 'ollama', baseURL: 'http://local-b.test/v1' })
       assert.notEqual(a.id, b.id)
@@ -88,6 +273,52 @@ void app
       assert.deepEqual(await listModels(teamA.id), [])
       assert.equal(calls, 1, 'private catalog failure never falls back to public entitlements')
       assert.equal((await listModels(teamB.id))[0]?.id, 'team-b', 'sibling catalog stays cached')
+
+      for (const status of [401, 403, 500, 503]) {
+        globalThis.fetch = async () => new Response('secret upstream details', { status })
+        assert.deepEqual(await listModelCatalog(teamA.id), {
+          models: [],
+          error: status === 401 || status === 403 ? 'authentication' : 'unavailable'
+        })
+        assert.deepEqual(await listModels(teamA.id), [], 'main callers remain best effort')
+        assert.equal((await listModelCatalog(teamB.id)).models[0]?.id, 'team-b')
+      }
+      globalThis.fetch = async () => {
+        throw new Error('secret bearer credential')
+      }
+      assert.deepEqual(await listModelCatalog(teamA.id), { models: [], error: 'unavailable' })
+      assert.deepEqual(await listModels(teamA.id), [])
+      assert.deepEqual(await listModelCatalog(b.id), { models: [], error: 'unavailable' })
+      assert.deepEqual(await listModelCatalog('openai'), { models: [], error: 'unavailable' })
+      globalThis.fetch = async () => new Response('not json')
+      assert.deepEqual(await listModelCatalog(teamA.id), { models: [], error: 'unavailable' })
+      globalThis.fetch = async () => Response.json({ error: 'secret upstream details' })
+      assert.deepEqual(await listModelCatalog(teamA.id), { models: [], error: 'unavailable' })
+      globalThis.fetch = async () => Response.json({ data: [] })
+      assert.deepEqual(await listModelCatalog(teamA.id), { models: [] }, 'empty is not failure')
+      repo.connectProvider({ id: 'roxy', connectionId: teamA.id, apiKey: 'recovered' })
+      globalThis.fetch = async () => Response.json({ data: [{ id: 'recovered' }] })
+      const recovered = await listModelCatalog(teamA.id)
+      assert.equal(recovered.models[0]?.id, 'recovered')
+      assert.equal(recovered.error, undefined, 'success clears the prior failure')
+
+      // Exercise prepareConnection failures without downloading or launching a sidecar.
+      assert.deepEqual(await listModelCatalog(CODEX_PROVIDER_ID), {
+        models: [],
+        error: 'unavailable'
+      })
+      assert.deepEqual(await listModels(CODEX_PROVIDER_ID), [])
+      const subscription = repo.storeCliProxyProvider(
+        CODEX_PROVIDER_ID,
+        'http://127.0.0.1:1/v1',
+        'private-sidecar-key'
+      )
+      getDb().prepare('UPDATE providers SET enabled = 0 WHERE id = ?').run(subscription.id)
+      assert.deepEqual(await listModelCatalog(subscription.id), {
+        models: [],
+        error: 'unavailable'
+      })
+      assert.deepEqual(await listModels(subscription.id), [])
 
       assert.deepEqual(openAiReasoning(teamB.id, true, 'xhigh'), { reasoning_effort: 'xhigh' })
       globalThis.fetch = async (url, options) => {

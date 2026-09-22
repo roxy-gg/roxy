@@ -123,6 +123,7 @@ export function ContextMenuRow({
   disabled,
   danger,
   preserveFocus,
+  role,
   onSelect
 }: {
   label: string
@@ -131,12 +132,14 @@ export function ContextMenuRow({
   disabled?: boolean
   danger?: boolean
   preserveFocus?: boolean
+  role?: 'menuitem'
   onSelect: () => void
 }): JSX.Element {
   return (
     <button
       type="button"
       disabled={disabled}
+      role={role}
       onMouseDown={preserveFocus ? (e) => e.preventDefault() : undefined}
       onClick={onSelect}
       className={cn(

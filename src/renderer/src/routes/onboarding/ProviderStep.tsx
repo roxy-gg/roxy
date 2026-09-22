@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useTranslation, Trans } from 'react-i18next'
-import { ArrowLeft, ArrowRight, Check, ChevronRight, ExternalLink, Search } from 'lucide-react'
+import { ArrowLeft, ArrowRight, Check, ChevronRight, ExternalLink, Search, X } from 'lucide-react'
 import { AUTH_LABELS, SEED_PROVIDERS, isConnectableNow, resolveSeed } from '@shared/providers'
 import { pickDefaultModel } from '@shared/models'
 import type { SeedProvider } from '@shared/types'
+import type { ProviderVerificationError } from '@shared/api'
 import { api } from '../../lib/api'
 import { useRoxyStore } from '../../lib/store'
 import { Button, Input } from '../../components/ui'
@@ -168,15 +169,101 @@ function ProviderRow({
   )
 }
 
+/** Settings uses a focused chooser instead of sending people through onboarding. */
+export function AddAccount({ onClose }: { onClose: () => void }): JSX.Element {
+  const { t } = useTranslation()
+  const providers = useRoxyStore((s) => s.providers)
+  const [query, setQuery] = useState('')
+  const [seedId, setSeedId] = useState<string | null>(null)
+  const dialogRef = useRef<HTMLDialogElement>(null)
+  const connectedIds = new Set(providers.map((p) => p.seedId))
+  const q = query.trim().toLowerCase()
+  const filtered = LISTED_PROVIDERS.filter(
+    (p) => isConnectableNow(p) && (!q || `${p.name} ${p.id}`.toLowerCase().includes(q))
+  ).sort((a, b) => Number(connectedIds.has(b.id)) - Number(connectedIds.has(a.id)))
+
+  useEffect(() => {
+    const dialog = dialogRef.current
+    if (!seedId) dialog?.showModal()
+    return () => dialog?.close()
+  }, [seedId])
+
+  return (
+    <>
+      <dialog
+        ref={dialogRef}
+        aria-labelledby="add-account-title"
+        style={seedId ? { display: 'none' } : undefined}
+        onCancel={(e) => {
+          e.preventDefault()
+          onClose()
+        }}
+        className="fixed inset-0 z-50 m-auto flex max-h-[85vh] w-[min(32rem,calc(100vw-2rem))] flex-col overflow-hidden rounded-xl border border-border bg-bg p-0 text-text shadow-float backdrop:bg-black/50"
+      >
+        <header className="flex items-center justify-between gap-3 px-5 pt-5">
+          <h2 id="add-account-title" className="text-base font-semibold">
+            {t('settings.providers.addAccount')}
+          </h2>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label={t('common.close')}
+            className="press-scale flex h-8 w-8 items-center justify-center rounded-lg text-text-muted hover:bg-white/5 focus-visible:outline-2 focus-visible:outline-accent/60"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </header>
+        <p className="px-5 pt-1 text-xs leading-relaxed text-text-muted">
+          {t('settings.providers.chooseProvider')}
+        </p>
+        <div className="px-5 py-4">
+          <Input
+            autoFocus
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            aria-label={t('settings.providers.search')}
+            placeholder={t('settings.providers.search')}
+          />
+        </div>
+        <div className="min-h-0 overflow-y-auto border-t border-border p-2">
+          {filtered.map((seed) => (
+            <ProviderRow
+              key={seed.id}
+              seed={seed}
+              connected={connectedIds.has(seed.id)}
+              onClick={() => setSeedId(seed.id)}
+            />
+          ))}
+          {filtered.length === 0 && (
+            <p className="px-3 py-6 text-center text-xs text-text-subtle">
+              {t('onboarding.noMatch', { query })}
+            </p>
+          )}
+        </div>
+      </dialog>
+      {seedId && (
+        <ProviderSetup
+          modal
+          seed={resolveSeed(seedId)}
+          onClose={() => setSeedId(null)}
+          onConnected={onClose}
+        />
+      )}
+    </>
+  )
+}
+
 export function ProviderSetup({
   seed,
   connectionId,
   modal = false,
+  onConnected: onComplete,
   onClose
 }: {
   seed: SeedProvider
   connectionId?: string
   modal?: boolean
+  onConnected?: () => void
   onClose: () => void
 }): JSX.Element {
   const { t } = useTranslation()
@@ -192,6 +279,8 @@ export function ProviderSetup({
   const [baseURL, setBaseURL] = useState(existing?.baseURL ?? seed.baseURL ?? '')
   const [connecting, setConnecting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [verificationError, setVerificationError] = useState<ProviderVerificationError | null>(null)
+  const connectingRef = useRef(false)
 
   const isCopilot = seed.auth === 'device-flow' && seed.id === 'github-copilot'
   // Signed in through the local CLIProxyAPI sidecar - no key field, no base
@@ -199,47 +288,57 @@ export function ProviderSetup({
   // it is by id, since one sidecar process serves them all.
   const isSubscription = seed.auth === 'subscription'
   const needsKey = seed.auth === 'api-key'
-  const needsBaseURL = !seed.baseURL
+  const needsBaseURL = !seed.baseURL && seed.wire !== 'google'
   const showBaseURL = needsBaseURL || seed.auth === 'none' || seed.id === 'openai-compatible'
   const canConnect =
     isConnectableNow(seed) &&
     (!needsKey || apiKey.trim().length > 0) &&
     (!needsBaseURL || baseURL.trim().length > 0)
 
-  const connect = async (): Promise<void> => {
+  const connect = async (allowUnverified = false): Promise<void> => {
+    if (connectingRef.current || !canConnect) return
+    connectingRef.current = true
     setConnecting(true)
     setError(null)
+    setVerificationError(null)
     try {
-      const provider = await api.providers.connect({
+      const result = await api.providers.connect({
         id: seed.id,
         connectionId,
         apiKey: apiKey.trim() || undefined,
-        baseURL: baseURL.trim() || undefined
+        baseURL: baseURL.trim() || undefined,
+        allowUnverified
       })
+      if (!result.ok) {
+        setVerificationError(result.error)
+        return
+      }
+      const provider = result.provider
       // Always auto-pick the provider's latest (tool-capable) model so the
       // composer's picker shows a real model right away and the first send just
       // works — no one has to know a model id to get started.
       let chosen = provider.defaultModel || null
       if (!chosen) {
         try {
-          chosen = pickDefaultModel(await api.models.list(provider.id)) ?? null
+          chosen = pickDefaultModel((await api.models.list(provider.id)).models) ?? null
         } catch {
           // Offline catalog — leave it null; send-time resolution still covers it.
         }
       }
       await api.settings.setActiveProvider(provider.id, chosen)
       await refreshProviders()
-      onClose()
+      ;(onComplete ?? onClose)()
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
+      connectingRef.current = false
       setConnecting(false)
     }
   }
 
   const onConnected = async (): Promise<void> => {
     await refreshProviders()
-    onClose()
+    ;(onComplete ?? onClose)()
   }
 
   return (
@@ -252,7 +351,8 @@ export function ProviderSetup({
       }
       onCancel={(e) => {
         e.preventDefault()
-        onClose()
+        e.stopPropagation()
+        if (!connectingRef.current) onClose()
       }}
       className={
         modal
@@ -265,6 +365,7 @@ export function ProviderSetup({
       >
         <button
           onClick={onClose}
+          disabled={connecting}
           title={t('onboarding.back')}
           className="press-scale flex h-8 w-8 items-center justify-center sq sq-lg rounded-lg text-text-muted hover:bg-white/5 hover:text-text"
         >
@@ -274,7 +375,7 @@ export function ProviderSetup({
           <ProviderLogo id={seed.id} name={seed.name} size={20} />
         </span>
         <div className="leading-tight">
-          <div className="text-sm font-semibold">{seed.name}</div>
+          <div className="text-sm font-semibold">{existing?.name ?? seed.name}</div>
           <div className="text-xs text-text-subtle">{AUTH_LABELS[seed.auth]}</div>
         </div>
       </header>
@@ -302,6 +403,9 @@ export function ProviderSetup({
                 <p className="mt-1 text-sm text-text-muted">
                   {needsKey ? t('onboarding.pasteKey') : t('onboarding.pointAtEndpoint')}
                 </p>
+                {needsKey && (
+                  <p className="mt-2 text-xs text-text-muted">{t('onboarding.verifyKeyBody')}</p>
+                )}
                 {seed.notes && <p className="mt-2 text-xs text-text-subtle">{seed.notes}</p>}
               </div>
               {needsKey && (
@@ -309,7 +413,16 @@ export function ProviderSetup({
                   <Input
                     type="password"
                     value={apiKey}
-                    onChange={(e) => setApiKey(e.target.value)}
+                    disabled={connecting}
+                    aria-invalid={
+                      verificationError === 'invalidKey' || verificationError === 'forbidden'
+                    }
+                    aria-describedby={verificationError ? 'provider-verification-error' : undefined}
+                    onChange={(e) => {
+                      setApiKey(e.target.value)
+                      setVerificationError(null)
+                      setError(null)
+                    }}
                     placeholder={seed.id === 'roxy' ? 'rx-…' : 'sk-…'}
                     autoFocus
                   />
@@ -329,20 +442,45 @@ export function ProviderSetup({
                 <Field label={t('onboarding.baseUrl')}>
                   <Input
                     value={baseURL}
-                    onChange={(e) => setBaseURL(e.target.value)}
+                    disabled={connecting}
+                    onChange={(e) => {
+                      setBaseURL(e.target.value)
+                      setVerificationError(null)
+                      setError(null)
+                    }}
                     placeholder="https://…"
                   />
                 </Field>
               )}
-              {error && <p className="text-xs text-danger">{error}</p>}
+              {error && (
+                <p role="alert" className="text-xs text-danger">
+                  {error}
+                </p>
+              )}
+              {verificationError && (
+                <p id="provider-verification-error" role="alert" className="text-xs text-danger">
+                  {t(`onboarding.keyVerification.${verificationError}`)}
+                </p>
+              )}
               <div className="flex items-center gap-2">
-                <Button variant="primary" onClick={connect} disabled={!canConnect || connecting}>
-                  {connecting ? t('onboarding.connecting') : t('onboarding.connect')}
+                <Button
+                  variant="primary"
+                  onClick={() => void connect()}
+                  disabled={!canConnect || connecting}
+                >
+                  {connecting
+                    ? t(needsKey ? 'onboarding.verifyingKey' : 'onboarding.connecting')
+                    : t('onboarding.connect')}
                 </Button>
-                <Button variant="ghost" onClick={onClose}>
+                <Button variant="ghost" onClick={onClose} disabled={connecting}>
                   {t('common.cancel')}
                 </Button>
               </div>
+              {verificationError === 'unsupported' && (
+                <Button variant="ghost" onClick={() => void connect(true)} disabled={connecting}>
+                  {t('onboarding.connectUnverified')}
+                </Button>
+              )}
               <p className="text-[11px] text-text-subtle">{t('onboarding.keysEncrypted')}</p>
             </div>
           ) : (

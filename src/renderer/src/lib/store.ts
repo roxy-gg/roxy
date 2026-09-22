@@ -19,6 +19,7 @@ import type {
   LlmEvent,
   LlmResult,
   ModelInfo,
+  ModelCatalogResult,
   RemoteDelta,
   RemoteState,
   SessionsUpdated,
@@ -76,6 +77,10 @@ interface RoxyStore {
    * the whole menu behind whichever provider was slowest.
    */
   modelsTried: Record<string, boolean>
+  /** Safe catalog failure per connection; cleared when discovery is retried. */
+  modelErrors: Record<string, ModelCatalogResult['error']>
+  /** Actual in-flight discovery, including retries after a previous attempt. */
+  modelsLoading: Record<string, boolean>
   /** Last 5 distinct model picks per provider, lazy-loaded + refreshed on selection. */
   recentModels: Record<string, { model: string; usedAt: number }[]>
   /**
@@ -878,6 +883,8 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
   copilotNeedsReauthentication: {},
   modelCatalog: {},
   modelsTried: {},
+  modelErrors: {},
+  modelsLoading: {},
   recentModels: {},
   hiddenModels: new Set<string>(),
   chats: [],
@@ -934,6 +941,8 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
       telemetryEnabled,
       modelCatalog: {},
       modelsTried: {},
+      modelErrors: {},
+      modelsLoading: {},
       copilotNeedsReauthentication: {},
       recentModels: {},
       hiddenModels: new Set(),
@@ -1121,11 +1130,23 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
     set((s) => {
       const modelCatalog = { ...s.modelCatalog }
       const modelsTried = { ...s.modelsTried }
+      const modelErrors = { ...s.modelErrors }
+      const modelsLoading = { ...s.modelsLoading }
       invalidated.forEach((id) => {
         delete modelCatalog[id]
         delete modelsTried[id]
+        delete modelErrors[id]
+        delete modelsLoading[id]
       })
-      return { providers, settings, modelCatalog, modelsTried, copilotNeedsReauthentication: {} }
+      return {
+        providers,
+        settings,
+        modelCatalog,
+        modelsTried,
+        modelErrors,
+        modelsLoading,
+        copilotNeedsReauthentication: {}
+      }
     })
     await Promise.all(
       providers.filter((p) => p.seedId === 'github-copilot').map((p) => get().ensureModels(p.id))
@@ -1398,40 +1419,49 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
     if (pending) return pending
     const load = Promise.resolve().then(async () => {
       try {
-        const list = await api.models.list(providerId)
+        const result = await api.models.list(providerId)
         const needsReauthentication = accountAware
           ? await api.copilot.needsReauthentication(providerId)
           : false
         if (modelCatalogInflight.get(providerId) !== load) return
-        // Copilot's empty list revokes old entries. Other providers still retry
-        // empty lists when a proxy or connection is starting up.
-        if (accountAware || list.length > 0) {
-          set((s) => ({
-            modelCatalog: { ...s.modelCatalog, [providerId]: list },
-            ...(accountAware
-              ? {
-                  copilotNeedsReauthentication: {
-                    ...s.copilotNeedsReauthentication,
-                    [providerId]: needsReauthentication
-                  }
+        // Empty catalogs revoke old entries but remain retryable. Errors contain
+        // only fixed codes, never the provider's exception or credentials.
+        set((s) => ({
+          modelCatalog: { ...s.modelCatalog, [providerId]: result.models },
+          modelErrors: { ...s.modelErrors, [providerId]: result.error },
+          ...(accountAware
+            ? {
+                copilotNeedsReauthentication: {
+                  ...s.copilotNeedsReauthentication,
+                  [providerId]: needsReauthentication
                 }
-              : {})
-          }))
-        }
+              }
+            : {})
+        }))
       } catch {
-        if (accountAware && modelCatalogInflight.get(providerId) === load) {
-          set((s) => ({ modelCatalog: { ...s.modelCatalog, [providerId]: [] } }))
+        if (modelCatalogInflight.get(providerId) === load) {
+          set((s) => ({
+            modelCatalog: { ...s.modelCatalog, [providerId]: [] },
+            modelErrors: { ...s.modelErrors, [providerId]: 'unavailable' }
+          }))
         }
       } finally {
         // Mark the attempt either way, so the picker can stop showing a
         // provider as "loading" once it has actually been asked.
         if (modelCatalogInflight.get(providerId) === load) {
           modelCatalogInflight.delete(providerId)
-          set((s) => ({ modelsTried: { ...s.modelsTried, [providerId]: true } }))
+          set((s) => ({
+            modelsTried: { ...s.modelsTried, [providerId]: true },
+            modelsLoading: { ...s.modelsLoading, [providerId]: false }
+          }))
         }
       }
     })
     modelCatalogInflight.set(providerId, load)
+    set((s) => ({
+      modelErrors: { ...s.modelErrors, [providerId]: undefined },
+      modelsLoading: { ...s.modelsLoading, [providerId]: true }
+    }))
     return load
   },
 

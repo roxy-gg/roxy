@@ -91,6 +91,8 @@ export interface ConnectProviderInput {
   apiKey?: string
   baseURL?: string
   defaultModel?: string
+  /** Explicit consent when a free credential check is unavailable. */
+  allowUnverified?: boolean
 }
 
 export interface DeviceFlowStart {

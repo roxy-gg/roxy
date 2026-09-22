@@ -22,7 +22,7 @@ import path from 'node:path'
 import { pipeline } from 'node:stream/promises'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { app } from 'electron'
+import { app, BrowserWindow } from 'electron'
 import * as repo from '../src/main/db/repo'
 import { closeDb } from '../src/main/db/database'
 import {
@@ -84,7 +84,16 @@ async function main(): Promise<void> {
   // ---- install + start (downloads, verifies, extracts, spawns, health-checks) ----
   console.log('  … downloading + starting the sidecar (this takes a moment)')
   const started = Date.now()
-  const url = await ensureRunning()
+  // Exercise progress IPC: a windowless test misses Chromium buffer corruption.
+  const window = new BrowserWindow({ show: false })
+  let url: string
+  try {
+    await window.loadURL('about:blank')
+    url = await ensureRunning()
+    check('download verifies while broadcasting progress to a window', true)
+  } finally {
+    window.destroy()
+  }
   console.log(`  … up in ${((Date.now() - started) / 1000).toFixed(1)}s`)
 
   check('ensureRunning returns a loopback base URL', /^http:\/\/127\.0\.0\.1:\d+\/v1$/.test(url))

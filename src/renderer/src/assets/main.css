@@ -546,6 +546,10 @@ img {
   user-select: none;
 }
 
+:root:not([data-appearance='light']) img[data-provider-logo='codex-subscription'] {
+  filter: invert(1);
+}
+
 /* Iconography — lucide ships a heavy 2px stroke that reads chunky at the 12–16px
    sizes we use. A slightly lighter, uniform stroke feels more refined and keeps
    every icon in the app visually consistent (done once here, not per-icon). */

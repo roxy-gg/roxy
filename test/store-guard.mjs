@@ -108,10 +108,17 @@ const compiled = transformSync(`const actions = {${actions.join('\n')}}`, { load
 const copilot = { id: 'copilot-account-a', seedId: 'github-copilot', accountNumber: 1 }
 const model = (id) => ({ id, name: id, reasoning: false, toolCall: true })
 let providers = [copilot]
-let list = async () => [model('enabled')]
+let list = async () => ({ models: [model('enabled')] })
 let calls = 0
 let needsReauthentication = false
-const state = { providers, modelCatalog: {}, modelsTried: {}, copilotNeedsReauthentication: {} }
+const state = {
+  providers,
+  modelCatalog: {},
+  modelsTried: {},
+  modelErrors: {},
+  modelsLoading: {},
+  copilotNeedsReauthentication: {}
+}
 const bridge = {
   copilot: { needsReauthentication: async () => needsReauthentication },
   models: {
@@ -136,21 +143,23 @@ await Promise.all([state.ensureModels(copilot.id), state.ensureModels(copilot.id
 check('model cache: concurrent requests share one IPC call', calls === 1)
 check(
   'model cache: successful discovery publishes models',
-  state.modelCatalog[copilot.id][0]?.id === 'enabled'
+  state.modelCatalog[copilot.id][0]?.id === 'enabled' &&
+    state.modelsLoading[copilot.id] === false &&
+    state.modelErrors[copilot.id] === undefined
 )
-list = async () => [model('new-model')]
+list = async () => ({ models: [model('new-model')] })
 await state.ensureModels(copilot.id)
 check(
   'model cache: a previous success does not freeze Copilot availability',
   state.modelCatalog[copilot.id][0]?.id === 'new-model' && calls === 2
 )
-list = async () => []
+list = async () => ({ models: [] })
 await state.ensureModels(copilot.id)
 check(
   'model cache: an empty account list replaces the old success',
   state.modelCatalog[copilot.id].length === 0 && state.modelsTried[copilot.id]
 )
-list = async () => [model('enabled-again')]
+list = async () => ({ models: [model('enabled-again')] })
 await state.ensureModels(copilot.id)
 check(
   'model cache: models can be reenabled after an empty list',
@@ -161,13 +170,16 @@ list = async () => {
 }
 await state.ensureModels(copilot.id)
 check(
-  'model cache: IPC failure clears stale Copilot models',
-  state.modelCatalog[copilot.id].length === 0 && state.modelsTried[copilot.id]
+  'model cache: IPC failure clears stale Copilot models and finishes loading',
+  state.modelCatalog[copilot.id].length === 0 &&
+    state.modelsTried[copilot.id] &&
+    state.modelErrors[copilot.id] === 'unavailable' &&
+    state.modelsLoading[copilot.id] === false
 )
 
 state.modelCatalog.openai = [model('custom')]
 needsReauthentication = true
-list = async () => []
+list = async () => ({ models: [] })
 await state.ensureModels(copilot.id)
 check(
   'Copilot: terminal auth failure offers reconnect even with an empty model list',
@@ -198,11 +210,14 @@ const newAccount = deferred()
 list = () => newAccount.promise
 const reconnect = state.refreshProviders()
 await new Promise(setImmediate)
-oldAccount.resolve([model('wrong-account')])
+oldAccount.resolve({ models: [model('wrong-account')] })
 await oldRequest
 check(
-  'model cache: reconnect discards an old account response',
-  state.modelCatalog[copilot.id] === undefined && !state.modelsTried[copilot.id]
+  'model cache: reconnect discards an old account response without stopping the new load',
+  state.modelCatalog[copilot.id] === undefined &&
+    !state.modelsTried[copilot.id] &&
+    state.modelsLoading[copilot.id] === true &&
+    state.modelErrors[copilot.id] === undefined
 )
 const beforeCoalesced = calls
 const coalesced = state.ensureModels(copilot.id)
@@ -211,7 +226,7 @@ check(
   'model cache: an old completion cannot delete the new in-flight request',
   calls === beforeCoalesced
 )
-newAccount.resolve([model('right-account')])
+newAccount.resolve({ models: [model('right-account')] })
 await Promise.all([reconnect, coalesced])
 check(
   'model cache: reconnect publishes only the new account',
@@ -232,13 +247,16 @@ const disconnectedRequest = state.ensureModels(copilot.id)
 await Promise.resolve()
 providers = []
 await state.refreshProviders()
-disconnecting.resolve([model('disconnected-account')])
+disconnecting.resolve({ models: [model('disconnected-account')] })
 await disconnectedRequest
 const beforeDisconnected = calls
 await state.ensureModels(copilot.id)
 check(
-  'model cache: disconnect cannot repopulate the catalog',
-  state.modelCatalog[copilot.id] === undefined && !state.modelsTried[copilot.id]
+  'model cache: disconnect cannot repopulate the catalog or loading state',
+  state.modelCatalog[copilot.id] === undefined &&
+    !state.modelsTried[copilot.id] &&
+    state.modelsLoading[copilot.id] === undefined &&
+    state.modelErrors[copilot.id] === undefined
 )
 check('model cache: disconnected providers are not fetched', calls === beforeDisconnected)
 
@@ -249,7 +267,7 @@ bridge.copilot.needsReauthentication = async (id) => {
   authReads.push(id)
   return id === copilot.id
 }
-list = async (id) => [model(`model-${id}`)]
+list = async (id) => ({ models: [model(`model-${id}`)] })
 await state.refreshProviders()
 check(
   'Copilot: discovery and reauthentication are scoped to UUID connections',
@@ -258,6 +276,100 @@ check(
     state.copilotNeedsReauthentication[copilot.id] === true &&
     state.copilotNeedsReauthentication[otherCopilot.id] === false &&
     state.modelCatalog[otherCopilot.id][0].id === `model-${otherCopilot.id}`
+)
+
+console.log('store: structured catalog failures and retries')
+const roxyA = { id: 'roxy-account-a', seedId: 'roxy' }
+const roxyB = { id: 'roxy-account-b', seedId: 'roxy' }
+providers = [roxyA, roxyB]
+await state.refreshProviders()
+const initialA = deferred()
+list = (id) => (id === roxyA.id ? initialA.promise : Promise.resolve({ models: [model('team-b')] }))
+const loadingA = state.ensureModels(roxyA.id)
+check(
+  'catalog: loading is set synchronously on first request',
+  state.modelsLoading[roxyA.id] === true
+)
+await state.ensureModels(roxyB.id)
+initialA.resolve({ models: [], error: 'authentication' })
+await loadingA
+check(
+  'catalog: authentication failure is scoped to one account and ends loading',
+  state.modelErrors[roxyA.id] === 'authentication' &&
+    state.modelsLoading[roxyA.id] === false &&
+    state.modelsTried[roxyA.id] &&
+    state.modelCatalog[roxyB.id][0]?.id === 'team-b' &&
+    state.modelErrors[roxyB.id] === undefined &&
+    state.modelsLoading[roxyB.id] === false
+)
+const retryA = deferred()
+list = () => retryA.promise
+const retryRequest = state.ensureModels(roxyA.id)
+check(
+  'catalog: retry clears the error immediately and starts loading again',
+  state.modelErrors[roxyA.id] === undefined && state.modelsLoading[roxyA.id] === true
+)
+const beforeRetryCoalesced = calls
+const retryCoalesced = state.ensureModels(roxyA.id)
+await Promise.resolve()
+check('catalog: concurrent retries share one request', calls === beforeRetryCoalesced + 1)
+retryA.resolve({ models: [], error: 'unavailable' })
+await Promise.all([retryRequest, retryCoalesced])
+check(
+  'catalog: subscription/network failure remains retryable without affecting siblings',
+  state.modelErrors[roxyA.id] === 'unavailable' &&
+    !state.modelsLoading[roxyA.id] &&
+    state.modelCatalog[roxyB.id][0]?.id === 'team-b'
+)
+list = async () => ({ models: [] })
+await state.ensureModels(roxyA.id)
+check(
+  'catalog: successful empty catalog clears a previous error',
+  state.modelErrors[roxyA.id] === undefined &&
+    !state.modelsLoading[roxyA.id] &&
+    state.modelCatalog[roxyA.id].length === 0
+)
+list = async () => {
+  throw new Error('secret transport detail')
+}
+await state.ensureModels(roxyA.id)
+check(
+  'catalog: rejected IPC is a safe unavailable code',
+  state.modelErrors[roxyA.id] === 'unavailable' && !state.modelsLoading[roxyA.id]
+)
+list = async () => ({ models: [model('team-a-recovered')] })
+await state.ensureModels(roxyA.id)
+check(
+  'catalog: successful retry clears errors and caches recovered models',
+  state.modelErrors[roxyA.id] === undefined &&
+    !state.modelsLoading[roxyA.id] &&
+    state.modelCatalog[roxyA.id][0]?.id === 'team-a-recovered'
+)
+await state.refreshProviders()
+const staleFailure = deferred()
+list = () => staleFailure.promise
+const staleRequest = state.ensureModels(roxyA.id)
+await Promise.resolve()
+state.modelErrors[roxyB.id] = 'authentication'
+await state.refreshProviders()
+check(
+  'catalog: refresh clears invalidated errors and loading flags',
+  state.modelErrors[roxyB.id] === undefined && state.modelsLoading[roxyA.id] === undefined
+)
+const fresh = deferred()
+list = () => fresh.promise
+const freshRequest = state.ensureModels(roxyA.id)
+staleFailure.resolve({ models: [], error: 'authentication' })
+await staleRequest
+check(
+  'catalog: stale failure cannot publish an error or finish a newer load',
+  state.modelErrors[roxyA.id] === undefined && state.modelsLoading[roxyA.id] === true
+)
+fresh.resolve({ models: [model('fresh-account')] })
+await freshRequest
+check(
+  'catalog: only the current account request publishes models and finishes loading',
+  state.modelCatalog[roxyA.id][0]?.id === 'fresh-account' && !state.modelsLoading[roxyA.id]
 )
 
 const app = readFileSync(new URL('../src/renderer/src/App.tsx', import.meta.url), 'utf8').replace(

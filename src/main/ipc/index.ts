@@ -37,7 +37,8 @@ import * as cliproxy from '../services/cliproxy'
 import * as browser from '../services/browser'
 import * as browserProxy from '../services/browser-proxy'
 import * as cookies from '../services/cookies'
-import { invalidateCopilotModels, listModels } from '../services/models'
+import { invalidateCopilotModels, listModelCatalog, listModels } from '../services/models'
+import { connectVerifiedProvider } from '../services/provider-connect'
 import { copilotNeedsReauthentication, invalidateCopilotToken } from '../services/llm'
 import { pickDefaultModel } from '../../shared/models'
 import { CLIPROXY_PROVIDER_IDS, isCliProxyProvider } from '../../shared/cliproxy'
@@ -267,8 +268,10 @@ export function registerIpc(): void {
   ipcMain.handle(CHANNELS.providersRename, (_e, id: string, name: string) =>
     repo.renameProvider(id, name)
   )
-  ipcMain.handle(CHANNELS.providersConnect, (_e, input: ConnectProviderInput) => {
-    const connected = repo.connectProvider(input)
+  ipcMain.handle(CHANNELS.providersConnect, async (_e, input: ConnectProviderInput) => {
+    const result = await connectVerifiedProvider(input)
+    if (!result.ok) return result
+    const connected = result.provider
     invalidateResponsesOnly(connected.id)
     // "What did people set up" is a different question from "what did they end
     // up using", and the gap between the two is where broken onboarding hides -
@@ -277,7 +280,7 @@ export function registerIpc(): void {
     // every other provider field.
     track('provider_connect', { provider: input.id })
     markActivation('provider_connected')
-    return connected
+    return result
   })
   ipcMain.handle(CHANNELS.providersDisconnect, async (_e, id: string) => {
     invalidateResponsesOnly(id)
@@ -924,7 +927,7 @@ export function registerIpc(): void {
   ipcMain.handle(CHANNELS.subagentCancel, (_e, subChatId: string) => cancelSubagentRun(subChatId))
 
   // ---- models (models.dev catalog) ----
-  ipcMain.handle(CHANNELS.modelsList, (_e, providerId: string) => listModels(providerId))
+  ipcMain.handle(CHANNELS.modelsList, (_e, providerId: string) => listModelCatalog(providerId))
   ipcMain.handle(CHANNELS.modelsRecent, (_e, providerId: string) =>
     repo.listRecentModels(providerId)
   )

@@ -36,6 +36,7 @@ export function ProviderLogo({
       <img
         src={logo}
         alt=""
+        data-provider-logo={id}
         className={id === 'roxy' ? 'rounded-[22%] object-cover' : 'object-contain'}
         style={{ width: size, height: size }}
         draggable={false}

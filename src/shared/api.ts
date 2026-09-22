@@ -535,6 +535,24 @@ export interface ModelInfo {
   cost?: ModelCost
 }
 
+/** Account catalog result; errors are safe, fixed codes rather than provider details. */
+export interface ModelCatalogResult {
+  models: ModelInfo[]
+  error?: 'authentication' | 'unavailable'
+}
+
+export type ProviderVerificationError =
+  | 'invalidKey'
+  | 'forbidden'
+  | 'invalidEndpoint'
+  | 'rateLimited'
+  | 'unavailable'
+  | 'unsupported'
+
+export type ConnectProviderResult =
+  | { ok: true; provider: ConnectedProvider }
+  | { ok: false; error: ProviderVerificationError }
+
 /** USD price per 1,000,000 tokens, split by kind (as models.dev reports it). */
 export interface ModelCost {
   /** Fresh input (prompt) tokens. */
@@ -765,7 +783,7 @@ export interface RoxyApi {
   }
   providers: {
     listConnected(): Promise<ConnectedProvider[]>
-    connect(input: ConnectProviderInput): Promise<ConnectedProvider>
+    connect(input: ConnectProviderInput): Promise<ConnectProviderResult>
     disconnect(id: string): Promise<void>
     rename(id: string, name: string): Promise<ConnectedProvider>
     /** Reorder connected providers; `ids` is the full Settings list, top-to-bottom. */
@@ -1033,8 +1051,8 @@ export interface RoxyApi {
     onDelta(callback: (payload: SubagentDelta) => void): () => void
   }
   models: {
-    /** Live model list for a provider id, from models.dev. */
-    list(providerId: string): Promise<ModelInfo[]>
+    /** Live account-aware model catalog, with safe discovery failure codes. */
+    list(providerId: string): Promise<ModelCatalogResult>
     /** Last 5 distinct model picks for a provider, newest first. */
     recent(providerId: string): Promise<{ model: string; usedAt: number }[]>
     /** Every model the user has hidden, across every provider. */

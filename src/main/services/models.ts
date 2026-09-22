@@ -2,7 +2,7 @@
  * Model discovery: account-specific catalogs for subscription providers and
  * models.dev for the rest. Public metadata is never an entitlement allow-list.
  */
-import type { ModelInfo, ModelCost } from '../../shared/api'
+import type { ModelInfo, ModelCost, ModelCatalogResult } from '../../shared/api'
 import type { ReasoningEffort } from '../../shared/types'
 import { REASONING_EFFORTS } from '../../shared/session-config'
 import { isSeedProviderId, resolveSeed } from '../../shared/providers'
@@ -278,6 +278,8 @@ function toModelInfo(body: { data?: RoxyModel[] }): ModelInfo[] {
     .sort((a, b) => a.name.localeCompare(b.name))
 }
 
+class CatalogAuthenticationError extends Error {}
+
 async function listRoxyModels(connectionId: string): Promise<ModelInfo[]> {
   const { url, token } = roxyCatalogSource(connectionId)
   const source = JSON.stringify([url, token])
@@ -286,17 +288,16 @@ async function listRoxyModels(connectionId: string): Promise<ModelInfo[]> {
   roxyCaches.delete(connectionId)
   const headers: Record<string, string> = { Accept: 'application/json' }
   if (token) headers.Authorization = `Bearer ${token}`
-  try {
-    const res = await fetch(url, { headers, signal: AbortSignal.timeout(20_000) })
-    if (!res.ok) throw new Error(`roxy.gg models returned ${res.status}`)
-    const list = toModelInfo((await res.json()) as { data?: RoxyModel[] })
-    const current = roxyCatalogSource(connectionId)
-    if (JSON.stringify([current.url, current.token]) !== source) return []
-    roxyCaches.set(connectionId, { source, at: Date.now(), data: list })
-    return list
-  } catch {
-    return []
-  }
+  const res = await fetch(url, { headers, signal: AbortSignal.timeout(20_000) })
+  if (res.status === 401 || res.status === 403) throw new CatalogAuthenticationError()
+  if (!res.ok) throw new Error('Roxy catalog unavailable')
+  const body = (await res.json()) as { data?: RoxyModel[] }
+  if (!Array.isArray(body.data)) throw new Error('Invalid Roxy catalog')
+  const list = toModelInfo(body)
+  const current = roxyCatalogSource(connectionId)
+  if (JSON.stringify([current.url, current.token]) !== source) return []
+  roxyCaches.set(connectionId, { source, at: Date.now(), data: list })
+  return list
 }
 
 /**
@@ -316,7 +317,7 @@ async function listRoxyModels(connectionId: string): Promise<ModelInfo[]> {
  * capability flags are asserted rather than guessed per id.
  */
 async function listSubscriptionModels(providerId: string): Promise<ModelInfo[]> {
-  const models = await listConnectionModels(providerId).catch(() => [])
+  const models = await listConnectionModels(providerId)
   return models
     .map((m) => ({
       id: m.id,
@@ -351,8 +352,25 @@ function toModelCost(c: ModelsDevModel['cost']): ModelCost | undefined {
   return Object.keys(cost).length ? cost : undefined
 }
 
-/** List a provider's available models, preferring its account-aware API. */
+/** Best-effort catalog for main-process callers that only need models. */
 export async function listModels(providerId: string): Promise<ModelInfo[]> {
+  return (await listModelCatalog(providerId)).models
+}
+
+/** Return only fixed error codes across IPC; provider exceptions may contain secrets. */
+export async function listModelCatalog(providerId: string): Promise<ModelCatalogResult> {
+  try {
+    return { models: await discoverModels(providerId) }
+  } catch (error) {
+    return {
+      models: [],
+      error: error instanceof CatalogAuthenticationError ? 'authentication' : 'unavailable'
+    }
+  }
+}
+
+/** List a provider's available models, preferring its account-aware API. */
+async function discoverModels(providerId: string): Promise<ModelInfo[]> {
   const provider = listConnectedProviders().find((p) => p.id === providerId)
   if (!provider && !isSeedProviderId(providerId)) return []
   const seedId = getProviderSeedId(providerId)
@@ -363,53 +381,45 @@ export async function listModels(providerId: string): Promise<ModelInfo[]> {
     provider?.baseURL &&
     (resolveSeed(seedId).group === 'local' || seedId === 'openai-compatible')
   ) {
-    try {
-      const token = getProviderToken(providerId)
-      const response = await fetch(`${provider.baseURL.replace(/\/+$/, '')}/models`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-        signal: AbortSignal.timeout(10_000)
-      })
-      if (!response.ok) return []
-      const body = (await response.json()) as { data?: { id?: string; name?: string }[] }
-      return (Array.isArray(body.data) ? body.data : [])
-        .filter(
-          (m): m is { id: string; name?: string } => typeof m?.id === 'string' && m.id.length > 0
-        )
-        .map((m) => ({ id: m.id, name: m.name || m.id, reasoning: false, toolCall: true }))
-    } catch {
-      return []
-    }
-  }
-  try {
-    const data = await getCatalog()
-    const models = data[seedId]?.models
-    if (!models) return []
-    return Object.values(models)
-      .map((m) => ({
-        id: m.id,
-        name: m.name || m.id,
-        reasoning: Boolean(m.reasoning),
-        toolCall: Boolean(m.tool_call),
-        contextLimit: m.limit?.context,
-        outputLimit: m.limit?.output,
-        cost: toModelCost(m.cost),
-        release: m.release_date ?? ''
-      }))
-      .sort((a, b) =>
-        a.release < b.release ? 1 : a.release > b.release ? -1 : a.name.localeCompare(b.name)
+    const token = getProviderToken(providerId)
+    const response = await fetch(`${provider.baseURL.replace(/\/+$/, '')}/models`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      signal: AbortSignal.timeout(10_000)
+    })
+    if (!response.ok) throw new Error('Provider catalog unavailable')
+    const body = (await response.json()) as { data?: { id?: string; name?: string }[] }
+    return (Array.isArray(body.data) ? body.data : [])
+      .filter(
+        (m): m is { id: string; name?: string } => typeof m?.id === 'string' && m.id.length > 0
       )
-      .map(({ id, name, reasoning, toolCall, contextLimit, outputLimit, cost }) => ({
-        id,
-        name,
-        reasoning,
-        toolCall,
-        contextLimit,
-        outputLimit,
-        ...(cost ? { cost } : {})
-      }))
-  } catch {
-    return []
+      .map((m) => ({ id: m.id, name: m.name || m.id, reasoning: false, toolCall: true }))
   }
+  const data = await getCatalog()
+  const models = data[seedId]?.models
+  if (!models) return []
+  return Object.values(models)
+    .map((m) => ({
+      id: m.id,
+      name: m.name || m.id,
+      reasoning: Boolean(m.reasoning),
+      toolCall: Boolean(m.tool_call),
+      contextLimit: m.limit?.context,
+      outputLimit: m.limit?.output,
+      cost: toModelCost(m.cost),
+      release: m.release_date ?? ''
+    }))
+    .sort((a, b) =>
+      a.release < b.release ? 1 : a.release > b.release ? -1 : a.name.localeCompare(b.name)
+    )
+    .map(({ id, name, reasoning, toolCall, contextLimit, outputLimit, cost }) => ({
+      id,
+      name,
+      reasoning,
+      toolCall,
+      contextLimit,
+      outputLimit,
+      ...(cost ? { cost } : {})
+    }))
 }
 
 /**
