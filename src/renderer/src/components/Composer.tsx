@@ -476,7 +476,7 @@ export function Composer({
           )}
         </div>
       </div>
-      {variant === 'session' && !projectAtHintDismissed && (
+      {variant === 'session' && bots.length > 0 && !projectAtHintDismissed && (
         <div
           role="note"
           className="mx-auto mb-2 flex max-w-3xl items-start gap-2 rounded-lg border border-border/60 bg-elevated/50 px-3 py-2 text-xs text-text-muted"

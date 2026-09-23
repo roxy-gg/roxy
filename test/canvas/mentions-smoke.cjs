@@ -44,6 +44,21 @@ async function run() {
   assert.equal(privateItem.asBotId, undefined)
   await click('button[title="Project session"]')
   await click('#busy')
+  // The honesty hint: it explains what @name does, so it belongs in a project
+  // session that HAS collaborators, and must survive a dismissal.
+  const hintText = async () =>
+    await evaluate(`const n = document.querySelector('[role=note]'); return n ? n.textContent : ''`)
+  assert.ok((await hintText()).includes('Roxy leads'), 'the project hint is shown')
+  await evaluate(
+    `[...document.querySelectorAll('[role=note] button')].find((b) => b.textContent.trim() === 'Got it').click()`
+  )
+  await wait()
+  assert.equal(await hintText(), '', 'dismissing hides it')
+  assert.equal(
+    await evaluate(`return localStorage.getItem('roxy.composer.projectAtHint.v1')`),
+    '1',
+    'and the dismissal is remembered across reloads'
+  )
   for (const draft of [
     'Hola @reviewer',
     '@reviewer hola',

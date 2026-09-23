@@ -54,6 +54,9 @@ jobs:
       - name: Store guard (regression test over renderer source)
         run: npm run smoke:store
 
+      - name: Composer hint dismissal (localStorage helper)
+        run: npm run smoke:hint
+
       - name: Canvas diff and interaction model suite
         run: npm run smoke:diff
 
