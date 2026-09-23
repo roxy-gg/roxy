@@ -6,7 +6,6 @@ import type {
   AppSettings,
   Chat,
   ConnectedProvider,
-  Loop,
   Message,
   MessagePart,
   QueueItem,
@@ -15,7 +14,6 @@ import type {
 } from '@shared/types'
 import type {
   ChatMessage,
-  CreateLoopInput,
   LlmEvent,
   LlmResult,
   ModelInfo,
@@ -54,6 +52,7 @@ import type {
 } from '@shared/api'
 import { aggregateLifecycle, aggregateRepoStatus, describeCompositeLifecycle } from '@shared/repos'
 import type { ForgeStatusView } from '@shared/forge'
+import type { Bot } from '@shared/bots'
 
 interface RoxyStore {
   ready: boolean
@@ -118,7 +117,24 @@ interface RoxyStore {
   projectInstructions: Record<string, string[]>
   /** Workspace paths in the user's chosen sidebar order (top → bottom). */
   projectOrder: string[]
-  loops: Loop[]
+  bots: Bot[]
+  botSettings: { botId: string; confirmDelete: boolean } | null
+  setBotSettings: (botId: string | null, confirmDelete?: boolean) => void
+  /** Main-owned queued turns, distinct from renderer-owned direct sends. */
+  runningAutomation: Record<string, true>
+  automationSpeakers: Record<string, { botId?: string; botUsername?: string }>
+  /**
+   * The chat whose composer should take focus, because it was opened for
+   * someone to start TYPING immediately (creating a bot is the only such case
+   * today). A plain `selectChat` deliberately leaves this alone, so clicking
+   * through the sidebar to read never steals the caret.
+   *
+   * It names the CHAT rather than counting requests: the composer is keyed by
+   * chat id and remounts on every switch, so a counter read at mount time is
+   * indistinguishable from one that was already consumed. The composer clears
+   * this once it has focused.
+   */
+  composerFocusChatId: string | null
   /** Pending prompts queued on the active chat (FIFO). */
   queue: QueueItem[]
   /** Chats with a pending stop request, keyed by chat id. */
@@ -179,7 +195,7 @@ interface RoxyStore {
 
   bootstrap: () => Promise<void>
   refreshChats: () => Promise<void>
-  refreshLoops: () => Promise<void>
+  refreshBots: () => Promise<void>
   refreshQueue: () => Promise<void>
   refreshProviders: () => Promise<void>
   /** Persist the connected provider order (optimistic). `ids` = full list, top-to-bottom. */
@@ -225,9 +241,10 @@ interface RoxyStore {
    * repos, and only git can say).
    */
   autoWorkstreamFor: (workspacePath: string | null) => Promise<boolean>
-  createLoop: (input: CreateLoopInput) => Promise<void>
-  setLoopEnabled: (id: string, enabled: boolean) => Promise<void>
-  removeLoop: (id: string) => Promise<void>
+  /** Create a bot and open its chat. With no username it gets a free one and is
+   *  named in conversation; returns it so schedules can be attached. */
+  createBot: (username?: string, instructions?: string) => Promise<Bot>
+  removeBot: (id: string) => Promise<void>
   setActiveAgent: (id: string) => Promise<void>
   /** Load + cache a workspace's instruction files (AGENTS.md etc.) for sizing. */
   ensureProjectInstructions: (workspacePath: string) => Promise<void>
@@ -244,8 +261,13 @@ interface RoxyStore {
   /** Persist the project (workspace) order (optimistic). `paths` = full list, top → bottom. */
   reorderProjects: (paths: string[]) => Promise<void>
   submit: (content: string, images?: ComposerImage[]) => Promise<void>
+  /**
+   * Explicit composer action: queue the prompt so ONLY this collaborator answers
+   * as a guest in the shared project session. Default Enter / submit still goes
+   * to Roxy.
+   */
+  submitToCollaborator: (content: string, botId: string, images?: ComposerImage[]) => Promise<void>
   sendMessage: (content: string, chatId?: string, images?: ComposerImage[]) => Promise<void>
-  drainQueue: (chatId: string) => Promise<void>
   removeQueued: (id: string) => Promise<void>
   moveQueued: (id: string, direction: 'up' | 'down') => Promise<void>
   /** Edit a queued prompt in place (text + images), keeping its queue position. */
@@ -358,7 +380,8 @@ const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout
 const asChatId = (value: unknown): string | undefined =>
   typeof value === 'string' ? value : undefined
 
-let loopTickSubscribed = false
+let botsSubscribed = false
+let automationSubscribed = false
 let llmDeltaSubscribed = false
 let taskUpdateSubscribed = false
 let remoteStateSubscribed = false
@@ -383,6 +406,92 @@ const modelCatalogInflight = new Map<string, Promise<void>>()
 let hiddenModelsLoaded = false
 /** Set when a remote turn lands while a local send streams into the shared chat. */
 const remoteMirror = { deferred: false }
+let automationRevision = 0
+const automationRevisions = new Map<string, number>()
+/** Turn starts/ends only. A snapshot is stale about WHO is speaking once the
+ *  turn itself has moved on, but streamed tokens say nothing about identity. */
+const automationTurnRevisions = new Map<string, number>()
+const automationLoads = new Map<string, number>()
+const deferredAutomation = new Set<string>()
+
+async function mirrorAutomationChat(chatId: string): Promise<void> {
+  const revision = (automationLoads.get(chatId) ?? 0) + 1
+  automationLoads.set(chatId, revision)
+  try {
+    const [messages, queue] = await Promise.all([api.messages.list(chatId), api.queue.list(chatId)])
+    const state = useRoxyStore.getState()
+    if (state.activeChatId !== chatId || automationLoads.get(chatId) !== revision) return
+    if (state.sendingChats[chatId]) {
+      deferredAutomation.add(chatId)
+      useRoxyStore.setState({ queue })
+      return
+    }
+    useRoxyStore.setState({ messages, queue, messagesChatId: chatId, messagesError: false })
+  } catch {
+    // A session can be removed while a completion notification is in flight.
+  }
+}
+
+function applyAutomationDelta(payload: RemoteDelta): void {
+  const id = payload.sessionId
+  automationRevisions.set(id, ++automationRevision)
+  if (payload.kind === 'turn') {
+    automationTurnRevisions.set(id, automationRevision)
+    useRoxyStore.setState((s) => {
+      const automationSpeakers = { ...s.automationSpeakers }
+      if (payload.state === 'running')
+        automationSpeakers[id] = { botId: payload.botId, botUsername: payload.botUsername }
+      else delete automationSpeakers[id]
+      return { automationSpeakers }
+    })
+  }
+  // Reuse the remote fold and publisher; never keep a second live parts tree.
+  applyRemoteDelta(payload)
+  useRoxyStore.setState((s) => {
+    const running = payload.kind !== 'turn' || payload.state === 'running'
+    if (Boolean(s.runningAutomation[id]) === running) return s
+    const runningAutomation = { ...s.runningAutomation }
+    if (running) runningAutomation[id] = true
+    else delete runningAutomation[id]
+    return { runningAutomation }
+  })
+  if (payload.kind === 'turn') {
+    void mirrorAutomationChat(id)
+    if (payload.state !== 'running') {
+      void useRoxyStore.getState().refreshChats()
+      void useRoxyStore.getState().refreshUsage()
+    }
+  }
+}
+
+/** Private bot turns always belong to main, even when idle. */
+function isBotChat(chatId: string, state: RoxyStore): boolean {
+  return (
+    state.chats.some((chat) => chat.id === chatId && chat.kind === 'bot') ||
+    state.bots.some((bot) => bot.chatId === chatId)
+  )
+}
+
+async function enqueuePrompt(
+  chatId: string,
+  text: string,
+  images?: ComposerImage[],
+  options?: {
+    sourceChatId?: string
+    asBotId?: string
+    recipientId?: string
+    fromUser?: boolean
+  }
+): Promise<void> {
+  await api.queue.add(
+    chatId,
+    text,
+    images?.map(({ dataUrl, mediaType, name }) => ({ dataUrl, mediaType, name })),
+    options
+  )
+  await useRoxyStore.getState().refreshQueue()
+  await api.automation.wake()
+}
 
 /**
  * One publisher per streaming session. Coalescing only works if consecutive
@@ -614,7 +723,9 @@ async function mirrorSharedChat(sessionId: string, rev: number): Promise<void> {
 function applyRemoteDelta(payload: RemoteDelta): void {
   const { sessionId } = payload
   const reflect = (parts: MessagePart[] | null): void => {
-    if (useRoxyStore.getState().activeChatId !== sessionId) return
+    // An off-screen turn still needs its old live bubble removed on completion.
+    // Otherwise selecting it again resurrects stale streaming parts forever.
+    if (parts !== null && useRoxyStore.getState().activeChatId !== sessionId) return
     // Never clobber a local send streaming into the same chat — its own handler
     // owns `streamingChats[sessionId]` until finishTurn reconciles.
     if (useRoxyStore.getState().sendingChats[sessionId]) return
@@ -890,7 +1001,21 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
   activeAgentId: DEFAULT_AGENT_ID,
   projectInstructions: {},
   projectOrder: [],
-  loops: [],
+  bots: [],
+  botSettings: null,
+  setBotSettings: (botId, confirmDelete = false) => {
+    const bot = get().bots.find((entry) => entry.id === botId)
+    if (!bot) {
+      set({ botSettings: null })
+      return
+    }
+    // selectChat switches synchronously and clears the pane before loading history.
+    if (get().activeChatId !== bot.chatId) void get().selectChat(bot.chatId)
+    set({ botSettings: { botId: bot.id, confirmDelete } })
+  },
+  runningAutomation: {},
+  automationSpeakers: {},
+  composerFocusChatId: null,
   queue: [],
   stopChats: {},
   compactingChats: {},
@@ -908,11 +1033,11 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
   usageStats: null,
 
   bootstrap: async () => {
-    const [settings, providers, chats, loops, projectOrder, telemetryEnabled] = await Promise.all([
+    const [settings, providers, chats, bots, projectOrder, telemetryEnabled] = await Promise.all([
       api.settings.getAll(),
       api.providers.listConnected(),
       api.chats.list(),
-      api.loops.list(),
+      api.bots.list(),
       api.projects.listOrder(),
       api.settings.getTelemetry()
     ])
@@ -929,7 +1054,7 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
       settings,
       providers,
       chats,
-      loops,
+      bots,
       projectOrder,
       telemetryEnabled,
       modelCatalog: {},
@@ -941,37 +1066,46 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
     // Warm the usage/cost dashboard for the titlebar pill (best-effort, async).
     void get().refreshUsage()
 
-    if (!loopTickSubscribed) {
-      loopTickSubscribed = true
-      api.loops.onTick(async (loopId) => {
-        const fresh = await api.loops.list()
-        set({ loops: fresh })
-        const loop = fresh.find((l) => l.id === loopId)
-        if (!loop) return
-        const loopMessages = await api.messages.list(loop.chatId)
-        if (get().activeChatId === loop.chatId) {
-          set({ messages: loopMessages, messagesChatId: loop.chatId })
-        }
-        // Real heartbeat: run the agent on the loop's prompt in its project each
-        // beat — the "infinite prompting" session. Needs a connected provider.
-        await get().refreshChats()
-        const { settings, providers } = get()
-        const provider =
-          providers.find((p) => p.id === settings?.activeProviderId) ?? providers[0] ?? null
-        if (!provider || !(provider.hasCredential || provider.auth === 'none')) return
-        // Previous beat still running → queue this beat's prompt (at most one
-        // pending) so the workflow's next step shows up as a queued item and
-        // runs as soon as the current reply finishes, instead of being skipped.
-        if (get().sendingChats[loop.chatId]) {
-          const pending = await api.queue.list(loop.chatId)
-          if (pending.length === 0) {
-            await api.queue.add(loop.chatId, loop.prompt)
-            if (get().activeChatId === loop.chatId) await get().refreshQueue()
-          }
-          return
-        }
-        await get().sendMessage(loop.prompt, loop.chatId)
+    if (!botsSubscribed) {
+      botsSubscribed = true
+      api.bots.onChanged(() => {
+        void get().refreshBots()
+        void get().refreshChats()
       })
+    }
+    if (!automationSubscribed) {
+      automationSubscribed = true
+      api.automation.onDelta((payload) => applyAutomationDelta(payload))
+      api.automation.onChanged((chatId) => void mirrorAutomationChat(chatId))
+      // Subscribe before requesting a snapshot; an event received during this
+      // round trip wins over its older snapshot (including a completed turn).
+      const revision = automationRevision
+      void api.automation
+        .snapshot()
+        .then((running) => {
+          for (const run of running) {
+            // A newer TURN transition knows better than this snapshot. A token
+            // that merely raced it does not: identity is announced once, when
+            // the turn starts, so dropping the snapshot over a delta left a
+            // guest's reply streaming under the host's name until it finished.
+            if ((automationTurnRevisions.get(run.sessionId) ?? 0) > revision) continue
+            set((s) => ({
+              runningAutomation: { ...s.runningAutomation, [run.sessionId]: true },
+              automationSpeakers: {
+                ...s.automationSpeakers,
+                [run.sessionId]: { botId: run.botId, botUsername: run.botUsername }
+              }
+            }))
+            if ((automationRevisions.get(run.sessionId) ?? 0) > revision) continue
+            const fold = new PartsFold()
+            fold.seed(run.parts)
+            remoteTurns.set(run.sessionId, fold)
+            if (get().activeChatId === run.sessionId && !get().sendingChats[run.sessionId]) {
+              publishStream(run.sessionId, fold.parts)
+            }
+          }
+        })
+        .catch(() => {})
     }
 
     if (!llmDeltaSubscribed) {
@@ -1063,46 +1197,65 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
       api.remote.onDelta((payload) => applyRemoteDelta(payload))
     }
 
-    const firstSession = chats.find((c) => c.kind === 'main')
+    const firstSession = chats.find((c) => c.kind === 'main') ?? chats.find((c) => c.kind === 'bot')
     if (!get().activeChatId && firstSession) {
       await get().selectChat(firstSession.id)
     }
   },
 
   refreshChats: async () => {
-    // Project order can change when a session/loop is created or deleted, so
+    // Project order can change when a session is created or deleted, so
     // pull it in the same round trip — one set, so the sidebar re-renders once.
     const [chats, projectOrder] = await Promise.all([api.chats.list(), api.projects.listOrder()])
     set({ chats, projectOrder })
   },
 
-  refreshLoops: async () => {
-    set({ loops: await api.loops.list() })
+  refreshBots: async () => {
+    set({ bots: await api.bots.list() })
   },
 
   refreshQueue: async () => {
     const chatId = get().activeChatId
-    set({ queue: chatId ? await api.queue.list(chatId) : [] })
+    const queue = chatId ? await api.queue.list(chatId) : []
+    if (get().activeChatId === chatId) set({ queue })
   },
 
-  createLoop: async (input) => {
-    const loop = await api.loops.create(input)
-    await get().refreshLoops()
+  createBot: async (username, instructions) => {
+    const bot = await api.bots.create(username)
+    if (instructions?.trim()) await api.bots.update(bot.id, { instructions })
+    await get().refreshBots()
     await get().refreshChats()
-    await get().selectChat(loop.chatId)
+    // A new bot is configured by talking to it, so the one thing to do next is
+    // type. Without this the click landed on an empty chat with no caret in it.
+    //
+    // Asked for WITH the selection, not after it finishes loading: the caret
+    // belongs in the composer the moment the chat appears, and a request that
+    // outlives the navigation steals focus from wherever the user went next
+    // (selectChat drops it for exactly that reason).
+    set({ composerFocusChatId: bot.chatId })
+    await get().selectChat(bot.chatId)
+    return bot
   },
 
-  setLoopEnabled: async (id, enabled) => {
-    await api.loops.setEnabled(id, enabled)
-    await get().refreshLoops()
-  },
-
-  removeLoop: async (id) => {
-    const loop = get().loops.find((l) => l.id === id)
-    await api.loops.remove(id)
-    await get().refreshLoops()
+  removeBot: async (id) => {
+    const bot = get().bots.find((b) => b.id === id)
+    await api.bots.remove(id)
+    await get().refreshBots()
     await get().refreshChats()
-    if (loop && get().activeChatId === loop.chatId) get().clearActive()
+    if (bot) {
+      remoteTurns.delete(bot.chatId)
+      cancelStream(bot.chatId)
+      set((s) => {
+        const runningAutomation = { ...s.runningAutomation }
+        const streamingChats = { ...s.streamingChats }
+        delete runningAutomation[bot.chatId]
+        delete streamingChats[bot.chatId]
+        const automationSpeakers = { ...s.automationSpeakers }
+        delete automationSpeakers[bot.chatId]
+        return { runningAutomation, streamingChats, automationSpeakers }
+      })
+      if (get().activeChatId === bot.chatId) get().clearActive()
+    }
   },
 
   refreshProviders: async () => {
@@ -1513,8 +1666,13 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
     // mode when you come back to it. The model/effort/context pickers read the
     // chat row directly via `resolveSessionConfig`, so they need no mirror here.
     const chat = get().chats.find((c) => c.id === id)
-    set({
+    set((s) => ({
       activeChatId: id,
+      botSettings: null,
+      // A pending "focus the composer" belongs to the chat that asked for it.
+      // Going somewhere else cancels it, so it cannot fire later and pull the
+      // caret out of whatever the user is typing in by then.
+      composerFocusChatId: s.composerFocusChatId === id ? id : null,
       messages: [],
       // `null` = loading. Without this the pane cannot tell a session that is
       // still fetching from one with no messages, and shows the empty state for
@@ -1523,7 +1681,7 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
       messagesError: false,
       queue: [],
       activeAgentId: chat?.agentId ?? DEFAULT_AGENT_ID
-    })
+    }))
     const workspace = chat?.workspacePath
     if (workspace) void get().ensureProjectInstructions(workspace)
     // Tell main which sub session is on screen so the end-of-turn prune spares
@@ -1532,6 +1690,8 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
     // Opening a subagent mid-run: pull what it has already done so the live
     // bubble starts from the whole transcript, not from the next delta.
     if (chat?.kind === 'sub') void hydrateSubagent(id)
+    const mainTurn = remoteTurns.get(id)
+    if (mainTurn && !get().sendingChats[id]) publishStream(id, mainTurn.parts)
     // A rejection here used to leave the pane blank forever: `messages` was
     // already cleared above, the set below never ran, and the promise floated
     // back into an onClick where nothing handled it. Now the failure is state,
@@ -1548,6 +1708,7 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
   clearActive: () =>
     set({
       activeChatId: null,
+      botSettings: null,
       messages: [],
       messagesChatId: null,
       messagesError: false,
@@ -1646,6 +1807,13 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
   },
 
   deleteChat: async (id) => {
+    // Migrated bots may still carry their old workspace path. Project/session
+    // deletion must not be an alternate way of deleting a top-level bot.
+    if (
+      get().bots.some((bot) => bot.chatId === id) ||
+      get().chats.find((chat) => chat.id === id)?.kind === 'bot'
+    )
+      return
     await api.chats.remove(id)
     await get().refreshChats()
     // Before clearing the live state, drop any frame this chat had scheduled —
@@ -1659,7 +1827,9 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
       delete sendingChats[id]
       delete streamingChats[id]
       delete stopChats[id]
-      return { sendingChats, streamingChats, stopChats }
+      const automationSpeakers = { ...s.automationSpeakers }
+      delete automationSpeakers[id]
+      return { sendingChats, streamingChats, stopChats, automationSpeakers }
     })
     if (get().activeChatId === id) get().clearActive()
   },
@@ -1728,21 +1898,45 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
     // is driven from the main process, so a prompt sent now would start a SECOND
     // concurrent turn writing into the same transcript. Queue it instead — it
     // drains as a normal follow-up once the delegate reports.
-    if (get().sendingChats[chatId] || remoteTurns.has(chatId) || subagentTurns.has(chatId)) {
-      await api.queue.add(
-        chatId,
-        text,
-        images?.map(({ dataUrl, mediaType, name }) => ({ dataUrl, mediaType, name }))
-      )
-      await get().refreshQueue()
+    if (
+      isBotChat(chatId, get()) ||
+      get().queue.length > 0 ||
+      get().sendingChats[chatId] ||
+      remoteTurns.has(chatId) ||
+      subagentTurns.has(chatId)
+    ) {
+      await enqueuePrompt(chatId, text, images)
       return
     }
     await get().sendMessage(text, undefined, images)
   },
 
+  submitToCollaborator: async (content, botId, images) => {
+    const chatId = get().activeChatId
+    if (!chatId) return
+    if (isBotChat(chatId, get())) {
+      throw new Error('Send to collaborator is only available in a project session')
+    }
+    const text = content.trim()
+    if (!text && (!images || images.length === 0)) return
+    const bot = get().bots.find((entry) => entry.id === botId)
+    if (!bot) throw new Error('Bot not found')
+    // Mirror bot_invoke: sourceChatId gates asBotId/recipientId on enqueuePrompt.
+    await enqueuePrompt(chatId, text, images, {
+      sourceChatId: chatId,
+      asBotId: bot.id,
+      recipientId: bot.id,
+      fromUser: true
+    })
+  },
+
   sendMessage: async (content, targetChatId, images) => {
     const chatId = targetChatId ?? get().activeChatId
     if (!chatId) return
+    if (isBotChat(chatId, get())) {
+      await enqueuePrompt(chatId, content, images)
+      return
+    }
     if (get().sendingChats[chatId]) return
     if (content.startsWith('!') && !content.slice(1).trim()) return
     const { settings } = get()
@@ -1804,7 +1998,7 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
     }
 
     // Persist the turn (always — even if the user navigated away) and clean up.
-    const finishTurn = async (): Promise<void> => {
+    const finishTurn = async (wakeQueue = true): Promise<void> => {
       // Capture the stop flag BEFORE clearStop() wipes it below — otherwise the
       // queue would drain even after the user hit Stop (the guard read `false`).
       const wasStopped = stopped()
@@ -1843,8 +2037,10 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
       if (active && !get().chats.some((c) => c.id === active)) {
         await get().selectChat(chatId)
       }
-      // Don't auto-run the next queued prompt when the user stopped this turn.
-      if (!wasStopped) await get().drainQueue(chatId)
+      if (deferredAutomation.delete(chatId)) void mirrorAutomationChat(chatId)
+      // Main is the only queue consumer. Wake it after the renderer has
+      // persisted this direct turn, never pop items or execute them here.
+      if (wakeQueue && !wasStopped) await api.automation.wake()
     }
 
     clearStop()
@@ -1890,8 +2086,7 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
         }
       ]
       setStreaming(parts)
-      // A loop tool changed loop state — refresh the sidebar to reflect it.
-      if (tool.startsWith('loop_')) await get().refreshLoops()
+      if (tool.startsWith('bot_')) await get().refreshBots()
       await finishTurn()
       return
     }
@@ -1971,10 +2166,8 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
           if (event.tool === 'task') void get().refreshChats()
         } else if (event.type === 'tool-end') {
           const ended = findByCallId(event.callId)
-          if (event.ok && ended?.type === 'tool' && ended.tool.startsWith('loop_')) {
-            // A loop_* tool just created/removed/toggled a loop — reflect it in
-            // the sidebar right away instead of waiting for a manual refresh.
-            void get().refreshLoops()
+          if (event.ok && ended?.type === 'tool' && ended.tool.startsWith('bot_')) {
+            void get().refreshBots()
             void get().refreshChats()
           } else if (ended?.type === 'tool' && ended.tool === 'task') {
             // A subagent finished — its `sub` session now has its reply; refresh
@@ -2019,42 +2212,54 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
       // Stop button for a turn that no longer existed, and clicking it aborted
       // a requestId that had already been deleted. That is the OTHER half of
       // the stuck-cancel bug, and it could only be cleared by restarting.
-      let result: LlmResult
       try {
-        result = await api.llm.start({
-          requestId,
-          sessionId: chatId,
-          providerId: provider.id,
-          model,
-          messages: chatMessages,
-          agentId,
-          reasoning: info?.reasoning ?? false,
-          // Clamp to what THIS model accepts. A session's effort is sticky
-          // across model switches, so "Max" set on one model would otherwise
-          // ride along to a model that only knows `high` and 400 the turn.
-          reasoningEffort: clampReasoningEffort(config.reasoningEffort, info?.reasoningEfforts),
-          contextLimit: contextBudget
-        })
-      } catch (e) {
-        result = { ok: false, error: e instanceof Error ? e.message : String(e) }
+        let result: LlmResult
+        try {
+          result = await api.llm.start({
+            requestId,
+            sessionId: chatId,
+            providerId: provider.id,
+            model,
+            messages: chatMessages,
+            agentId,
+            reasoning: info?.reasoning ?? false,
+            // Clamp to what THIS model accepts. A session's effort is sticky
+            // across model switches, so "Max" set on one model would otherwise
+            // ride along to a model that only knows `high` and 400 the turn.
+            reasoningEffort: clampReasoningEffort(config.reasoningEffort, info?.reasoningEfforts),
+            contextLimit: contextBudget
+          })
+        } catch (e) {
+          result = { ok: false, error: e instanceof Error ? e.message : String(e) }
+        }
+        if (!result.ok && !stopped()) {
+          if (provider.id === 'github-copilot') {
+            // Read the failure without another discovery request masking its auth status.
+            const providers = get().providers
+            const needed = await api.copilot.needsReauthentication().catch(() => false)
+            if (get().providers === providers) set({ copilotNeedsReauthentication: needed })
+          }
+          parts = [
+            ...parts,
+            { type: 'text', text: `_\u26a0 ${result.error ?? 'Model request failed.'}_` }
+          ]
+          setStreaming(parts)
+        }
+        // Main retains ownership after start resolves. Persist the assistant
+        // (including failures/stops) before releasing that session in finally.
+        await finishTurn(false)
       } finally {
         deltaHandlers.delete(requestId)
         chatRequests.delete(chatId)
+        // Persistence/refresh failures must not strand either ownership flag.
+        setStreaming(null)
+        setSending(false)
+        clearStop()
+        await api.llm.finish(requestId)
       }
-      if (!result.ok && !stopped()) {
-        if (provider.id === 'github-copilot') {
-          // Read the failure without another discovery request masking its auth status.
-          const providers = get().providers
-          const needed = await api.copilot.needsReauthentication().catch(() => false)
-          if (get().providers === providers) set({ copilotNeedsReauthentication: needed })
-        }
-        parts = [
-          ...parts,
-          { type: 'text', text: `_\u26a0 ${result.error ?? 'Model request failed.'}_` }
-        ]
-        setStreaming(parts)
-      }
-      await finishTurn()
+      // abortSession pauses the queue in main; wake never resumes a stopped
+      // session, and only runs now that the persisted direct turn is unlocked.
+      await api.automation.wake()
       return
     }
 
@@ -2065,22 +2270,6 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
       if (!(await streamText('text', reply))) return
     }
     await finishTurn()
-  },
-
-  drainQueue: async (chatId) => {
-    const items = await api.queue.list(chatId)
-    if (items.length === 0) {
-      if (get().activeChatId === chatId) set({ queue: [] })
-      return
-    }
-    const next = items[0]
-    await api.queue.remove(next.id)
-    if (get().activeChatId === chatId) set({ queue: items.slice(1) })
-    await get().sendMessage(
-      next.content,
-      chatId,
-      next.images?.map((img) => ({ id: crypto.randomUUID(), ...img, name: img.name ?? 'image' }))
-    )
   },
 
   removeQueued: async (id) => {
@@ -2113,6 +2302,7 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
       images?.map(({ dataUrl, mediaType, name }) => ({ dataUrl, mediaType, name }))
     )
     await get().refreshQueue()
+    await api.automation.wake()
   },
 
   refreshUsage: async () => {
@@ -2292,9 +2482,10 @@ async function buildChatMessages(
   // Each turn rebuilds into one or more chat messages; keeping them grouped means
   // the window cut below can never split an assistant's tool_calls from the
   // matching role:'tool' results (which would orphan them → provider 400s).
+  const self = useRoxyStore.getState().bots.find((b) => b.chatId === chatId)
   const groups = (await api.messages.list(chatId))
     .filter((m) => (m.role === 'user' || m.role === 'assistant') && m.createdAt > since)
-    .map(reconstructTurn)
+    .map((m) => reconstructTurn(m, self))
     .filter((g) => g.length > 0)
 
   // Prune older tool outputs to a head/tail preview *before* the window cut, so
@@ -2430,21 +2621,6 @@ function parseToolCommand(raw: string): {
       return { tool: 'browser_console', input: {}, title: 'console' }
     case 'closebrowser':
       return { tool: 'browser_close', input: {}, title: 'close browser' }
-    case 'loops':
-      return { tool: 'loop_list', input: {}, title: 'loops' }
-    case 'loop': {
-      const m = /^(on|off|enable|disable)\s+(.+)$/i.exec(arg)
-      if (m) {
-        const enable = /^(on|enable)$/i.test(m[1])
-        const ref = m[2].trim()
-        return {
-          tool: enable ? 'loop_enable' : 'loop_disable',
-          input: { loop: ref },
-          title: `${m[1].toLowerCase()} ${ref}`
-        }
-      }
-      return { tool: 'loop_list', input: {}, title: 'loops' }
-    }
     default:
       return { tool: 'bash', input: { command: raw }, title: raw }
   }

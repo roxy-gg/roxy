@@ -3,6 +3,7 @@
  * Implemented in src/preload/index.ts, handled in src/main/ipc/*.
  */
 import type { Language } from './i18n'
+import type { Bot, BotJob, BotJobInput } from './bots'
 import type { MotionPreference } from './motion'
 import type {
   AddMessageInput,
@@ -14,9 +15,9 @@ import type {
   ConnectProviderInput,
   DeviceFlowStart,
   IntegrationConnection,
-  Loop,
   Message,
   MessagePart,
+  QueueAddOptions,
   QueueImage,
   QueueItem,
   ReasoningEffort,
@@ -332,14 +333,6 @@ export interface PruneWorktreesResult {
   error?: string
 }
 
-export interface CreateLoopInput {
-  name: string
-  prompt: string
-  intervalMinutes: number
-  /** Project (workspace folder) the loop's agent runs in; null = no workspace. */
-  workspacePath?: string | null
-}
-
 /** An image attached to a user message, sent to vision-capable models. */
 export interface ChatImage {
   /** Image as a data URL (data:image/png;base64,â€¦). */
@@ -378,6 +371,11 @@ export interface LlmStartInput {
   reasoning?: boolean
   /** Effective context-window budget in tokens (drives large-context headers). */
   contextLimit?: number
+  /** Bot speaking this turn, when it is not the session's own bot — a guest in a
+   *  shared session. Drives the identity + role in the system prompt. */
+  asBotId?: string
+  /** Roxy explicitly answering inside a bot's private chat. */
+  asHost?: boolean
 }
 
 export interface LlmResult {
@@ -706,7 +704,13 @@ export interface RemoteStartInput {
  */
 export type RemoteDelta =
   | { sessionId: string; kind: 'event'; event: LlmEvent }
-  | { sessionId: string; kind: 'turn'; state: 'running' | 'idle' }
+  | {
+      sessionId: string
+      kind: 'turn'
+      state: 'running' | 'idle'
+      botId?: string
+      botUsername?: string
+    }
 
 /** Outcome of exporting the portable config bundle (skills + MCP servers). */
 export interface ConfigExportResult {
@@ -739,6 +743,28 @@ export interface ConfigImportResult {
 }
 
 export interface RoxyApi {
+  bots: {
+    list(): Promise<Bot[]>
+    /** Omit the username to get a free one: a bot can be named in chat later. */
+    create(username?: string): Promise<Bot>
+    update(id: string, patch: { username?: string; instructions?: string }): Promise<Bot>
+    remove(id: string): Promise<void>
+    jobs(botId: string): Promise<BotJob[]>
+    saveJob(input: BotJobInput, id?: string): Promise<BotJob>
+    removeJob(id: string): Promise<void>
+    /** Queue an extra run without changing the schedule or its remaining-run limit. */
+    runJob(id: string): Promise<QueueItem>
+    onChanged(callback: () => void): () => void
+  }
+  automation: {
+    /** Main owns queued turns; renderers only mirror these events. */
+    onDelta(callback: (payload: RemoteDelta) => void): () => void
+    snapshot(): Promise<
+      { sessionId: string; parts: MessagePart[]; botId?: string; botUsername?: string }[]
+    >
+    onChanged(callback: (chatId: string) => void): () => void
+    wake(): Promise<void>
+  }
   settings: {
     getAll(): Promise<AppSettings>
     setActiveProvider(providerId: string, model: string | null): Promise<AppSettings>
@@ -950,14 +976,6 @@ export interface RoxyApi {
     /** Import a config bundle chosen via an open dialog (overwrites by name/id). */
     import(): Promise<ConfigImportResult>
   }
-  loops: {
-    list(): Promise<Loop[]>
-    create(input: CreateLoopInput): Promise<Loop>
-    setEnabled(id: string, enabled: boolean): Promise<void>
-    remove(id: string): Promise<void>
-    /** Subscribe to heartbeat ticks; returns an unsubscribe fn. */
-    onTick(callback: (loopId: string) => void): () => void
-  }
   tools: {
     run(sessionId: string, name: string, input: Record<string, unknown>): Promise<ToolResult>
     /**
@@ -970,7 +988,12 @@ export interface RoxyApi {
   }
   queue: {
     list(chatId: string): Promise<QueueItem[]>
-    add(chatId: string, content: string, images?: QueueImage[]): Promise<QueueItem>
+    add(
+      chatId: string,
+      content: string,
+      images?: QueueImage[],
+      options?: QueueAddOptions
+    ): Promise<QueueItem>
     remove(id: string): Promise<void>
     /** Reorder a chat's queue; `ids` is the full queue front-to-back. */
     reorder(chatId: string, ids: string[]): Promise<void>
@@ -988,6 +1011,8 @@ export interface RoxyApi {
   llm: {
     /** Stream a completion; text deltas arrive via onDelta. Resolves when done. */
     start(input: LlmStartInput): Promise<LlmResult>
+    /** Release the local turn only after its renderer has persisted the transcript. */
+    finish(requestId: string): Promise<void>
     abort(requestId: string): Promise<void>
     /**
      * Stop everything in flight for a session â€” the streaming turn, any

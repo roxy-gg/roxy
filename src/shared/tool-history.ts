@@ -13,6 +13,7 @@
  */
 import type { ChatMessage } from './api'
 import type { Message, MessagePart } from './types'
+import { isHostSpeaker, type Bot } from './bots'
 import { previewText } from './context'
 
 /** Cap a replayed tool result to what the live loop sent (agent.ts runLoop bounds big outputs). */
@@ -106,9 +107,62 @@ export function reconstructAssistant(parts: MessagePart[]): ChatMessage[] {
   return out
 }
 
-/** Rebuild one persisted turn (user or assistant) into structured chat messages. */
-export function reconstructTurn(m: Message): ChatMessage[] {
-  if (m.role === 'assistant') return reconstructAssistant(m.parts)
+/** A speaker marker this module added on a previous pass — or one a model copied
+ *  from its own history. Either way it is scaffolding, never part of the reply. */
+const SPEAKER_MARKER = /^(?:\[@[a-z0-9_-]+\]\s*)+/i
+
+/**
+ * Rebuild one persisted turn (user or assistant) into structured chat messages.
+ *
+ * `self` is the bot whose context is being built. Its own turns are NOT marked:
+ * a model that sees `[@bobo]` on every one of its past replies concludes the
+ * marker is part of its voice and starts typing it itself — and since the next
+ * rebuild prefixes *that* too, every round added another one ("[@bobo] [@bobo] …").
+ * Marking only other speakers keeps the tag meaningful and the loop impossible.
+ */
+export function reconstructTurn(
+  m: Message,
+  self?: Pick<Bot, 'id' | 'username' | 'chatId'>
+): ChatMessage[] {
+  // No `self` means the HOST is reading: her own rows are the unattributed ones,
+  // plus any explicitly marked as hers (which is how she signs a reply inside a
+  // bot's chat, where "unattributed" already belongs to that bot).
+  // IDs survive renames. Fall back to the handle only for older saved messages.
+  //
+  // An unsigned row inside the bot's OWN chat is the bot's: authorship was only
+  // written down once a chat could have several speakers, so every reply from
+  // before that is bare. Treating those as the host's turned a bot's own history
+  // into "[@Roxy]" quotes and dropped the tool calls it had made.
+  const own = self
+    ? m.botId
+      ? m.botId === self.id
+      : m.botUsername
+        ? m.botUsername === self.username
+        : m.chatId === self.chatId
+    : !m.botId && (!m.botUsername || isHostSpeaker(m.botId, m.botUsername))
+  const foreign = !own && (m.role === 'assistant' || !!m.botId || !!m.botUsername)
+  if (foreign) {
+    const speaker = isHostSpeaker(m.botId, m.botUsername) ? 'Roxy' : (m.botUsername ?? 'Roxy')
+    const content = m.parts
+      .flatMap((part) => {
+        if (part.type === 'text') return [part.text.replace(SPEAKER_MARKER, '')]
+        if (part.type !== 'tool') return []
+        return [
+          `${part.tool} (${part.state}): ${previewText(JSON.stringify(part.input ?? {}), { maxChars: REPLAY_OUTPUT_CAP })}`,
+          previewText(part.output ?? '(no output)', { maxChars: REPLAY_OUTPUT_CAP })
+        ]
+      })
+      .join('\n')
+    // Other participants' actions are background, never this actor's native
+    // assistant/tool history. In particular a guest must not become the host.
+    return [{ role: 'user', content: `[@${speaker}]\n${content}` }]
+  }
+  if (m.role === 'assistant') {
+    const turns = reconstructAssistant(m.parts)
+    for (const turn of turns)
+      if (turn.role === 'assistant') turn.content = turn.content.replace(SPEAKER_MARKER, '')
+    return turns
+  }
   const content = m.parts
     .map((p) => (p.type === 'text' ? p.text : ''))
     .join('')

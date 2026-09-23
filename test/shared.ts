@@ -386,8 +386,15 @@ check(
   )
 )
 check(
-  'loop tools registered',
-  ['loop_list', 'loop_enable', 'loop_disable'].every((id) => Boolean(getTool(id)))
+  'bot tools registered',
+  [
+    'project_list',
+    'session_manage',
+    'bot_manage',
+    'bot_schedule',
+    'bot_invoke',
+    'queue_manage'
+  ].every((id) => Boolean(getTool(id)))
 )
 check(
   'file/bash tools registered',
@@ -411,7 +418,7 @@ check(
 )
 check(
   'instant local tools offer no cancel button',
-  ['read', 'write', 'edit', 'list', 'loop_list', 'bash_list', 'change_session_metadata'].every(
+  ['read', 'write', 'edit', 'list', 'bot_manage', 'bash_list', 'change_session_metadata'].every(
     (id) => !isInterruptibleTool(id)
   )
 )
@@ -439,8 +446,8 @@ check(
     'skill',
     'lsp',
     'browser_close',
-    'loop_create',
-    'loop_remove',
+    'bot_manage',
+    'bot_schedule',
     'change_session_metadata'
   ].every((id) => Boolean(getTool(id)))
 )
@@ -2689,6 +2696,7 @@ console.log('\nremote workspace ipc parity\n')
   const preload = read('src/preload/index.ts')
   const handlers = read('src/main/ipc/index.ts')
   const service = read('src/main/services/remote.ts')
+  const automation = read('src/main/services/automation.ts')
   const api = read('src/shared/api.ts')
   // `remote` is the last member of both the preload bridge and RoxyApi, so
   // slicing from its marker to EOF isolates just that block for method checks.
@@ -2728,7 +2736,10 @@ console.log('\nremote workspace ipc parity\n')
     'preload unsubscribes from remote:delta',
     preload.includes('removeListener(CHANNELS.remoteDelta')
   )
-  check('main emits remote:delta', service.includes('CHANNELS.remoteDelta'))
+  check(
+    'the queue owner fans turn events to the desktop',
+    automation.includes('CHANNELS.automationDelta')
+  )
   check(
     'persisted desktop messages refresh the remote transcript',
     /CHANNELS\.messagesAdd[\s\S]{0,300}remote\.notifyTranscriptChanged\(input\.chatId\)/.test(
@@ -2737,13 +2748,17 @@ console.log('\nremote workspace ipc parity\n')
   )
   check(
     'remote transcript refresh sends an authoritative snapshot',
-    /function notifyTranscriptChanged[\s\S]{0,300}sendSnapshot\(sessionId\)/.test(service)
+    /function notifyTranscriptChanged[\s\S]{0,200}sendSnapshot\(sessionId\)/.test(service)
+  )
+  // Queued turns reconcile too: the queue owner snapshots from its own finally,
+  // which is what makes a scheduled/bot reply reach the phone at all.
+  check(
+    'the queue owner refreshes the remote transcript when a turn ends',
+    /finally\s*{[\s\S]{0,400}notifyTranscriptChanged\(item\.chatId\)/.test(automation)
   )
   check(
-    'phone turns reconcile before becoming idle',
-    /active\.liveTurns\.get\(sessionId\)[\s\S]{0,300}sendSnapshot\(sessionId\)[\s\S]{0,200}state: 'idle'/.test(
-      service
-    )
+    'phone prompts use the main-process queue',
+    service.includes('enqueuePrompt(sessionId, text)')
   )
 
   // ---- chats:updated parity ----

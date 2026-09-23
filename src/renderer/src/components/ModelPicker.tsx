@@ -85,7 +85,12 @@ function useWindow(
   return { band, reset }
 }
 
-export function ModelPicker(): JSX.Element {
+/**
+ * `side` follows the composer's upward menus by default. The bot settings pane
+ * passes `bottom`: there the trigger sits near the top of a scrolling column,
+ * and a menu opening upward is clipped by that container.
+ */
+export function ModelPicker({ side = 'top' }: { side?: 'top' | 'bottom' } = {}): JSX.Element {
   const navigate = useNavigate()
   const { t } = useTranslation()
   const providers = useRoxyStore((s) => s.providers)
@@ -108,7 +113,7 @@ export function ModelPicker(): JSX.Element {
   const carouselRef = useRef<HTMLDivElement>(null)
   const activeTabRef = useRef<HTMLButtonElement>(null)
 
-  const anchor = useMenuAnchor(rootRef, open, MENU_W, { gap: 8, maxHeight: 380 })
+  const anchor = useMenuAnchor(rootRef, open, MENU_W, { gap: 8, maxHeight: 380, side })
   const { band, reset: resetScroll } = useWindow(listRef, open)
 
   const config = useMemo(() => resolveSessionConfig(activeChat, settings), [activeChat, settings])
@@ -272,7 +277,21 @@ export function ModelPicker(): JSX.Element {
   }
 
   return (
-    <div ref={rootRef} className="relative">
+    <div
+      ref={rootRef}
+      className="relative"
+      // Escape closes the MENU and stops there. The document listener below is
+      // the fallback for when focus has left the picker, but it runs after any
+      // ancestor's React handler — and the bot settings pane closes itself on
+      // Escape, discarding an unsaved profile edit. Dismissing a dropdown must
+      // not throw away the form behind it.
+      onKeyDown={(e) => {
+        if (open && e.key === 'Escape') {
+          e.stopPropagation()
+          setOpen(false)
+        }
+      }}
+    >
       <button type="button" onClick={() => setOpen((o) => !o)} className={triggerClass}>
         {activeProvider && (
           <ProviderLogo id={activeProvider.id} name={activeProvider.name} size={14} />
@@ -283,7 +302,12 @@ export function ModelPicker(): JSX.Element {
 
       {open && (
         <div
-          className="animate-pop-in absolute bottom-full z-50 mb-2 flex flex-col overflow-hidden sq-frame sq-xl sq-fill-elevated sq-ring edge edge-strong edge-panel rounded-xl border border-border bg-elevated shadow-float origin-bottom-left"
+          className={cn(
+            'animate-pop-in absolute z-50 flex flex-col overflow-hidden sq-frame sq-xl sq-fill-elevated sq-ring edge edge-strong edge-panel rounded-xl border border-border bg-elevated shadow-float',
+            side === 'bottom'
+              ? 'top-full mt-2 origin-top-left'
+              : 'bottom-full mb-2 origin-bottom-left'
+          )}
           style={anchor}
         >
           {/* Provider Carousel */}
