@@ -410,7 +410,7 @@ async function main(): Promise<void> {
       expected: 'a'.repeat(64),
       actual: 'b'.repeat(64),
       stream: 'b'.repeat(64),
-      asset: 'CLIProxyAPI_7.2.112_darwin_aarch64.tar.gz',
+      asset: 'CLIProxyAPI_7.3.15_darwin_aarch64.tar.gz',
       ...over
     })
 
@@ -421,8 +421,8 @@ async function main(): Promise<void> {
       1004,
       1004,
       D({
-        actual: PINNED_SHA256['CLIProxyAPI_7.2.112_linux_amd64.tar.gz'],
-        stream: PINNED_SHA256['CLIProxyAPI_7.2.112_linux_amd64.tar.gz']
+        actual: PINNED_SHA256['CLIProxyAPI_7.3.15_linux_amd64.tar.gz'],
+        stream: PINNED_SHA256['CLIProxyAPI_7.3.15_linux_amd64.tar.gz']
       }) as never
     )
     check(

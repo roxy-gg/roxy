@@ -89,18 +89,18 @@ const PORT_RANGE_END = 8399
 // trust this over the network, a wrong entry breaks every install - it has to be
 // checkable.
 export const PINNED_SHA256: Record<string, string> = {
-  'CLIProxyAPI_7.2.112_windows_amd64.zip':
-    'e2a59965f73e5e32c00cb711a09412f8a7898ca8c10a4e682bb963dafde764f4',
-  'CLIProxyAPI_7.2.112_windows_aarch64.zip':
-    '23225aecfcdd4c680e6c3eda8e74f9bee16457bd4249d6b30e9f70185e14b550',
-  'CLIProxyAPI_7.2.112_darwin_aarch64.tar.gz':
-    'd8e41dd24f7f1ab68ed57d1637a928a13e7d217268093aa7d2177cf95010feff',
-  'CLIProxyAPI_7.2.112_darwin_amd64.tar.gz':
-    'c9c1c36e7f134bb43e4155321d3c75037a4ba6c3173e8c6cfa70caff49903a55',
-  'CLIProxyAPI_7.2.112_linux_amd64.tar.gz':
-    'a64de846ac2920b82cfbdfac988a3ae4f637eae9d2ff2fe00e4022cd451ca6e7',
-  'CLIProxyAPI_7.2.112_linux_aarch64.tar.gz':
-    '254bb551ac71eb54720a6ee848ca8de559cdee5feb2dc1e44dbda59a03233220'
+  'CLIProxyAPI_7.3.15_windows_amd64.zip':
+    '2722eccdabdbca935cfbd41e99b00a8017e91e45296e34b30004932c176b01b2',
+  'CLIProxyAPI_7.3.15_windows_aarch64.zip':
+    'de4db7058bf4f9fcbf2097ed693a1c28a2e9364949ee16a57cccac0fd0a6a12f',
+  'CLIProxyAPI_7.3.15_darwin_aarch64.tar.gz':
+    'c1e49c148a94c476dc43a6a0eed28bca34239d5153ebb7792048d8c18f3b92f0',
+  'CLIProxyAPI_7.3.15_darwin_amd64.tar.gz':
+    '1dd2f2f5d57c2c9172eb51837d07f1f014d02ab1093215401a00c61d942bb972',
+  'CLIProxyAPI_7.3.15_linux_amd64.tar.gz':
+    '801c3a23061d57a830e67fcd033fda26e96c2bfe93e1b2e34e4428ed7defc7e5',
+  'CLIProxyAPI_7.3.15_linux_aarch64.tar.gz':
+    '0b147342517b2f0f0cb80a4630e4f863cdd531fa0e90986f30a437c81ba82e75'
 }
 
 /**

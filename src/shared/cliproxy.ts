@@ -147,7 +147,7 @@ export function providerIdForUpstream(upstream: string): string | undefined {
  * holds the user's OAuth tokens, so it is never auto-updated to whatever
  * `latest` happens to be on the day someone first clicks Sign in.
  */
-export const CLIPROXY_VERSION = '7.2.112'
+export const CLIPROXY_VERSION = '7.3.15'
 
 /** Where the pinned release assets come from. */
 export const CLIPROXY_REPO = 'router-for-me/CLIProxyAPI'
