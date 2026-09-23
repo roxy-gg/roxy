@@ -192,7 +192,12 @@ export function ChatView(): JSX.Element {
           {activeBot ? (
             <div className="flex min-w-0 items-center gap-2">
               <BotAvatar username={activeBot.username} size={28} />
-              <span className="truncate text-sm font-medium">@{activeBot.username}</span>
+              <div className="min-w-0">
+                <div className="truncate text-sm font-medium">@{activeBot.username}</div>
+                <div className="truncate text-[11px] text-text-subtle">
+                  {t('bots.talkingTo', { username: activeBot.username })}
+                </div>
+              </div>
             </div>
           ) : (
             <div className="flex min-w-0 items-center gap-2">
@@ -337,6 +342,9 @@ export function ChatView(): JSX.Element {
               <div className="flex flex-col items-center gap-4">
                 <BotAvatar username={activeBot.username} size={56} />
                 <div className="flex max-w-xs flex-col gap-2">
+                  <p className="text-sm font-medium text-text">
+                    {t('bots.talkingTo', { username: activeBot.username })}
+                  </p>
                   <p className="text-sm text-text-muted">{t('bots.intro')}</p>
                   <p className="text-xs text-text-subtle">{t('bots.introExample')}</p>
                 </div>

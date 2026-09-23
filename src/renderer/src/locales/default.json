@@ -53,10 +53,11 @@
     "remainingRuns": "Run limit (optional)",
     "unlimited": "Unlimited",
     "enabled": "Enabled",
-    "mentionLabel": "Mention a bot",
+    "mentionLabel": "Highlight a collaborator",
     "inference": "Inference",
     "model": "Model",
-    "inferenceHint": "Applies to every run of this bot — its own chat, scheduled jobs, and turns it answers as a guest in another session."
+    "inferenceHint": "Applies to every run of this bot — its own chat, scheduled jobs, and turns it answers as a guest in another session.",
+    "talkingTo": "You're talking to @{{username}}."
   },
   "browserChrome": {
     "closeTab": "Close tab",
@@ -136,7 +137,9 @@
     "stop": "Stop (Esc)",
     "sendTo": "Send to @{{username}}",
     "chooseSendTo": "Choose who to send to",
-    "sendToHint": "Send only to this collaborator. Enter still sends to Roxy."
+    "sendToHint": "Send only to this collaborator. Enter still sends to Roxy.",
+    "projectAtHint": "In projects, Roxy leads. @name highlights a collaborator — use Send to @name to talk to them directly.",
+    "projectAtHintDismiss": "Got it"
   },
   "configBackup": {
     "export": "Export",

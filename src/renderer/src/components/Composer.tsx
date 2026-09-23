@@ -15,6 +15,7 @@ import { ImagePreview } from './ImagePreview'
 import { useRoxyStore } from '../lib/store'
 import { BotAvatar } from './BotAvatar'
 import { cn } from '../lib/cn'
+import { dismissProjectAtHint, isProjectAtHintDismissed } from '../lib/project-at-hint'
 import { MENTION, isKnownMention, mentionedBots } from '@shared/mentions'
 
 export function Composer({
@@ -57,6 +58,9 @@ export function Composer({
   const [focused, setFocused] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
+  const [projectAtHintDismissed, setProjectAtHintDismissed] = useState(() =>
+    isProjectAtHintDismissed()
+  )
   /** Explicit pick when several known @bots appear; cleared when no longer mentioned. */
   const [pickedSendId, setPickedSendId] = useState<string | null>(null)
   // A mention can start anywhere, as long as the "@" opens a word (start of
@@ -472,6 +476,24 @@ export function Composer({
           )}
         </div>
       </div>
+      {variant === 'session' && !projectAtHintDismissed && (
+        <div
+          role="note"
+          className="mx-auto mb-2 flex max-w-3xl items-start gap-2 rounded-lg border border-border/60 bg-elevated/50 px-3 py-2 text-xs text-text-muted"
+        >
+          <p className="min-w-0 flex-1 leading-relaxed">{t('composer.projectAtHint')}</p>
+          <button
+            type="button"
+            onClick={() => {
+              dismissProjectAtHint()
+              setProjectAtHintDismissed(true)
+            }}
+            className="press-scale shrink-0 rounded-md px-1.5 py-0.5 text-[11px] font-medium text-accent hover:bg-accent/10"
+          >
+            {t('composer.projectAtHintDismiss')}
+          </button>
+        </div>
+      )}
       {error && (
         <p role="alert" className="mx-auto mt-2 max-w-3xl text-xs text-danger">
           {error}
