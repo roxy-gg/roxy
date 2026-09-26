@@ -264,8 +264,8 @@
     "tools": "ツール"
   },
   "notifications": {
-    "turnCompleteBody": "準備ができました。",
-    "turnCompleteUntitled": "無題のセッション"
+    "responseReady": "Response ready.",
+    "responseReadyForSession": "Response ready: {{session}}"
   },
   "onboarding": {
     "apiKey": "APIキー",
@@ -479,7 +479,7 @@
       "completeDescription": "Roxy が応答を完了したときに通知を受け取ります。時間のかかるタスクに便利です。Roxy がフォーカスされていないときにのみ通知され、クリックするとそのセッションに移動します。",
       "completeTitle": "応答の完了",
       "heading": "通知",
-      "preview": "再生"
+      "testNotification": "Test notification"
     },
     "privacy": {
       "description": "アプリの起動、完了したターン、ターンにかかったステップとツールの数、使用されたトークンの数、おおよそのコストなど、このマシンで生成されたランダムなIDに関連付けられたカウントとタイミング。プロンプト、コード、ファイルパス、リポジトリ名、エラーテキストは決して含まれません。",

@@ -785,11 +785,11 @@ export interface RoxyApi {
   }
   notifications: {
     /**
-     * Post a native OS toast for session `chatId`. Both strings arrive already
+     * Post a native OS toast for session `chatId`. All strings arrive already
      * translated: main has no i18next instance, so the renderer resolves them
      * before calling.
      */
-    toast(title: string, body: string, chatId: string): Promise<void>
+    toast(title: string, subtitle: string, body: string, chatId: string): Promise<void>
     /**
      * Subscribe to toast clicks; returns an unsubscribe fn. The payload is the
      * session id the toast was posted for, so the UI can open it.

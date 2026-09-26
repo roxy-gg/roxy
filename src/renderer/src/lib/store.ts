@@ -1920,8 +1920,8 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
         const pending = await api.queue.list(chatId)
         const notifySettings = get().settings
         if (pending.length === 0 && notifySettings) {
-          const title = get().chats.find((c) => c.id === chatId)?.title
-          notifyTurnComplete(notifySettings, title ?? '', chatId)
+          const chat = get().chats.find((c) => c.id === chatId)
+          if (chat) notifyTurnComplete(notifySettings, chat)
         }
         await get().drainQueue(chatId)
       }

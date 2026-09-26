@@ -10,7 +10,7 @@
  * and whether the window is focused.
  */
 import chime from '../assets/chime.wav'
-import { NOTIFY_VOLUME, type AppSettings } from '@shared/types'
+import { NOTIFY_VOLUME, type AppSettings, type Chat } from '@shared/types'
 import i18n from '../i18n'
 import { api } from './api'
 
@@ -54,20 +54,32 @@ function shouldNotify(settings: AppSettings): boolean {
  * Announce that a session's turn finished: chime plus an OS toast. A no-op when
  * notifications are off, or when you are already watching.
  *
- * The SESSION NAME is the toast's title: with several sessions running, which
- * one finished is the only thing you actually need from the toast, and the
- * Windows header above it already says Roxy. `sessionTitle` is user data and
- * goes in untranslated; the rest is resolved here because main has no i18next.
+ * Use the completed chat, never the currently selected one: another project's
+ * turn can finish while the user has switched sessions.
  */
 export function notifyTurnComplete(
   settings: AppSettings,
-  sessionTitle: string,
-  chatId: string
+  chat: Pick<Chat, 'id' | 'title' | 'workspacePath'>
 ): void {
   if (!shouldNotify(settings)) return
+  void showCompletionNotification(chat)
+}
+
+/** Also used by the Settings preview, which deliberately bypasses focus suppression. */
+export async function showCompletionNotification(
+  chat?: Pick<Chat, 'id' | 'title' | 'workspacePath'>
+): Promise<void> {
   void playNotificationSound()
-  // A session can genuinely have no title yet (notify fires on the first turn,
-  // which is what names it), and an empty toast heading looks broken.
-  const name = sessionTitle.trim() || i18n.t('notifications.turnCompleteUntitled')
-  void api.notifications.toast(name, i18n.t('notifications.turnCompleteBody'), chatId)
+  // workspacePath is the project root; worktreePath would show an internal slug.
+  const project = chat?.workspacePath?.split(/[\\/]/).filter(Boolean).at(-1) ?? ''
+  const session = chat?.title.trim() ?? ''
+  const body =
+    project && session
+      ? i18n.t('notifications.responseReadyForSession', { session })
+      : i18n.t('notifications.responseReady')
+  try {
+    await api.notifications.toast('Roxy', project || session, body, chat?.id ?? '')
+  } catch (error) {
+    console.warn('Failed to request completion notification:', error)
+  }
 }

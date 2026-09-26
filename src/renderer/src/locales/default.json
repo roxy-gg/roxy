@@ -243,8 +243,8 @@
     "tools": "Tools"
   },
   "notifications": {
-    "turnCompleteBody": "Ready for you.",
-    "turnCompleteUntitled": "Untitled session"
+    "responseReady": "Response ready.",
+    "responseReadyForSession": "Response ready: {{session}}"
   },
   "onboarding": {
     "welcomeTagline": "This might be a complete disaster. It might also be the best thing you use all year!",
@@ -442,7 +442,7 @@
       "heading": "Notifications",
       "completeTitle": "Response completions",
       "completeDescription": "Get a notification when Roxy has finished a response. Useful for long-running tasks. Only fires when Roxy isn't focused; click it to jump to that session.",
-      "preview": "Play"
+      "testNotification": "Test notification"
     },
     "workstreams": {
       "heading": "Workstreams",

@@ -142,12 +142,14 @@ function focusApp(): void {
  * `silent: true` always: Roxy plays its own chime, and letting the OS add its
  * default alert on top produces two noises for one event.
  */
-export function showTurnToast(title: string, body: string, chatId: string): void {
+export function showTurnToast(title: string, subtitle: string, body: string, chatId: string): void {
   if (!Notification.isSupported()) return
   const icon = iconPath ? nativeImage.createFromPath(iconPath) : undefined
   const notification = new Notification({
     title,
-    body,
+    // macOS has a native subtitle; other platforms keep the project in the body.
+    ...(isMac ? { subtitle } : {}),
+    body: !isMac && subtitle ? `${subtitle}\n${body}` : body,
     silent: true,
     // On macOS, `icon` sets `contentImage` (displayed as an attachment thumbnail
     // on the right side of the banner). The application icon on the left is
@@ -164,6 +166,7 @@ export function showTurnToast(title: string, body: string, chatId: string): void
     <binding template="ToastGeneric">
       <image placement="appLogoOverride" hint-crop="circle" src="${esc(fileUri(iconPath))}"/>
       <text hint-maxLines="1">${esc(title)}</text>
+      ${subtitle ? `<text hint-maxLines="1">${esc(subtitle)}</text>` : ''}
       <text>${esc(body)}</text>
     </binding>
   </visual>
@@ -196,7 +199,7 @@ export function showTurnToast(title: string, body: string, chatId: string): void
     focusApp()
     // Raising the window is not enough: it comes back on whatever session was
     // last open, which is exactly the one you did NOT get notified about.
-    existing.webContents.send(CHANNELS.notifyActivated, chatId)
+    if (chatId) existing.webContents.send(CHANNELS.notifyActivated, chatId)
   })
   notification.show()
 }

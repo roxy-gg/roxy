@@ -264,8 +264,8 @@
     "tools": "الأدوات"
   },
   "notifications": {
-    "turnCompleteBody": "جاهز لك.",
-    "turnCompleteUntitled": "جلسة بلا عنوان"
+    "responseReady": "Response ready.",
+    "responseReadyForSession": "Response ready: {{session}}"
   },
   "onboarding": {
     "apiKey": "مفتاح API",
@@ -479,7 +479,7 @@
       "completeDescription": "احصل على إشعار عندما ينتهي Roxy من الرد. مفيد للمهام الطويلة. لا يظهر إلا عندما لا يكون Roxy في المقدمة؛ انقر عليه للانتقال إلى تلك الجلسة.",
       "completeTitle": "اكتمال الردود",
       "heading": "الإشعارات",
-      "preview": "تشغيل"
+      "testNotification": "Test notification"
     },
     "privacy": {
       "description": "العدد والتوقيتات — تشغيل التطبيق، الأدوار المكتملة، عدد الخطوات والأدوات التي استغرقها الدور، عدد الرموز المميزة التي استخدمها وما يقرب من تكلفتها — مرتبطة بمعرف عشوائي تم إنشاؤه على هذا الجهاز. لا يتم تضمين مطالباتك، أو التعليمات البرمجية الخاصة بك، أو مسارات الملفات، أو أسماء المستودعات، أو أي نص خطأ.",

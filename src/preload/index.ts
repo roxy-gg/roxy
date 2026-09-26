@@ -48,7 +48,8 @@ const roxy: RoxyApi = {
     setTelemetry: (enabled) => ipcRenderer.invoke(CHANNELS.settingsSetTelemetry, enabled)
   },
   notifications: {
-    toast: (title, body, chatId) => ipcRenderer.invoke(CHANNELS.notifyToast, title, body, chatId),
+    toast: (title, subtitle, body, chatId) =>
+      ipcRenderer.invoke(CHANNELS.notifyToast, title, subtitle, body, chatId),
     onActivated: (callback) => {
       const handler = (_event: Electron.IpcRendererEvent, chatId: string): void => callback(chatId)
       ipcRenderer.on(CHANNELS.notifyActivated, handler)

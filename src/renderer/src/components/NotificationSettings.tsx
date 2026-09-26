@@ -2,10 +2,10 @@ import { useTranslation } from 'react-i18next'
 import { Play } from 'lucide-react'
 import { Button, Switch } from './ui'
 import { useRoxyStore } from '../lib/store'
-import { playNotificationSound } from '../lib/notify'
+import { showCompletionNotification } from '../lib/notify'
 
 /**
- * Notification preferences: a single switch, plus a way to hear the chime.
+ * Notification preferences: a single switch, plus a full native notification preview.
  *
  * Deliberately one control and not four. Sound, OS toast and a never/unfocused/
  * always picker were separate ways of asking one question -- "tell me when it's
@@ -14,7 +14,7 @@ import { playNotificationSound } from '../lib/notify'
  * while the window is focused is not a preference either: it is what the
  * feature should always do, so it lives in `shouldNotify`.
  *
- * The play button stays: it is the only way to know what you signed up for, and
+ * The preview tests both the banner and the chime, and
  * the click doubles as the gesture that unlocks Chromium's autoplay policy -- an
  * app that has never been clicked in cannot play audio, so without it the first
  * chime is swallowed. That is also why the button is never disabled: the person
@@ -40,11 +40,14 @@ export function NotificationSettings(): JSX.Element {
       <div className="flex shrink-0 items-center gap-3">
         <Button
           size="sm"
-          aria-label={t('settings.notifications.preview')}
-          onClick={() => void playNotificationSound()}
+          aria-label={t('settings.notifications.testNotification')}
+          onClick={() => {
+            const { chats, activeChatId } = useRoxyStore.getState()
+            void showCompletionNotification(chats.find((chat) => chat.id === activeChatId))
+          }}
         >
           <Play className="h-3.5 w-3.5" />
-          {t('settings.notifications.preview')}
+          {t('settings.notifications.testNotification')}
         </Button>
         <Switch checked={enabled} onChange={(v) => void setNotifyOnComplete(v)} />
       </div>

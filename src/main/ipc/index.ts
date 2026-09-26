@@ -261,10 +261,13 @@ export function registerIpc(): void {
   )
 
   // ---- notifications ----
-  // Both strings arrive translated - see the note on the api type.
-  ipcMain.handle(CHANNELS.notifyToast, (_e, title: string, body: string, chatId: string) => {
-    notifications.showTurnToast(title, body, chatId)
-  })
+  // Strings arrive translated - see the note on the api type.
+  ipcMain.handle(
+    CHANNELS.notifyToast,
+    (_e, title: string, subtitle: string, body: string, chatId: string) => {
+      notifications.showTurnToast(title, subtitle, body, chatId)
+    }
+  )
   ipcMain.handle(CHANNELS.notifyTakePending, () => notifications.takePendingActivation())
 
   // ---- providers ----
