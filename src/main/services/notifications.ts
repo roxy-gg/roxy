@@ -174,6 +174,10 @@ export function showTurnToast(title: string, body: string, chatId: string): void
   })
   live.add(notification)
   if (live.size > MAX_LIVE) live.delete(live.values().next().value as Notification)
+  notification.on('failed', (_event, error) => {
+    console.warn('Failed to show notification:', error)
+    live.delete(notification)
+  })
   notification.on('close', () => live.delete(notification))
   notification.on('click', () => {
     live.delete(notification)
