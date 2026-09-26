@@ -956,13 +956,26 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
 
     if (!notifyActivatedSubscribed) {
       notifyActivatedSubscribed = true
-      api.notifications.onActivated(async (chatId) => {
+      const activate = async (chatId: string): Promise<void> => {
+        if (!get().settings?.onboardingCompleted) return
         // The session may have been deleted between the toast and the click, and
         // selectChat on a missing id would blank the view for no reason.
         if (!get().chats.some((c) => c.id === chatId)) await get().refreshChats()
         if (!get().chats.some((c) => c.id === chatId)) return
         await get().selectChat(chatId)
+        if (window.location.hash !== '#/') window.location.hash = '#/'
+      }
+      api.notifications.onActivated((chatId) => {
+        void activate(chatId).catch((error) => console.warn('Failed to open notification:', error))
       })
+      // Install the live listener first, then resolve the reopening click before
+      // bootstrap's first-session fallback can select a different chat.
+      try {
+        const pendingChatId = await api.notifications.takePendingActivation()
+        if (pendingChatId) await activate(pendingChatId)
+      } catch (error) {
+        console.warn('Failed to restore notification activation:', error)
+      }
     }
 
     if (!loopTickSubscribed) {

@@ -188,7 +188,7 @@ export function showTurnToast(title: string, subtitle: string, body: string, cha
     if (!existing) {
       // No window (macOS, everything closed): reopen, and leave the session id
       // for the new renderer to collect once it is listening.
-      pendingChatId = chatId
+      pendingChatId = chatId || null
       openWindow?.()
       focusApp()
       return
