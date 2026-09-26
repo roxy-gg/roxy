@@ -25,6 +25,7 @@ import { ConfigBackup } from '../components/ConfigBackup'
 import { ActivitySection } from '../components/ActivitySection'
 import { ProviderSetup, AddAccount } from './onboarding/ProviderStep'
 import { ProviderAccount } from '../components/ProviderAccount'
+import { NotificationSettings } from '../components/NotificationSettings'
 import { useRoxyStore } from '../lib/store'
 import { MotionSettings } from '../components/MotionSettings'
 
@@ -275,6 +276,11 @@ export default function Settings(): JSX.Element {
             ))}
           </select>
         </div>
+      </section>
+
+      <section className="mb-8">
+        <h2 className={SECTION_HEADING}>{t('settings.notifications.heading')}</h2>
+        <NotificationSettings />
       </section>
 
       <section className="mb-8">

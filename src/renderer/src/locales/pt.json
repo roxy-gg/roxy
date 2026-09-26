@@ -263,6 +263,10 @@
     "selectModel": "Selecionar um modelo",
     "tools": "Ferramentas"
   },
+  "notifications": {
+    "responseReady": "Response ready.",
+    "responseReadyForSession": "Response ready: {{session}}"
+  },
   "onboarding": {
     "apiKey": "Chave de API",
     "back": "Voltar",
@@ -470,6 +474,12 @@
       "reduced": "Reduzido",
       "saveFailed": "Não foi possível guardar a preferência de movimento. Tente novamente.",
       "system": "Seguir sistema"
+    },
+    "notifications": {
+      "completeDescription": "Receba uma notificação quando o Roxy terminar uma resposta. Útil para tarefas longas. Só é acionada quando o Roxy não está em foco; clique nela para ir para essa sessão.",
+      "completeTitle": "Respostas concluídas",
+      "heading": "Notificações",
+      "testNotification": "Test notification"
     },
     "privacy": {
       "description": "Contagens e tempos — inicializações de aplicativos, turnos concluídos, quantos passos e ferramentas um turno levou, quantos tokens usou e aproximadamente quanto custou — vinculados a um ID aleatório gerado nesta máquina. Nunca seus prompts, seu código, caminhos de arquivo, nomes de repositórios ou qualquer texto de erro.",
