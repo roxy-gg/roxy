@@ -56,9 +56,9 @@ async function run() {
     await evaluate(`
       const section = document.querySelector('button[title="New bot"]').parentElement;
       const styles = getComputedStyle(section);
-      return styles.paddingTop === '0px' && styles.paddingBottom === '0px';
+      return styles.paddingTop === '12px' && styles.paddingBottom === '0px';
     `),
-    'the new-bot-only row has no vertical padding'
+    'the new-bot-only row is separated from New project without adding bottom padding'
   )
   // Creating a bot asks NOTHING: one click lands in its chat, ready to be told
   // who it is. No dialog, no username, no empty form to abandon.

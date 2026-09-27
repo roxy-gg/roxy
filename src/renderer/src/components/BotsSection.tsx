@@ -69,7 +69,7 @@ export function BotsSection({ rail = false }: { rail?: boolean }): JSX.Element {
           'flex gap-2',
           rail
             ? cn('max-h-64 flex-col items-center overflow-y-auto', bots.length > 0 && 'py-3')
-            : cn('items-center overflow-x-auto px-1', bots.length > 0 && 'py-3')
+            : cn('items-center overflow-x-auto px-1 pt-3', bots.length > 0 && 'pb-3')
         )}
       >
         {bots.map((bot) => (
