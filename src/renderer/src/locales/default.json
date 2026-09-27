@@ -368,8 +368,6 @@
   },
   "queue": {
     "userRequest": "You",
-    "agentRequest": "Agent handoff",
-    "scheduledRequest": "Schedule",
     "toCollaborator": "to @{{username}}",
     "image": "Image",
     "empty": "(empty)",

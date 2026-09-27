@@ -618,6 +618,26 @@ async function main(): Promise<void> {
   getDb().prepare(`UPDATE queue SET state = 'pending' WHERE id = ?`).run(qRunning.id)
   repo.removeQueueItem(qRunning.id)
   repo.removeQueueItem(qPending.id)
+  const handoff = repo.enqueue(chat.id, 'automated handoff')
+  getDb().prepare('UPDATE queue SET source_chat_id = ? WHERE id = ?').run(chat.id, handoff.id)
+  const beforeMove = repo.listQueue(chat.id).map((item) => item.id)
+  repo.reorderQueue(chat.id, [handoff.id, q2.id, q1.id])
+  check(
+    'queue reorder rejects moving automated handoffs',
+    repo
+      .listQueue(chat.id)
+      .map((item) => item.id)
+      .join() === beforeMove.join()
+  )
+  repo.reorderQueue(chat.id, [q1.id, q2.id, handoff.id])
+  check(
+    'queue reorder swaps user prompts while preserving an automated slot',
+    repo
+      .listQueue(chat.id)
+      .map((item) => item.id)
+      .join() === [q1.id, q2.id, handoff.id].join()
+  )
+  repo.removeQueueItem(handoff.id)
   repo.removeQueueItem(q1.id)
   check(
     'queue remove',
@@ -759,6 +779,16 @@ async function main(): Promise<void> {
   const scheduled = repo.listQueue(bot.chatId)
   check('scheduled bot prompt is durably queued', scheduled.length === 1)
   check('scheduled bot prompt exposes its origin', scheduled[0]?.scheduleId === job.id)
+  const scheduledUser = repo.enqueue(bot.chatId, 'user after scheduled work')
+  repo.reorderQueue(bot.chatId, [scheduledUser.id, scheduled[0].id])
+  check(
+    'queue reorder cannot move scheduled work',
+    repo
+      .listQueue(bot.chatId)
+      .map((item) => item.id)
+      .join() === [scheduled[0].id, scheduledUser.id].join()
+  )
+  repo.removeQueueItem(scheduledUser.id)
   check('schedule advances after enqueue', bots.listJobs(bot.id)[0].nextRunAt! > job.nextRunAt!)
 
   // ---- sessions status excludes loop chats ----

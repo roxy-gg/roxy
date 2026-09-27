@@ -397,21 +397,43 @@ const queueItems: QueueItem[] = [
   }
 ]
 check(
-  'queue shows every pending origin in true FIFO order',
+  'composer queue shows only user prompts, including collaborator requests',
   queueItems
     .filter(isVisibleQueueItem)
     .map((item) => item.id)
-    .join() === 'handoff,first,collaborator,scheduled'
+    .join() === 'first,collaborator'
 )
 check(
   'queue distinguishes user, agent, and schedule origins',
   queueItems.map(queueOrigin).join() === 'user,agent,user,user,schedule'
 )
 check(
-  'queue move crosses origins without moving the running slot',
-  moveVisibleQueueItem(queueItems, 'first', 'up')
+  'queue swaps user prompts without moving running or automated slots',
+  moveVisibleQueueItem(queueItems, 'collaborator', 'up')
     ?.map((item) => item.id)
-    .join() === 'running,first,handoff,collaborator,scheduled'
+    .join() === 'running,handoff,collaborator,first,scheduled'
+)
+check(
+  'user prompts can swap across hidden work without relocating that work',
+  moveVisibleQueueItem(
+    [queueItems[0], queueItems[2], queueItems[1], queueItems[4], queueItems[3]],
+    'collaborator',
+    'up'
+  )
+    ?.map((item) => item.id)
+    .join() === 'running,collaborator,handoff,scheduled,first'
+)
+check(
+  'queue ignores moves for running and automated requests and user boundaries',
+  ['running', 'handoff', 'scheduled', 'first'].every(
+    (id) => moveVisibleQueueItem(queueItems, id, 'up') === null
+  ) && moveVisibleQueueItem(queueItems, 'collaborator', 'down') === null
+)
+check(
+  'failed automated requests stay out of the composer queue; failed user requests remain',
+  !isVisibleQueueItem({ ...queueItems[1], state: 'failed' }) &&
+    !isVisibleQueueItem({ ...queueItems[4], state: 'failed' }) &&
+    isVisibleQueueItem({ ...queueItems[3], state: 'failed' })
 )
 check(
   'motion: missing and unknown values fall back to On',

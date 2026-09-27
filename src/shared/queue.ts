@@ -9,14 +9,13 @@ export function queueOrigin(item: QueueItem): QueueOrigin {
   return 'agent'
 }
 
-/** Running prompts already have a transcript row, so only pending/failed rows render here. */
+/** The composer queue contains only user prompts that have not started or need retrying. */
 export function isVisibleQueueItem(item: QueueItem): boolean {
-  return item.state !== 'running'
+  return item.state !== 'running' && queueOrigin(item) === 'user'
 }
 
 /**
- * Move one rendered row while leaving a claimed running row in its existing slot.
- * Every pending origin participates so the displayed order stays truthful.
+ * Swap user prompts without changing the slots occupied by running or automated work.
  */
 export function moveVisibleQueueItem(
   items: readonly QueueItem[],

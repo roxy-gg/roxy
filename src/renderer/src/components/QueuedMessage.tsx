@@ -2,8 +2,6 @@ import { useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEve
 import { useTranslation } from 'react-i18next'
 import {
   AlertCircle,
-  Bot,
-  CalendarClock,
   Check,
   ChevronDown,
   ChevronUp,
@@ -13,7 +11,6 @@ import {
   UserRound,
   X
 } from 'lucide-react'
-import { queueOrigin } from '@shared/queue'
 import type { QueueItem as QueueItemType } from '@shared/types'
 import { useRoxyStore } from '../lib/store'
 import { imageFilesFrom, readImageFile, type ComposerImage } from '../lib/images'
@@ -39,9 +36,7 @@ function toComposerImages(item: QueueItemType): ComposerImage[] {
 }
 
 /**
- * One row of the pending queue. User-authored prompts are editable; agent and
- * schedule rows are clearly attributed and stay read-only unless they fail.
- * Every row can still be reordered or cancelled before it starts.
+ * One user-authored prompt in the composer queue, including requests to collaborators.
  */
 export function QueuedMessage({
   item,
@@ -66,14 +61,12 @@ export function QueuedMessage({
   const [error, setError] = useState('')
   const running = item.state === 'running'
   const failed = item.state === 'failed'
-  const origin = queueOrigin(item)
-  const editable = origin === 'user' || failed
   const recipient = item.asBotId ? bots.find((bot) => bot.id === item.asBotId) : undefined
   const textRef = useRef<HTMLTextAreaElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
 
   const startEditing = (): void => {
-    if (running || !editable) return
+    if (running) return
     setError('')
     setDraft(item.content)
     setDraftImages(toComposerImages(item))
@@ -271,39 +264,14 @@ export function QueuedMessage({
       ) : failed ? (
         <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-danger" />
       ) : (
-        <QueueItemIndicator
-          className={origin === 'agent' ? 'bg-accent' : origin === 'schedule' ? 'bg-warning' : ''}
-        />
+        <QueueItemIndicator />
       )}
       <div className="min-w-0 flex-1">
         <div className="mb-0.5 flex flex-wrap items-center gap-1.5 text-[10px] font-medium uppercase tracking-wide">
-          <span
-            className={
-              origin === 'user'
-                ? 'inline-flex items-center gap-1 text-text-muted'
-                : origin === 'schedule'
-                  ? 'inline-flex items-center gap-1 text-warning'
-                  : 'inline-flex items-center gap-1 text-accent'
-            }
-          >
-            {origin === 'user' ? (
-              <UserRound className="h-3 w-3" />
-            ) : origin === 'schedule' ? (
-              <CalendarClock className="h-3 w-3" />
-            ) : (
-              <Bot className="h-3 w-3" />
-            )}
-            {origin === 'user'
-              ? t('queue.userRequest')
-              : origin === 'schedule'
-                ? t('queue.scheduledRequest')
-                : t('queue.agentRequest')}
+          <span className="inline-flex items-center gap-1 text-text-muted">
+            <UserRound className="h-3 w-3" />
+            {t('queue.userRequest')}
           </span>
-          {item.botUsername && origin === 'agent' && (
-            <span className="normal-case tracking-normal text-text-subtle">
-              @{item.botUsername}
-            </span>
-          )}
           {recipient && (
             <span className="normal-case tracking-normal text-text-subtle">
               {t('queue.toCollaborator', { username: recipient.username })}
@@ -340,15 +308,13 @@ export function QueuedMessage({
         )}
       </div>
       <QueueItemActions>
-        {editable && (
-          <QueueItemAction
-            onClick={startEditing}
-            disabled={running}
-            title={failed ? t('queue.editRetry') : t('queue.editMessage')}
-          >
-            <Pencil className="h-3.5 w-3.5" />
-          </QueueItemAction>
-        )}
+        <QueueItemAction
+          onClick={startEditing}
+          disabled={running}
+          title={failed ? t('queue.editRetry') : t('queue.editMessage')}
+        >
+          <Pencil className="h-3.5 w-3.5" />
+        </QueueItemAction>
         <QueueItemAction
           onClick={() => moveQueued(item.id, 'up')}
           disabled={running || index === 0}
