@@ -931,6 +931,7 @@ export function registerIpc(): void {
     if (item) {
       resumeQueue(item.chatId)
       notifyAutomation(item.chatId)
+      remote.notifyTranscriptChanged(item.chatId)
     }
     return item
   })

@@ -1454,7 +1454,8 @@ export function updateQueueItem(
 ): QueueItem | undefined {
   if (!content.trim() && !images?.length) throw new Error('A prompt is required')
   const imagesJson = images && images.length ? JSON.stringify(images) : null
-  const previous = getDb()
+  const db = getDb()
+  const previous = db
     .prepare('SELECT content, images, message_id, state FROM queue WHERE id = ?')
     .get(id) as
     | {
@@ -1465,15 +1466,26 @@ export function updateQueueItem(
       }
     | undefined
   if (previous?.state === 'running') throw new Error('This message is already running')
-  // Retrying an unchanged request reuses its user bubble. Editing its content
-  // creates a new user turn, so the model receives the correction, not stale text.
+  // Pending collaborator prompts already have a user bubble. Edit that bubble
+  // in place; detaching it leaves stale history and loses the user's authorship.
+  // Failed turns keep their history and append a correction when edited.
   const changed = previous && (previous.content !== content || previous.images !== imagesJson)
-  getDb()
-    .prepare(
+  const editMessage = changed && previous.state === 'pending' && previous.message_id
+  db.transaction(() => {
+    if (editMessage)
+      db.prepare('UPDATE messages SET content = ?, parts = ? WHERE id = ?').run(
+        content,
+        JSON.stringify([
+          { type: 'text', text: content },
+          ...(images ?? []).map((image) => ({ type: 'image', ...image }))
+        ]),
+        editMessage
+      )
+    db.prepare(
       `UPDATE queue SET content = ?, images = ?, state = 'pending', error = NULL,
     message_id = CASE WHEN ? THEN NULL ELSE message_id END WHERE id = ? AND state != 'running'`
-    )
-    .run(content, imagesJson, Number(!!changed), id)
+    ).run(content, imagesJson, Number(!!changed && !editMessage), id)
+  })()
   const row = getDb().prepare('SELECT * FROM queue WHERE id = ?').get(id) as QueueRow | undefined
   if (!row) return undefined
   return listQueue(row.chat_id).find((item) => item.id === id)

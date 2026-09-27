@@ -12,6 +12,7 @@ import {
 } from '../services/automation'
 import { claimTurn, sessionBusy, stopTurn, resumeQueue } from '../services/turn-state'
 import { emitSessionsUpdated } from '../services/session-events'
+import { notifyTranscriptChanged } from '../services/remote'
 import { cancelSessionBackgroundJobs } from '../services/background-tasks'
 import { endSubagentRuns } from '../services/subagent-stream'
 import { killSessionBackground } from './tools'
@@ -285,6 +286,7 @@ export async function runBotTool(
             )
               throw new Error('Invalid not_before timestamp')
             repo.updateQueueItem(id, prompt, old.images)
+            notifyTranscriptChanged(row.chat_id)
             resumeQueue(row.chat_id)
             if (input.not_before !== undefined)
               getDb()

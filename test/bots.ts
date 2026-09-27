@@ -1033,7 +1033,73 @@ async function main(): Promise<void> {
         }
       )
       assert.equal(repo.listMessages(local.id).at(-1)?.role, 'user')
-      repo.removeQueueItem(routed.id)
+      const originalPrompt = repo.listMessages(local.id).at(-1)!
+      const editedText = 'Review the corrected collaborator request'
+      const attachment = {
+        dataUrl: 'data:image/png;base64,aW1hZ2U=',
+        mediaType: 'image/png',
+        name: 'corrected.png'
+      }
+      const edited = await win.webContents.executeJavaScript(
+        `window.roxy.queue.update(${JSON.stringify(routed.id)}, ${JSON.stringify(editedText)}, ${JSON.stringify([attachment])})`
+      )
+      assert.equal(edited.createdAt, routed.createdAt, 'editing preserves FIFO position')
+      assert.equal(edited.asBotId, worker.id, 'editing preserves the recipient')
+      assert.deepEqual(
+        repo.listMessages(local.id),
+        [
+          {
+            ...originalPrompt,
+            content: editedText,
+            parts: [
+              { type: 'text', text: editedText },
+              { type: 'image', ...attachment }
+            ]
+          }
+        ],
+        'a pending edit replaces the linked user message, not its author or identity'
+      )
+      assert.deepEqual(
+        getDb()
+          .prepare('SELECT recipient_id, as_bot_id, message_id FROM queue WHERE id = ?')
+          .get(routed.id),
+        { recipient_id: worker.id, as_bot_id: worker.id, message_id: originalPrompt.id }
+      )
+      // An unchanged save must not detach the message; attachment-only edits must
+      // update its parts too, including removal of the last image.
+      repo.updateQueueItem(routed.id, editedText, [attachment])
+      assert.equal(repo.listMessages(local.id).length, 1)
+      await win.webContents.executeJavaScript(
+        `window.roxy.queue.update(${JSON.stringify(routed.id)}, ${JSON.stringify(editedText)})`
+      )
+      assert.deepEqual(repo.listMessages(local.id)[0].parts, [{ type: 'text', text: editedText }])
+      getDb().prepare("UPDATE queue SET state = 'running' WHERE id = ?").run(routed.id)
+      assert.throws(() => repo.updateQueueItem(routed.id, 'Rejected edit'), /already running/)
+      assert.equal(repo.listMessages(local.id)[0].content, editedText)
+      assert.equal(repo.listQueue(local.id)[0].content, editedText)
+      getDb().prepare("UPDATE queue SET state = 'pending' WHERE id = ?").run(routed.id)
+      const beforeEditedRequest = requests.length
+      wakeAutomation()
+      const editDeadline = Date.now() + 10000
+      while (sessionBusy(local.id) && Date.now() < editDeadline)
+        await new Promise((resolve) => setTimeout(resolve, 10))
+      assert.equal(repo.listQueue(local.id).length, 0, 'edited collaborator request settles')
+      assert.equal(requests.length, beforeEditedRequest + 1)
+      const editedTranscript = repo.listMessages(local.id)
+      assert.equal(editedTranscript.length, 2, 'delivery does not recreate the user message')
+      assert.equal(editedTranscript[0].id, originalPrompt.id)
+      assert.equal(editedTranscript[0].role, 'user')
+      assert.equal(editedTranscript[0].content, editedText)
+      assert.equal(editedTranscript[1].botUsername, worker.username)
+      const editedRequest = requests.at(-1)!
+      assert.ok(
+        !JSON.stringify(editedRequest.messages).includes(originalPrompt.content),
+        'the superseded instruction is absent from model context'
+      )
+      assert.ok(
+        editedRequest.messages.some((m) => m.role === 'user' && m.content === editedText),
+        'the corrected instruction reaches the model as user-authored'
+      )
       repo.addMessage({ chatId: local.id, role: 'user', content: 'Direct turn' })
       const input = {
         requestId: 'test-local-lock',
