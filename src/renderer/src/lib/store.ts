@@ -42,6 +42,7 @@ import { shouldAutoWorkstream, statusKeyForSession } from '@shared/workstream'
 import { api } from './api'
 import { applyMotion, motionSnapshot, type MotionPreference } from './motion'
 import { createStreamPublisher, type StreamPublisher } from './stream-publisher'
+import { notifyTurnComplete } from './notify'
 import type { ComposerImage } from './images'
 import { pruneComposerDrafts, type ComposerDrafts } from './composerDrafts'
 import type {
@@ -239,6 +240,7 @@ interface RoxyStore {
   setAutoWorkstream: (enabled: boolean) => Promise<void>
   setTelemetryEnabled: (enabled: boolean) => Promise<void>
   setBranchPrefix: (prefix: string) => Promise<void>
+  setNotifyOnComplete: (enabled: boolean) => Promise<void>
   setLanguage: (language: Language) => Promise<void>
   setMotion: (preference: MotionPreference) => Promise<void>
   selectChat: (id: string) => Promise<void>
@@ -392,6 +394,7 @@ const asChatId = (value: unknown): string | undefined =>
 
 let botsSubscribed = false
 let automationSubscribed = false
+let notifyActivatedSubscribed = false
 let llmDeltaSubscribed = false
 let taskUpdateSubscribed = false
 let remoteStateSubscribed = false
@@ -452,7 +455,12 @@ function applyAutomationDelta(payload: RemoteDelta): void {
       if (payload.state === 'running')
         automationSpeakers[id] = { botId: payload.botId, botUsername: payload.botUsername }
       else delete automationSpeakers[id]
-      return { automationSpeakers }
+      // A new turn starts clean, like `clearStop()` in sendMessage: a Stop left
+      // over from an idle session or a compaction must not silence this one.
+      if (payload.state !== 'running' || !s.stopChats[id]) return { automationSpeakers }
+      const stopChats = { ...s.stopChats }
+      delete stopChats[id]
+      return { automationSpeakers, stopChats }
     })
   }
   // Reuse the remote fold and publisher; never keep a second live parts tree.
@@ -468,10 +476,77 @@ function applyAutomationDelta(payload: RemoteDelta): void {
   if (payload.kind === 'turn') {
     void mirrorAutomationChat(id)
     if (payload.state !== 'running') {
-      void useRoxyStore.getState().refreshChats()
+      // Queued, bot and scheduled turns run in main; this is the renderer's only
+      // sign that one ended. A Stop pressed on it is consumed here, so the next
+      // turn in this session is not silenced by a stale flag.
+      const stopped = Boolean(useRoxyStore.getState().stopChats[id])
+      if (stopped)
+        useRoxyStore.setState((s) => {
+          const stopChats = { ...s.stopChats }
+          delete stopChats[id]
+          return { stopChats }
+        })
+      // Captured now: if another turn starts while these round trips are in
+      // flight, this completion is stale and must not announce itself.
+      const turnRevision = automationTurnRevisions.get(id)
+      void useRoxyStore
+        .getState()
+        .refreshChats()
+        .then(() =>
+          stopped ? undefined : notifyIfSessionIdle(id, { turnRevision, fromAutomation: true })
+        )
+        .catch((error) => console.warn('Failed to notify turn completion:', error))
       void useRoxyStore.getState().refreshUsage()
     }
   }
+}
+
+/**
+ * Notify that a session's turn finished, unless queued work is about to start.
+ *
+ * Checking the queue keeps a chain of prompts (or a bot handoff) from chiming
+ * once per step: only the turn that leaves the session idle announces itself.
+ * Only the HEAD matters, exactly as main's FIFO consumer (`wakeAutomation`)
+ * sees it: a failed or future-scheduled head blocks everything behind it, so
+ * the session is idle even with pending items further down.
+ *
+ * `turnRevision` pins the turn being announced. Main can start the next turn
+ * while the queue is being read; that one will announce itself later.
+ *
+ * `fromAutomation` marks a turn main ran off this queue. Only then is a failed
+ * head necessarily the turn that just ended (a failed head blocks the FIFO, so
+ * nothing behind it could have run); after a direct send it may be stale.
+ */
+async function notifyIfSessionIdle(
+  chatId: string,
+  {
+    turnRevision = automationTurnRevisions.get(chatId),
+    fromAutomation = false
+  }: { turnRevision?: number; fromAutomation?: boolean } = {}
+): Promise<void> {
+  if (!useRoxyStore.getState().settings?.notifyOnComplete) return
+  let next: QueueItem | undefined
+  try {
+    next = (await api.queue.list(chatId))[0]
+  } catch (error) {
+    console.warn('Failed to check queue before notifying:', error)
+    return
+  }
+  // Stopped from somewhere this renderer never saw (the phone, a bot tool):
+  // main marks the interrupted item instead of setting `stopChats`.
+  if (fromAutomation && next?.state === 'failed' && next.error === 'Stopped.') return
+  if (next && next.state !== 'failed' && (next.notBefore ?? 0) <= Date.now()) return
+  const state = useRoxyStore.getState()
+  if (
+    automationTurnRevisions.get(chatId) !== turnRevision ||
+    state.sendingChats[chatId] ||
+    state.runningAutomation[chatId] ||
+    state.stopChats[chatId] ||
+    !state.settings?.notifyOnComplete
+  )
+    return
+  const chat = state.chats.find((c) => c.id === chatId)
+  if (chat) notifyTurnComplete(state.settings, chat)
 }
 
 /** Private bot turns always belong to main, even when idle. */
@@ -1117,6 +1192,30 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
     })
     // Warm the usage/cost dashboard for the titlebar pill (best-effort, async).
     void get().refreshUsage()
+
+    if (!notifyActivatedSubscribed) {
+      notifyActivatedSubscribed = true
+      const activate = async (chatId: string): Promise<void> => {
+        if (!get().settings?.onboardingCompleted) return
+        // The session may have been deleted between the toast and the click, and
+        // selectChat on a missing id would blank the view for no reason.
+        if (!get().chats.some((c) => c.id === chatId)) await get().refreshChats()
+        if (!get().chats.some((c) => c.id === chatId)) return
+        await get().selectChat(chatId)
+        if (window.location.hash !== '#/') window.location.hash = '#/'
+      }
+      api.notifications.onActivated((chatId) => {
+        void activate(chatId).catch((error) => console.warn('Failed to open notification:', error))
+      })
+      // Install the live listener first, then resolve the reopening click before
+      // bootstrap's first-session fallback can select a different chat.
+      try {
+        const pendingChatId = await api.notifications.takePendingActivation()
+        if (pendingChatId) await activate(pendingChatId)
+      } catch (error) {
+        console.warn('Failed to restore notification activation:', error)
+      }
+    }
 
     if (!botsSubscribed) {
       botsSubscribed = true
@@ -1766,6 +1865,10 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
     }
   },
 
+  setNotifyOnComplete: async (enabled) => {
+    set({ settings: await api.settings.setNotifyOnComplete(enabled) })
+  },
+
   selectChat: async (id) => {
     // Per-chat send state survives switching — just swap which chat is shown.
     // Clear messages/queue first so the previous chat's content never flashes.
@@ -2159,6 +2262,10 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
         await get().selectChat(chatId)
       }
       if (deferredAutomation.delete(chatId)) void mirrorAutomationChat(chatId)
+      // A stopped turn stays silent: the user is already here, they just
+      // pressed the button. Otherwise announce it only when nothing queued is
+      // about to run next, so a chain of prompts notifies once, at the end.
+      if (!wasStopped) await notifyIfSessionIdle(chatId)
       // Main is the only queue consumer. Wake it after the renderer has
       // persisted this direct turn, never pop items or execute them here.
       if (wakeQueue && !wasStopped) await api.automation.wake()

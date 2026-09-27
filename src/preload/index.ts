@@ -62,6 +62,8 @@ const roxy: RoxyApi = {
     setContextLimit: (limit) => ipcRenderer.invoke(CHANNELS.settingsSetContextLimit, limit),
     setAutoWorkstream: (enabled) => ipcRenderer.invoke(CHANNELS.settingsSetAutoWorkstream, enabled),
     setBranchPrefix: (prefix) => ipcRenderer.invoke(CHANNELS.settingsSetBranchPrefix, prefix),
+    setNotifyOnComplete: (enabled) =>
+      ipcRenderer.invoke(CHANNELS.settingsSetNotifyOnComplete, enabled),
     setLanguage: (language) => ipcRenderer.invoke(CHANNELS.settingsSetLanguage, language),
     setMotion: (motion) => ipcRenderer.invoke(CHANNELS.settingsSetMotion, motion),
     onMotionChanged: (callback) => {
@@ -74,6 +76,16 @@ const roxy: RoxyApi = {
     reset: () => ipcRenderer.invoke(CHANNELS.settingsReset),
     getTelemetry: () => ipcRenderer.invoke(CHANNELS.settingsGetTelemetry),
     setTelemetry: (enabled) => ipcRenderer.invoke(CHANNELS.settingsSetTelemetry, enabled)
+  },
+  notifications: {
+    toast: (title, subtitle, body, chatId) =>
+      ipcRenderer.invoke(CHANNELS.notifyToast, title, subtitle, body, chatId),
+    takePendingActivation: () => ipcRenderer.invoke(CHANNELS.notifyTakePending),
+    onActivated: (callback) => {
+      const handler = (_event: Electron.IpcRendererEvent, chatId: string): void => callback(chatId)
+      ipcRenderer.on(CHANNELS.notifyActivated, handler)
+      return () => ipcRenderer.removeListener(CHANNELS.notifyActivated, handler)
+    }
   },
   providers: {
     listConnected: () => ipcRenderer.invoke(CHANNELS.providersList),
