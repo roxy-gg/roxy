@@ -713,7 +713,29 @@
   "transcript": {
     "activityImage": "сделал снимок",
     "activityStarting": "запуск…",
+    "activityStatus": "{{verb}} {{suffix}}",
+    "activityStatusAs": "{{name}} is {{verb}} {{suffix}}",
+    "activitySuffix": {
+      "caffeinatedStardust": "caffeinated stardust",
+      "cosmicMagic": "cosmic magic",
+      "forbiddenGeometry": "forbidden geometry",
+      "goblinPaperwork": "goblin paperwork",
+      "immortalCrabThoughts": "immortal crab thoughts",
+      "interdimensionalSnacks": "interdimensional snacks",
+      "moonlitSyntax": "moonlit syntax",
+      "oneMoreDimension": "one more dimension",
+      "politeChaos": "polite chaos",
+      "quantumBreadcrumbs": "quantum breadcrumbs",
+      "suspiciousPixels": "suspicious pixels",
+      "tinyThunder": "tiny thunder"
+    },
     "activityThinking": "думает…",
+    "activityVerb": {
+      "analyzing": "analyzing",
+      "thinking": "thinking",
+      "working": "working",
+      "writing": "writing"
+    },
     "activityWriting": "пишет…",
     "assistant": "Roxy",
     "cancelCall": "Отменить этот вызов {{tool}}",

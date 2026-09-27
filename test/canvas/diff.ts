@@ -35,6 +35,12 @@ import { invokeChip } from '../../src/renderer/src/canvas/invoke-status'
 import type { QueueItem } from '../../src/shared/types'
 import { layoutTerminalBody } from '../../src/renderer/src/canvas/terminal'
 import { createStreamPublisher } from '../../src/renderer/src/lib/stream-publisher'
+import {
+  ACTIVITY_PHRASE_ROTATION_MS,
+  activityIdentity,
+  activityVerb,
+  updateActivityPhrase
+} from '../../src/renderer/src/canvas/activity-status'
 
 let checks = 0
 function check(name: string, run: () => void): void {
@@ -72,10 +78,13 @@ const metrics = {
   measure: (text: string) => [...text].reduce((sum, char) => sum + (char === 'W' ? 12 : 6), 0),
   advance: () => 6,
   lineHeight: () => 20,
-  ellipsize: (text: string, _font: unknown, width: number) => ({
-    text: text.slice(0, Math.max(0, Math.floor(width / 6))),
-    width
-  })
+  ellipsize: (text: string, _font: unknown, width: number) => {
+    const chars = Math.max(0, Math.floor(width / 6))
+    return {
+      text: text.length <= chars ? text : `${text.slice(0, Math.max(0, chars - 1))}…`,
+      width
+    }
+  }
 } as unknown as TextMetrics
 const view = (): ViewState => ({
   open: new Set(),
@@ -96,6 +105,42 @@ const sceneOf = (builder: Builder, height: number): Scene => ({
   blocks: [builder.finish('test', 0, height)],
   width: 600,
   height
+})
+
+check('activity phrases stay stable, rotate deliberately, and reset by identity', () => {
+  const first = updateActivityPhrase(null, 'roxy:writing', 1000, () => 0)
+  assert.equal(first.suffixIndex, 0)
+  assert.equal(
+    updateActivityPhrase(first, 'roxy:writing', 1000 + ACTIVITY_PHRASE_ROTATION_MS - 1, () => 0),
+    first
+  )
+
+  const rotated = updateActivityPhrase(
+    first,
+    'roxy:writing',
+    1000 + ACTIVITY_PHRASE_ROTATION_MS,
+    () => 0
+  )
+  assert.equal(rotated.suffixIndex, 1, 'rotation cannot immediately repeat the same suffix')
+
+  const nextState = updateActivityPhrase(rotated, 'roxy:analyzing', 12_000, () => 0.5)
+  assert.equal(nextState.identity, 'roxy:analyzing')
+  assert.notEqual(nextState, rotated)
+
+  const nextActor = updateActivityPhrase(nextState, 'helper:analyzing', 12_001, () => 0.25)
+  assert.equal(nextActor.identity, 'helper:analyzing')
+  assert.notEqual(nextActor, nextState)
+})
+
+check('activity verbs reflect the live part kind', () => {
+  assert.equal(activityVerb([]), 'thinking')
+  assert.equal(activityVerb([{ type: 'reasoning', text: 'checking' }]), 'analyzing')
+  assert.equal(activityVerb([{ type: 'text', text: 'answer' }]), 'writing')
+  assert.equal(
+    activityVerb([{ type: 'tool', tool: 'bash', state: 'running', title: 'npm test' }]),
+    'working'
+  )
+  assert.equal(activityIdentity('helper', [{ type: 'text', text: 'answer' }]), 'helper:writing')
 })
 
 check('elapsed time uses compact whole units at each boundary', () => {
@@ -758,7 +803,8 @@ check('one live turn keeps its activity row and start time across updates', () =
     streaming: [] as MessagePart[],
     botUsername: 'bot',
     now: 1000,
-    viewport: undefined
+    viewport: undefined,
+    activityRandom: () => 0
   }
   const startedAt = (scene: Scene): number | undefined => {
     const elapsed = scene.blocks.at(-1)?.nodes.find((node) => node.kind === 'elapsed')
@@ -767,7 +813,7 @@ check('one live turn keeps its activity row and start time across updates', () =
 
   const thinking = layoutTranscript(input, cache)
   assert.equal(startedAt(thinking), 1000)
-  assert.ok(JSON.stringify(thinking.blocks.at(-1)!.nodes).includes('@bot is thinking'))
+  assert.ok(JSON.stringify(thinking.blocks.at(-1)!.nodes).includes('@bot is thinking cosmic magic'))
 
   const writing = layoutTranscript(
     {
@@ -779,7 +825,25 @@ check('one live turn keeps its activity row and start time across updates', () =
   )
   assert.equal(startedAt(writing), 1000)
   assert.ok(writing.blocks.at(-1)!.animated)
-  assert.ok(JSON.stringify(writing.blocks.at(-1)!.nodes).includes('@bot is writing'))
+  assert.ok(JSON.stringify(writing.blocks.at(-1)!.nodes).includes('@bot is writing cosmic magic'))
+
+  const elapsedX = (scene: Scene): number | undefined => {
+    const elapsed = scene.blocks.at(-1)?.nodes.find((node) => node.kind === 'elapsed')
+    return elapsed?.kind === 'elapsed' ? elapsed.x : undefined
+  }
+  const rotated = layoutTranscript(
+    { ...input, now: 48_000, streaming: [{ type: 'text', text: 'Still writing.' }] },
+    cache
+  )
+  assert.equal(startedAt(rotated), 1000, 'phrase rotation does not reset elapsed time')
+  assert.equal(
+    elapsedX(rotated),
+    elapsedX(writing),
+    'phrase lengths keep the timer position stable'
+  )
+  assert.ok(
+    JSON.stringify(rotated.blocks.at(-1)!.nodes).includes('@bot is writing immortal crab thoughts')
+  )
 
   const usingTool = layoutTranscript(
     {
@@ -793,6 +857,24 @@ check('one live turn keeps its activity row and start time across updates', () =
 
   layoutTranscript({ ...input, streaming: null, now: 62_000 }, cache)
   assert.equal(state.startedAt.has('__turn__'), false)
+  assert.equal(state.activityPhrase, undefined)
+})
+check('activity copy ellipsizes without pushing the elapsed timer out of a narrow row', () => {
+  const scene = layoutTranscript(
+    {
+      ...longInput([]),
+      width: 190,
+      streaming: [{ type: 'text', text: 'Still writing.' }],
+      botUsername: 'extra-long-helper-name',
+      activityRandom: () => 0,
+      viewport: undefined
+    },
+    new BlockCache()
+  )
+  const nodes = JSON.stringify(scene.blocks.at(-1)!.nodes)
+  assert.ok(nodes.includes('…'), 'the label uses an ellipsis instead of compressed glyphs')
+  const elapsed = scene.blocks.at(-1)!.nodes.find((node) => node.kind === 'elapsed')
+  assert.ok(elapsed?.kind === 'elapsed' && elapsed.x < scene.width)
 })
 check('live reasoning starts collapsed and can be toggled closed again', () => {
   const state = view()
@@ -952,7 +1034,7 @@ check('bot replies use a round Facehash and username in both transcript layouts'
   assert.ok(liveHostNodes.includes('__roxy__'))
   // While a turn streams there is no name on the row yet, so the pending
   // indicator is the only thing saying WHO the wait belongs to.
-  assert.ok(liveHostNodes.includes('@roxy is thinking'), 'a streaming host says who is thinking')
+  assert.ok(liveHostNodes.includes('@roxy is thinking '), 'a streaming host says who is thinking')
   const liveGuestIndicator = JSON.stringify(
     layoutTranscript(
       {
@@ -967,7 +1049,7 @@ check('bot replies use a round Facehash and username in both transcript layouts'
     ).blocks.at(-1)!.nodes
   )
   assert.ok(
-    liveGuestIndicator.includes('@helper is thinking'),
+    liveGuestIndicator.includes('@helper is thinking '),
     'and a streaming guest is named too, not left as a bare "thinking"'
   )
 

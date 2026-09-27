@@ -713,7 +713,29 @@
   "transcript": {
     "activityImage": "画像をキャプチャしました",
     "activityStarting": "開始中…",
+    "activityStatus": "{{verb}} {{suffix}}",
+    "activityStatusAs": "{{name}} is {{verb}} {{suffix}}",
+    "activitySuffix": {
+      "caffeinatedStardust": "caffeinated stardust",
+      "cosmicMagic": "cosmic magic",
+      "forbiddenGeometry": "forbidden geometry",
+      "goblinPaperwork": "goblin paperwork",
+      "immortalCrabThoughts": "immortal crab thoughts",
+      "interdimensionalSnacks": "interdimensional snacks",
+      "moonlitSyntax": "moonlit syntax",
+      "oneMoreDimension": "one more dimension",
+      "politeChaos": "polite chaos",
+      "quantumBreadcrumbs": "quantum breadcrumbs",
+      "suspiciousPixels": "suspicious pixels",
+      "tinyThunder": "tiny thunder"
+    },
     "activityThinking": "思考中…",
+    "activityVerb": {
+      "analyzing": "analyzing",
+      "thinking": "thinking",
+      "working": "working",
+      "writing": "writing"
+    },
     "activityWriting": "書き込み中…",
     "assistant": "Roxy",
     "cancelCall": "この{{tool}}呼び出しをキャンセル",

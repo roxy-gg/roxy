@@ -713,7 +713,29 @@
   "transcript": {
     "activityImage": "已捕获图像",
     "activityStarting": "正在启动…",
+    "activityStatus": "{{verb}} {{suffix}}",
+    "activityStatusAs": "{{name}} is {{verb}} {{suffix}}",
+    "activitySuffix": {
+      "caffeinatedStardust": "caffeinated stardust",
+      "cosmicMagic": "cosmic magic",
+      "forbiddenGeometry": "forbidden geometry",
+      "goblinPaperwork": "goblin paperwork",
+      "immortalCrabThoughts": "immortal crab thoughts",
+      "interdimensionalSnacks": "interdimensional snacks",
+      "moonlitSyntax": "moonlit syntax",
+      "oneMoreDimension": "one more dimension",
+      "politeChaos": "polite chaos",
+      "quantumBreadcrumbs": "quantum breadcrumbs",
+      "suspiciousPixels": "suspicious pixels",
+      "tinyThunder": "tiny thunder"
+    },
     "activityThinking": "正在思考…",
+    "activityVerb": {
+      "analyzing": "analyzing",
+      "thinking": "thinking",
+      "working": "working",
+      "writing": "writing"
+    },
     "activityWriting": "正在写入…",
     "assistant": "Roxy",
     "cancelCall": "取消此 {{tool}} 调用",

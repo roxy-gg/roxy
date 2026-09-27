@@ -713,7 +713,29 @@
   "transcript": {
     "activityImage": "एक छवि कैप्चर की",
     "activityStarting": "शुरू हो रहा है…",
+    "activityStatus": "{{verb}} {{suffix}}",
+    "activityStatusAs": "{{name}} is {{verb}} {{suffix}}",
+    "activitySuffix": {
+      "caffeinatedStardust": "caffeinated stardust",
+      "cosmicMagic": "cosmic magic",
+      "forbiddenGeometry": "forbidden geometry",
+      "goblinPaperwork": "goblin paperwork",
+      "immortalCrabThoughts": "immortal crab thoughts",
+      "interdimensionalSnacks": "interdimensional snacks",
+      "moonlitSyntax": "moonlit syntax",
+      "oneMoreDimension": "one more dimension",
+      "politeChaos": "polite chaos",
+      "quantumBreadcrumbs": "quantum breadcrumbs",
+      "suspiciousPixels": "suspicious pixels",
+      "tinyThunder": "tiny thunder"
+    },
     "activityThinking": "सोच रहा है…",
+    "activityVerb": {
+      "analyzing": "analyzing",
+      "thinking": "thinking",
+      "working": "working",
+      "writing": "writing"
+    },
     "activityWriting": "लिख रहा है…",
     "assistant": "रॉक्सी",
     "cancelCall": "इस {{tool}} कॉल को रद्द करें",

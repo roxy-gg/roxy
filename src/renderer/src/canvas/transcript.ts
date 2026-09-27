@@ -27,6 +27,13 @@ import { TranscriptWindow } from './transcript-window'
 import type { Bot } from '@shared/bots'
 import { HOST_USERNAME, isHostSpeaker } from '../../../shared/bots'
 import { MENTION, isKnownMention } from '../../../shared/mentions'
+import {
+  activityIdentity,
+  activityLabels,
+  activityVerb,
+  updateActivityPhrase,
+  type ActivityPhraseState
+} from './activity-status'
 
 export interface LayoutInput {
   botUsername?: string
@@ -56,6 +63,8 @@ export interface LayoutInput {
   }
   /** Which calls can actually be cancelled (the store knows; layout does not). */
   canCancel: (part: Extract<MessagePart, { type: 'tool' }>) => boolean
+  /** Injectable so activity-phrase selection is deterministic in focused tests. */
+  activityRandom?: () => number
   /**
    * The translator, threaded down to every block.
    *
@@ -83,8 +92,12 @@ export function layoutTranscript(input: LayoutInput, cache: BlockCache): Scene {
     ].join('|')
   )
   const { messages, streaming, width, theme, view } = input
-  if (streaming === null) view.startedAt.delete(TURN_STARTED_AT)
-  else if (!view.startedAt.has(TURN_STARTED_AT)) view.startedAt.set(TURN_STARTED_AT, input.now)
+  if (streaming === null) {
+    view.startedAt.delete(TURN_STARTED_AT)
+    view.activityPhrase = undefined
+  } else if (!view.startedAt.has(TURN_STARTED_AT)) {
+    view.startedAt.set(TURN_STARTED_AT, input.now)
+  }
   const availableWidth =
     width - (messages.some((message) => message.role === 'user') ? PROMPT_GUTTER : 0)
   const column = Math.max(1, Math.min(SPACE.columnMax, availableWidth - SPACE.columnPadX * 2))
@@ -455,18 +468,23 @@ export function layoutParts(
   // The activity row belongs to the live turn, not to gaps between its deltas.
   // Keeping it mounted through prose and tool updates also keeps one elapsed
   // timestamp for the complete activity period instead of blinking it away.
-  const last = parts[parts.length - 1]
   if (indicator && streaming) {
-    const thinkingLabel = speakingAs
-      ? builder.t(last === undefined ? 'transcript.thinkingAs' : 'transcript.writingAs', {
-          name: `@${speakingAs}`
-        })
-      : builder.t(last === undefined ? 'transcript.thinking' : 'transcript.working')
+    const actor = speakingAs ?? HOST_USERNAME
+    const verb = activityVerb(parts)
+    const phrase = cacheActivityPhrase(
+      input,
+      activityIdentity(actor, parts),
+      input.now,
+      input.activityRandom
+    )
+    const labels = activityLabels(builder.t, speakingAs, verb)
     cursor += layoutThinking(
       builder,
       x,
       cursor,
-      thinkingLabel,
+      width,
+      labels[phrase.suffixIndex],
+      labels,
       input.view.startedAt.get(TURN_STARTED_AT) ?? input.now
     )
   }
@@ -565,12 +583,26 @@ function layoutReasoning(
   return height
 }
 
-/** The braille spinner + label shown while a turn is live but silent. */
+/** Keep a phrase stable between deliberate rotations, independent of the turn timer. */
+function cacheActivityPhrase(
+  input: LayoutInput,
+  identity: string,
+  now: number,
+  random?: () => number
+): ActivityPhraseState {
+  const next = updateActivityPhrase(input.view.activityPhrase ?? null, identity, now, random)
+  input.view.activityPhrase = next
+  return next
+}
+
+/** The braille spinner + stable-width activity label and elapsed timer. */
 function layoutThinking(
   builder: Builder,
   x: number,
   y: number,
+  width: number,
   label: string,
+  labelVariants: string[],
   startedAt: number
 ): number {
   const palette = builder.palette
@@ -578,6 +610,12 @@ function layoutThinking(
   const timerFont = font(FONT_SIZE.small, 400, 'mono')
   const height = builder.metrics.lineHeight(f) + 8
   const centerY = y + height / 2
+  const timerWidth = builder.metrics.measure('999h 59m 59s', timerFont)
+  const maxLabelWidth = Math.max(1, width - 20 - 8 - timerWidth)
+  const labelWidth = Math.min(
+    maxLabelWidth,
+    Math.max(...labelVariants.map((variant) => builder.metrics.measure(variant, f)))
+  )
   builder.push({
     kind: 'braille',
     x,
@@ -585,12 +623,19 @@ function layoutThinking(
     font: font(FONT_SIZE.body + 2, 400, 'mono'),
     color: palette.accent
   })
+  const visibleLabel = builder.metrics.ellipsize(label, f, labelWidth).text
   builder.pulsing(() => {
-    builder.text(x + 20, centerY - builder.metrics.lineHeight(f) / 2, label, f, palette.textMuted)
+    builder.text(
+      x + 20,
+      centerY - builder.metrics.lineHeight(f) / 2,
+      visibleLabel,
+      f,
+      palette.textMuted
+    )
   })
   builder.push({
     kind: 'elapsed',
-    x: x + 20 + builder.metrics.measure(label, f) + 8,
+    x: x + 20 + labelWidth + 8,
     y: centerY - builder.metrics.lineHeight(timerFont) / 2,
     startedAt,
     font: timerFont,

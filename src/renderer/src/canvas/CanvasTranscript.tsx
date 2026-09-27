@@ -6,6 +6,7 @@ import { CanvasSurface, type CanvasLayoutContext } from './CanvasSurface'
 import { transcriptCache, layoutTranscript } from './transcript'
 import type { HitAction } from './scene'
 import { promptEntries } from './prompt-history'
+import { ACTIVITY_PHRASE_ROTATION_MS } from './activity-status'
 import roxyLogo from '../assets/roxy.png'
 import { useRoxyStore } from '../lib/store'
 import { botAvatarUrl } from '../components/BotAvatar'
@@ -87,9 +88,16 @@ export function CanvasTranscript({
   useEffect(() => {
     if (signature === null) return
     // Reveal cancellation for a long-running tool even when it emits no new deltas.
-    const timer = setTimeout(() => setClock((n) => n + 1), 1250)
-    return () => clearTimeout(timer)
+    const reveal = setTimeout(() => setClock((n) => n + 1), 1250)
+    return () => clearTimeout(reveal)
   }, [signature])
+
+  useEffect(() => {
+    if (streaming === null) return
+    // Keep this independent of token signatures: active output must not postpone rotation.
+    const rotation = setInterval(() => setClock((n) => n + 1), ACTIVITY_PHRASE_ROTATION_MS)
+    return () => clearInterval(rotation)
+  }, [streaming !== null])
 
   const buildScene = useCallback(
     (context: CanvasLayoutContext) => {

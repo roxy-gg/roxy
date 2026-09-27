@@ -713,7 +713,29 @@
   "transcript": {
     "activityImage": "image capturée",
     "activityStarting": "démarrage…",
+    "activityStatus": "{{verb}} {{suffix}}",
+    "activityStatusAs": "{{name}} is {{verb}} {{suffix}}",
+    "activitySuffix": {
+      "caffeinatedStardust": "caffeinated stardust",
+      "cosmicMagic": "cosmic magic",
+      "forbiddenGeometry": "forbidden geometry",
+      "goblinPaperwork": "goblin paperwork",
+      "immortalCrabThoughts": "immortal crab thoughts",
+      "interdimensionalSnacks": "interdimensional snacks",
+      "moonlitSyntax": "moonlit syntax",
+      "oneMoreDimension": "one more dimension",
+      "politeChaos": "polite chaos",
+      "quantumBreadcrumbs": "quantum breadcrumbs",
+      "suspiciousPixels": "suspicious pixels",
+      "tinyThunder": "tiny thunder"
+    },
     "activityThinking": "réflexion…",
+    "activityVerb": {
+      "analyzing": "analyzing",
+      "thinking": "thinking",
+      "working": "working",
+      "writing": "writing"
+    },
     "activityWriting": "écriture…",
     "assistant": "Roxy",
     "cancelCall": "Annuler cet appel {{tool}}",

@@ -712,6 +712,28 @@
     "working": "working",
     "thinkingAs": "{{name}} is thinking…",
     "writingAs": "{{name}} is writing…",
+    "activityStatus": "{{verb}} {{suffix}}",
+    "activityStatusAs": "{{name}} is {{verb}} {{suffix}}",
+    "activityVerb": {
+      "thinking": "thinking",
+      "analyzing": "analyzing",
+      "writing": "writing",
+      "working": "working"
+    },
+    "activitySuffix": {
+      "cosmicMagic": "cosmic magic",
+      "immortalCrabThoughts": "immortal crab thoughts",
+      "interdimensionalSnacks": "interdimensional snacks",
+      "moonlitSyntax": "moonlit syntax",
+      "tinyThunder": "tiny thunder",
+      "suspiciousPixels": "suspicious pixels",
+      "goblinPaperwork": "goblin paperwork",
+      "forbiddenGeometry": "forbidden geometry",
+      "quantumBreadcrumbs": "quantum breadcrumbs",
+      "politeChaos": "polite chaos",
+      "caffeinatedStardust": "caffeinated stardust",
+      "oneMoreDimension": "one more dimension"
+    },
     "invokeCalling": "Calling @{{name}}…",
     "invokeReplied": "@{{name}} replied",
     "invokeFailed": "Failed",
