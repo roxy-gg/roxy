@@ -1,26 +1,49 @@
-# JevRelay API
+# JevRelay Inference Provider
 
-The hosted service deployed at `api.jevrelay.com`.
+This folder represents a separate private repository named `jevrelay-provider`.
 
-## Minimum API
+Deploy it at `api.jevrelay.com`.
+
+## Entire API
 
 ```text
-GET  /oauth/authorize
-POST /oauth/token
 POST /v1/decide
-GET  /v1/usage
 ```
 
-`POST /v1/decide` checks the user's allowance, calls the TypeSafe Jev API with the server-side key, records usage, and returns typed answers.
+Request:
 
-## Rules
+```json
+{
+  "state": {},
+  "questions": {}
+}
+```
 
-- Never accept browser cookies or website credentials.
-- Never execute a Jev Script remotely.
-- Never send desktop screenshots by default.
-- Use short-lived access tokens and rotating refresh tokens.
-- Enforce request-size, account, and rate limits before inference.
-- Return inference usage to the local runtime.
-- Store only the metadata needed for billing and abuse prevention.
+Response:
 
-Start with one small HTTP service. Do not add queues or a separate routing service until measured load requires them.
+```json
+{
+  "answers": {},
+  "usage": {}
+}
+```
+
+Authentication:
+
+```text
+Authorization: Bearer <JEVRELAY_API_KEY>
+```
+
+The service validates the API key, applies a rate or credit limit, calls Jev, and returns the typed response. A small page on `jevrelay.com` can create and revoke these keys.
+
+It does not contain:
+
+- MCP.
+- Jev Script execution.
+- Playwright.
+- Browser or desktop control.
+- OAuth.
+- User computer state.
+- Provider selection.
+
+The public runtime treats this API as one optional decision provider alongside OpenRouter. OpenRouter requests go directly from the local runtime to OpenRouter and never pass through this service.

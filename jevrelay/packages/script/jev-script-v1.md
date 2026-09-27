@@ -57,7 +57,7 @@ Each operation has its own validated arguments. Unknown operations and arguments
 
 ### Decision
 
-Calls the JevRelay API for a typed, bounded Jev decision.
+Calls the user's selected inference provider for a typed, bounded decision.
 
 ```ts
 type DecisionStep = {
@@ -101,7 +101,7 @@ maximum Jev calls
 maximum Jev request size
 ```
 
-The local runtime enforces these limits. The relay separately enforces account and usage limits.
+The local runtime enforces these limits. The selected provider may enforce its own request and usage limits.
 
 ## Permissions
 

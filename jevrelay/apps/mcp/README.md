@@ -1,14 +1,15 @@
 # JevRelay MCP
 
-The local MCP server, published as:
+The open source local MCP server and setup CLI, published as:
 
 ```text
 @jevrelay/mcp
 ```
 
-Initial command:
+Commands:
 
 ```text
+npx @jevrelay/mcp setup
 npx @jevrelay/mcp
 ```
 
@@ -16,11 +17,12 @@ Planned layout:
 
 ```text
 src/mcp.ts          MCP tools and stdio transport
-src/runtime.ts      Jev Script validation and execution
-src/auth.ts         OAuth PKCE and OS credential storage
-src/relay.ts        authenticated calls to api.jevrelay.com
-src/adapters/
-  playwright.ts     first adapter
+src/cli.ts          local provider setup
+src/config.ts       provider choice and credential-store access
 ```
 
-This app owns all browser and future desktop execution. Electron is not required.
+The setup command asks the user to choose OpenRouter or JevRelay and stores the API key in the OS credential store. API keys are never accepted through MCP tool arguments.
+
+The runtime, Playwright adapter, script package, and provider adapters remain separate public workspace packages in the same repository.
+
+Electron is not required.

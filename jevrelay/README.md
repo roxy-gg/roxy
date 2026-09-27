@@ -1,111 +1,139 @@
 # JevRelay
 
-JevRelay lets Claude, ChatGPT, Roxy, and other MCP hosts create and run fast local automations.
+JevRelay is an open source local runtime for AI-created browser automations.
 
 Domain: `jevrelay.com`
 
-## One Repository
+## Two Repositories
 
-Create one GitHub repository named `jevrelay`:
+Use two repositories because only the inference provider is private.
+
+### 1. `jevrelay` - Public
+
+Everything users install and run locally:
 
 ```text
 jevrelay/
   apps/
-    mcp/          local MCP server and Playwright runtime
-    api/          hosted OAuth and Jev inference relay
+    mcp/              local MCP server and CLI
   packages/
-    script/       shared Jev Script schema and types
+    runtime/          script execution
+    script/           schema and types
+    playwright/       browser adapter
+    providers/        OpenRouter and JevRelay adapters
   examples/
     play-video.json
 ```
 
-That is all the MVP needs.
+Open source this entire repository.
 
-Do not create separate client, server, protocol, Playwright, desktop, or Electron repositories. Split repositories only if separate teams or release cycles create a real need later.
+### 2. `jevrelay-provider` - Private
 
-## How It Works
-
-```text
-Claude / ChatGPT / Roxy
--> @jevrelay/mcp on the user's computer
--> Playwright runs browser actions locally
--> api.jevrelay.com is called only for Jev decisions
--> local runtime verifies the result
-```
-
-The AI creates a declarative Jev Script. The local MCP server validates and runs it. Jev only chooses between known options at explicit `decide` steps.
-
-## Two Deployables
-
-The single repository produces two things.
-
-### Local MCP
-
-Published as:
+Only our optional hosted inference provider:
 
 ```text
-@jevrelay/mcp
+jevrelay-provider/
+  POST /v1/decide
 ```
 
-Run with:
-
-```text
-npx @jevrelay/mcp
-```
-
-It contains:
-
-- The MCP tools.
-- The Jev Script runtime.
-- The Playwright adapter.
-- OAuth login.
-- Local permissions, logs, cancellation, retries, and verification.
-
-Browser cookies and computer access stay local.
-
-### Hosted API
-
-Deployed at:
+Deploy it at:
 
 ```text
 api.jevrelay.com
 ```
 
-It contains:
+It accepts a typed decision request, calls Jev, and returns the typed answer. It does not run scripts, browsers, MCP, Playwright, desktop actions, or computer controls.
 
-- OAuth and accounts.
-- The TypeSafe Jev API key.
-- Jev inference routing.
-- Usage limits, billing, and markup.
+## Provider Choice
 
-It never runs browser or desktop actions.
+JevRelay does not force users to buy inference from us.
+
+During local setup:
+
+```text
+Choose an inference provider:
+1. OpenRouter
+2. JevRelay
+```
+
+Then the user supplies that provider's API key. Choosing OpenRouter does not require a JevRelay account and sends no inference request through our server.
+
+```text
+OpenRouter selected
+-> store OPENROUTER_API_KEY locally
+-> decision steps call OpenRouter
+
+JevRelay selected
+-> create a key on jevrelay.com
+-> store JEVRELAY_API_KEY locally
+-> decision steps call api.jevrelay.com directly over HTTPS
+```
+
+The runtime uses one provider interface:
+
+```ts
+interface DecisionProvider {
+  decide(request: DecisionRequest): Promise<DecisionResponse>
+}
+```
+
+Provider adapters translate the same typed decision into the provider's request format.
+
+## API Keys
+
+OAuth is not required for the MVP.
+
+Users configure their provider with a local interactive command:
+
+```text
+npx @jevrelay/mcp setup
+```
+
+The command stores the selected provider and API key in the operating system credential store. Environment variables are also supported for servers and development:
+
+```text
+JEVRELAY_PROVIDER=openrouter
+OPENROUTER_API_KEY=...
+```
+
+or:
+
+```text
+JEVRELAY_PROVIDER=jevrelay
+JEVRELAY_API_KEY=...
+```
+
+Do not ask users to paste API keys into an MCP tool. Tool arguments can enter the AI transcript and logs.
+
+A JevRelay API key can initially be created on `jevrelay.com` and pasted into local setup. Only the private inference service and its small key-management page need accounts. The MCP server does not need login, sessions, OAuth, or account management.
+
+## How It Works
+
+```text
+Claude / ChatGPT / Roxy
+-> open source @jevrelay/mcp
+-> open source runtime
+-> Playwright actions run locally
+-> selected inference provider handles only explicit decisions
+-> runtime verifies the result locally
+```
+
+Browser cookies, scripts, screenshots, and computer access stay on the user's machine.
 
 ## MCP Tools
 
-Keep the initial surface small:
+Keep the initial MCP surface small:
 
 ```text
-jevrelay_auth
 jevrelay_validate
 jevrelay_run
 jevrelay_status
 jevrelay_stop
 ```
 
-`jevrelay_run` accepts a Jev Script and inputs. One script can run many local Playwright actions, avoiding an AI round trip for every click.
+Provider setup is a local CLI command, not an MCP tool.
 
-## OAuth
-
-```text
-1. User installs @jevrelay/mcp.
-2. jevrelay_auth opens jevrelay.com.
-3. User signs in using OAuth PKCE.
-4. The callback returns to the local MCP process.
-5. The refresh token is stored in the OS credential store.
-6. The MCP process uses short-lived tokens with api.jevrelay.com.
-```
-
-The local package never receives the upstream TypeSafe API key.
+`jevrelay_run` accepts a Jev Script and inputs. One script can execute many local Playwright actions without an AI round trip for every click.
 
 ## Jev Scripts
 
@@ -145,7 +173,7 @@ A Jev Script is validated data, not arbitrary JavaScript or shell code.
 }
 ```
 
-Every action must be implemented by an installed adapter and pass local validation.
+Every action must be implemented by an installed local adapter and pass validation.
 
 See [`packages/script/jev-script-v1.md`](packages/script/jev-script-v1.md) and [`packages/script/jev-script-v1.schema.json`](packages/script/jev-script-v1.schema.json).
 
@@ -155,11 +183,12 @@ Build only this flow:
 
 ```text
 install @jevrelay/mcp
--> sign in
+-> choose OpenRouter or JevRelay
+-> store the provider API key locally
 -> submit play-video.json
 -> validate locally
 -> run Playwright locally
--> call JevRelay once for a bounded decision
+-> call the selected provider for one bounded decision
 -> click and verify locally
 -> return one structured result
 ```
@@ -170,11 +199,12 @@ Keep the browser warm during a run. Use DOM and accessibility data instead of sc
 
 Do not build these until the browser MVP works:
 
+- OAuth.
 - Electron app.
 - Windows or macOS desktop control.
 - Game automation.
 - Visual script editor.
 - Marketplace.
-- Additional repositories.
+- More inference providers.
 
-A future Electron or tray app can provide login, permissions, logs, and a stop button while reusing the same local runtime.
+A future Electron or tray app can provide local setup, permissions, logs, and a stop button while reusing the same open source runtime.
