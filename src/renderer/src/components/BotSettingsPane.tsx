@@ -47,6 +47,7 @@ export function BotSettingsPane({ bot, onClose }: { bot: Bot; onClose: () => voi
     (s) => s.botSettings?.botId === bot.id && s.botSettings.confirmDelete
   )
   const setBotSettings = useRoxyStore((s) => s.setBotSettings)
+  const paneRef = useRef<HTMLElement>(null)
   const deleteSection = useRef<HTMLDivElement>(null)
   const [editingJob, setEditingJob] = useState<BotJob | 'new' | null>(null)
 
@@ -92,6 +93,7 @@ export function BotSettingsPane({ bot, onClose }: { bot: Bot; onClose: () => voi
 
   return (
     <aside
+      ref={paneRef}
       id="bot-settings-pane"
       aria-label={t('bots.settings')}
       className="absolute bottom-0 left-0 top-12 z-30 flex w-80 max-w-full flex-col border-r border-border bg-surface shadow-xl @min-[48rem]/chat:static @min-[48rem]/chat:shrink-0 @min-[48rem]/chat:shadow-none"
@@ -157,7 +159,10 @@ export function BotSettingsPane({ bot, onClose }: { bot: Bot; onClose: () => voi
             />
           </label>
         </form>
-        <BotInferenceFields modelPicker={<ModelPicker side="bottom" />} />
+        <BotInferenceFields
+          modelPicker={<ModelPicker side="bottom" width={420} outsideRef={paneRef} />}
+          outsideRef={paneRef}
+        />
         <section className="border-t border-border pt-4">
           <div className="mb-3 flex items-center justify-between">
             <h3 className="text-sm font-medium">{t('bots.schedules')}</h3>

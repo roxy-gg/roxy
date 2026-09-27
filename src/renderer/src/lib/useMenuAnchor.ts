@@ -17,8 +17,16 @@
  *
  * The geometry itself lives in lib/anchor.ts, pure and tested.
  */
-import { useCallback, useEffect, useState, type CSSProperties, type RefObject } from 'react'
-import { alignMenu, MAX_MENU_H, menuMaxHeight, type MenuAlign, type MenuSide } from './anchor'
+import { useCallback, useLayoutEffect, useState, type CSSProperties, type RefObject } from 'react'
+import {
+  alignMenu,
+  MARGIN,
+  MAX_MENU_H,
+  menuMaxHeight,
+  placeOutsidePanel,
+  type MenuAlign,
+  type MenuSide
+} from './anchor'
 
 interface Options {
   /** Which trigger edge to line up with when there's room. */
@@ -33,6 +41,10 @@ interface Options {
    * to opt out of a ceiling entirely, which is the point.
    */
   maxHeight?: number
+  /** Rendered menu uses viewport coordinates rather than trigger-relative offsets. */
+  fixed?: boolean
+  /** Prefer placing the fixed menu immediately outside this surface. */
+  outsideRef?: RefObject<HTMLElement>
 }
 
 /**
@@ -44,7 +56,14 @@ export function useMenuAnchor(
   ref: RefObject<HTMLElement>,
   open: boolean,
   width: number,
-  { align = 'start', side = 'top', gap = 6, maxHeight = MAX_MENU_H }: Options = {}
+  {
+    align = 'start',
+    side = 'top',
+    gap = 6,
+    maxHeight = MAX_MENU_H,
+    fixed = false,
+    outsideRef
+  }: Options = {}
 ): CSSProperties {
   // Start with the un-nudged position so the FIRST paint is already anchored:
   // measuring in an effect means one frame exists before we know better, and a
@@ -52,28 +71,55 @@ export function useMenuAnchor(
   // The height ceiling is in here for the same reason -- it does not depend on
   // the measurement, and leaving it out let a long list paint at full height for
   // one frame and then snap shorter.
-  const [style, setStyle] = useState<CSSProperties>({ width, maxHeight })
+  const [style, setStyle] = useState<CSSProperties>({
+    width: `min(${width}px, calc(100vw - ${MARGIN * 2}px))`,
+    maxHeight
+  })
 
   const measure = useCallback((): void => {
     const el = ref.current
     if (!el) return
     const r = el.getBoundingClientRect()
+    const menuWidth = Math.min(width, window.innerWidth - MARGIN * 2)
+    const alignedLeft = r.left + alignMenu(r.left, r.width, menuWidth, window.innerWidth, align)
+    const outside = outsideRef?.current?.getBoundingClientRect()
+    const fixedLeft =
+      fixed && outside
+        ? placeOutsidePanel(
+            alignedLeft,
+            outside.left,
+            outside.right,
+            menuWidth,
+            window.innerWidth,
+            gap
+          )
+        : alignedLeft
     setStyle({
-      width,
-      left: alignMenu(r.left, r.width, width, window.innerWidth, align),
+      width: menuWidth,
+      left: fixed ? fixedLeft : alignedLeft - r.left,
+      ...(fixed
+        ? {
+            [side === 'top' ? 'bottom' : 'top']:
+              side === 'top' ? window.innerHeight - r.top + gap : r.bottom + gap
+          }
+        : {}),
       maxHeight: menuMaxHeight(r.top, r.bottom, window.innerHeight, side, gap, maxHeight)
     })
-  }, [ref, width, align, side, gap, maxHeight])
+  }, [ref, width, align, side, gap, maxHeight, fixed, outsideRef])
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!open) return
     measure()
     // Resizing the window and dragging the sidebar's edge both move the trigger
     // without remounting the menu, so re-measure rather than close: the user is
     // mid-interaction and closing their menu for them would be rude.
     window.addEventListener('resize', measure)
-    return () => window.removeEventListener('resize', measure)
-  }, [open, measure])
+    if (fixed) window.addEventListener('scroll', measure, true)
+    return () => {
+      window.removeEventListener('resize', measure)
+      if (fixed) window.removeEventListener('scroll', measure, true)
+    }
+  }, [open, measure, fixed])
 
   return style
 }

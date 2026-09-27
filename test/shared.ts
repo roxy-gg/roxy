@@ -313,6 +313,7 @@ import {
   place,
   alignMenu,
   menuMaxHeight,
+  placeOutsidePanel,
   placeContextMenu,
   GAP,
   MARGIN,
@@ -5242,6 +5243,19 @@ async function main(): Promise<void> {
   )
 
   // Height: a menu opening upward gets the room above its trigger, never more.
+  check(
+    'menu: bot picker opens outside the settings pane when the canvas has room',
+    placeOutsidePanel(12, 0, 320, 420, 1280) === 328
+  )
+  check(
+    'menu: outside placement can use the panel left when it is the roomy side',
+    placeOutsidePanel(500, 500, 820, 420, 900) === 72
+  )
+  check(
+    'menu: outside placement keeps the viewport-safe fallback in narrow windows',
+    placeOutsidePanel(12, 0, 320, 420, 600) === 12
+  )
+
   const strip = { top: 700, bottom: 724 }
   const capUp = menuMaxHeight(strip.top, strip.bottom, 780, 'top', 6)
   check('menu: height cap fits above the trigger', capUp <= strip.top - 6 - MARGIN, String(capUp))

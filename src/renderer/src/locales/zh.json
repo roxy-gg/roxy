@@ -133,8 +133,6 @@
     "attachImages": "附加图片",
     "chooseSendTo": "Choose who to send to",
     "placeholder": "问 Roxy 任何问题…（粘贴或拖放图片）",
-    "projectAtHint": "In projects, Roxy leads. @name highlights a collaborator — use Send to @name to talk to them directly.",
-    "projectAtHintDismiss": "Got it",
     "queuePlaceholder": "将后续消息加入队列…",
     "queuePlaceholderStop": "将后续消息加入队列…（按 Esc 停止）",
     "removeImage": "移除图片",

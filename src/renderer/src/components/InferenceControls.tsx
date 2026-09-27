@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { Brain, Check, Loader2 } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react'
+import { createPortal } from 'react-dom'
+import { Brain, Check, ChevronsUpDown, Loader2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import type { MessagePart, ReasoningEffort } from '@shared/types'
 import type { ModelInfo } from '@shared/api'
@@ -134,6 +135,142 @@ const popoverDownClass =
 const POPOVER_W = 288
 /** Just wide enough for "Build"/"Plan" + the check, now that blurbs are gone. */
 const AGENT_POPOVER_W = 160
+
+interface BotPickerOption<T extends string> {
+  value: T
+  label: string
+  icon?: ReactNode
+  description?: string
+  meta?: string
+}
+
+/** The bot pane uses one field and overlay treatment for all standing choices. */
+function BotSettingsPicker<T extends string>({
+  label,
+  value,
+  options,
+  outsideRef,
+  onChange
+}: {
+  label: string
+  value: T
+  options: readonly BotPickerOption<T>[]
+  outsideRef: RefObject<HTMLElement>
+  onChange: (value: T) => void
+}): JSX.Element {
+  const [open, setOpen] = useState(false)
+  const rootRef = useRef<HTMLDivElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+  const anchor = useMenuAnchor(rootRef, open, 420, {
+    gap: 8,
+    side: 'bottom',
+    maxHeight: 380,
+    fixed: true,
+    outsideRef
+  })
+  const selected = options.find((option) => option.value === value) ?? options[0]
+
+  useEffect(() => {
+    if (!open) return
+    const onClick = (event: MouseEvent): void => {
+      const target = event.target as Node
+      if (!rootRef.current?.contains(target) && !menuRef.current?.contains(target)) setOpen(false)
+    }
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('mousedown', onClick)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onClick)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+
+  return (
+    <div
+      ref={rootRef}
+      className="relative w-full"
+      onKeyDown={(event) => {
+        if (open && event.key === 'Escape') {
+          event.stopPropagation()
+          setOpen(false)
+        }
+      }}
+    >
+      <button
+        type="button"
+        className={triggerClass}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        onClick={() => setOpen((current) => !current)}
+      >
+        {selected?.icon}
+        <span className="truncate">{selected?.label}</span>
+        <ChevronsUpDown className="ml-auto h-3 w-3 shrink-0 opacity-60" />
+      </button>
+      {open &&
+        createPortal(
+          <div
+            ref={menuRef}
+            role="listbox"
+            aria-label={label}
+            className="animate-pop-in fixed z-[100] flex flex-col overflow-hidden sq-frame sq-xl sq-fill-elevated sq-ring edge edge-strong edge-panel rounded-xl border border-border bg-elevated shadow-float origin-top-left"
+            style={anchor}
+          >
+            <div className="shrink-0 border-b border-border/70 px-3 py-2 text-[11px] font-medium text-text-subtle">
+              {label}
+            </div>
+            <div className="p-1.5">
+              {options.map((option) => {
+                const isSelected = option.value === value
+                return (
+                  <button
+                    key={option.value}
+                    type="button"
+                    role="option"
+                    aria-selected={isSelected}
+                    onClick={() => {
+                      onChange(option.value)
+                      setOpen(false)
+                    }}
+                    className={cn(
+                      'flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition',
+                      isSelected ? 'bg-accent/15' : 'hover:bg-white/5'
+                    )}
+                  >
+                    <span className="flex h-5 w-5 shrink-0 items-center justify-center">
+                      {option.icon}
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-xs font-medium text-text">
+                        {option.label}
+                      </span>
+                      {option.description && (
+                        <span className="mt-0.5 block text-[11px] leading-4 text-text-subtle">
+                          {option.description}
+                        </span>
+                      )}
+                    </span>
+                    {option.meta && (
+                      <span className="text-[11px] text-text-subtle">{option.meta}</span>
+                    )}
+                    <Check
+                      className={cn(
+                        'h-3.5 w-3.5 shrink-0',
+                        isSelected ? 'text-accent' : 'opacity-0'
+                      )}
+                    />
+                  </button>
+                )
+              })}
+            </div>
+          </div>,
+          document.body
+        )}
+    </div>
+  )
+}
 
 // ---- Thinking effort ---------------------------------------------------------
 
@@ -401,12 +538,20 @@ export function ContextPicker(): JSX.Element | null {
  * `modelPicker` is injected rather than imported: `ModelPicker` takes
  * `triggerClass` from this module, so importing it back would close a cycle.
  */
-export function BotInferenceFields({ modelPicker }: { modelPicker: ReactNode }): JSX.Element {
+export function BotInferenceFields({
+  modelPicker,
+  outsideRef
+}: {
+  modelPicker: ReactNode
+  outsideRef: RefObject<HTMLElement>
+}): JSX.Element {
   const { t } = useTranslation()
   const info = useActiveModelInfo()
   const config = useSessionConfig()
   const setReasoningEffort = useRoxyStore((s) => s.setReasoningEffort)
   const setContextLimit = useRoxyStore((s) => s.setContextLimit)
+  const activeAgentId = useRoxyStore((s) => s.activeAgentId)
+  const setActiveAgent = useRoxyStore((s) => s.setActiveAgent)
 
   const efforts = info?.reasoning
     ? info.reasoningEfforts?.length
@@ -414,6 +559,9 @@ export function BotInferenceFields({ modelPicker }: { modelPicker: ReactNode }):
       : EFFORTS
     : []
   const max = info ? effectiveContextMax(info) : 0
+  const activeAgent = getAgent(activeAgentId) ?? getAgent(DEFAULT_AGENT_ID)!
+  const defaultEffort = clampReasoningEffort(DEFAULT_REASONING_EFFORT, info?.reasoningEfforts)
+  const currentEffort = clampReasoningEffort(config.reasoningEffort, info?.reasoningEfforts)
 
   const fieldClass = 'flex flex-col gap-1.5 text-xs text-text-muted'
   const selectClass =
@@ -427,12 +575,12 @@ export function BotInferenceFields({ modelPicker }: { modelPicker: ReactNode }):
     <section className="border-t border-border pt-4">
       <h3 className="mb-3 text-sm font-medium">{t('bots.inference')}</h3>
       <div className="flex flex-col gap-3">
-        {/* Model and mode are the same controls the composer uses, so the bot
-            pane can never drift from the picker a session gets.
+        {/* Model keeps the composer's full picker; mode and effort share the
+            same trigger and outside-overlay treatment in this settings pane.
 
             Plain divs, not <label>s: a label forwards a click anywhere inside
-            it to its first labelable descendant, so picking a model re-fired
-            the trigger button and reopened the menu. */}
+            it to its first labelable descendant, so picking an option can
+            re-fire the trigger button and reopen the menu. */}
         <div className={fieldClass}>
           {t('bots.model')}
           <div className={controlClass}>{modelPicker}</div>
@@ -440,24 +588,43 @@ export function BotInferenceFields({ modelPicker }: { modelPicker: ReactNode }):
         <div className={fieldClass}>
           {t('inference.agentMode')}
           <div className={controlClass}>
-            <AgentPicker side="bottom" />
+            <BotSettingsPicker
+              label={t('inference.agentMode')}
+              value={activeAgent.id}
+              outsideRef={outsideRef}
+              options={PRIMARY_AGENTS.map((agent) => ({
+                value: agent.id,
+                label: agent.name,
+                description: agent.description,
+                icon: (
+                  <span
+                    className="h-2 w-2 shrink-0 rounded-full"
+                    style={{ backgroundColor: agent.color }}
+                  />
+                )
+              }))}
+              onChange={(agentId) => void setActiveAgent(agentId)}
+            />
           </div>
         </div>
         {efforts.length > 0 && (
-          <label className={fieldClass}>
+          <div className={fieldClass}>
             {t('inference.thinkingTitle')}
-            <select
-              className={selectClass}
-              value={clampReasoningEffort(config.reasoningEffort, info?.reasoningEfforts)}
-              onChange={(e) => void setReasoningEffort(e.target.value as ReasoningEffort)}
-            >
-              {efforts.map((e) => (
-                <option key={e.value} value={e.value}>
-                  {t(e.labelKey)}
-                </option>
-              ))}
-            </select>
-          </label>
+            <div className={controlClass}>
+              <BotSettingsPicker
+                label={t('inference.thinkingTitle')}
+                value={currentEffort}
+                outsideRef={outsideRef}
+                options={efforts.map((effort) => ({
+                  value: effort.value,
+                  label: t(effort.labelKey),
+                  meta: effort.value === defaultEffort ? t('inference.default') : undefined,
+                  icon: <Brain className="h-3.5 w-3.5 shrink-0 text-accent" />
+                }))}
+                onChange={(effort) => void setReasoningEffort(effort)}
+              />
+            </div>
+          </div>
         )}
         {max > 0 && (
           <label className={fieldClass}>

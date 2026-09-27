@@ -308,7 +308,7 @@ export function ChatView(): JSX.Element {
                     : 'text-text-muted hover:bg-white/5 hover:text-text'
                 )}
               >
-                <Settings className="h-3.5 w-3.5" /> {t('chat.settings')}
+                <Settings className="h-3.5 w-3.5" /> {t('bots.settings')}
               </button>
             )}
             <UsageMeter />

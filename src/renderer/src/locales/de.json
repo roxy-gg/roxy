@@ -133,8 +133,6 @@
     "attachImages": "Bilder anhängen",
     "chooseSendTo": "Choose who to send to",
     "placeholder": "Frag Roxy alles… (Bilder einfügen oder ablegen)",
-    "projectAtHint": "In projects, Roxy leads. @name highlights a collaborator — use Send to @name to talk to them directly.",
-    "projectAtHintDismiss": "Got it",
     "queuePlaceholder": "Eine Folgeanfrage einreihen…",
     "queuePlaceholderStop": "Eine Folgeanfrage einreihen… (Esc zum Stoppen)",
     "removeImage": "Bild entfernen",

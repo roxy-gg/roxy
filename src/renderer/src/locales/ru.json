@@ -133,8 +133,6 @@
     "attachImages": "Прикрепить изображения",
     "chooseSendTo": "Choose who to send to",
     "placeholder": "Спросите Roxy о чём угодно… (вставьте или перетащите изображения)",
-    "projectAtHint": "In projects, Roxy leads. @name highlights a collaborator — use Send to @name to talk to them directly.",
-    "projectAtHintDismiss": "Got it",
     "queuePlaceholder": "Добавить следующий запрос в очередь…",
     "queuePlaceholderStop": "Добавить следующий запрос в очередь… (Esc — остановить)",
     "removeImage": "Удалить изображение",

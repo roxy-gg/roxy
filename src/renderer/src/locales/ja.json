@@ -133,8 +133,6 @@
     "attachImages": "画像を添付",
     "chooseSendTo": "Choose who to send to",
     "placeholder": "Roxy に何でも質問…（画像を貼り付けるかドロップ）",
-    "projectAtHint": "In projects, Roxy leads. @name highlights a collaborator — use Send to @name to talk to them directly.",
-    "projectAtHintDismiss": "Got it",
     "queuePlaceholder": "次のメッセージをキューに追加…",
     "queuePlaceholderStop": "次のメッセージをキューに追加…（Esc で停止）",
     "removeImage": "画像を削除",

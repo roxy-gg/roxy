@@ -133,8 +133,6 @@
     "attachImages": "छवियाँ संलग्न करें",
     "chooseSendTo": "Choose who to send to",
     "placeholder": "Roxy से कुछ भी पूछें… (चित्र चिपकाएँ या यहाँ छोड़ें)",
-    "projectAtHint": "In projects, Roxy leads. @name highlights a collaborator — use Send to @name to talk to them directly.",
-    "projectAtHintDismiss": "Got it",
     "queuePlaceholder": "अगला संदेश कतार में जोड़ें…",
     "queuePlaceholderStop": "अगला संदेश कतार में जोड़ें… (रोकने के लिए Esc)",
     "removeImage": "छवि हटाएँ",

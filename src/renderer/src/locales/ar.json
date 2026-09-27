@@ -133,8 +133,6 @@
     "attachImages": "إرفاق الصور",
     "chooseSendTo": "Choose who to send to",
     "placeholder": "اسأل Roxy عن أي شيء… (الصق الصور أو أفلتها)",
-    "projectAtHint": "In projects, Roxy leads. @name highlights a collaborator — use Send to @name to talk to them directly.",
-    "projectAtHintDismiss": "Got it",
     "queuePlaceholder": "ضع متابعة في قائمة الانتظار…",
     "queuePlaceholderStop": "ضع متابعة في قائمة الانتظار… (Esc للإيقاف)",
     "removeImage": "إزالة الصورة",
