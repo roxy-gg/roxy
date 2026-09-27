@@ -595,25 +595,24 @@ check(
 )
 check(
   'Composer updates only the draft belonging to its chat',
-  /state\.composerDrafts\[chatId\] \?\? \{ value: '', images: \[\] \}/.test(composer) &&
-    /composerDrafts\[chatId\] = next/.test(composer)
+  /updateComposerDraft\(state\.composerDrafts, state\.chats, chatId, update\)/.test(composer)
 )
 check(
-  'empty drafts are discarded instead of accumulating',
-  /if \(!next\.value && next\.images\.length === 0\) delete composerDrafts\[chatId\]/.test(composer)
-)
-check(
-  'failed sends restore text and attachments to the originating chat',
-  /setValue\(\(draft\) => draft \|\| text\)/.test(composer) &&
-    /setImages\(\(draft\) => \(draft\.length \? draft : snapshotImages\)\)/.test(composer)
+  'failed sends atomically restore text and attachments to the originating chat',
+  /restoreComposerDraft\([\s\S]*?state\.chats,[\s\S]*?chatId,[\s\S]*?text,[\s\S]*?snapshotImages/.test(
+    composer
+  )
 )
 check(
   'the store initializes per-chat drafts',
-  /composerDrafts: Record<string, \{ value: string; images: ComposerImage\[\] \}>/.test(src) &&
-    /composerDrafts: \{\}/.test(src)
+  /composerDrafts: ComposerDrafts/.test(src) && /composerDrafts: \{\}/.test(src)
 )
 check(
-  'deleting chats and bots removes their drafts',
+  'authoritative chat loads prune deleted drafts',
+  (src.match(/pruneComposerDrafts\([^,]+, chats\)/g) ?? []).length === 2
+)
+check(
+  'deleting chats and bots removes their drafts immediately',
   (src.match(/delete composerDrafts\[(?:id|bot\.chatId)\]/g) ?? []).length === 2
 )
 

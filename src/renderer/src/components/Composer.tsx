@@ -12,6 +12,7 @@ import { ModelPicker } from './ModelPicker'
 import { ContextMeter, ContextPicker, ThinkingPicker, AgentPicker } from './InferenceControls'
 import { imageFilesFrom, readImageFile, type ComposerImage } from '../lib/images'
 import { ImagePreview } from './ImagePreview'
+import { restoreComposerDraft, updateComposerDraft } from '../lib/composerDrafts'
 import { useRoxyStore } from '../lib/store'
 import { BotAvatar } from './BotAvatar'
 import { cn } from '../lib/cn'
@@ -56,13 +57,9 @@ export function Composer({
       images: ComposerImage[]
     }
   ): void => {
-    useRoxyStore.setState((state) => {
-      const next = update(state.composerDrafts[chatId] ?? { value: '', images: [] })
-      const composerDrafts = { ...state.composerDrafts }
-      if (!next.value && next.images.length === 0) delete composerDrafts[chatId]
-      else composerDrafts[chatId] = next
-      return { composerDrafts }
-    })
+    useRoxyStore.setState((state) => ({
+      composerDrafts: updateComposerDraft(state.composerDrafts, state.chats, chatId, update)
+    }))
   }
   const setValue = (next: string | ((current: string) => string)): void => {
     updateDraft((current) => ({
@@ -186,8 +183,15 @@ export function Composer({
         await onSend(text, snapshotImages.length ? snapshotImages : undefined)
       }
     } catch (e) {
-      setValue((draft) => draft || text)
-      setImages((draft) => (draft.length ? draft : snapshotImages))
+      useRoxyStore.setState((state) => ({
+        composerDrafts: restoreComposerDraft(
+          state.composerDrafts,
+          state.chats,
+          chatId,
+          text,
+          snapshotImages
+        )
+      }))
       setError(e instanceof Error ? e.message : String(e))
     } finally {
       submittingRef.current = false
