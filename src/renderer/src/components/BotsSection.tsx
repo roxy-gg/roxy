@@ -66,10 +66,10 @@ export function BotsSection({ rail = false }: { rail?: boolean }): JSX.Element {
     <>
       <div
         className={cn(
-          'flex gap-2 py-3',
+          'flex gap-2',
           rail
-            ? 'max-h-64 flex-col items-center overflow-y-auto'
-            : 'items-center overflow-x-auto px-1'
+            ? 'max-h-64 flex-col items-center overflow-y-auto py-3'
+            : 'items-center overflow-x-auto px-1 pt-3'
         )}
       >
         {bots.map((bot) => (
