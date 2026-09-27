@@ -17,7 +17,7 @@ import * as bots from '../src/main/db/bots'
 import { testProviderPersistence } from './provider-persistence'
 import { getActivityStats } from '../src/main/services/activity'
 import { localDay } from '../src/shared/cost'
-import { closeDb } from '../src/main/db/database'
+import { closeDb, getDb } from '../src/main/db/database'
 import {
   runTool,
   killSessionBackground,
@@ -595,6 +595,29 @@ async function main(): Promise<void> {
       .map((x) => x.content)
       .join() === 'q2,q1'
   )
+  const qRunning = repo.enqueue(chat.id, 'running')
+  const qPending = repo.enqueue(chat.id, 'pending')
+  repo.reorderQueue(chat.id, [qRunning.id, q2.id, q1.id, qPending.id])
+  getDb().prepare(`UPDATE queue SET state = 'running' WHERE id = ?`).run(qRunning.id)
+  repo.reorderQueue(chat.id, [qRunning.id, q2.id, qPending.id, q1.id])
+  check(
+    'queue reorder keeps working behind a running row',
+    repo
+      .listQueue(chat.id)
+      .map((item) => item.id)
+      .join() === [qRunning.id, q2.id, qPending.id, q1.id].join()
+  )
+  repo.reorderQueue(chat.id, [q2.id, qRunning.id, qPending.id, q1.id])
+  check(
+    'queue reorder cannot move the running row',
+    repo
+      .listQueue(chat.id)
+      .map((item) => item.id)
+      .join() === [qRunning.id, q2.id, qPending.id, q1.id].join()
+  )
+  getDb().prepare(`UPDATE queue SET state = 'pending' WHERE id = ?`).run(qRunning.id)
+  repo.removeQueueItem(qRunning.id)
+  repo.removeQueueItem(qPending.id)
   repo.removeQueueItem(q1.id)
   check(
     'queue remove',
@@ -733,7 +756,9 @@ async function main(): Promise<void> {
     schedule: { kind: 'interval', minutes: 5 }
   })
   bots.enqueueDueJobs(job.nextRunAt!)
-  check('scheduled bot prompt is durably queued', repo.listQueue(bot.chatId).length === 1)
+  const scheduled = repo.listQueue(bot.chatId)
+  check('scheduled bot prompt is durably queued', scheduled.length === 1)
+  check('scheduled bot prompt exposes its origin', scheduled[0]?.scheduleId === job.id)
   check('schedule advances after enqueue', bots.listJobs(bot.id)[0].nextRunAt! > job.nextRunAt!)
 
   // ---- sessions status excludes loop chats ----

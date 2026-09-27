@@ -861,7 +861,7 @@ export function registerIpc(): void {
     if (!job) throw new Error('Schedule not found')
     const bot = bots.getBot(job.botId)
     if (!bot) throw new Error('Bot not found')
-    const item = enqueuePrompt(bot.chatId, job.prompt)
+    const item = enqueuePrompt(bot.chatId, job.prompt, undefined, { scheduleId: job.id })
     wakeAutomation()
     return item
   })

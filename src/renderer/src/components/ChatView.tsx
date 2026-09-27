@@ -12,6 +12,7 @@ import {
   Square
 } from 'lucide-react'
 import type { Chat } from '@shared/types'
+import { isVisibleQueueItem } from '@shared/queue'
 import { resolveSessionConfig } from '@shared/session-config'
 import { useRoxyStore } from '../lib/store'
 import { useTranslation } from 'react-i18next'
@@ -80,20 +81,9 @@ export function ChatView(): JSX.Element {
   const allQueued = useRoxyStore((s) => s.queue)
   // A running item's prompt is already persisted to the transcript by the main
   // process, so showing its queue row too renders the same message twice.
-  // Failed items stay listed: they're the retry/edit affordance.
-  //
-  // This panel is YOUR outbox: prompts you typed and haven't sent yet. A
-  // machine-generated item (`sourceChatId` is set - bot_invoke inviting a bot to
-  // answer here, or another session handing work over) belongs to a turn already
-  // in flight, not to you, so listing it as an editable draft read as a bug. It
-  // still appears once it FAILS, the one moment you can act on it.
-  const queue = useMemo(
-    () =>
-      allQueued.filter(
-        (item) => item.state !== 'running' && (!item.sourceChatId || item.state === 'failed')
-      ),
-    [allQueued]
-  )
+  // Pending rows from every origin stay visible in their real FIFO order; each
+  // row identifies whether it came from the user, an agent, or a schedule.
+  const queue = useMemo(() => allQueued.filter(isVisibleQueueItem), [allQueued])
   const newSession = useRoxyStore((s) => s.newSession)
   const selectChat = useRoxyStore((s) => s.selectChat)
   const activeChatId = useRoxyStore((s) => s.activeChatId)
@@ -146,6 +136,9 @@ export function ChatView(): JSX.Element {
     setInfoOpen(false)
   }, [activeChatId])
   const activeChat = chats.find((c) => c.id === activeChatId)
+  const queueHasUserRequests = queue.some(
+    (item) => !item.scheduleId && (item.fromUser || !item.sourceChatId)
+  )
   const selectedProvider = settings ? resolveSessionConfig(activeChat, settings).providerId : null
   const provider = selectedProvider
     ? providers.find((p) => p.id === selectedProvider)
@@ -386,7 +379,7 @@ export function ChatView(): JSX.Element {
                       count={queue.length}
                       icon={<ListTree className="h-3.5 w-3.5 text-text-subtle" />}
                     />
-                    {sending && (
+                    {sending && queueHasUserRequests && (
                       <span className="ml-auto text-[10px] text-text-subtle">
                         {t('chat.runsAfterReply')}
                       </span>

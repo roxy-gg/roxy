@@ -104,6 +104,7 @@ export function enqueuePrompt(
     sourceChatId?: string
     replyToChatId?: string
     notBefore?: number
+    scheduleId?: string
     hops?: number
     continueReply?: boolean
     /** Set when the prompt is machine-generated on a bot's behalf, so the
@@ -165,13 +166,14 @@ export function enqueuePrompt(
     const item = repo.enqueue(chatId, trimmed, images)
     getDb()
       .prepare(
-        'UPDATE queue SET source_chat_id = ?, reply_to_chat_id = ?, hops = ?, not_before = ?, continue_reply = ?, bot_id = ?, bot_username = ?, as_bot_id = ?, recipient_id = ?, reply_to_bot_id = ?, reply_to_bot_username = ?, message_id = COALESCE(?, message_id) WHERE id = ?'
+        'UPDATE queue SET source_chat_id = ?, reply_to_chat_id = ?, hops = ?, not_before = ?, schedule_id = ?, continue_reply = ?, bot_id = ?, bot_username = ?, as_bot_id = ?, recipient_id = ?, reply_to_bot_id = ?, reply_to_bot_username = ?, from_user = ?, message_id = COALESCE(?, message_id) WHERE id = ?'
       )
       .run(
         options.sourceChatId ?? null,
         options.replyToChatId ?? null,
         options.hops ?? 0,
         options.notBefore ?? 0,
+        options.scheduleId ?? null,
         Number(!!options.continueReply),
         options.botId ?? null,
         options.botUsername ?? null,
@@ -179,6 +181,7 @@ export function enqueuePrompt(
         recipientId ?? null,
         options.replyToActor?.botId ?? null,
         options.replyToActor?.botUsername ?? null,
+        Number(!!options.fromUser),
         messageId,
         item.id
       )

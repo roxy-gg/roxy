@@ -203,7 +203,8 @@ import {
   type ServiceOutcome
 } from '../src/shared/services'
 import { posix as posixPath, win32 as win32Path } from 'node:path'
-import type { Message, MessagePart } from '../src/shared/types'
+import type { Message, MessagePart, QueueItem } from '../src/shared/types'
+import { isVisibleQueueItem, moveVisibleQueueItem, queueOrigin } from '../src/shared/queue'
 import type { ChatMessage } from '../src/shared/api'
 import {
   emptyUsage,
@@ -364,6 +365,54 @@ function check(name: string, cond: boolean, detail = ''): void {
 console.log('shared catalogs\n')
 
 check('motion: normal animation is the default', DEFAULT_MOTION === 'on')
+
+// ---- queue ordering ----
+const queueItems: QueueItem[] = [
+  { id: 'running', chatId: 'chat', content: 'running', createdAt: 1, state: 'running' },
+  {
+    id: 'handoff',
+    chatId: 'chat',
+    content: 'bot handoff',
+    createdAt: 2,
+    state: 'pending',
+    sourceChatId: 'bot-chat'
+  },
+  { id: 'first', chatId: 'chat', content: 'first', createdAt: 3, state: 'pending' },
+  {
+    id: 'collaborator',
+    chatId: 'chat',
+    content: 'user-directed handoff',
+    createdAt: 4,
+    state: 'pending',
+    sourceChatId: 'chat',
+    fromUser: true
+  },
+  {
+    id: 'scheduled',
+    chatId: 'chat',
+    content: 'scheduled',
+    createdAt: 5,
+    state: 'pending',
+    scheduleId: 'job'
+  }
+]
+check(
+  'queue shows every pending origin in true FIFO order',
+  queueItems
+    .filter(isVisibleQueueItem)
+    .map((item) => item.id)
+    .join() === 'handoff,first,collaborator,scheduled'
+)
+check(
+  'queue distinguishes user, agent, and schedule origins',
+  queueItems.map(queueOrigin).join() === 'user,agent,user,user,schedule'
+)
+check(
+  'queue move crosses origins without moving the running slot',
+  moveVisibleQueueItem(queueItems, 'first', 'up')
+    ?.map((item) => item.id)
+    .join() === 'running,first,handoff,collaborator,scheduled'
+)
 check(
   'motion: missing and unknown values fall back to On',
   [undefined, null, '', 'invalid', true].every((value) => normalizeMotion(value) === 'on')

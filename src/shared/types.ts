@@ -372,6 +372,10 @@ export interface QueueItem {
   botUsername?: string
   /** Bot that should ANSWER this prompt, when it isn't the session's own bot. */
   asBotId?: string
+  /** Composer "Send to @bot" remains user-authored even though it has a source chat. */
+  fromUser?: boolean
+  /** Scheduled prompts name their originating job so the UI does not present them as user drafts. */
+  scheduleId?: string
 }
 
 // ---- Integrations & skills ---------------------------------------------------

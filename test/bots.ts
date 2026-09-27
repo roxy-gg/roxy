@@ -1053,14 +1053,16 @@ async function main(): Promise<void> {
         )})`
       )
       assert.equal(routed.asBotId, worker.id)
+      assert.equal(routed.fromUser, true)
       assert.deepEqual(
         getDb()
-          .prepare('SELECT recipient_id, as_bot_id, message_id FROM queue WHERE id = ?')
+          .prepare('SELECT recipient_id, as_bot_id, message_id, from_user FROM queue WHERE id = ?')
           .get(routed.id),
         {
           recipient_id: worker.id,
           as_bot_id: worker.id,
-          message_id: repo.listMessages(local.id).at(-1)!.id
+          message_id: repo.listMessages(local.id).at(-1)!.id,
+          from_user: 1
         }
       )
       assert.equal(repo.listMessages(local.id).at(-1)?.role, 'user')

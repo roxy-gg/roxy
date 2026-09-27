@@ -367,6 +367,10 @@
     "activeSummary": "Active: {{scheme}}://{{host}}:{{port}}"
   },
   "queue": {
+    "userRequest": "You",
+    "agentRequest": "Agent handoff",
+    "scheduledRequest": "Schedule",
+    "toCollaborator": "to @{{username}}",
     "image": "Image",
     "empty": "(empty)",
     "running": "Running",
