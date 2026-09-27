@@ -19,10 +19,12 @@ import type { IconName } from './icons'
 import type { AnsiSpan } from './ansi'
 import type { Token } from './highlight'
 import type { DiffCommand, DiffViewState } from '../components/diff/model'
+import type { ActivityPhraseState } from './activity-status'
 
 export interface ViewState {
   open: Set<string>
   startedAt: Map<string, number>
+  activityPhrase?: ActivityPhraseState
   images: Map<string, HTMLImageElement>
   diffs: Map<string, DiffViewState>
   scroll: Map<string, { left: number; top: number }>

@@ -83,12 +83,16 @@ async function run() {
   } finally {
     settings.closeDb()
   }
-  const { createServer } = await import('vite')
-  server = await createServer({
-    configFile: path.join(__dirname, 'vite.config.mjs'),
-    server: { host: '127.0.0.1', port: 3114, strictPort: true }
-  })
-  await server.listen()
+  let url = process.env.CANVAS_TEST_URL
+  if (!url) {
+    const { createServer } = await import('vite')
+    server = await createServer({
+      configFile: path.join(__dirname, 'vite.config.mjs'),
+      server: { host: '127.0.0.1', port: 3114, strictPort: true }
+    })
+    await server.listen()
+    url = 'http://127.0.0.1:3114/'
+  }
   // Use the app's default throttling policy rather than masking issues with backgroundThrottling:false.
   win = new BrowserWindow({
     width: 1100,
@@ -100,7 +104,9 @@ async function run() {
   win.webContents.on('console-message', (_event, level, message) => {
     if (level >= 3) errors.push(message)
   })
-  await win.loadURL('http://127.0.0.1:3114/?animation')
+  const harnessUrl = new URL(url)
+  harnessUrl.searchParams.set('animation', '')
+  await win.loadURL(harnessUrl.href)
   win.show()
   win.focus()
   await wait(1700)

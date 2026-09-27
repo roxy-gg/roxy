@@ -313,6 +313,7 @@ import {
   place,
   alignMenu,
   menuMaxHeight,
+  placeOutsidePanel,
   placeContextMenu,
   GAP,
   MARGIN,
@@ -329,6 +330,11 @@ import {
   buildProviderModelRows,
   countMatchesByProvider
 } from '../src/renderer/src/lib/modelRows'
+import {
+  pruneComposerDrafts,
+  restoreComposerDraft,
+  updateComposerDraft
+} from '../src/renderer/src/lib/composerDrafts'
 import {
   contextMenuItems as clipboardMenuItems,
   hasUsableItems,
@@ -386,8 +392,15 @@ check(
   )
 )
 check(
-  'loop tools registered',
-  ['loop_list', 'loop_enable', 'loop_disable'].every((id) => Boolean(getTool(id)))
+  'bot tools registered',
+  [
+    'project_list',
+    'session_manage',
+    'bot_manage',
+    'bot_schedule',
+    'bot_invoke',
+    'queue_manage'
+  ].every((id) => Boolean(getTool(id)))
 )
 check(
   'file/bash tools registered',
@@ -411,7 +424,7 @@ check(
 )
 check(
   'instant local tools offer no cancel button',
-  ['read', 'write', 'edit', 'list', 'loop_list', 'bash_list', 'change_session_metadata'].every(
+  ['read', 'write', 'edit', 'list', 'bot_manage', 'bash_list', 'change_session_metadata'].every(
     (id) => !isInterruptibleTool(id)
   )
 )
@@ -439,8 +452,8 @@ check(
     'skill',
     'lsp',
     'browser_close',
-    'loop_create',
-    'loop_remove',
+    'bot_manage',
+    'bot_schedule',
     'change_session_metadata'
   ].every((id) => Boolean(getTool(id)))
 )
@@ -1351,6 +1364,60 @@ check(
   'convertWebContent html format returns raw html',
   convertWebContent('<p>hi</p>', 'text/html', 'html') === '<p>hi</p>'
 )
+
+console.log('\ncomposer drafts\n')
+const image = (id: string) => ({
+  id,
+  dataUrl: `data:image/png;base64,${id}`,
+  mediaType: 'image/png',
+  name: `${id}.png`
+})
+const chats = [{ id: 'chat-a' }, { id: 'chat-b' }]
+let drafts = updateComposerDraft({}, chats, 'chat-a', () => ({
+  value: 'draft a',
+  images: [image('a')]
+}))
+drafts = updateComposerDraft(drafts, chats, 'chat-b', () => ({
+  value: 'draft b',
+  images: [image('b')]
+}))
+check(
+  'drafts: text and images stay scoped to their chat',
+  drafts['chat-a']?.value === 'draft a' &&
+    drafts['chat-a']?.images[0]?.id === 'a' &&
+    drafts['chat-b']?.value === 'draft b' &&
+    drafts['chat-b']?.images[0]?.id === 'b'
+)
+const beforeLateWrite = drafts
+drafts = updateComposerDraft(drafts, [{ id: 'chat-b' }], 'chat-a', (current) => ({
+  ...current,
+  images: [...current.images, image('late')]
+}))
+check('drafts: late image reads cannot recreate a deleted chat', drafts === beforeLateWrite)
+const pruned = pruneComposerDrafts(drafts, [{ id: 'chat-b' }])
+check(
+  'drafts: authoritative chat refresh prunes deleted sessions',
+  !pruned['chat-a'] && pruned['chat-b']?.value === 'draft b'
+)
+const restored = restoreComposerDraft(
+  {
+    'chat-b': { value: 'follow-up', images: [image('new'), image('failed')] }
+  },
+  [{ id: 'chat-b' }],
+  'chat-b',
+  'failed prompt',
+  [image('failed'), image('old')]
+)
+check(
+  'drafts: failed sends merge with a follow-up without dropping text or images',
+  restored['chat-b']?.value === 'failed prompt\n\nfollow-up' &&
+    restored['chat-b']?.images.map((item) => item.id).join(',') === 'failed,old,new'
+)
+const cleared = updateComposerDraft(restored, [{ id: 'chat-b' }], 'chat-b', () => ({
+  value: '',
+  images: []
+}))
+check('drafts: empty drafts are removed', !cleared['chat-b'])
 
 // ---- context management (Phase 9) ----
 console.log('\ncontext management\n')
@@ -2694,6 +2761,7 @@ console.log('\nremote workspace ipc parity\n')
   const preload = read('src/preload/index.ts')
   const handlers = read('src/main/ipc/index.ts')
   const service = read('src/main/services/remote.ts')
+  const automation = read('src/main/services/automation.ts')
   const api = read('src/shared/api.ts')
   // `remote` is the last member of both the preload bridge and RoxyApi, so
   // slicing from its marker to EOF isolates just that block for method checks.
@@ -2733,7 +2801,10 @@ console.log('\nremote workspace ipc parity\n')
     'preload unsubscribes from remote:delta',
     preload.includes('removeListener(CHANNELS.remoteDelta')
   )
-  check('main emits remote:delta', service.includes('CHANNELS.remoteDelta'))
+  check(
+    'the queue owner fans turn events to the desktop',
+    automation.includes('CHANNELS.automationDelta')
+  )
   check(
     'persisted desktop messages refresh the remote transcript',
     /CHANNELS\.messagesAdd[\s\S]{0,300}remote\.notifyTranscriptChanged\(input\.chatId\)/.test(
@@ -2742,13 +2813,17 @@ console.log('\nremote workspace ipc parity\n')
   )
   check(
     'remote transcript refresh sends an authoritative snapshot',
-    /function notifyTranscriptChanged[\s\S]{0,300}sendSnapshot\(sessionId\)/.test(service)
+    /function notifyTranscriptChanged[\s\S]{0,200}sendSnapshot\(sessionId\)/.test(service)
+  )
+  // Queued turns reconcile too: the queue owner snapshots from its own finally,
+  // which is what makes a scheduled/bot reply reach the phone at all.
+  check(
+    'the queue owner refreshes the remote transcript when a turn ends',
+    /finally\s*{[\s\S]{0,400}notifyTranscriptChanged\(item\.chatId\)/.test(automation)
   )
   check(
-    'phone turns reconcile before becoming idle',
-    /active\.liveTurns\.get\(sessionId\)[\s\S]{0,300}sendSnapshot\(sessionId\)[\s\S]{0,200}state: 'idle'/.test(
-      service
-    )
+    'phone prompts use the main-process queue',
+    service.includes('enqueuePrompt(sessionId, text)')
   )
 
   // ---- chats:updated parity ----
@@ -5227,6 +5302,19 @@ async function main(): Promise<void> {
   )
 
   // Height: a menu opening upward gets the room above its trigger, never more.
+  check(
+    'menu: bot picker opens outside the settings pane when the canvas has room',
+    placeOutsidePanel(12, 0, 320, 420, 1280) === 328
+  )
+  check(
+    'menu: outside placement can use the panel left when it is the roomy side',
+    placeOutsidePanel(500, 500, 820, 420, 900) === 72
+  )
+  check(
+    'menu: outside placement keeps the viewport-safe fallback in narrow windows',
+    placeOutsidePanel(12, 0, 320, 420, 600) === 12
+  )
+
   const strip = { top: 700, bottom: 724 }
   const capUp = menuMaxHeight(strip.top, strip.bottom, 780, 'top', 6)
   check('menu: height cap fits above the trigger', capUp <= strip.top - 6 - MARGIN, String(capUp))

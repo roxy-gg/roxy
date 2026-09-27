@@ -372,6 +372,81 @@ check(
   state.modelCatalog[roxyA.id][0]?.id === 'fresh-account' && !state.modelsLoading[roxyA.id]
 )
 
+// A reload mid-turn asks main for a snapshot of what is already streaming.
+// WHO is speaking is announced once, when the turn starts, so a token that
+// merely raced the round trip must not discard the snapshot's identity - it
+// left a guest's (or Roxy's) reply streaming under the chat owner's name until
+// the turn ended. A newer TURN transition still wins.
+console.log('store: a reload mid-turn keeps the speaker')
+const snapshotBody = src.match(/\.then\(\(running\) => \{\n([\s\S]*?)\n {8}\}\)\n {8}\.catch/)?.[1]
+check('snapshot handler found', snapshotBody !== undefined)
+const runSnapshot = ({ turnRevision, partsRevision }) => {
+  const state = {
+    runningAutomation: {},
+    automationSpeakers: {},
+    activeChatId: null,
+    sendingChats: {}
+  }
+  const seeded = []
+  const body = transformSync(`async function apply(running) {${snapshotBody}}`, {
+    loader: 'ts'
+  }).code
+  new Function(
+    'running',
+    'revision',
+    'automationTurnRevisions',
+    'automationRevisions',
+    'set',
+    'get',
+    'PartsFold',
+    'remoteTurns',
+    'publishStream',
+    `${body}
+return apply(running)`
+  )(
+    [
+      {
+        sessionId: 'chat-1',
+        parts: [{ type: 'text', text: 'hi' }],
+        botId: 'bot-1',
+        botUsername: 'helper'
+      }
+    ],
+    5,
+    new Map([['chat-1', turnRevision]]),
+    new Map([['chat-1', partsRevision]]),
+    (patch) => Object.assign(state, typeof patch === 'function' ? patch(state) : patch),
+    () => state,
+    class {
+      seed(parts) {
+        seeded.push(parts)
+      }
+    },
+    new Map(),
+    () => {}
+  )
+  return { state, seeded }
+}
+// A streamed token raced the snapshot: its parts are stale, its identity is not.
+const raced = runSnapshot({ turnRevision: 0, partsRevision: 9 })
+check(
+  'a racing token does not erase who is speaking',
+  raced.state.automationSpeakers['chat-1']?.botUsername === 'helper'
+)
+check('but its stale parts are still discarded', raced.seeded.length === 0)
+// A newer turn transition genuinely supersedes the snapshot.
+const superseded = runSnapshot({ turnRevision: 9, partsRevision: 9 })
+check(
+  'a newer turn transition still wins over the snapshot',
+  superseded.state.automationSpeakers['chat-1'] === undefined
+)
+// The ordinary case: nothing raced, so both identity and parts are adopted.
+const clean = runSnapshot({ turnRevision: 0, partsRevision: 0 })
+check(
+  'an unraced snapshot restores the speaker and the stream',
+  clean.state.automationSpeakers['chat-1']?.botUsername === 'helper' && clean.seeded.length === 1
+)
+
 const app = readFileSync(new URL('../src/renderer/src/App.tsx', import.meta.url), 'utf8').replace(
   /\r\n/g,
   '\n'
@@ -497,6 +572,48 @@ await compactActions.compactConversation('pinned-chat')
 check(
   'compaction: an existing pinned account still works',
   compactions === 1 && catalogRequests === 1
+)
+
+console.log('composer: drafts stay with their chat')
+const composer = readFileSync(
+  new URL('../src/renderer/src/components/Composer.tsx', import.meta.url),
+  'utf8'
+).replace(/\r\n/g, '\n')
+const chatView = readFileSync(
+  new URL('../src/renderer/src/components/ChatView.tsx', import.meta.url),
+  'utf8'
+).replace(/\r\n/g, '\n')
+check(
+  'ChatView identifies the composer with the active chat',
+  /<Composer\s+[\s\S]*?chatId=\{activeChat\.id\}/.test(chatView)
+)
+check(
+  'Composer reads text and images from the active chat draft',
+  /useRoxyStore\(\(s\) => s\.composerDrafts\[chatId\]\)/.test(composer) &&
+    /const value = draft\?\.value \?\? ''/.test(composer) &&
+    /const images = draft\?\.images \?\? \[\]/.test(composer)
+)
+check(
+  'Composer updates only the draft belonging to its chat',
+  /updateComposerDraft\(state\.composerDrafts, state\.chats, chatId, update\)/.test(composer)
+)
+check(
+  'failed sends atomically restore text and attachments to the originating chat',
+  /restoreComposerDraft\([\s\S]*?state\.chats,[\s\S]*?chatId,[\s\S]*?text,[\s\S]*?snapshotImages/.test(
+    composer
+  )
+)
+check(
+  'the store initializes per-chat drafts',
+  /composerDrafts: ComposerDrafts/.test(src) && /composerDrafts: \{\}/.test(src)
+)
+check(
+  'authoritative chat loads prune deleted drafts',
+  (src.match(/pruneComposerDrafts\([^,]+, chats\)/g) ?? []).length === 2
+)
+check(
+  'deleting chats and bots removes their drafts immediately',
+  (src.match(/delete composerDrafts\[(?:id|bot\.chatId)\]/g) ?? []).length === 2
 )
 
 console.log(failures === 0 ? '\nSTORE GUARD OK' : `\nSTORE GUARD FAILED \u2014 ${failures} failing`)

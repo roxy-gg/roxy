@@ -125,6 +125,20 @@ export function alignMenu(
  * less room than MIN_MENU_H, and we return MIN anyway, because overflowing a
  * little beats a menu too short to show a single row.
  */
+/** Places a fixed menu outside a panel when either side has enough room. */
+export function placeOutsidePanel(
+  fallbackLeft: number,
+  panelLeft: number,
+  panelRight: number,
+  menuWidth: number,
+  viewportWidth: number,
+  gap = 8
+): number {
+  if (viewportWidth - panelRight - gap - MARGIN >= menuWidth) return panelRight + gap
+  if (panelLeft - gap - MARGIN >= menuWidth) return panelLeft - gap - menuWidth
+  return fallbackLeft
+}
+
 export function menuMaxHeight(
   triggerTop: number,
   triggerBottom: number,

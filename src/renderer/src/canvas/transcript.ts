@@ -13,10 +13,10 @@
  */
 
 import type { TFunction } from 'i18next'
-import type { Message, MessagePart } from '@shared/types'
+import type { Message, MessagePart, QueueItem } from '@shared/types'
 import { Builder } from './builder'
 import type { Block, Scene, ViewState } from './scene'
-import { TextMetrics, font } from './text'
+import { TextMetrics, font, type InlineSpan } from './text'
 import type { CanvasTheme } from './theme'
 import { alpha } from './theme'
 import { FONT_SIZE, SIZE, SPACE } from './metrics'
@@ -24,13 +24,32 @@ import { layoutMarkdown, layoutPlainText } from './prose'
 import { layoutToolCard, type ToolCardInput } from './tool-card'
 import { PROMPT_GUTTER } from './prompt-history'
 import { TranscriptWindow } from './transcript-window'
+import type { Bot } from '@shared/bots'
+import { HOST_USERNAME, isHostSpeaker } from '../../../shared/bots'
+import { MENTION, isKnownMention } from '../../../shared/mentions'
+import {
+  activityIdentity,
+  activityLabels,
+  activityVerb,
+  updateActivityPhrase,
+  type ActivityPhraseState
+} from './activity-status'
 
 export interface LayoutInput {
+  botUsername?: string
+  streamingBot?: { botId?: string; botUsername?: string }
+  bots?: Bot[]
+  /** Active chat queue — drives bot_invoke status chips. */
+  queue?: QueueItem[]
+  /** False while that queue is still loading; an empty one then means
+   *  "not known yet", not "the guest answered". */
+  queueLoaded?: boolean
+  botAvatar?: (username: string) => string
   messages: Message[]
   /** The live turn's parts, or null when nothing is streaming. */
   streaming: MessagePart[] | null
-  /** True once a live turn has produced no visible update for a short interval. */
-  quiet?: boolean
+  /** Turn start or latest tool start, retained by the per-chat store across view switches. */
+  activityStartedAt?: number
   width: number
   metrics: TextMetrics
   theme: CanvasTheme
@@ -46,6 +65,8 @@ export interface LayoutInput {
   }
   /** Which calls can actually be cancelled (the store knows; layout does not). */
   canCancel: (part: Extract<MessagePart, { type: 'tool' }>) => boolean
+  /** Injectable so activity-phrase selection is deterministic in focused tests. */
+  activityRandom?: () => number
   /**
    * The translator, threaded down to every block.
    *
@@ -59,12 +80,20 @@ export interface LayoutInput {
 
 /** How long a call must run before its cancel button appears. */
 const CANCEL_REVEAL_MS = 1200
-const TURN_STARTED_AT = '__turn__'
 
 export function layoutTranscript(input: LayoutInput, cache: BlockCache): Scene {
+  cache.setIdentity(
+    [
+      input.botUsername ?? '',
+      input.bots?.map((bot) => `${bot.id}:${bot.username}`).join('|') ?? '',
+      input.queue?.map((item) => `${item.id}:${item.state ?? ''}`).join('|') ?? '',
+      // Part of the identity: the same queue before and after it loads must not
+      // reuse a block that rendered "replied" out of ignorance.
+      input.queueLoaded === false ? 'q:loading' : 'q:loaded'
+    ].join('|')
+  )
   const { messages, streaming, width, theme, view } = input
-  if (streaming === null) view.startedAt.delete(TURN_STARTED_AT)
-  else if (!view.startedAt.has(TURN_STARTED_AT)) view.startedAt.set(TURN_STARTED_AT, input.now)
+  if (streaming === null) view.activityPhrase = undefined
   const availableWidth =
     width - (messages.some((message) => message.role === 'user') ? PROMPT_GUTTER : 0)
   const column = Math.max(1, Math.min(SPACE.columnMax, availableWidth - SPACE.columnPadX * 2))
@@ -99,6 +128,7 @@ export function layoutTranscript(input: LayoutInput, cache: BlockCache): Scene {
       input,
       {
         id: '__streaming__',
+        ...input.streamingBot,
         chatId: '',
         role: 'assistant',
         content: '',
@@ -150,8 +180,23 @@ function layoutMessage(
   counter: { value: number },
   streaming = false
 ): Block {
-  const builder = new Builder(input.metrics, input.theme, counter, input.t)
-  const body = layoutMessageHeader(builder, message.role === 'user', x, y, width)
+  const builder = new Builder(
+    input.metrics,
+    input.theme,
+    counter,
+    input.t,
+    input.bots?.map((bot) => bot.username)
+  )
+  const username = messageBotUsername(input, message)
+  const body = layoutMessageHeader(
+    builder,
+    message.role === 'user',
+    x,
+    y,
+    width,
+    username,
+    username && username !== HOST_USERNAME ? input.botAvatar?.(username) : undefined
+  )
   let cursor = body.y
   if (message.role === 'user') {
     cursor += layoutUserBody(builder, message.parts, body.x, cursor, body.width)
@@ -164,11 +209,31 @@ function layoutMessage(
       body.width,
       input,
       streaming,
-      `${message.id}/`
+      `${message.id}/`,
+      0,
+      true,
+      username
     )
   }
   const height = cursor - y + SPACE.messagePadY
   return { ...builder.finish(message.id, y, height), copyText: () => partsText(message.parts) }
+}
+
+export function messageBotUsername(input: LayoutInput, message: Message): string | undefined {
+  // The host answering inside a bot's chat is recorded explicitly, because the
+  // fallback below means "this chat's bot": without the marker Roxy's reply was
+  // drawn under the owner's name and avatar, both live and after a reload.
+  // Surface the host handle as @roxy so attribution matches every other speaker.
+  if (isHostSpeaker(message.botId, message.botUsername)) return HOST_USERNAME
+  const signed =
+    input.bots?.find((bot) => bot.id === message.botId)?.username ?? message.botUsername
+  // Work arriving from another session is stored as a user turn (it is a prompt
+  // for this one), but it was written by a bot and says so. Reading the role
+  // alone drew it as "You", crediting the person to whom it was delivered.
+  if (message.role !== 'assistant') return signed
+  // Unsigned assistants in a project chat are the host; in a bot chat they are
+  // the chat's owner via input.botUsername.
+  return signed ?? input.botUsername ?? HOST_USERNAME
 }
 
 export function layoutMessageHeader(
@@ -176,7 +241,9 @@ export function layoutMessageHeader(
   isUser: boolean,
   x: number,
   y: number,
-  width: number
+  width: number,
+  botUsername?: string,
+  botAvatarSrc?: string
 ): { x: number; y: number; width: number } {
   const palette = builder.palette
   const top = y + SPACE.messagePadY
@@ -203,8 +270,8 @@ export function layoutMessageHeader(
       y: avatarY,
       w: SPACE.avatar,
       h: SPACE.avatar,
-      src: '__roxy__',
-      radius: SPACE.radiusLg,
+      src: botUsername === HOST_USERNAME ? '__roxy__' : (botAvatarSrc ?? '__roxy__'),
+      radius: !botUsername || botUsername === HOST_USERNAME ? SPACE.radiusLg : SPACE.avatar / 2,
       border: palette.border
     })
   }
@@ -213,7 +280,7 @@ export function layoutMessageHeader(
   builder.text(
     bodyX,
     top,
-    builder.t(isUser ? 'transcript.you' : 'transcript.assistant'),
+    botUsername ? `@${botUsername}` : builder.t(isUser ? 'transcript.you' : 'transcript.assistant'),
     nameFont,
     palette.textMuted
   )
@@ -274,10 +341,27 @@ export function layoutUserBody(
     .map((p) => (p.type === 'text' || p.type === 'reasoning' ? p.text : ''))
     .join('')
   if (text) {
-    cursor += layoutPlainText(builder, text, x, cursor, width, {
-      color: palette.text,
-      size: FONT_SIZE.body
-    })
+    // ...except @mentions, which stay highlighted the way the composer showed
+    // them, so a prompt that hands work to a bot reads as such in the transcript.
+    const base = font(FONT_SIZE.body, 400, 'sans')
+    const spans: InlineSpan[] = []
+    let last = 0
+    for (const match of text.matchAll(MENTION)) {
+      if (!isKnownMention(match[0], builder.botUsernames)) continue
+      const at = match.index + match[0].indexOf('@')
+      if (at > last)
+        spans.push({ text: text.slice(last, at), font: base, color: palette.text, offset: last })
+      last = at + match[0].length - match[0].indexOf('@')
+      spans.push({
+        text: text.slice(at, last),
+        font: font(FONT_SIZE.body, 600, 'sans'),
+        color: palette.accent,
+        offset: at
+      })
+    }
+    if (last < text.length)
+      spans.push({ text: text.slice(last), font: base, color: palette.text, offset: last })
+    cursor += builder.paragraph(spans, x, cursor, width)
   }
   return cursor - y
 }
@@ -298,7 +382,8 @@ export function layoutParts(
   streaming: boolean,
   idPrefix: string,
   firstIndex = 0,
-  indicator = true
+  indicator = true,
+  speakingAs?: string
 ): number {
   const palette = builder.palette
   let cursor = y
@@ -314,9 +399,23 @@ export function layoutParts(
         open: input.view.open.has(id),
         live: part.state === 'running',
         cancellable: cancelReady(part, input),
+        queue: input.queue,
+        queueLoaded: input.queueLoaded,
         view: input.view,
         renderNested: (nestedBuilder, children, nx, ny, nw, live, prefix) =>
-          layoutParts(nestedBuilder, children, nx, ny, nw, input, streaming && live, prefix)
+          layoutParts(
+            nestedBuilder,
+            children,
+            nx,
+            ny,
+            nw,
+            input,
+            streaming && live,
+            prefix,
+            0,
+            true,
+            speakingAs
+          )
       }
       cursor += layoutToolCard(builder, card, x, cursor, width)
       return
@@ -362,19 +461,27 @@ export function layoutParts(
     cursor += SPACE.partGap
   })
 
-  // The thinking indicator: shown for the whole live turn EXCEPT when something
-  // else is already signalling progress — a tool mid-execution has its own
-  // spinner, and text actively arriving is its own evidence.
-  const last = parts[parts.length - 1]
-  const runningTool = last?.type === 'tool' && last.state === 'running'
-  const liveText = (last?.type === 'text' || last?.type === 'reasoning') && last.text.trim() !== ''
-  if (indicator && streaming && !runningTool && (!liveText || input.quiet)) {
+  // The activity row belongs to the live turn, not to gaps between its deltas.
+  // Keeping it mounted through prose and tool updates also keeps one elapsed
+  // timestamp for the complete activity period instead of blinking it away.
+  if (indicator && streaming) {
+    const actor = speakingAs ?? HOST_USERNAME
+    const verb = activityVerb(parts)
+    const phrase = cacheActivityPhrase(
+      input,
+      activityIdentity(actor, parts),
+      input.now,
+      input.activityRandom
+    )
+    const labels = activityLabels(builder.t, speakingAs, verb)
     cursor += layoutThinking(
       builder,
       x,
       cursor,
-      builder.t(last === undefined ? 'transcript.thinking' : 'transcript.working'),
-      input.view.startedAt.get(TURN_STARTED_AT) ?? input.now
+      width,
+      labels[phrase.suffixIndex],
+      labels,
+      input.activityStartedAt ?? input.now
     )
   }
 
@@ -472,39 +579,60 @@ function layoutReasoning(
   return height
 }
 
-/** The braille spinner + label shown while a turn is live but silent. */
+/** Keep a phrase stable between deliberate rotations, independent of the turn timer. */
+function cacheActivityPhrase(
+  input: LayoutInput,
+  identity: string,
+  now: number,
+  random?: () => number
+): ActivityPhraseState {
+  const next = updateActivityPhrase(input.view.activityPhrase ?? null, identity, now, random)
+  input.view.activityPhrase = next
+  return next
+}
+
+/** The braille spinner + activity label with a compact timer underneath. */
 function layoutThinking(
   builder: Builder,
   x: number,
   y: number,
+  width: number,
   label: string,
+  labelVariants: string[],
   startedAt: number
 ): number {
   const palette = builder.palette
   const f = font(FONT_SIZE.body, 400, 'sans')
-  const timerFont = font(FONT_SIZE.small, 400, 'mono')
-  const height = builder.metrics.lineHeight(f) + 8
-  const centerY = y + height / 2
+  const timerFont = font(FONT_SIZE.micro, 400, 'mono')
+  const labelHeight = builder.metrics.lineHeight(f)
+  const timerHeight = builder.metrics.lineHeight(timerFont)
+  const contentX = x + 20
+  const maxLabelWidth = Math.max(1, width - 20)
+  const labelWidth = Math.min(
+    maxLabelWidth,
+    Math.max(...labelVariants.map((variant) => builder.metrics.measure(variant, f)))
+  )
   builder.push({
     kind: 'braille',
     x,
-    y: centerY - builder.metrics.lineHeight(f) / 2,
+    y,
     font: font(FONT_SIZE.body + 2, 400, 'mono'),
     color: palette.accent
   })
+  const visibleLabel = builder.metrics.ellipsize(label, f, labelWidth).text
   builder.pulsing(() => {
-    builder.text(x + 20, centerY - builder.metrics.lineHeight(f) / 2, label, f, palette.textMuted)
+    builder.text(contentX, y, visibleLabel, f, palette.textMuted)
   })
   builder.push({
     kind: 'elapsed',
-    x: x + 20 + builder.metrics.measure(label, f) + 8,
-    y: centerY - builder.metrics.lineHeight(timerFont) / 2,
+    x: contentX,
+    y: y + labelHeight - 2,
     startedAt,
     font: timerFont,
     color: palette.textSubtle
   })
   builder.animate()
-  return height
+  return labelHeight + timerHeight - 2
 }
 
 /**
@@ -518,6 +646,13 @@ function layoutThinking(
  */
 export class BlockCache {
   readonly window = new TranscriptWindow()
+  private identity: string | undefined
+
+  /** Identity invalidation must survive canvas remounts alongside retained measurements. */
+  setIdentity(identity: string): void {
+    if (this.identity !== undefined && this.identity !== identity) this.clear()
+    this.identity = identity
+  }
   private messages: Message[] | null = null
   private units = 0
   private characters = 0

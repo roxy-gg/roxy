@@ -40,6 +40,7 @@ interface Run {
   subagentType: string
   background: boolean
   startedAt: number
+  activityStartedAt: number
   fold: PartsFold
   /**
    * Abort just THIS delegate, leaving its parent turn running.
@@ -115,6 +116,7 @@ export function startSubagentRun(input: StartRunInput): {
     subagentType: input.subagentType,
     background: input.background,
     startedAt: Date.now(),
+    activityStartedAt: Date.now(),
     fold: new PartsFold(),
     cancel: input.cancel,
     cancelled: false
@@ -130,6 +132,7 @@ export function startSubagentRun(input: StartRunInput): {
     emit: (event) => {
       if (closed) return
       run.fold.apply(event)
+      if (event.type === 'tool-start') run.activityStartedAt = Date.now()
       broadcast({ subChatId: run.subChatId, kind: 'event', event })
     },
     finish: (state) => {
@@ -192,7 +195,8 @@ export function listRunningSubagents(): SubagentRunView[] {
     description: r.description,
     subagentType: r.subagentType,
     background: r.background,
-    startedAt: r.startedAt
+    startedAt: r.startedAt,
+    activityStartedAt: r.activityStartedAt
   }))
 }
 

@@ -12,6 +12,7 @@ import { layoutDiffViewer } from '../../src/renderer/src/components/diff/layout'
 import { Builder } from '../../src/renderer/src/canvas/builder'
 import { font, wrapSpans, type TextMetrics } from '../../src/renderer/src/canvas/text'
 import {
+  formatElapsed,
   hitTest,
   hitText,
   selectionText,
@@ -30,8 +31,16 @@ import type { Message, MessagePart } from '../../src/shared/types'
 import { parseMarkdown } from '../../src/renderer/src/canvas/markdown'
 import { ansiLineText, parseAnsi } from '../../src/renderer/src/canvas/ansi'
 import { layoutToolCard } from '../../src/renderer/src/canvas/tool-card'
+import { invokeChip } from '../../src/renderer/src/canvas/invoke-status'
+import type { QueueItem } from '../../src/shared/types'
 import { layoutTerminalBody } from '../../src/renderer/src/canvas/terminal'
 import { createStreamPublisher } from '../../src/renderer/src/lib/stream-publisher'
+import {
+  ACTIVITY_PHRASE_ROTATION_MS,
+  activityIdentity,
+  activityVerb,
+  updateActivityPhrase
+} from '../../src/renderer/src/canvas/activity-status'
 
 let checks = 0
 function check(name: string, run: () => void): void {
@@ -69,10 +78,13 @@ const metrics = {
   measure: (text: string) => [...text].reduce((sum, char) => sum + (char === 'W' ? 12 : 6), 0),
   advance: () => 6,
   lineHeight: () => 20,
-  ellipsize: (text: string, _font: unknown, width: number) => ({
-    text: text.slice(0, Math.max(0, Math.floor(width / 6))),
-    width
-  })
+  ellipsize: (text: string, _font: unknown, width: number) => {
+    const chars = Math.max(0, Math.floor(width / 6))
+    return {
+      text: text.length <= chars ? text : `${text.slice(0, Math.max(0, chars - 1))}…`,
+      width
+    }
+  }
 } as unknown as TextMetrics
 const view = (): ViewState => ({
   open: new Set(),
@@ -93,6 +105,54 @@ const sceneOf = (builder: Builder, height: number): Scene => ({
   blocks: [builder.finish('test', 0, height)],
   width: 600,
   height
+})
+
+check('activity phrases stay stable, rotate deliberately, and reset by identity', () => {
+  const first = updateActivityPhrase(null, 'roxy:writing', 1000, () => 0)
+  assert.equal(first.suffixIndex, 0)
+  assert.equal(
+    updateActivityPhrase(first, 'roxy:writing', 1000 + ACTIVITY_PHRASE_ROTATION_MS - 1, () => 0),
+    first
+  )
+
+  const rotated = updateActivityPhrase(
+    first,
+    'roxy:writing',
+    1000 + ACTIVITY_PHRASE_ROTATION_MS,
+    () => 0
+  )
+  assert.equal(rotated.suffixIndex, 1, 'rotation cannot immediately repeat the same suffix')
+
+  const nextState = updateActivityPhrase(rotated, 'roxy:analyzing', 12_000, () => 0.5)
+  assert.equal(nextState.identity, 'roxy:analyzing')
+  assert.notEqual(nextState, rotated)
+
+  const nextActor = updateActivityPhrase(nextState, 'helper:analyzing', 12_001, () => 0.25)
+  assert.equal(nextActor.identity, 'helper:analyzing')
+  assert.notEqual(nextActor, nextState)
+})
+
+check('activity verbs reflect the live part kind', () => {
+  assert.equal(activityVerb([]), 'thinking')
+  assert.equal(activityVerb([{ type: 'reasoning', text: 'checking' }]), 'analyzing')
+  assert.equal(activityVerb([{ type: 'text', text: 'answer' }]), 'writing')
+  assert.equal(
+    activityVerb([{ type: 'tool', tool: 'bash', state: 'running', title: 'npm test' }]),
+    'working'
+  )
+  assert.equal(activityIdentity('helper', [{ type: 'text', text: 'answer' }]), 'helper:writing')
+})
+
+check('elapsed time uses compact whole units at each boundary', () => {
+  assert.equal(formatElapsed(0), '0s')
+  assert.equal(formatElapsed(37.9), '37s')
+  assert.equal(formatElapsed(59), '59s')
+  assert.equal(formatElapsed(60), '1m 0s')
+  assert.equal(formatElapsed(90), '1m 30s')
+  assert.equal(formatElapsed(631), '10m 31s')
+  assert.equal(formatElapsed(3599), '59m 59s')
+  assert.equal(formatElapsed(3600), '1h 0m 0s')
+  assert.equal(formatElapsed(4830), '1h 20m 30s')
 })
 
 check('source offsets preserve LF, CRLF, blank lines and final newline', () => {
@@ -485,6 +545,37 @@ check('returning to an identical IPC snapshot reuses measured text', () => {
   layoutTranscript({ ...input, messages: structuredClone(longMessages) }, cache)
   assert.ok(calls < initialCalls / 3, `revisit ${calls} versus cold ${initialCalls}`)
 })
+check(
+  'bot identity preserves measured text on remount and still invalidates renamed headers',
+  () => {
+    let calls = 0
+    const counted = {
+      ...metrics,
+      measure: (value: string, f: ReturnType<typeof font>) => {
+        calls++
+        return metrics.measure(value, f)
+      }
+    } as unknown as TextMetrics
+    for (const messages of [[longMessages[149]], longMessages]) {
+      const cache = new BlockCache()
+      const input = { ...longInput(messages), metrics: counted, botUsername: 'helper' }
+      calls = 0
+      layoutTranscript(input, cache)
+      const cold = calls
+      cache.detach()
+      calls = 0
+      const revisited = layoutTranscript(
+        { ...input, messages: structuredClone(messages), view: view() },
+        cache
+      )
+      if (messages.length > 1) assert.ok(calls < cold / 2, `remount ${calls} versus cold ${cold}`)
+      assert.ok(JSON.stringify(revisited.blocks.at(-1)!.nodes).includes('@helper'))
+      const renamed = layoutTranscript({ ...input, botUsername: 'reviewer' }, cache)
+      assert.ok(JSON.stringify(renamed.blocks.at(-1)!.nodes).includes('@reviewer'))
+      assert.ok(!JSON.stringify(renamed.blocks.at(-1)!.nodes).includes('@helper'))
+    }
+  }
+)
 check('changed text invalidates cached parts despite stable message ids', () => {
   const cache = new BlockCache()
   const input = longInput(longMessages)
@@ -695,26 +786,118 @@ check('a new canvas host cannot reuse stale expanded diff controls', () => {
 })
 check('an empty streaming turn remains visible beside windowed history', () => {
   const state = view()
-  const input = { ...longInput(longMessages, state), streaming: [], now: 1234 }
+  const input = {
+    ...longInput(longMessages, state),
+    streaming: [],
+    activityStartedAt: 1234,
+    now: 1234
+  }
   const scene = layoutTranscript(input, new BlockCache())
   assert.ok(scene.blocks.at(-1)!.animated)
   assert.ok(JSON.stringify(scene.blocks.at(-1)!.nodes).includes('braille'))
   assert.ok(JSON.stringify(scene.blocks.at(-1)!.nodes).includes('elapsed'))
-  assert.equal(state.startedAt.get('__turn__'), 1234)
-  layoutTranscript({ ...input, streaming: null, now: 5000 }, new BlockCache())
-  assert.equal(state.startedAt.has('__turn__'), false)
 })
-check('a quiet live turn restores working after visible prose', () => {
+check('one live turn keeps its activity row and start time across updates', () => {
+  const state = view()
+  const cache = new BlockCache()
   const input = {
-    ...longInput(longMessages),
-    streaming: [{ type: 'text' as const, text: 'I found the integration issue.' }]
+    ...longInput([], state),
+    streaming: [] as MessagePart[],
+    activityStartedAt: 1000,
+    botUsername: 'bot',
+    now: 1000,
+    viewport: undefined,
+    activityRandom: () => 0
   }
-  const active = layoutTranscript(input, new BlockCache())
-  assert.equal(JSON.stringify(active.blocks.at(-1)!.nodes).includes('braille'), false)
+  const startedAt = (scene: Scene): number | undefined => {
+    const elapsed = scene.blocks.at(-1)?.nodes.find((node) => node.kind === 'elapsed')
+    return elapsed?.kind === 'elapsed' ? elapsed.startedAt : undefined
+  }
 
-  const quiet = layoutTranscript({ ...input, quiet: true }, new BlockCache())
-  assert.ok(quiet.blocks.at(-1)!.animated)
-  assert.ok(JSON.stringify(quiet.blocks.at(-1)!.nodes).includes('braille'))
+  const thinking = layoutTranscript(input, cache)
+  assert.equal(startedAt(thinking), 1000)
+  assert.ok(JSON.stringify(thinking.blocks.at(-1)!.nodes).includes('@bot is thinking cosmic magic'))
+
+  const writing = layoutTranscript(
+    {
+      ...input,
+      now: 38_000,
+      streaming: [{ type: 'text', text: 'Still producing the same reply.' }]
+    },
+    cache
+  )
+  assert.equal(startedAt(writing), 1000)
+  assert.ok(writing.blocks.at(-1)!.animated)
+  assert.ok(JSON.stringify(writing.blocks.at(-1)!.nodes).includes('@bot is writing cosmic magic'))
+
+  const elapsedX = (scene: Scene): number | undefined => {
+    const elapsed = scene.blocks.at(-1)?.nodes.find((node) => node.kind === 'elapsed')
+    return elapsed?.kind === 'elapsed' ? elapsed.x : undefined
+  }
+  const rotated = layoutTranscript(
+    { ...input, now: 48_000, streaming: [{ type: 'text', text: 'Still writing.' }] },
+    cache
+  )
+  assert.equal(startedAt(rotated), 1000, 'phrase rotation does not reset elapsed time')
+  assert.equal(
+    elapsedX(rotated),
+    elapsedX(writing),
+    'phrase lengths keep the timer position stable'
+  )
+  assert.ok(
+    JSON.stringify(rotated.blocks.at(-1)!.nodes).includes('@bot is writing immortal crab thoughts')
+  )
+
+  const usingTool = layoutTranscript(
+    {
+      ...input,
+      activityStartedAt: 60_000,
+      now: 61_000,
+      streaming: [{ type: 'tool', tool: 'bash', state: 'running', title: 'npm test' }]
+    },
+    cache
+  )
+  assert.equal(startedAt(usingTool), 60_000, 'a tool start resets the inactivity timer')
+
+  const remounted = layoutTranscript(
+    {
+      ...input,
+      view: view(),
+      activityStartedAt: 60_000,
+      now: 65_000,
+      streaming: [{ type: 'text', text: 'Back from another session.' }]
+    },
+    new BlockCache()
+  )
+  assert.equal(startedAt(remounted), 60_000, 'a remounted chat keeps its activity timestamp')
+
+  layoutTranscript({ ...input, streaming: null, now: 62_000 }, cache)
+  assert.equal(state.activityPhrase, undefined)
+})
+check('activity timer sits below the copy and narrow copy still ellipsizes', () => {
+  const scene = layoutTranscript(
+    {
+      ...longInput([]),
+      width: 190,
+      streaming: [{ type: 'text', text: 'Still writing.' }],
+      botUsername: 'extra-long-helper-name',
+      activityRandom: () => 0,
+      viewport: undefined
+    },
+    new BlockCache()
+  )
+  const nodes = JSON.stringify(scene.blocks.at(-1)!.nodes)
+  assert.ok(nodes.includes('…'), 'the label uses an ellipsis instead of compressed glyphs')
+  const label = scene.blocks
+    .at(-1)!
+    .nodes.flatMap((node) => (node.kind === 'pulse' ? node.children : []))
+    .find((node) => node.kind === 'text')
+  const elapsed = scene.blocks.at(-1)!.nodes.find((node) => node.kind === 'elapsed')
+  assert.ok(label?.kind === 'text')
+  assert.ok(elapsed?.kind === 'elapsed')
+  assert.equal(elapsed.x, label.x)
+  assert.ok(elapsed.y > label.y)
+  assert.ok(elapsed.x < scene.width)
 })
 check('live reasoning starts collapsed and can be toggled closed again', () => {
   const state = view()
@@ -756,6 +939,166 @@ check('a dragged selection retains its source rows across viewport boundaries', 
   assert.ok(next.window!.end >= next.window!.scrollTop + 600)
 })
 
+check('bot replies use a round Facehash and username in both transcript layouts', () => {
+  const own = {
+    ...FIXTURES[1],
+    id: 'own-bot-reply',
+    parts: [{ type: 'text' as const, text: 'Ready.' }]
+  }
+  const attributed = { ...own, id: 'attributed-reply', botId: 'bot-1', botUsername: 'old-name' }
+  const bot = {
+    id: 'bot-1',
+    username: 'helper',
+    instructions: '',
+    chatId: 'bot-chat',
+    createdAt: 0
+  }
+  for (const messages of [[own], [attributed], [...longMessages, attributed]]) {
+    const scene = layoutTranscript(
+      {
+        ...longInput(messages),
+        botUsername: 'helper',
+        bots: [bot],
+        botAvatar: (name) => `data:image/svg+xml,${name}`
+      },
+      new BlockCache()
+    )
+    const last = scene.blocks.at(-1)!
+    const nodes = JSON.stringify(last.nodes)
+    assert.ok(nodes.includes('@helper'))
+    assert.ok(nodes.includes('data:image/svg+xml,'))
+    assert.ok(!nodes.includes('__roxy__'))
+    assert.ok(!nodes.includes('@old-name'))
+  }
+  // Work handed over from another session is stored as a USER turn - it is a
+  // prompt for this one - but a bot wrote it and the row says so. Reading the
+  // role alone drew it as "You", crediting it to whoever received it.
+  const fromAnotherSession = {
+    ...own,
+    id: 'cross-session-request',
+    role: 'user' as const,
+    botId: 'bot-1',
+    botUsername: 'helper',
+    parts: [{ type: 'text' as const, text: 'Please review the diff.' }]
+  }
+  for (const messages of [[fromAnotherSession], [...longMessages, fromAnotherSession]]) {
+    const scene = layoutTranscript(
+      {
+        ...longInput(messages),
+        bots: [bot],
+        botAvatar: (name) => `data:image/svg+xml,${name}`
+      },
+      new BlockCache()
+    )
+    const nodes = JSON.stringify(scene.blocks.at(-1)!.nodes)
+    assert.ok(nodes.includes('@helper'), 'a delegated request keeps its author')
+    assert.ok(!nodes.includes('__roxy__'), 'and is not drawn as the person reading it')
+  }
+  // An ordinary user turn is still the user's, with no bot name attached.
+  const typedHere = {
+    ...fromAnotherSession,
+    id: 'typed-here',
+    botId: undefined,
+    botUsername: undefined
+  }
+  assert.ok(
+    !JSON.stringify(
+      layoutTranscript({ ...longInput([typedHere]), bots: [bot] }, new BlockCache()).blocks.at(-1)!
+        .nodes
+    ).includes('@helper'),
+    'what the user typed here is not attributed to a bot'
+  )
+
+  // The HOST answering inside a bot's chat: `botUsername` names the chat owner,
+  // so an unsigned row is drawn as that bot. Roxy signs hers, and must come out
+  // as @roxy with the host avatar - not as @helper wearing the bot's.
+  const bySigningHost = {
+    ...own,
+    id: 'host-reply',
+    botUsername: 'roxy',
+    parts: [{ type: 'text' as const, text: 'Roxy here.' }]
+  }
+  for (const messages of [[bySigningHost], [...longMessages, bySigningHost]]) {
+    const scene = layoutTranscript(
+      {
+        ...longInput(messages),
+        botUsername: 'helper',
+        bots: [bot],
+        botAvatar: (name) => `data:image/svg+xml,${name}`
+      },
+      new BlockCache()
+    )
+    const nodes = JSON.stringify(scene.blocks.at(-1)!.nodes)
+    assert.ok(!nodes.includes('@helper'), 'the host is not drawn as the chat owner')
+    assert.ok(nodes.includes('@roxy'), 'the host is named like any other speaker')
+    assert.ok(nodes.includes('__roxy__'), 'it keeps the host avatar')
+    // The avatar shape is what separates host from guest: square for Roxy,
+    // round for a bot. Naming the host must not hand it the guest treatment.
+    assert.ok(
+      !nodes.includes('data:image/svg+xml,roxy'),
+      'the host keeps its own avatar, not a generated bot one'
+    )
+  }
+  // The same row streaming live, which is the other half of the bug: the
+  // speaker arrives on the turn event before anything is persisted.
+  const liveHost = layoutTranscript(
+    {
+      ...longInput(longMessages),
+      streaming: [],
+      botUsername: 'helper',
+      streamingBot: { botUsername: 'roxy' },
+      bots: [bot],
+      botAvatar: (name) => `data:image/svg+xml,${name}`
+    },
+    new BlockCache()
+  )
+  const liveHostNodes = JSON.stringify(liveHost.blocks.at(-1)!.nodes)
+  assert.ok(!liveHostNodes.includes('@helper'), 'a streaming host is not the chat owner either')
+  assert.ok(liveHostNodes.includes('__roxy__'))
+  // While a turn streams there is no name on the row yet, so the pending
+  // indicator is the only thing saying WHO the wait belongs to.
+  assert.ok(liveHostNodes.includes('@roxy is thinking '), 'a streaming host says who is thinking')
+  const liveGuestIndicator = JSON.stringify(
+    layoutTranscript(
+      {
+        ...longInput(longMessages),
+        streaming: [],
+        botUsername: 'helper',
+        streamingBot: { botId: bot.id, botUsername: 'helper' },
+        bots: [bot],
+        botAvatar: (name) => `data:image/svg+xml,${name}`
+      },
+      new BlockCache()
+    ).blocks.at(-1)!.nodes
+  )
+  assert.ok(
+    liveGuestIndicator.includes('@helper is thinking '),
+    'and a streaming guest is named too, not left as a bare "thinking"'
+  )
+
+  const live = layoutTranscript(
+    { ...longInput(longMessages), streaming: [], botUsername: 'helper' },
+    new BlockCache()
+  )
+  assert.ok(JSON.stringify(live.blocks.at(-1)!.nodes).includes('@helper'))
+  for (const messages of [[own], longMessages]) {
+    const guest = layoutTranscript(
+      {
+        ...longInput(messages),
+        streaming: [],
+        streamingBot: { botId: bot.id, botUsername: 'old-name' },
+        bots: [bot],
+        botAvatar: (name) => `data:image/svg+xml,${name}`
+      },
+      new BlockCache()
+    )
+    const nodes = JSON.stringify(guest.blocks.at(-1)!.nodes)
+    assert.ok(nodes.includes('@helper'), 'a live guest is named in a project transcript')
+    assert.ok(nodes.includes('data:image/svg+xml,'))
+    assert.ok(!nodes.includes('__roxy__'))
+  }
+})
+
 check('Windows terminal lines survive CRLF and ANSI style changes', () => {
   assert.deepEqual(parseAnsi('first\r\nsecond\r\n').map(ansiLineText), ['first', 'second', ''])
   assert.deepEqual(parseAnsi('\u001b[31merror\r\u001b[0m\nnext').map(ansiLineText), [
@@ -782,6 +1125,35 @@ check('short bash cards do not reserve blank ANSI output space', () => {
     600
   )
   assert.ok(height < 90, `One command occupied ${height}px`)
+})
+
+check('expanded tool cards retain a dim lower border', () => {
+  const part: Extract<MessagePart, { type: 'tool' }> = {
+    type: 'tool',
+    tool: 'read',
+    state: 'done',
+    title: 'file.txt',
+    output: 'visible contents'
+  }
+  const builder = new Builder(metrics, theme, { value: 0 }, t)
+  const height = layoutToolCard(
+    builder,
+    { part, id: 'read', view: view(), open: true, live: false, cancellable: false },
+    0,
+    0,
+    600
+  )
+  const last = sceneOf(builder, height).blocks[0].nodes.at(-1)
+  assert.equal(last?.kind, 'clip')
+  assert.ok(last && last.kind === 'clip')
+  const lowerEdge = last.children.find((node) => node.kind === 'hairline')
+  assert.deepEqual(lowerEdge, {
+    kind: 'hairline',
+    x: 0,
+    y: height - 7,
+    w: 600,
+    color: 'rgba(48, 48, 48, 0.720)'
+  })
 })
 
 check('long bash commands wrap completely instead of being clipped', () => {
@@ -1011,6 +1383,127 @@ check('stream publishing stays frame-coalesced with a non-resetting timer fallba
     globalThis.setTimeout = original.timeout
     globalThis.clearTimeout = original.clear
   }
+})
+
+check(
+  'only known mentions highlight in both roles and layouts; roster changes invalidate caches',
+  () => {
+    const text =
+      'Hola @reviewer, @roxy. @unknown @modelcontextprotocol/sdk @reviewer/sdk user@reviewer.com'
+    const bot = {
+      id: 'mention-bot',
+      username: 'reviewer',
+      instructions: '',
+      chatId: 'bot-chat',
+      createdAt: 0
+    }
+    for (const role of ['user', 'assistant'] as const) {
+      const message = {
+        ...FIXTURES[0],
+        id: 'mention-message',
+        role,
+        parts: [{ type: 'text' as const, text }]
+      }
+      for (const messages of [[message], [...longMessages, message]]) {
+        const cache = new BlockCache()
+        const input = { ...longInput(messages), bots: [bot] }
+        const highlighted = (scene: Scene) =>
+          scene.blocks
+            .at(-1)!
+            .selectable.flatMap((line) => line.runs)
+            .filter((run) => run.color === theme.palette.accent)
+            .map((run) => run.text)
+            .join('')
+        assert.equal(highlighted(layoutTranscript(input, cache)), '@reviewer@roxy')
+        assert.equal(highlighted(layoutTranscript({ ...input, bots: [] }, cache)), '@roxy')
+        assert.equal(
+          highlighted(
+            layoutTranscript({ ...input, bots: [{ ...bot, username: 'unknown' }] }, cache)
+          ),
+          '@roxy@unknown'
+        )
+      }
+    }
+  }
+)
+
+check('bot_invoke chip tracks the queued guest', () => {
+  const part = {
+    type: 'tool' as const,
+    tool: 'bot_invoke',
+    state: 'done' as const,
+    input: { bot: 'reviewer', prompt: 'look' },
+    output: JSON.stringify({ id: 'q1', content: '@reviewer look' })
+  }
+  assert.equal(
+    invokeChip(part, [
+      {
+        id: 'q1',
+        chatId: 'c',
+        content: '@reviewer look',
+        createdAt: 1,
+        state: 'pending'
+      } as QueueItem
+    ]).kind,
+    'calling'
+  )
+  assert.equal(
+    invokeChip(part, [
+      {
+        id: 'q1',
+        chatId: 'c',
+        content: '@reviewer look',
+        createdAt: 1,
+        state: 'running'
+      } as QueueItem
+    ]).kind,
+    'calling'
+  )
+  assert.equal(
+    invokeChip(part, [
+      {
+        id: 'q1',
+        chatId: 'c',
+        content: '@reviewer look',
+        createdAt: 1,
+        state: 'failed'
+      } as QueueItem
+    ]).kind,
+    'failed'
+  )
+  assert.equal(invokeChip(part, []).kind, 'replied')
+  assert.equal(invokeChip({ ...part, state: 'running' }, []).kind, 'calling')
+  assert.equal(invokeChip({ ...part, state: 'error' }, []).kind, 'failed')
+  assert.equal(invokeChip(part, []).name, 'reviewer')
+
+  // A pending row for a DIFFERENT call must not satisfy this card.
+  assert.equal(
+    invokeChip(part, [
+      { id: 'other', chatId: 'c', content: 'x', createdAt: 1, state: 'pending' } as QueueItem
+    ]).kind,
+    'replied'
+  )
+
+  // An empty queue is only evidence once it has actually loaded. On a reload
+  // the store starts at [] and fills in after the fetch, so reading absence as
+  // an answer announced "@reviewer replied" for a call still waiting.
+  assert.equal(invokeChip(part, [], false).kind, 'calling')
+  assert.equal(invokeChip(part, [], true).kind, 'replied')
+
+  // Output with no id cannot be correlated at all - a transcript older than
+  // this field, or a result that did not serialize. Claiming an outcome there
+  // is inventing one, so no chip is shown.
+  assert.equal(invokeChip({ ...part, output: 'queued' }, []).kind, 'none')
+  assert.equal(invokeChip({ ...part, output: undefined }, []).kind, 'none')
+  // ...but a live or failed call still reports itself without needing an id.
+  assert.equal(invokeChip({ ...part, output: undefined, state: 'running' }, []).kind, 'calling')
+  assert.equal(invokeChip({ ...part, output: undefined, state: 'error' }, []).kind, 'failed')
+
+  // The handle is display-only and must survive the shapes users actually type.
+  assert.equal(invokeChip({ ...part, input: { bot: '@reviewer' } }, []).name, 'reviewer')
+  assert.equal(invokeChip({ ...part, input: { bot: '  spaced  ' } }, []).name, 'spaced')
+  assert.equal(invokeChip({ ...part, input: {} }, []).name, 'bot')
+  assert.equal(invokeChip({ ...part, input: { bot: 42 } as never }, []).name, 'bot')
 })
 
 console.log(`DIFF/CANVAS MODEL OK - ${checks} checks passed`)

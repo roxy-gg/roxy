@@ -196,7 +196,7 @@ for (const pending of ['finished', 'deleted', null, 'failed', 'onboarding']) {
     },
     providers: { listConnected: async () => [] },
     chats: { list: async () => chats },
-    loops: { list: async () => [] },
+    bots: { list: async () => [] },
     projects: { listOrder: async () => [] },
     notifications: {
       onActivated(callback) {
@@ -223,7 +223,8 @@ for (const pending of ['finished', 'deleted', null, 'failed', 'onboarding']) {
     let hiddenModelsLoaded = true, notifyActivatedSubscribed = false;
     const modelCatalogInflight = new Map();
     const applyLanguage = async () => {};
-    const loopTickSubscribed = true, llmDeltaSubscribed = true,
+    const pruneComposerDrafts = (drafts) => drafts;
+    const botsSubscribed = true, automationSubscribed = true, llmDeltaSubscribed = true,
       chatsUpdatedSubscribed = true, taskUpdateSubscribed = true,
       subagentDeltaSubscribed = true, remoteStateSubscribed = true, remoteDeltaSubscribed = true;
     ${bootstrapCode}
