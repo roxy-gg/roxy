@@ -977,6 +977,35 @@ check('short bash cards do not reserve blank ANSI output space', () => {
   assert.ok(height < 90, `One command occupied ${height}px`)
 })
 
+check('expanded tool cards retain a dim lower border', () => {
+  const part: Extract<MessagePart, { type: 'tool' }> = {
+    type: 'tool',
+    tool: 'read',
+    state: 'done',
+    title: 'file.txt',
+    output: 'visible contents'
+  }
+  const builder = new Builder(metrics, theme, { value: 0 }, t)
+  const height = layoutToolCard(
+    builder,
+    { part, id: 'read', view: view(), open: true, live: false, cancellable: false },
+    0,
+    0,
+    600
+  )
+  const last = sceneOf(builder, height).blocks[0].nodes.at(-1)
+  assert.equal(last?.kind, 'clip')
+  assert.ok(last && last.kind === 'clip')
+  const lowerEdge = last.children.find((node) => node.kind === 'hairline')
+  assert.deepEqual(lowerEdge, {
+    kind: 'hairline',
+    x: 0,
+    y: height - 7,
+    w: 600,
+    color: 'rgba(48, 48, 48, 0.720)'
+  })
+})
+
 check('long bash commands wrap completely instead of being clipped', () => {
   const command = 'Copy-Item ' + '"C:\\long folder\\file.txt" '.repeat(12) + '-Force'
   const part: Extract<MessagePart, { type: 'tool' }> = {

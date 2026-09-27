@@ -197,6 +197,14 @@ export function layoutToolCard(
 
   layoutHeader(builder, input, x, top, width)
 
+  if (open) {
+    // Expanded bodies paint after the frame and can cover its lower stroke.
+    // Restore that edge last, but keep it quieter than the top-lit frame.
+    builder.clipped(x, top, width, height, SPACE.radiusLg, () => {
+      builder.hairline(x, top + height - 1, width, alpha(palette.border, 0.72))
+    })
+  }
+
   return height + SPACE.cardMarginY * 2
 }
 
