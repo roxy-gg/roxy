@@ -4,9 +4,18 @@ const { mkdtempSync, rmSync } = require('node:fs')
 const path = require('node:path')
 const temp = mkdtempSync(path.join(require('node:os').tmpdir(), 'roxy-mentions-ui-'))
 app.setPath('userData', temp)
+let server
 let win
 const wait = () => new Promise((resolve) => setTimeout(resolve, 150))
 const evaluate = (code) => win.webContents.executeJavaScript(`(async () => { ${code} })()`, true)
+const waitFor = async (selector, timeout = 15000) => {
+  const deadline = Date.now() + timeout
+  while (Date.now() < deadline) {
+    if (await evaluate(`return !!document.querySelector(${JSON.stringify(selector)})`)) return
+    await wait()
+  }
+  throw new Error(`Timed out waiting for selector: ${selector}`)
+}
 const click = async (selector) => {
   await evaluate(`
     const target = document.querySelector(${JSON.stringify(selector)})
@@ -26,6 +35,16 @@ const highlights = () =>
   )
 const send = () => click('button[title="Send"], button[title="Add to queue"]')
 async function run() {
+  let url = process.env.BOTS_TEST_URL
+  if (!url) {
+    const { createServer } = await import('vite')
+    server = await createServer({
+      configFile: path.join(__dirname, 'vite.config.mjs'),
+      server: { port: 3114, strictPort: true }
+    })
+    await server.listen()
+    url = 'http://localhost:3114/?bots'
+  }
   win = new BrowserWindow({
     width: 1280,
     height: 840,
@@ -33,18 +52,38 @@ async function run() {
     webPreferences: { contextIsolation: true, nodeIntegration: false, backgroundThrottling: false }
   })
   win.webContents.debugger.attach('1.3')
-  await win.loadURL(process.env.BOTS_TEST_URL || 'http://localhost:3130/?bots')
-  await new Promise((resolve) => setTimeout(resolve, 1500))
+  await win.loadURL(url)
+  await waitFor('button[title="New bot"]')
   await click('button[title="New bot"]')
   await evaluate(`await window.__renameBot('bot', 'reviewer')`)
   await wait()
   const bot = await evaluate(`return (await window.roxy.bots.list())[0]`)
-  await click('#answer')
+  win.setSize(390, 840)
+  await wait()
+  assert.deepEqual(
+    await evaluate(`
+      const textarea = document.querySelector('textarea')
+      const mirror = textarea.previousElementSibling
+      return {
+        oneLine: textarea.getBoundingClientRect().height < 40,
+        nativePlaceholder: textarea.placeholder,
+        visiblePlaceholder: mirror.textContent.trim().length > 40
+      }
+    `),
+    { oneLine: true, nativePlaceholder: '', visiblePlaceholder: true },
+    'localized placeholder stays visible without changing the empty composer height'
+  )
+  win.setSize(1280, 840)
+  await wait()
+  for (let i = 0; i < 24; i++) await click('#answer')
   await evaluate(`
     const textarea = document.querySelector('textarea')
     const canvas = document.querySelector('[data-canvas-surface]')
+    if (canvas.scrollHeight <= canvas.clientHeight) throw new Error('Transcript fixture must scroll')
+    canvas.scrollTop = canvas.scrollHeight
     window.__composerSizing = {
       initialHeight: textarea.getBoundingClientRect().height,
+      initialScrollTop: canvas.scrollTop,
       styleMutations: 0,
       canvasResizes: 0
     }
@@ -67,6 +106,7 @@ async function run() {
         sameHeight: textarea.getBoundingClientRect().height === window.__composerSizing.initialHeight,
         styleMutations: window.__composerSizing.styleMutations,
         canvasResizes: window.__composerSizing.canvasResizes,
+        sameScrollTop: canvas.scrollTop === window.__composerSizing.initialScrollTop,
         atBottom: Math.abs(canvas.scrollHeight - canvas.clientHeight - canvas.scrollTop) < 2
       }
     `),
@@ -75,6 +115,7 @@ async function run() {
       sameHeight: true,
       styleMutations: 0,
       canvasResizes: 0,
+      sameScrollTop: true,
       atBottom: true
     },
     'ordinary typing does not collapse or resize the canvas viewport'
@@ -278,15 +319,24 @@ async function run() {
     'MENTIONS UI OK: known highlights only, no automatic routing, unrestricted sends, renames, autocomplete and mobile'
   )
 }
+const watchdog = setTimeout(() => {
+  console.error('MENTIONS UI TIMEOUT')
+  app.exit(1)
+}, 120000)
+
 app
   .whenReady()
   .then(run)
-  .then(() => {
+  .then(async () => {
+    clearTimeout(watchdog)
     win.destroy()
+    await server?.close()
     app.quit()
   })
-  .catch((error) => {
+  .catch(async (error) => {
+    clearTimeout(watchdog)
     console.error(error)
+    await server?.close()
     app.exit(1)
   })
 app.on('will-quit', () => {

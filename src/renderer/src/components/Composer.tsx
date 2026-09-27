@@ -227,6 +227,11 @@ export function Composer({
   }
 
   // Only known collaborators get a tint. A mention never chooses the responder.
+  const placeholder = sending
+    ? onStop
+      ? t('composer.queuePlaceholderStop')
+      : t('composer.queuePlaceholder')
+    : t('composer.placeholder')
   const highlighted = value
     .split(new RegExp(`(${MENTION.source})`, MENTION.flags))
     .map((chunk, i) => {
@@ -363,7 +368,7 @@ export function Composer({
             aria-hidden
             className="pointer-events-none absolute inset-0 max-h-[168px] overflow-hidden whitespace-pre-wrap break-words px-4 pt-3 text-sm text-transparent"
           >
-            {highlighted}
+            {value ? highlighted : <span className="text-text-subtle">{placeholder}</span>}
           </div>
           {/* Native content sizing avoids collapsing the flex sibling canvas to
               measure scrollHeight on every keystroke. */}
@@ -380,13 +385,6 @@ export function Composer({
             onFocus={() => setFocused(true)}
             onBlur={() => setFocused(false)}
             onSelect={(e) => setCaret(e.currentTarget.selectionStart)}
-            placeholder={
-              sending
-                ? onStop
-                  ? t('composer.queuePlaceholderStop')
-                  : t('composer.queuePlaceholder')
-                : t('composer.placeholder')
-            }
             onChange={(e) => {
               setValue(e.target.value)
               setError('')
@@ -399,7 +397,7 @@ export function Composer({
             onScroll={(e) => {
               if (mirror.current) mirror.current.scrollTop = e.currentTarget.scrollTop
             }}
-            className="relative block max-h-[168px] w-full resize-none overflow-y-auto bg-transparent px-4 pt-3 text-sm text-transparent caret-text outline-none [field-sizing:content] placeholder:text-text-subtle"
+            className="relative block max-h-[168px] w-full resize-none overflow-y-auto bg-transparent px-4 pt-3 text-sm text-transparent caret-text outline-none [field-sizing:content]"
           />
         </div>
         <div className="flex items-center justify-between gap-2 px-2.5 pb-2 pt-1.5">
