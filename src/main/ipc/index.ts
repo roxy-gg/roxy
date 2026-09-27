@@ -526,6 +526,7 @@ export function registerIpc(): void {
     // above the page, so CSS cannot reach them -- they have to be repainted
     // here or they keep the old theme's colors in the corner of the window.
     applyWindowChromeAll(resolved)
+    browser.applyThemeToErrorPages(resolved)
     for (const win of BrowserWindow.getAllWindows()) {
       try {
         if (!win.isDestroyed()) win.webContents.send(CHANNELS.themesChanged, resolved)

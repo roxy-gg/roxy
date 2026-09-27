@@ -31,6 +31,7 @@ import { CHANNELS } from '../../shared/ipc'
 import type { BrowserState, BrowserTab } from '../../shared/api'
 import { attachNativeContextMenu } from './context-menu'
 import { BROWSER_PARTITION, ensureApplied as ensureProxyApplied } from './browser-proxy'
+import type { ResolvedTheme } from '../../shared/theme'
 
 /** Persisted session â†’ cookies, localStorage and logins survive app restarts. */
 export const PARTITION = BROWSER_PARTITION
@@ -63,6 +64,10 @@ export interface ConsoleEntry {
 interface Tab {
   id: string
   view: BrowserView
+  /** The real URL represented by our internal load-error document. */
+  errorUrl?: string
+  errorPageUrl?: string
+  errorSeq: number
 }
 
 /** One isolated browser â€” a window + its tabs + console, owned by a session key. */
@@ -234,7 +239,7 @@ function createTab(s: Session, rawUrl?: string): string {
     }
   })
   const id = `tab-${++s.tabSeq}`
-  const tab: Tab = { id, view }
+  const tab: Tab = { id, view, errorSeq: 0 }
   s.tabs.push(tab)
   s.win.addBrowserView(view)
   wireTab(s, tab)
@@ -247,6 +252,155 @@ function createTab(s: Session, rawUrl?: string): string {
   return id
 }
 
+function escapeHtml(value: string): string {
+  return value.replace(
+    /[&<>"']/g,
+    (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]!
+  )
+}
+
+function loadErrorCopy(errorCode: number, host: string): string {
+  switch (errorCode) {
+    case -106:
+      return 'Your internet connection appears to be offline.'
+    case -105:
+      return `We couldn't find an address for ${host}.`
+    case -102:
+      return `${host} refused the connection.`
+    case -118:
+      return `${host} took too long to respond.`
+    case -109:
+      return `${host} couldn't be reached from this network.`
+    case -111:
+    case -130:
+      return 'The browser proxy could not connect to this site.'
+    default:
+      return `${host} didn't answer this time.`
+  }
+}
+
+/** A small themed document shown inside the tab instead of Chromium's blank failure surface. */
+function loadErrorPage(
+  failedUrl: string,
+  errorCode: number,
+  errorDescription: string,
+  theme: ResolvedTheme | null
+): string {
+  let host = failedUrl
+  try {
+    host = new URL(failedUrl).hostname || failedUrl
+  } catch {
+    // Keep the original string when Chromium reports a non-standard URL.
+  }
+  const vars = theme?.vars
+  const bg = vars?.['--color-bg'] ?? '#0a0a0a'
+  const surface = vars?.['--color-surface'] ?? '#141416'
+  const border = vars?.['--color-border'] ?? '#2a2a2e'
+  const text = vars?.['--color-text'] ?? '#f4f4f5'
+  const muted = vars?.['--color-text-muted'] ?? '#a1a1aa'
+  const subtle = vars?.['--color-text-subtle'] ?? '#71717a'
+  const accent = vars?.['--color-accent'] ?? '#7c8cff'
+  const accentHover = vars?.['--color-accent-hover'] ?? accent
+  const contrast = vars?.['--color-white'] ?? '#ffffff'
+  const contrastText = vars?.['--color-black'] ?? '#000000'
+  const fontSans = vars?.['--font-sans'] ?? 'ui-sans-serif, system-ui, sans-serif'
+  const fontMono = vars?.['--font-mono'] ?? 'ui-monospace, SFMono-Regular, Consolas, monospace'
+  const safeCss = (value: string): string => value.replace(/</g, '\\3c ')
+  const detail = errorDescription.replace(/^ERR_/, '').replaceAll('_', ' ').toLowerCase()
+
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Couldn't reach ${escapeHtml(host)}</title>
+  <style>
+    :root {
+      color-scheme: ${theme?.appearance === 'light' ? 'light' : 'dark'};
+      --error-bg: ${safeCss(bg)};
+      --error-surface: ${safeCss(surface)};
+      --error-border: ${safeCss(border)};
+      --error-text: ${safeCss(text)};
+      --error-muted: ${safeCss(muted)};
+      --error-subtle: ${safeCss(subtle)};
+      --error-accent: ${safeCss(accent)};
+      --error-accent-hover: ${safeCss(accentHover)};
+      --error-contrast: ${safeCss(contrast)};
+      --error-contrast-text: ${safeCss(contrastText)};
+      --error-font-sans: ${safeCss(fontSans)};
+      --error-font-mono: ${safeCss(fontMono)};
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 40px 24px; background: var(--error-bg); color: var(--error-text); font-family: var(--error-font-sans); }
+    main { width: min(100%, 520px); }
+    .illustration { position: relative; width: 116px; height: 116px; margin-bottom: 28px; display: grid; place-items: center; border: 1px solid var(--error-border); border-radius: 32px; background: var(--error-surface); transform: rotate(-2deg); }
+    .spark { position: absolute; right: -9px; top: 13px; width: 25px; height: 25px; color: var(--error-accent); }
+    svg { width: 72px; height: 72px; color: var(--error-muted); transform: rotate(2deg); }
+    h1 { margin: 0; font-size: clamp(27px, 4vw, 36px); line-height: 1.12; letter-spacing: -0.035em; text-wrap: balance; }
+    .host { color: var(--error-accent); overflow-wrap: anywhere; }
+    .message { margin: 14px 0 0; max-width: 440px; color: var(--error-muted); font-size: 15px; line-height: 1.65; text-wrap: pretty; }
+    .actions { display: flex; align-items: center; gap: 14px; margin-top: 28px; }
+    .retry { display: inline-flex; min-height: 40px; align-items: center; justify-content: center; padding: 0 18px; border-radius: 12px; background: var(--error-contrast); color: var(--error-contrast-text); font-size: 14px; font-weight: 650; text-decoration: none; transition: transform 140ms cubic-bezier(.23, 1, .32, 1), opacity 140ms ease; }
+    .retry:focus-visible { outline: 2px solid var(--error-accent); outline-offset: 3px; }
+    .retry:active { transform: scale(.97); }
+    .hint { color: var(--error-subtle); font-size: 12px; }
+    .detail { margin-top: 44px; color: var(--error-subtle); font-family: var(--error-font-mono); font-size: 11px; letter-spacing: .02em; }
+    @media (hover: hover) and (pointer: fine) { .retry:hover { opacity: .82; transform: translateY(-1px); } }
+    @media (max-width: 520px) { body { place-items: start; padding-top: 14vh; } .actions { align-items: flex-start; flex-direction: column; gap: 10px; } }
+    @media (prefers-reduced-motion: reduce) { .retry { transition: opacity 140ms ease; } .retry:active { transform: none; } }
+  </style>
+</head>
+<body>
+  <main id="roxy-browser-error">
+    <div class="illustration" aria-hidden="true">
+      <svg viewBox="0 0 80 80" fill="none">
+        <path d="M25 14v12m30-12v12M19 12h12v13a9 9 0 0 1-9 9h-3V12Zm30 0h12v22h-3a9 9 0 0 1-9-9V12Z" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M40 31v12c0 8-6 14-14 14H16" stroke="currentColor" stroke-width="4" stroke-linecap="round"/>
+        <path d="M13 51 7 57l6 6" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M47 55c4-4 11-4 15 0m-12 9h9" stroke="currentColor" stroke-width="4" stroke-linecap="round"/>
+      </svg>
+      <svg class="spark" viewBox="0 0 24 24" fill="none"><path d="m12 2 1.6 6.4L20 10l-6.4 1.6L12 18l-1.6-6.4L4 10l6.4-1.6L12 2Z" fill="currentColor"/></svg>
+    </div>
+    <h1>We couldn't reach <span class="host">${escapeHtml(host)}</span></h1>
+    <p class="message">${escapeHtml(loadErrorCopy(errorCode, host))} Check the address or your connection, then give it another try.</p>
+    <div class="actions">
+      <a class="retry" href="${escapeHtml(failedUrl)}">Try again</a>
+      <span class="hint">You can also use the reload button above.</span>
+    </div>
+    <div class="detail">${escapeHtml(detail)} &middot; ${errorCode}</div>
+  </main>
+</body>
+</html>`
+}
+
+async function showLoadError(
+  s: Session,
+  tab: Tab,
+  failedUrl: string,
+  errorCode: number,
+  errorDescription: string
+): Promise<void> {
+  if (!failedUrl || tab.view.webContents.isDestroyed()) return
+  const token = ++tab.errorSeq
+  tab.errorUrl = failedUrl
+  pushState(s)
+  pushTabs(s)
+  const theme = await resolveThemeById(getSettings().activeThemeId, chromePlatform()).catch(
+    () => null
+  )
+  if (tab.errorSeq !== token || tab.errorUrl !== failedUrl || tab.view.webContents.isDestroyed()) {
+    return
+  }
+  const html = loadErrorPage(failedUrl, errorCode, errorDescription, theme)
+  const errorPageUrl = `data:text/html;charset=utf-8,${encodeURIComponent(html)}`
+  tab.errorPageUrl = errorPageUrl
+  await tab.view.webContents.loadURL(errorPageUrl).catch(() => undefined)
+  if (tab.errorSeq === token) {
+    pushState(s)
+    pushTabs(s)
+  }
+}
+
 /** Console + navigation listeners for a tab's page. */
 function wireTab(s: Session, tab: Tab): void {
   const wc = tab.view.webContents
@@ -257,6 +411,24 @@ function wireTab(s: Session, tab: Tab): void {
     s.consoleLog.push({ level, message, line, url: sourceId, ts: Date.now() })
     if (s.consoleLog.length > MAX_CONSOLE) s.consoleLog = s.consoleLog.slice(-MAX_CONSOLE)
   })
+  const onNav = (): void => {
+    if (tab.id === s.activeTabId) pushState(s)
+    pushTabs(s)
+  }
+  wc.on('did-start-navigation', (_e, url, isInPlace, isMainFrame) => {
+    if (
+      !isMainFrame ||
+      isInPlace ||
+      url === tab.errorPageUrl ||
+      url.startsWith('chrome-error://')
+    ) {
+      return
+    }
+    tab.errorSeq++
+    tab.errorUrl = undefined
+    tab.errorPageUrl = undefined
+    onNav()
+  })
   wc.on('did-fail-load', (_e, errorCode, errorDescription, validatedURL, isMainFrame) => {
     if (isMainFrame && errorCode !== -3 /* not a benign ERR_ABORTED */) {
       s.consoleLog.push({
@@ -264,12 +436,11 @@ function wireTab(s: Session, tab: Tab): void {
         message: `Failed to load ${validatedURL}: ${errorDescription} (${errorCode})`,
         ts: Date.now()
       })
+      if (validatedURL !== tab.errorPageUrl && !validatedURL.startsWith('chrome-error://')) {
+        void showLoadError(s, tab, validatedURL, errorCode, errorDescription)
+      }
     }
   })
-  const onNav = (): void => {
-    if (tab.id === s.activeTabId) pushState(s)
-    pushTabs(s)
-  }
   wc.on('did-navigate', onNav)
   wc.on('did-navigate-in-page', onNav)
   wc.on('did-start-loading', onNav)
@@ -279,17 +450,26 @@ function wireTab(s: Session, tab: Tab): void {
 
 /** Send a session's active-tab navigation state to its toolbar. */
 function pushState(s: Session): void {
-  const v = activeView(s)
-  if (!v || !s.win || s.win.isDestroyed() || s.win.webContents.isDestroyed()) return
-  const wc = v.webContents
+  const tab = s.tabs.find((entry) => entry.id === s.activeTabId)
+  if (!tab || !s.win || s.win.isDestroyed() || s.win.webContents.isDestroyed()) return
+  const wc = tab.view.webContents
+  if (wc.isDestroyed()) return
   const state: BrowserState = {
-    url: wc.getURL(),
-    title: wc.getTitle(),
+    url: tab.errorUrl ?? wc.getURL(),
+    title: tab.errorUrl ? errorTabTitle(tab.errorUrl) : wc.getTitle(),
     canGoBack: wc.navigationHistory.canGoBack(),
     canGoForward: wc.navigationHistory.canGoForward(),
     loading: wc.isLoadingMainFrame()
   }
   s.win.webContents.send(CHANNELS.browserState, state)
+}
+
+function errorTabTitle(url: string): string {
+  try {
+    return `Couldn't reach ${new URL(url).hostname}`
+  } catch {
+    return "Couldn't reach this site"
+  }
 }
 
 /** The open tabs for a session (id, title, url, active). */
@@ -298,8 +478,12 @@ function tabsOf(s: Session): BrowserTab[] {
     const dead = t.view.webContents.isDestroyed()
     return {
       id: t.id,
-      title: dead ? '' : t.view.webContents.getTitle() || 'New tab',
-      url: dead ? '' : t.view.webContents.getURL(),
+      title: dead
+        ? ''
+        : t.errorUrl
+          ? errorTabTitle(t.errorUrl)
+          : t.view.webContents.getTitle() || 'New tab',
+      url: dead ? '' : (t.errorUrl ?? t.view.webContents.getURL()),
       active: t.id === s.activeTabId
     }
   })
@@ -362,7 +546,13 @@ export async function open(
   } catch (e) {
     error = e instanceof Error ? e.message : String(e)
   }
-  return { url: wc.getURL() || url, title: wc.getTitle(), error }
+  const reportedUrl = currentUrl(key) || url
+  const tab = s.tabs.find((entry) => entry.id === s.activeTabId)
+  return {
+    url: reportedUrl,
+    title: tab?.errorUrl ? errorTabTitle(reportedUrl) : wc.getTitle(),
+    error
+  }
 }
 
 export async function screenshot(
@@ -413,8 +603,8 @@ export function getConsole(key: string = DEFAULT_KEY): {
 
 export function currentUrl(key: string = DEFAULT_KEY): string | null {
   const s = peek(key)
-  const v = s ? activeView(s) : null
-  return v ? v.webContents.getURL() : null
+  const tab = s?.tabs.find((entry) => entry.id === s.activeTabId)
+  return tab ? (tab.errorUrl ?? tab.view.webContents.getURL()) : null
 }
 
 /** Close a session's browser (window + all its tabs). */
@@ -434,6 +624,36 @@ export function disposeSession(key: string): void {
 /** Close every browser window (app shutdown). */
 export function closeAll(): void {
   for (const key of [...sessions.keys()]) close(key)
+}
+
+/** Keep already-open internal error pages in step with live theme changes. */
+export function applyThemeToErrorPages(theme: ResolvedTheme): void {
+  const vars = theme.vars
+  const errorVars: Record<string, string> = {
+    '--error-bg': vars['--color-bg'] ?? '#0a0a0a',
+    '--error-surface': vars['--color-surface'] ?? '#141416',
+    '--error-border': vars['--color-border'] ?? '#2a2a2e',
+    '--error-text': vars['--color-text'] ?? '#f4f4f5',
+    '--error-muted': vars['--color-text-muted'] ?? '#a1a1aa',
+    '--error-subtle': vars['--color-text-subtle'] ?? '#71717a',
+    '--error-accent': vars['--color-accent'] ?? '#7c8cff',
+    '--error-accent-hover': vars['--color-accent-hover'] ?? '#7c8cff',
+    '--error-contrast': vars['--color-white'] ?? '#ffffff',
+    '--error-contrast-text': vars['--color-black'] ?? '#000000',
+    '--error-font-sans': vars['--font-sans'] ?? 'ui-sans-serif, system-ui, sans-serif',
+    '--error-font-mono': vars['--font-mono'] ?? 'ui-monospace, SFMono-Regular, Consolas, monospace'
+  }
+  const code = `(() => {
+    document.documentElement.style.colorScheme = ${JSON.stringify(theme.appearance)};
+    const vars = ${JSON.stringify(errorVars)};
+    for (const [name, value] of Object.entries(vars)) document.documentElement.style.setProperty(name, value);
+  })()`
+  for (const s of sessions.values()) {
+    for (const tab of s.tabs) {
+      if (!tab.errorUrl || tab.view.webContents.isDestroyed()) continue
+      void tab.view.webContents.executeJavaScript(code).catch(() => undefined)
+    }
+  }
 }
 
 /** Open a new tab (optionally at a URL) and make it active. */
@@ -532,7 +752,10 @@ export function forward(key: string = DEFAULT_KEY): void {
 
 export function reload(key: string = DEFAULT_KEY): void {
   const s = peek(key)
-  if (s) activeView(s)?.webContents.reload()
+  const tab = s?.tabs.find((entry) => entry.id === s.activeTabId)
+  if (!tab) return
+  if (tab.errorUrl) void navigate(tab.errorUrl, key)
+  else tab.view.webContents.reload()
 }
 
 export function stop(key: string = DEFAULT_KEY): void {
