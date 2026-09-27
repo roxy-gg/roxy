@@ -918,7 +918,10 @@ export function registerIpc(): void {
       | undefined
     repo.removeQueueItem(id)
     remote.notifyQueueChanged()
-    if (item) notifyAutomation(item.chat_id)
+    if (item) {
+      notifyAutomation(item.chat_id)
+      remote.notifyTranscriptChanged(item.chat_id)
+    }
   })
   ipcMain.handle(CHANNELS.queueReorder, (_e, chatId: string, ids: string[]) => {
     repo.reorderQueue(chatId, ids)

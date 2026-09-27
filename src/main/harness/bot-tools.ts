@@ -17,6 +17,7 @@ import { endSubagentRuns } from '../services/subagent-stream'
 import { killSessionBackground } from './tools'
 import { disposeSession } from '../services/browser'
 import { removeWorktreeForChat } from '../services/worktree'
+import { notifyTranscriptChanged } from '../services/remote'
 
 const text = (value: unknown): string => (typeof value === 'string' ? value : '')
 
@@ -274,6 +275,7 @@ export async function runBotTool(
             )
           if (action === 'delete') {
             repo.removeQueueItem(id)
+            notifyTranscriptChanged(row.chat_id)
             result = { deleted: id }
           } else if (action === 'update') {
             const old = repo.listQueue(row.chat_id).find((item) => item.id === id)!

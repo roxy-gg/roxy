@@ -472,6 +472,7 @@ function onFrame(raw: string): void {
       if (typeof frame.id === 'string') {
         try {
           repo.removeQueueItem(frame.id)
+          notifyTranscriptChanged(share.currentSessionId)
         } catch (error) {
           sendFrame({ t: 'error', message: error instanceof Error ? error.message : String(error) })
         }
