@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://jevtools.dev/schemas/jev-script-v1.schema.json",
+  "$id": "https://jevrelay.com/schemas/jev-script-v1.schema.json",
   "title": "Jev Script v1",
   "type": "object",
   "additionalProperties": false,

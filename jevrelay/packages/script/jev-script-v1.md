@@ -57,7 +57,7 @@ Each operation has its own validated arguments. Unknown operations and arguments
 
 ### Decision
 
-Calls the JevTools Relay for a typed, bounded Jev decision.
+Calls the JevRelay API for a typed, bounded Jev decision.
 
 ```ts
 type DecisionStep = {

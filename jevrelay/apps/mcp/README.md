@@ -1,26 +1,26 @@
-# JevTools Local
+# JevRelay MCP
 
-Published package name:
+The local MCP server, published as:
 
 ```text
-@jevtools/mcp
+@jevrelay/mcp
 ```
 
-This package will contain:
+Initial command:
 
 ```text
-src/mcp.ts          local MCP tools and stdio transport
+npx @jevrelay/mcp
+```
+
+Planned layout:
+
+```text
+src/mcp.ts          MCP tools and stdio transport
 src/runtime.ts      Jev Script validation and execution
 src/auth.ts         OAuth PKCE and OS credential storage
-src/relay.ts        authenticated calls to JevTools Relay
+src/relay.ts        authenticated calls to api.jevrelay.com
 src/adapters/
   playwright.ts     first adapter
 ```
 
-The initial command should be:
-
-```text
-npx @jevtools/mcp
-```
-
-Electron is not required. A future desktop UI must reuse this runtime rather than reimplementing automation.
+This app owns all browser and future desktop execution. Electron is not required.

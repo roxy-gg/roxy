@@ -1,84 +1,115 @@
-# JevTools
+# JevRelay
 
-JevTools lets Claude, ChatGPT, Roxy, and other MCP hosts create and run fast local automations.
+JevRelay lets Claude, ChatGPT, Roxy, and other MCP hosts create and run fast local automations.
 
-The AI writes a small declarative Jev Script. JevTools validates it, executes normal actions locally, and calls Jev only for bounded decisions.
+Domain: `jevrelay.com`
+
+## One Repository
+
+Create one GitHub repository named `jevrelay`:
+
+```text
+jevrelay/
+  apps/
+    mcp/          local MCP server and Playwright runtime
+    api/          hosted OAuth and Jev inference relay
+  packages/
+    script/       shared Jev Script schema and types
+  examples/
+    play-video.json
+```
+
+That is all the MVP needs.
+
+Do not create separate client, server, protocol, Playwright, desktop, or Electron repositories. Split repositories only if separate teams or release cycles create a real need later.
+
+## How It Works
 
 ```text
 Claude / ChatGPT / Roxy
--> local JevTools MCP server
--> Playwright or an OS adapter
--> JevTools Relay only when a decision needs inference
+-> @jevrelay/mcp on the user's computer
+-> Playwright runs browser actions locally
+-> api.jevrelay.com is called only for Jev decisions
+-> local runtime verifies the result
 ```
 
-## What We Ship
+The AI creates a declarative Jev Script. The local MCP server validates and runs it. Jev only chooses between known options at explicit `decide` steps.
 
-### 1. JevTools Local
+## Two Deployables
 
-One installable package:
+The single repository produces two things.
+
+### Local MCP
+
+Published as:
 
 ```text
-@jevtools/mcp
+@jevrelay/mcp
 ```
 
-It runs on the user's computer and provides:
-
-- A local MCP server over stdio.
-- A Jev Script validator and runtime.
-- A Playwright browser adapter.
-- OAuth login to the JevTools Relay.
-- Local execution logs, cancellation, and permission checks.
-- Windows UI Automation and macOS Accessibility adapters later.
-
-The browser, cookies, desktop state, and input control stay local.
-
-### 2. JevTools Relay
-
-One hosted service operated by us. Users do not install it.
-
-It provides:
-
-- OAuth and account management.
-- A relay to the TypeSafe Jev API.
-- Usage limits, billing, and our markup.
-- Model routing and version control.
-- Audit metadata without browser credentials or cookies.
-
-The TypeSafe API key stays on our server. The local package receives a short-lived JevTools access token.
-
-Do not call these packages `JevClient` and `JevServer`. In MCP terminology, the local program is already an MCP server. `JevTools Local` and `JevTools Relay` make the boundary clearer.
-
-## OAuth Flow
+Run with:
 
 ```text
-1. User installs @jevtools/mcp.
-2. User or MCP host calls jevtools_auth.
-3. JevTools opens the browser with an OAuth PKCE login URL.
-4. Login returns to a loopback URL on the user's computer.
-5. JevTools stores the refresh token in the OS credential store.
-6. JevTools calls the relay with short-lived access tokens.
-7. The relay meters the Jev inference and returns the typed answer.
+npx @jevrelay/mcp
 ```
 
-The local runtime never receives our upstream TypeSafe API key.
+It contains:
+
+- The MCP tools.
+- The Jev Script runtime.
+- The Playwright adapter.
+- OAuth login.
+- Local permissions, logs, cancellation, retries, and verification.
+
+Browser cookies and computer access stay local.
+
+### Hosted API
+
+Deployed at:
+
+```text
+api.jevrelay.com
+```
+
+It contains:
+
+- OAuth and accounts.
+- The TypeSafe Jev API key.
+- Jev inference routing.
+- Usage limits, billing, and markup.
+
+It never runs browser or desktop actions.
 
 ## MCP Tools
 
-Keep the first MCP surface small:
+Keep the initial surface small:
 
 ```text
-jevtools_auth
-jevtools_validate
-jevtools_run
-jevtools_status
-jevtools_stop
+jevrelay_auth
+jevrelay_validate
+jevrelay_run
+jevrelay_status
+jevrelay_stop
 ```
 
-`jevtools_run` receives a Jev Script plus inputs. The script can contain many local actions, so the MCP host does not pay one model round trip for every click.
+`jevrelay_run` accepts a Jev Script and inputs. One script can run many local Playwright actions, avoiding an AI round trip for every click.
 
-## Jev Script
+## OAuth
 
-A Jev Script is data, not arbitrary JavaScript or shell code.
+```text
+1. User installs @jevrelay/mcp.
+2. jevrelay_auth opens jevrelay.com.
+3. User signs in using OAuth PKCE.
+4. The callback returns to the local MCP process.
+5. The refresh token is stored in the OS credential store.
+6. The MCP process uses short-lived tokens with api.jevrelay.com.
+```
+
+The local package never receives the upstream TypeSafe API key.
+
+## Jev Scripts
+
+A Jev Script is validated data, not arbitrary JavaScript or shell code.
 
 ```json
 {
@@ -87,23 +118,10 @@ A Jev Script is data, not arbitrary JavaScript or shell code.
   "permissions": {
     "origins": ["https://www.youtube.com"]
   },
-  "inputs": {
-    "query": "Roxy"
-  },
   "steps": [
     {
       "action": "browser.goto",
       "url": "https://www.youtube.com"
-    },
-    {
-      "action": "browser.fill",
-      "target": { "role": "combobox", "name": "Search" },
-      "value": "${input.query}"
-    },
-    {
-      "action": "browser.press",
-      "target": { "role": "combobox", "name": "Search" },
-      "key": "Enter"
     },
     {
       "action": "browser.extract",
@@ -114,7 +132,7 @@ A Jev Script is data, not arbitrary JavaScript or shell code.
     {
       "decide": {
         "state": "${vars.videos}",
-        "question": "Which video best matches the user's request?",
+        "question": "Which video best matches the request?",
         "optionsFrom": "videos.id",
         "saveAs": "videoId"
       }
@@ -122,87 +140,41 @@ A Jev Script is data, not arbitrary JavaScript or shell code.
     {
       "action": "browser.click",
       "target": { "id": "${vars.videoId}" }
-    },
-    {
-      "action": "browser.assert",
-      "target": { "selector": "video" },
-      "state": "playing"
     }
   ]
 }
 ```
 
-The AI can create this script, but it cannot invent new runtime powers. Every `action` must match an installed adapter operation and pass validation.
+Every action must be implemented by an installed adapter and pass local validation.
 
-See [`protocol/jev-script-v1.md`](protocol/jev-script-v1.md) and the machine-readable [`protocol/jev-script-v1.schema.json`](protocol/jev-script-v1.schema.json) for the initial contract.
+See [`packages/script/jev-script-v1.md`](packages/script/jev-script-v1.md) and [`packages/script/jev-script-v1.schema.json`](packages/script/jev-script-v1.schema.json).
 
-## Fast Path
+## Fast MVP
 
-The speed comes from where work runs:
-
-```text
-Local action
--> local action
--> local action
--> one batched Jev decision when needed
--> local action
--> local verification
-```
-
-Rules for keeping it fast:
-
-- Run Playwright locally.
-- Keep the browser process and context warm during a run.
-- Compile and validate the script once before execution.
-- Use DOM and accessibility data instead of screenshots where possible.
-- Call the relay only for `decide` steps.
-- Batch independent Jev questions into one request.
-- Put retries, waits, and assertions in the local runtime.
-- Return one structured result to the MCP host.
-
-MCP stdio is not the bottleneck. Repeated LLM and screenshot round trips are.
-
-## Electron
-
-Do not start with Electron.
-
-The foundation should be a headless Node.js MCP server and runtime. This works with Claude Desktop, Claude Code, ChatGPT-compatible MCP hosts, Roxy, and other clients without a separate app.
-
-Add an Electron or native tray app later only for:
-
-- Login and account status.
-- Permission management.
-- Run history and live logs.
-- A large stop button.
-- macOS Accessibility permission onboarding.
-
-The UI should call the same local runtime. It should not contain a second automation engine.
-
-## Adapter Order
-
-1. Playwright browser adapter.
-2. Windows UI Automation adapter.
-3. macOS Accessibility adapter.
-4. Optional screen and native input fallback.
-5. Game-specific adapters.
-
-Desktop adapters belong in JevTools Local because they must access the user's machine. The relay only performs inference and account operations.
-
-Games need a different execution loop. MCP can start and stop a game script, but it should not carry every frame or input. Real-time observation and controls must remain local, with Jev used for occasional high-level bounded decisions.
-
-## MVP
-
-Build one vertical slice:
+Build only this flow:
 
 ```text
-install @jevtools/mcp
--> OAuth login
--> AI submits play-video.json
--> local validator approves it
--> Playwright runs locally
--> one decision is sent through the relay to Jev
--> local runtime clicks and verifies playback
--> MCP returns the result and usage
+install @jevrelay/mcp
+-> sign in
+-> submit play-video.json
+-> validate locally
+-> run Playwright locally
+-> call JevRelay once for a bounded decision
+-> click and verify locally
+-> return one structured result
 ```
 
-Do not add desktop control, games, a visual editor, a marketplace, or Electron until this flow is reliable.
+Keep the browser warm during a run. Use DOM and accessibility data instead of screenshots. Put waits, retries, and assertions in the local runtime.
+
+## Not Yet
+
+Do not build these until the browser MVP works:
+
+- Electron app.
+- Windows or macOS desktop control.
+- Game automation.
+- Visual script editor.
+- Marketplace.
+- Additional repositories.
+
+A future Electron or tray app can provide login, permissions, logs, and a stop button while reusing the same local runtime.

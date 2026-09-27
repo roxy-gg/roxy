@@ -1,6 +1,6 @@
-# JevTools Relay
+# JevRelay API
 
-The relay is a hosted service, not an end-user package.
+The hosted service deployed at `api.jevrelay.com`.
 
 ## Minimum API
 
@@ -11,16 +11,16 @@ POST /v1/decide
 GET  /v1/usage
 ```
 
-`POST /v1/decide` accepts the Jev state and typed questions, checks the user's allowance, calls the TypeSafe API with the server-side key, records usage, and returns the typed answers.
+`POST /v1/decide` checks the user's allowance, calls the TypeSafe Jev API with the server-side key, records usage, and returns typed answers.
 
 ## Rules
 
 - Never accept browser cookies or website credentials.
 - Never execute a Jev Script remotely.
-- Never send raw desktop screenshots by default.
+- Never send desktop screenshots by default.
 - Use short-lived access tokens and rotating refresh tokens.
-- Apply account, request-size, and rate limits before upstream inference.
-- Return upstream token usage so the local runtime can report cost.
-- Store only the minimum metadata required for billing and abuse prevention.
+- Enforce request-size, account, and rate limits before inference.
+- Return inference usage to the local runtime.
+- Store only the metadata needed for billing and abuse prevention.
 
-The first implementation can be one small HTTP service. It does not need queues, workers, or a separate routing service until measured load requires them.
+Start with one small HTTP service. Do not add queues or a separate routing service until measured load requires them.
