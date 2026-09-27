@@ -275,6 +275,7 @@ export async function runBotTool(
             )
           if (action === 'delete') {
             repo.removeQueueItem(id)
+            notifyTranscriptChanged(row.chat_id)
             result = { deleted: id }
           } else if (action === 'update') {
             const old = repo.listQueue(row.chat_id).find((item) => item.id === id)!

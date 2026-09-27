@@ -72,8 +72,21 @@ async function main(): Promise<void> {
   migrationDb
     .prepare(`UPDATE queue SET recipient_id = 'roxy', source_chat_id = 'one' WHERE id = 'two'`)
     .run()
+  migrationDb.exec(`
+    INSERT INTO queue(id,chat_id,content,created_at,source_chat_id,message_id)
+      VALUES ('collaborator','two','user-directed prompt',2,'two','two');
+  `)
   for (const upgrade of MIGRATIONS.slice(25))
     typeof upgrade === 'function' ? upgrade(migrationDb) : migrationDb.exec(upgrade)
+  assert.deepEqual(
+    migrationDb.prepare('SELECT id, from_user FROM queue ORDER BY id').all(),
+    [
+      { id: 'collaborator', from_user: 1 },
+      { id: 'one', from_user: 0 },
+      { id: 'two', from_user: 0 }
+    ],
+    'v29 backfills only same-chat requests linked to user messages'
+  )
   assert.deepEqual(
     migrationDb
       .prepare('SELECT recipient_id, as_bot_id, state, error FROM queue WHERE id = ?')
@@ -103,7 +116,7 @@ async function main(): Promise<void> {
     (migrationDb.prepare('SELECT COUNT(*) AS n FROM messages').get() as { n: number }).n,
     2
   )
-  assert.equal((migrationDb.prepare('SELECT COUNT(*) AS n FROM queue').get() as { n: number }).n, 2)
+  assert.equal((migrationDb.prepare('SELECT COUNT(*) AS n FROM queue').get() as { n: number }).n, 3)
   assert.deepEqual(
     migrationDb.prepare('SELECT enabled,next_run_at FROM bot_jobs ORDER BY id').all(),
     [
@@ -133,6 +146,24 @@ async function main(): Promise<void> {
     )
     .run()
   skippedDb.pragma('user_version = 27')
+  skippedDb.exec(`INSERT INTO queue(id,chat_id,content,created_at)
+    VALUES ('skipped-queue','skipped-chat','queued before upgrade',1)`)
+  // Match startup ordering: the migration ladder must finish before repair runs.
+  const skippedVersion = skippedDb.pragma('user_version', { simple: true }) as number
+  for (let version = skippedVersion; version < MIGRATIONS.length; version++) {
+    skippedDb.transaction(() => {
+      const step = MIGRATIONS[version]
+      if (typeof step === 'string') skippedDb.exec(step)
+      else step(skippedDb)
+      skippedDb.pragma(`user_version = ${version + 1}`)
+    })()
+  }
+  assert.equal(skippedDb.pragma('user_version', { simple: true }), MIGRATIONS.length)
+  assert.deepEqual(
+    skippedDb.prepare('SELECT content, source_chat_id, message_id, from_user FROM queue').all(),
+    [{ content: 'queued before upgrade', source_chat_id: null, message_id: null, from_user: 0 }],
+    'v29 repairs its backfill dependencies without changing legacy queue content or origin'
+  )
   repairSchema(skippedDb)
   repairSchema(skippedDb)
   assert.equal((skippedDb.prepare('SELECT COUNT(*) AS n FROM loops').get() as { n: number }).n, 0)
@@ -1100,6 +1131,26 @@ async function main(): Promise<void> {
         editedRequest.messages.some((m) => m.role === 'user' && m.content === editedText),
         'the corrected instruction reaches the model as user-authored'
       )
+      const ipcCancelledChat = repo.createChat({ title: 'IPC cancellation' })
+      const ipcCancelled = await win.webContents.executeJavaScript(
+        `window.roxy.queue.add(${JSON.stringify(ipcCancelledChat.id)}, 'Cancel this collaborator request', undefined, ${JSON.stringify(
+          {
+            sourceChatId: ipcCancelledChat.id,
+            asBotId: worker.id,
+            recipientId: worker.id,
+            fromUser: true
+          }
+        )})`
+      )
+      assert.equal(repo.listMessages(ipcCancelledChat.id).length, 1)
+      await win.webContents.executeJavaScript(
+        `window.roxy.queue.remove(${JSON.stringify(ipcCancelled.id)})`
+      )
+      assert.equal(
+        repo.listMessages(ipcCancelledChat.id).length,
+        0,
+        'IPC cancellation removes the user bubble'
+      )
       repo.addMessage({ chatId: local.id, role: 'user', content: 'Direct turn' })
       const input = {
         requestId: 'test-local-lock',
@@ -1167,6 +1218,65 @@ async function main(): Promise<void> {
         await new Promise((resolve) => setTimeout(resolve, 10))
       assert.ok(!sessionBusy(chatId), 'turn did not settle')
     }
+    const cancelledChat = repo.createChat({ title: 'Cancelled collaborator prompt' })
+    const kept = repo.addMessage({
+      chatId: cancelledChat.id,
+      role: 'user',
+      content: 'Keep this existing context.'
+    })
+    const cancelledText = 'REVIEW CANCELLED INSTRUCTION'
+    const cancelled = enqueuePrompt(cancelledChat.id, cancelledText, undefined, {
+      sourceChatId: cancelledChat.id,
+      asBotId: worker.id,
+      recipientId: worker.id,
+      fromUser: true
+    })
+    const cancelledMessage = repo.listMessages(cancelledChat.id).at(-1)!
+    assert.equal(
+      cancelledMessage.content,
+      cancelledText,
+      'collaborator prompt is eagerly persisted'
+    )
+    getDb().prepare("UPDATE queue SET state = 'running' WHERE id = ?").run(cancelled.id)
+    assert.throws(() => repo.removeQueueItem(cancelled.id), /Stop the session/)
+    assert.equal(repo.listQueue(cancelledChat.id).length, 1)
+    assert.ok(
+      repo.listMessages(cancelledChat.id).some((message) => message.id === cancelledMessage.id)
+    )
+    getDb().prepare("UPDATE queue SET state = 'pending' WHERE id = ?").run(cancelled.id)
+    repo.removeQueueItem(cancelled.id)
+    repo.removeQueueItem(cancelled.id) // Removing an unknown item remains a no-op.
+    assert.equal(repo.listQueue(cancelledChat.id).length, 0)
+    assert.deepEqual(
+      repo.listMessages(cancelledChat.id).map((message) => message.id),
+      [kept.id]
+    )
+    enqueuePrompt(cancelledChat.id, 'REVIEW NEXT TURN')
+    const beforeCancellation = requests.length
+    wakeAutomation()
+    await settle(cancelledChat.id)
+    assert.equal(requests.length, beforeCancellation + 1)
+    const nextContext = JSON.stringify(requests.at(-1)!.messages)
+    assert.ok(nextContext.includes('REVIEW NEXT TURN'))
+    assert.ok(nextContext.includes(kept.content), 'unrelated history is preserved')
+    assert.ok(
+      !nextContext.includes(cancelledText),
+      'cancelled instruction is absent from model context'
+    )
+
+    const failed = enqueuePrompt(cancelledChat.id, 'Previously attempted request', undefined, {
+      sourceChatId: cancelledChat.id,
+      asBotId: worker.id,
+      fromUser: true
+    })
+    const failedMessage = repo.listMessages(cancelledChat.id).at(-1)!
+    getDb().prepare("UPDATE queue SET state = 'failed' WHERE id = ?").run(failed.id)
+    repo.removeQueueItem(failed.id)
+    assert.ok(
+      repo.listMessages(cancelledChat.id).some((message) => message.id === failedMessage.id),
+      'removing a failed turn preserves its transcript'
+    )
+
     const hostFirst = repo.createChat({
       title: 'Host interprets intent',
       workspacePath: app.getPath('userData')

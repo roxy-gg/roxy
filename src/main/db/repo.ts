@@ -1437,12 +1437,24 @@ export function enqueue(chatId: string, content: string, images?: QueueImage[]):
 }
 
 export function removeQueueItem(id: string): void {
-  const row = getDb().prepare('SELECT state FROM queue WHERE id = ?').get(id) as
-    | { state: string }
-    | undefined
-  if (row?.state === 'running')
-    throw new Error('Stop the session before removing its running message')
-  getDb().prepare(`DELETE FROM queue WHERE id = ? AND state != 'running'`).run(id)
+  const db = getDb()
+  db.transaction(() => {
+    const row = db
+      .prepare('SELECT state, chat_id, source_chat_id, message_id FROM queue WHERE id = ?')
+      .get(id) as
+      | { state: string; chat_id: string; source_chat_id: string | null; message_id: string | null }
+      | undefined
+    if (row?.state === 'running')
+      throw new Error('Stop the session before removing its running message')
+    // Send to @bot persists its user bubble before delivery. Cancelling that
+    // pending request must remove it from history too, not just stop delivery.
+    if (row?.state === 'pending' && row.source_chat_id === row.chat_id && row.message_id)
+      db.prepare("DELETE FROM messages WHERE id = ? AND chat_id = ? AND role = 'user'").run(
+        row.message_id,
+        row.chat_id
+      )
+    db.prepare(`DELETE FROM queue WHERE id = ? AND state != 'running'`).run(id)
+  })()
 }
 
 /** Edit a queued item's text + images in place, keeping its `created_at` (so its
