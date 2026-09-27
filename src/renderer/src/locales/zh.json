@@ -585,7 +585,7 @@
     "deleteSubagentSession": "删除子代理会话",
     "empty": "暂无会话 — 打开文件夹以开始。",
     "expand": "展开侧边栏",
-    "mcpServers": "MCP 服务器",
+    "mcpServers": "MCP",
     "menu": {
       "delete": "删除会话",
       "deleteBusySub": "删除 — 请先取消它",
@@ -597,7 +597,7 @@
     "newProjectTitle": "将文件夹作为新项目打开",
     "newSessionInProject": "在此项目中新建会话",
     "projects": "项目",
-    "remoteWorkspace": "远程工作区",
+    "remoteWorkspace": "远程",
     "resizeHandle": "拖动以调整大小 · 双击以重置",
     "rowDirty": "未提交的更改",
     "rowRepos": "{{count}} 个仓库：{{names}}",

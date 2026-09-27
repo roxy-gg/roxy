@@ -585,7 +585,7 @@
     "deleteSubagentSession": "सबएजेंट सत्र हटाएँ",
     "empty": "अभी तक कोई सत्र नहीं है — एक शुरू करने के लिए एक फ़ोल्डर खोलें।",
     "expand": "साइडबार का विस्तार करें",
-    "mcpServers": "MCP सर्वर",
+    "mcpServers": "MCP",
     "menu": {
       "delete": "सत्र हटाएँ",
       "deleteBusySub": "हटाएँ — पहले इसे रद्द करें",
@@ -597,7 +597,7 @@
     "newProjectTitle": "एक फ़ोल्डर को नए प्रोजेक्ट के रूप में खोलें",
     "newSessionInProject": "इस प्रोजेक्ट में नया सत्र",
     "projects": "प्रोजेक्ट",
-    "remoteWorkspace": "रिमोट वर्कस्पेस",
+    "remoteWorkspace": "रिमोट",
     "resizeHandle": "आकार बदलने के लिए खींचें · रीसेट करने के लिए डबल-क्लिक करें",
     "rowDirty": "अप्रतिबद्ध परिवर्तन",
     "rowRepos": "{{count}} रेपो: {{names}}",

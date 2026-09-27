@@ -585,7 +585,7 @@
     "deleteSubagentSession": "サブエージェントセッションを削除",
     "empty": "まだセッションがありません — フォルダーを開いて開始してください。",
     "expand": "サイドバーを展開",
-    "mcpServers": "MCPサーバー",
+    "mcpServers": "MCP",
     "menu": {
       "delete": "セッションを削除",
       "deleteBusySub": "削除 — まずキャンセルしてください",
@@ -597,7 +597,7 @@
     "newProjectTitle": "フォルダーを新規プロジェクトとして開く",
     "newSessionInProject": "このプロジェクトで新しいセッション",
     "projects": "プロジェクト",
-    "remoteWorkspace": "リモートワークスペース",
+    "remoteWorkspace": "リモート",
     "resizeHandle": "ドラッグしてサイズ変更 · ダブルクリックでリセット",
     "rowDirty": "コミットされていない変更",
     "rowRepos": "{{count}}リポジトリ: {{names}}",

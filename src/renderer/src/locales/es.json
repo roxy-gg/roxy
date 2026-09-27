@@ -585,7 +585,7 @@
     "deleteSubagentSession": "Eliminar la sesión del subagente",
     "empty": "Aún no hay sesiones: abre una carpeta para empezar.",
     "expand": "Expandir la barra lateral",
-    "mcpServers": "Servidores MCP",
+    "mcpServers": "MCP",
     "menu": {
       "delete": "Eliminar la sesión",
       "deleteBusySub": "Eliminar: cancélalo primero",
@@ -597,7 +597,7 @@
     "newProjectTitle": "Abrir una carpeta como proyecto nuevo",
     "newSessionInProject": "Nueva sesión en este proyecto",
     "projects": "Proyectos",
-    "remoteWorkspace": "Espacio de trabajo remoto",
+    "remoteWorkspace": "Remoto",
     "resizeHandle": "Arrastra para redimensionar · doble clic para restablecer",
     "rowDirty": "cambios sin confirmar",
     "rowRepos": "{{count}} repositorios: {{names}}",

@@ -585,7 +585,7 @@
     "deleteSubagentSession": "حذف جلسة الوكيل الفرعي",
     "empty": "لا توجد جلسات بعد — افتح مجلدًا لبدء واحدة.",
     "expand": "توسيع الشريط الجانبي",
-    "mcpServers": "خوادم MCP",
+    "mcpServers": "MCP",
     "menu": {
       "delete": "حذف الجلسة",
       "deleteBusySub": "حذف — قم بإلغائه أولاً",
@@ -597,7 +597,7 @@
     "newProjectTitle": "افتح مجلدًا كمشروع جديد",
     "newSessionInProject": "جلسة جديدة في هذا المشروع",
     "projects": "المشاريع",
-    "remoteWorkspace": "مساحة العمل عن بُعد",
+    "remoteWorkspace": "عن بعد",
     "resizeHandle": "اسحب لتغيير الحجم · انقر نقرًا مزدوجًا لإعادة التعيين",
     "rowDirty": "تغييرات غير ملتزم بها",
     "rowRepos": "{{count}} مستودعات: {{names}}",
