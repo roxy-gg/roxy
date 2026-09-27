@@ -401,7 +401,9 @@
     "removeFromQueue": "キューから削除",
     "removeImage": "画像を削除",
     "running": "実行中",
-    "saveRetry": "保存して再試行"
+    "saveRetry": "保存して再試行",
+    "toCollaborator": "to @{{username}}",
+    "userRequest": "You"
   },
   "remote": {
     "close": "閉じる（共有は継続）",

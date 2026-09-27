@@ -401,7 +401,9 @@
     "removeFromQueue": "Retirer de la file d'attente",
     "removeImage": "Supprimer l'image",
     "running": "En cours",
-    "saveRetry": "Enregistrer et réessayer"
+    "saveRetry": "Enregistrer et réessayer",
+    "toCollaborator": "to @{{username}}",
+    "userRequest": "You"
   },
   "remote": {
     "close": "Fermer (maintient le partage)",

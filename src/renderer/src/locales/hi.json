@@ -401,7 +401,9 @@
     "removeFromQueue": "कतार से हटाएँ",
     "removeImage": "छवि हटाएँ",
     "running": "चल रहा है",
-    "saveRetry": "सहेजें और पुनः प्रयास करें"
+    "saveRetry": "सहेजें और पुनः प्रयास करें",
+    "toCollaborator": "to @{{username}}",
+    "userRequest": "You"
   },
   "remote": {
     "close": "बंद करें (साझा करना जारी रखता है)",

@@ -401,7 +401,9 @@
     "removeFromQueue": "Quitar de la cola",
     "removeImage": "Quitar la imagen",
     "running": "En ejecución",
-    "saveRetry": "Guardar y reintentar"
+    "saveRetry": "Guardar y reintentar",
+    "toCollaborator": "to @{{username}}",
+    "userRequest": "You"
   },
   "remote": {
     "close": "Cerrar (se sigue compartiendo)",

@@ -401,7 +401,9 @@
     "removeFromQueue": "إزالة من قائمة الانتظار",
     "removeImage": "إزالة الصورة",
     "running": "قيد التشغيل",
-    "saveRetry": "حفظ وإعادة المحاولة"
+    "saveRetry": "حفظ وإعادة المحاولة",
+    "toCollaborator": "to @{{username}}",
+    "userRequest": "You"
   },
   "remote": {
     "close": "إغلاق (يستمر بالمشاركة)",
