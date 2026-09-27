@@ -187,6 +187,16 @@ Object.assign(window.roxy, {
     await useRoxyStore.getState().refreshBots()
     await useRoxyStore.getState().refreshChats()
   }
+;(window as unknown as { __rerenderBotComposer: () => void }).__rerenderBotComposer = () => {
+  const state = useRoxyStore.getState()
+  if (!state.activeChatId) return
+  useRoxyStore.setState({
+    sendingChats: {
+      ...state.sendingChats,
+      [state.activeChatId]: !state.sendingChats[state.activeChatId]
+    }
+  })
+}
 
 export function BotsHarness(): JSX.Element {
   const [ready, setReady] = useState(false)

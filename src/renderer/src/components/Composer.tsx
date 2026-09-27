@@ -243,7 +243,7 @@ export function Composer({
           </span>
         )
       return (
-        <span key={i} className="font-semibold text-accent">
+        <span key={i} className="text-accent">
           {chunk}
         </span>
       )

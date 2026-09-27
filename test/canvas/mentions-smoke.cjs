@@ -8,7 +8,11 @@ let win
 const wait = () => new Promise((resolve) => setTimeout(resolve, 150))
 const evaluate = (code) => win.webContents.executeJavaScript(`(async () => { ${code} })()`, true)
 const click = async (selector) => {
-  await evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`)
+  await evaluate(`
+    const target = document.querySelector(${JSON.stringify(selector)})
+    if (!target) throw new Error('Missing selector: ' + ${JSON.stringify(selector)})
+    target.click()
+  `)
   await wait()
 }
 const type = async (text) => {
@@ -76,6 +80,107 @@ async function run() {
   assert.deepEqual(await highlights(), [], 'removed handles stop highlighting')
   await type('Hola @RENAMED!')
   assert.deepEqual(await highlights(), ['@RENAMED'])
+  assert.ok(
+    await evaluate(`
+      const textarea = document.querySelector('textarea')
+      const highlight = document.querySelector('[aria-hidden] span.text-accent')
+      return getComputedStyle(textarea).fontWeight === getComputedStyle(highlight).fontWeight
+    `),
+    'mention color does not change glyph metrics relative to the native textarea caret'
+  )
+  await type('prefix @RENAMED suffix')
+  assert.ok(
+    await evaluate(`
+      const textarea = document.querySelector('textarea')
+      const mirror = textarea.previousElementSibling
+      return textarea.scrollHeight === mirror.scrollHeight
+    `),
+    'the visible mirror wraps the same measured text as the native textarea'
+  )
+  await click('button[title="@renamed"]')
+  await type('prefix @RENAMED suffix')
+  await evaluate(`
+    const textarea = document.querySelector('textarea')
+    textarea.focus()
+    textarea.setSelectionRange(7, 15, 'backward')
+    window.__selectionTarget = textarea
+  `)
+  await evaluate(`window.__rerenderBotComposer()`)
+  await wait()
+  assert.deepEqual(
+    await evaluate(`
+      const textarea = document.querySelector('textarea')
+      return {
+        sameNode: textarea === window.__selectionTarget,
+        active: document.activeElement === textarea,
+        start: textarea.selectionStart,
+        end: textarea.selectionEnd,
+        direction: textarea.selectionDirection,
+        value: textarea.value
+      }
+    `),
+    {
+      sameNode: true,
+      active: true,
+      start: 7,
+      end: 15,
+      direction: 'backward',
+      value: 'prefix @RENAMED suffix'
+    },
+    'bot activity rerenders preserve the editable node and middle selection'
+  )
+  await win.webContents.debugger.sendCommand('Input.insertText', { text: 'bot' })
+  await wait()
+  assert.deepEqual(
+    await evaluate(`
+      const textarea = document.querySelector('textarea')
+      return { start: textarea.selectionStart, end: textarea.selectionEnd, value: textarea.value }
+    `),
+    { start: 10, end: 10, value: 'prefix bot suffix' },
+    'typing after a bot rerender replaces the selected middle text at the native caret'
+  )
+  await type('compose here')
+  await evaluate(`
+    const textarea = document.querySelector('textarea')
+    textarea.focus()
+    textarea.setSelectionRange(8, 8)
+    window.__selectionTarget = textarea
+  `)
+  await win.webContents.debugger.sendCommand('Input.imeSetComposition', {
+    text: '\u3042',
+    selectionStart: 1,
+    selectionEnd: 1
+  })
+  await evaluate(`window.__rerenderBotComposer()`)
+  await wait()
+  assert.deepEqual(
+    await evaluate(`
+      const textarea = document.querySelector('textarea')
+      return {
+        sameNode: textarea === window.__selectionTarget,
+        active: document.activeElement === textarea,
+        start: textarea.selectionStart,
+        end: textarea.selectionEnd,
+        value: textarea.value
+      }
+    `),
+    {
+      sameNode: true,
+      active: true,
+      start: 9,
+      end: 9,
+      value: 'compose \u3042here'
+    },
+    'bot activity rerenders preserve an in-progress IME composition and its caret'
+  )
+  await win.webContents.debugger.sendCommand('Input.insertText', { text: '\u3042' })
+  await wait()
+  assert.equal(
+    await evaluate(`return document.querySelector('textarea').value`),
+    'compose \u3042here',
+    'the IME composition commits after the rerender'
+  )
+  await click('button[title="Project session"]')
   await type('Hola @ro')
   await click('[role=option]')
   assert.equal(await evaluate(`return document.querySelector('textarea').value`), 'Hola @roxy ')
