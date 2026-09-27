@@ -470,6 +470,8 @@ export interface SubagentRunView {
   /** True for a detached (`background: true`) run â€” it outlives its launching turn. */
   background: boolean
   startedAt: number
+  /** Run start or latest tool start, used by the inactivity timer. */
+  activityStartedAt: number
 }
 
 /**
@@ -778,7 +780,13 @@ export interface RoxyApi {
     /** Main owns queued turns; renderers only mirror these events. */
     onDelta(callback: (payload: RemoteDelta) => void): () => void
     snapshot(): Promise<
-      { sessionId: string; parts: MessagePart[]; botId?: string; botUsername?: string }[]
+      {
+        sessionId: string
+        parts: MessagePart[]
+        activityStartedAt: number
+        botId?: string
+        botUsername?: string
+      }[]
     >
     onChanged(callback: (chatId: string) => void): () => void
     wake(): Promise<void>

@@ -111,6 +111,8 @@ interface RoxyStore {
   sendingChats: Record<string, boolean>
   /** In-progress assistant parts per chat while a reply streams in. */
   streamingChats: Record<string, MessagePart[]>
+  /** Turn start or latest tool start per chat, retained while switching views. */
+  activityStartedAt: Record<string, number>
   /**
    * The open session's mode, mirrored from its `chat.agentId` for synchronous
    * reads (the composer + the context meter re-render on every keystroke, and
@@ -535,6 +537,28 @@ function cancelStream(chatId: string): void {
   streamPublishers.delete(chatId)
 }
 
+function markActivity(chatId: string, startedAt = Date.now()): void {
+  useRoxyStore.setState((s) => ({
+    activityStartedAt: { ...s.activityStartedAt, [chatId]: startedAt }
+  }))
+}
+
+function clearActivity(chatId: string): void {
+  useRoxyStore.setState((s) => {
+    if (s.activityStartedAt[chatId] === undefined) return s
+    const activityStartedAt = { ...s.activityStartedAt }
+    delete activityStartedAt[chatId]
+    return { activityStartedAt }
+  })
+}
+
+function isToolStart(event: LlmEvent): boolean {
+  return (
+    event.type === 'tool-start' ||
+    (event.type === 'tool-child' && event.event.type === 'tool-start')
+  )
+}
+
 /**
  * Live parts for the in-flight *phone-driven* turn per session, so the desktop
  * mirrors a remote reply token-by-token (the twin of a local send's `parts`).
@@ -739,16 +763,20 @@ function applyRemoteDelta(payload: RemoteDelta): void {
 
   if (payload.kind === 'turn') {
     if (payload.state === 'running') {
+      markActivity(sessionId)
       // Open an empty live bubble (a "thinking" indicator) the moment the turn
       // starts, so the desktop isn't blank while the first token is resolved.
       remoteTurns.set(sessionId, new PartsFold())
       reflect([])
     } else {
       remoteTurns.delete(sessionId)
+      clearActivity(sessionId)
       reflect(null)
     }
     return
   }
+
+  if (isToolStart(payload.event)) markActivity(sessionId)
 
   // A stream event: fold it into this session's live parts through the SAME pure
   // fold the local send and the main process use, so remote mirroring can never
@@ -820,6 +848,7 @@ function applySubagentDelta(payload: SubagentDelta): void {
 
   if (payload.kind === 'run') {
     if (payload.state === 'running') {
+      markActivity(subChatId)
       // Open an empty live bubble the moment the run starts, so a viewer who is
       // already on the session gets the thinking indicator rather than a blank
       // pane while the delegate resolves its first token.
@@ -831,6 +860,7 @@ function applySubagentDelta(payload: SubagentDelta): void {
       return
     }
     subagentTurns.delete(subChatId)
+    clearActivity(subChatId)
     useRoxyStore.setState((s) => {
       const runningSubagents = { ...s.runningSubagents }
       delete runningSubagents[subChatId]
@@ -848,6 +878,8 @@ function applySubagentDelta(payload: SubagentDelta): void {
     })()
     return
   }
+
+  if (payload.event.type === 'tool-start') markActivity(subChatId)
 
   // A stream event: fold it through the SAME pure fold the main process and every
   // other live path use, so a subagent's view can never drift from — or silently
@@ -894,6 +926,10 @@ async function hydrateSubagent(subChatId: string): Promise<void> {
   subagentTurns.set(subChatId, fold)
   useRoxyStore.setState((s) => ({
     runningSubagents: { ...s.runningSubagents, [subChatId]: true },
+    activityStartedAt: {
+      ...s.activityStartedAt,
+      [subChatId]: s.activityStartedAt[subChatId] ?? Date.now()
+    },
     streamingChats: { ...s.streamingChats, [subChatId]: fold.parts }
   }))
 }
@@ -1005,6 +1041,7 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
   messagesError: false,
   sendingChats: {},
   streamingChats: {},
+  activityStartedAt: {},
   activeAgentId: DEFAULT_AGENT_ID,
   projectInstructions: {},
   projectOrder: [],
@@ -1101,6 +1138,10 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
             if ((automationTurnRevisions.get(run.sessionId) ?? 0) > revision) continue
             set((s) => ({
               runningAutomation: { ...s.runningAutomation, [run.sessionId]: true },
+              activityStartedAt: {
+                ...s.activityStartedAt,
+                [run.sessionId]: run.activityStartedAt
+              },
               automationSpeakers: {
                 ...s.automationSpeakers,
                 [run.sessionId]: { botId: run.botId, botUsername: run.botUsername }
@@ -1161,8 +1202,12 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
           if (running.length === 0) return
           set((s) => {
             const runningSubagents = { ...s.runningSubagents }
-            for (const r of running) runningSubagents[r.subChatId] = true
-            return { runningSubagents }
+            const activityStartedAt = { ...s.activityStartedAt }
+            for (const r of running) {
+              runningSubagents[r.subChatId] = true
+              activityStartedAt[r.subChatId] = r.activityStartedAt
+            }
+            return { runningSubagents, activityStartedAt }
           })
           const active = get().activeChatId
           if (active && running.some((r) => r.subChatId === active)) void hydrateSubagent(active)
@@ -1258,11 +1303,13 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
       set((s) => {
         const runningAutomation = { ...s.runningAutomation }
         const streamingChats = { ...s.streamingChats }
+        const activityStartedAt = { ...s.activityStartedAt }
         delete runningAutomation[bot.chatId]
         delete streamingChats[bot.chatId]
+        delete activityStartedAt[bot.chatId]
         const automationSpeakers = { ...s.automationSpeakers }
         delete automationSpeakers[bot.chatId]
-        return { runningAutomation, streamingChats, automationSpeakers }
+        return { runningAutomation, streamingChats, activityStartedAt, automationSpeakers }
       })
       if (get().activeChatId === bot.chatId) get().clearActive()
     }
@@ -1868,13 +1915,21 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
     set((s) => {
       const sendingChats = { ...s.sendingChats }
       const streamingChats = { ...s.streamingChats }
+      const activityStartedAt = { ...s.activityStartedAt }
       const stopChats = { ...s.stopChats }
       delete sendingChats[id]
       delete streamingChats[id]
+      delete activityStartedAt[id]
       delete stopChats[id]
       const automationSpeakers = { ...s.automationSpeakers }
       delete automationSpeakers[id]
-      return { sendingChats, streamingChats, stopChats, automationSpeakers }
+      return {
+        sendingChats,
+        streamingChats,
+        activityStartedAt,
+        stopChats,
+        automationSpeakers
+      }
     })
     if (get().activeChatId === id) get().clearActive()
   },
@@ -2065,6 +2120,7 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
       }
       setStreaming(null)
       setSending(false)
+      clearActivity(chatId)
       clearStop()
       // If a remote (phone) turn landed while this local send was streaming, we
       // deferred the mirror to avoid clobbering the stream — reconcile it now.
@@ -2090,6 +2146,7 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
 
     clearStop()
     setSending(true)
+    markActivity(chatId)
 
     // The user turn carries any pasted/dropped images as image parts ahead of
     // the text, so they persist, render as thumbnails, and reach the model.
@@ -2213,6 +2270,7 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
       deltaHandlers.set(requestId, (event) => {
         if (!chatExists()) return
         parts = fold.apply(event)
+        if (isToolStart(event)) markActivity(chatId)
         if (event.type === 'tool-start') {
           // A `task` just spawned a subagent (its own `sub` session was created
           // in main) — surface it under the parent in the sidebar immediately.

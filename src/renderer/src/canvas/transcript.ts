@@ -48,6 +48,8 @@ export interface LayoutInput {
   messages: Message[]
   /** The live turn's parts, or null when nothing is streaming. */
   streaming: MessagePart[] | null
+  /** Turn start or latest tool start, retained by the per-chat store across view switches. */
+  activityStartedAt?: number
   width: number
   metrics: TextMetrics
   theme: CanvasTheme
@@ -78,7 +80,6 @@ export interface LayoutInput {
 
 /** How long a call must run before its cancel button appears. */
 const CANCEL_REVEAL_MS = 1200
-const TURN_STARTED_AT = '__turn__'
 
 export function layoutTranscript(input: LayoutInput, cache: BlockCache): Scene {
   cache.setIdentity(
@@ -92,12 +93,7 @@ export function layoutTranscript(input: LayoutInput, cache: BlockCache): Scene {
     ].join('|')
   )
   const { messages, streaming, width, theme, view } = input
-  if (streaming === null) {
-    view.startedAt.delete(TURN_STARTED_AT)
-    view.activityPhrase = undefined
-  } else if (!view.startedAt.has(TURN_STARTED_AT)) {
-    view.startedAt.set(TURN_STARTED_AT, input.now)
-  }
+  if (streaming === null) view.activityPhrase = undefined
   const availableWidth =
     width - (messages.some((message) => message.role === 'user') ? PROMPT_GUTTER : 0)
   const column = Math.max(1, Math.min(SPACE.columnMax, availableWidth - SPACE.columnPadX * 2))
@@ -485,7 +481,7 @@ export function layoutParts(
       width,
       labels[phrase.suffixIndex],
       labels,
-      input.view.startedAt.get(TURN_STARTED_AT) ?? input.now
+      input.activityStartedAt ?? input.now
     )
   }
 
@@ -595,7 +591,7 @@ function cacheActivityPhrase(
   return next
 }
 
-/** The braille spinner + stable-width activity label and elapsed timer. */
+/** The braille spinner + activity label with a compact timer underneath. */
 function layoutThinking(
   builder: Builder,
   x: number,
@@ -607,11 +603,11 @@ function layoutThinking(
 ): number {
   const palette = builder.palette
   const f = font(FONT_SIZE.body, 400, 'sans')
-  const timerFont = font(FONT_SIZE.small, 400, 'mono')
-  const height = builder.metrics.lineHeight(f) + 8
-  const centerY = y + height / 2
-  const timerWidth = builder.metrics.measure('999h 59m 59s', timerFont)
-  const maxLabelWidth = Math.max(1, width - 20 - 8 - timerWidth)
+  const timerFont = font(FONT_SIZE.micro, 400, 'mono')
+  const labelHeight = builder.metrics.lineHeight(f)
+  const timerHeight = builder.metrics.lineHeight(timerFont)
+  const contentX = x + 20
+  const maxLabelWidth = Math.max(1, width - 20)
   const labelWidth = Math.min(
     maxLabelWidth,
     Math.max(...labelVariants.map((variant) => builder.metrics.measure(variant, f)))
@@ -619,30 +615,24 @@ function layoutThinking(
   builder.push({
     kind: 'braille',
     x,
-    y: centerY - builder.metrics.lineHeight(f) / 2,
+    y,
     font: font(FONT_SIZE.body + 2, 400, 'mono'),
     color: palette.accent
   })
   const visibleLabel = builder.metrics.ellipsize(label, f, labelWidth).text
   builder.pulsing(() => {
-    builder.text(
-      x + 20,
-      centerY - builder.metrics.lineHeight(f) / 2,
-      visibleLabel,
-      f,
-      palette.textMuted
-    )
+    builder.text(contentX, y, visibleLabel, f, palette.textMuted)
   })
   builder.push({
     kind: 'elapsed',
-    x: x + 20 + labelWidth + 8,
-    y: centerY - builder.metrics.lineHeight(timerFont) / 2,
+    x: contentX,
+    y: y + labelHeight - 2,
     startedAt,
     font: timerFont,
     color: palette.textSubtle
   })
   builder.animate()
-  return height
+  return labelHeight + timerHeight - 2
 }
 
 /**

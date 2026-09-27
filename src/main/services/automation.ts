@@ -33,6 +33,7 @@ import {
 
 let timer: ReturnType<typeof setInterval> | null = null
 const live = new Map<string, PartsFold>()
+const activityStartedAt = new Map<string, number>()
 /**
  * Who is speaking in each live turn. A bot carries both fields; the HOST
  * answering inside a bot's chat carries only the reserved username, because she
@@ -83,12 +84,14 @@ function emit(delta: RemoteDelta): void {
 export function automationSnapshot(): {
   sessionId: string
   parts: MessagePart[]
+  activityStartedAt: number
   botId?: string
   botUsername?: string
 }[] {
   return [...live].map(([sessionId, fold]) => ({
     sessionId,
     parts: fold.parts,
+    activityStartedAt: activityStartedAt.get(sessionId) ?? Date.now(),
     ...speakers.get(sessionId)
   }))
 }
@@ -320,6 +323,7 @@ async function deliver(item: QueueItem): Promise<void> {
   }
   const fold = new PartsFold()
   live.set(item.chatId, fold)
+  activityStartedAt.set(item.chatId, Date.now())
   let bot: ReturnType<typeof bots.getBot>
   // Declared out here so the failure path below attributes a partial answer to
   // the same speaker the successful path would have.
@@ -451,6 +455,11 @@ async function deliver(item: QueueItem): Promise<void> {
       },
       (event) => {
         fold.apply(event)
+        if (
+          event.type === 'tool-start' ||
+          (event.type === 'tool-child' && event.event.type === 'tool-start')
+        )
+          activityStartedAt.set(item.chatId, Date.now())
         emit({ sessionId: item.chatId, kind: 'event', event })
         if (relay) relayLocalTurnEvent(relay, event)
       },
@@ -575,6 +584,7 @@ async function deliver(item: QueueItem): Promise<void> {
     }
   } finally {
     live.delete(item.chatId)
+    activityStartedAt.delete(item.chatId)
     speakers.delete(item.chatId)
     release()
     if (relay) relayLocalTurnEnd(relay)

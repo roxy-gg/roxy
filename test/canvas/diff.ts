@@ -786,14 +786,16 @@ check('a new canvas host cannot reuse stale expanded diff controls', () => {
 })
 check('an empty streaming turn remains visible beside windowed history', () => {
   const state = view()
-  const input = { ...longInput(longMessages, state), streaming: [], now: 1234 }
+  const input = {
+    ...longInput(longMessages, state),
+    streaming: [],
+    activityStartedAt: 1234,
+    now: 1234
+  }
   const scene = layoutTranscript(input, new BlockCache())
   assert.ok(scene.blocks.at(-1)!.animated)
   assert.ok(JSON.stringify(scene.blocks.at(-1)!.nodes).includes('braille'))
   assert.ok(JSON.stringify(scene.blocks.at(-1)!.nodes).includes('elapsed'))
-  assert.equal(state.startedAt.get('__turn__'), 1234)
-  layoutTranscript({ ...input, streaming: null, now: 5000 }, new BlockCache())
-  assert.equal(state.startedAt.has('__turn__'), false)
 })
 check('one live turn keeps its activity row and start time across updates', () => {
   const state = view()
@@ -801,6 +803,7 @@ check('one live turn keeps its activity row and start time across updates', () =
   const input = {
     ...longInput([], state),
     streaming: [] as MessagePart[],
+    activityStartedAt: 1000,
     botUsername: 'bot',
     now: 1000,
     viewport: undefined,
@@ -848,18 +851,30 @@ check('one live turn keeps its activity row and start time across updates', () =
   const usingTool = layoutTranscript(
     {
       ...input,
+      activityStartedAt: 60_000,
       now: 61_000,
       streaming: [{ type: 'tool', tool: 'bash', state: 'running', title: 'npm test' }]
     },
     cache
   )
-  assert.equal(startedAt(usingTool), 1000)
+  assert.equal(startedAt(usingTool), 60_000, 'a tool start resets the inactivity timer')
+
+  const remounted = layoutTranscript(
+    {
+      ...input,
+      view: view(),
+      activityStartedAt: 60_000,
+      now: 65_000,
+      streaming: [{ type: 'text', text: 'Back from another session.' }]
+    },
+    new BlockCache()
+  )
+  assert.equal(startedAt(remounted), 60_000, 'a remounted chat keeps its activity timestamp')
 
   layoutTranscript({ ...input, streaming: null, now: 62_000 }, cache)
-  assert.equal(state.startedAt.has('__turn__'), false)
   assert.equal(state.activityPhrase, undefined)
 })
-check('activity copy ellipsizes without pushing the elapsed timer out of a narrow row', () => {
+check('activity timer sits below the copy and narrow copy still ellipsizes', () => {
   const scene = layoutTranscript(
     {
       ...longInput([]),
@@ -873,8 +888,16 @@ check('activity copy ellipsizes without pushing the elapsed timer out of a narro
   )
   const nodes = JSON.stringify(scene.blocks.at(-1)!.nodes)
   assert.ok(nodes.includes('…'), 'the label uses an ellipsis instead of compressed glyphs')
+  const label = scene.blocks
+    .at(-1)!
+    .nodes.flatMap((node) => (node.kind === 'pulse' ? node.children : []))
+    .find((node) => node.kind === 'text')
   const elapsed = scene.blocks.at(-1)!.nodes.find((node) => node.kind === 'elapsed')
-  assert.ok(elapsed?.kind === 'elapsed' && elapsed.x < scene.width)
+  assert.ok(label?.kind === 'text')
+  assert.ok(elapsed?.kind === 'elapsed')
+  assert.equal(elapsed.x, label.x)
+  assert.ok(elapsed.y > label.y)
+  assert.ok(elapsed.x < scene.width)
 })
 check('live reasoning starts collapsed and can be toggled closed again', () => {
   const state = view()
