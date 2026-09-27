@@ -574,5 +574,48 @@ check(
   compactions === 1 && catalogRequests === 1
 )
 
+console.log('composer: drafts stay with their chat')
+const composer = readFileSync(
+  new URL('../src/renderer/src/components/Composer.tsx', import.meta.url),
+  'utf8'
+).replace(/\r\n/g, '\n')
+const chatView = readFileSync(
+  new URL('../src/renderer/src/components/ChatView.tsx', import.meta.url),
+  'utf8'
+).replace(/\r\n/g, '\n')
+check(
+  'ChatView identifies the composer with the active chat',
+  /<Composer\s+[\s\S]*?chatId=\{activeChat\.id\}/.test(chatView)
+)
+check(
+  'Composer reads text and images from the active chat draft',
+  /useRoxyStore\(\(s\) => s\.composerDrafts\[chatId\]\)/.test(composer) &&
+    /const value = draft\?\.value \?\? ''/.test(composer) &&
+    /const images = draft\?\.images \?\? \[\]/.test(composer)
+)
+check(
+  'Composer updates only the draft belonging to its chat',
+  /state\.composerDrafts\[chatId\] \?\? \{ value: '', images: \[\] \}/.test(composer) &&
+    /composerDrafts\[chatId\] = next/.test(composer)
+)
+check(
+  'empty drafts are discarded instead of accumulating',
+  /if \(!next\.value && next\.images\.length === 0\) delete composerDrafts\[chatId\]/.test(composer)
+)
+check(
+  'failed sends restore text and attachments to the originating chat',
+  /setValue\(\(draft\) => draft \|\| text\)/.test(composer) &&
+    /setImages\(\(draft\) => \(draft\.length \? draft : snapshotImages\)\)/.test(composer)
+)
+check(
+  'the store initializes per-chat drafts',
+  /composerDrafts: Record<string, \{ value: string; images: ComposerImage\[\] \}>/.test(src) &&
+    /composerDrafts: \{\}/.test(src)
+)
+check(
+  'deleting chats and bots removes their drafts',
+  (src.match(/delete composerDrafts\[(?:id|bot\.chatId)\]/g) ?? []).length === 2
+)
+
 console.log(failures === 0 ? '\nSTORE GUARD OK' : `\nSTORE GUARD FAILED \u2014 ${failures} failing`)
 process.exit(failures === 0 ? 0 : 1)

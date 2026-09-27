@@ -20,11 +20,13 @@ import { HOST_USERNAME } from '@shared/bots'
 import { MENTION, isKnownMention, mentionedBots } from '@shared/mentions'
 
 export function Composer({
+  chatId,
   onSend,
   sending,
   onStop,
   variant = 'session'
 }: {
+  chatId: string
   onSend: (text: string, images?: ComposerImage[]) => void | Promise<void>
   sending?: boolean
   onStop?: () => void
@@ -45,8 +47,37 @@ export function Composer({
   variant?: 'session' | 'bot'
 }): JSX.Element {
   const { t } = useTranslation()
-  const [value, setValue] = useState('')
-  const [images, setImages] = useState<ComposerImage[]>([])
+  const draft = useRoxyStore((s) => s.composerDrafts[chatId])
+  const value = draft?.value ?? ''
+  const images = draft?.images ?? []
+  const updateDraft = (
+    update: (current: { value: string; images: ComposerImage[] }) => {
+      value: string
+      images: ComposerImage[]
+    }
+  ): void => {
+    useRoxyStore.setState((state) => {
+      const next = update(state.composerDrafts[chatId] ?? { value: '', images: [] })
+      const composerDrafts = { ...state.composerDrafts }
+      if (!next.value && next.images.length === 0) delete composerDrafts[chatId]
+      else composerDrafts[chatId] = next
+      return { composerDrafts }
+    })
+  }
+  const setValue = (next: string | ((current: string) => string)): void => {
+    updateDraft((current) => ({
+      ...current,
+      value: typeof next === 'function' ? next(current.value) : next
+    }))
+  }
+  const setImages = (
+    next: ComposerImage[] | ((current: ComposerImage[]) => ComposerImage[])
+  ): void => {
+    updateDraft((current) => ({
+      ...current,
+      images: typeof next === 'function' ? next(current.images) : next
+    }))
+  }
   const [dragging, setDragging] = useState(false)
   const ref = useRef<HTMLTextAreaElement>(null)
   const mirror = useRef<HTMLDivElement>(null)
@@ -259,6 +290,10 @@ export function Composer({
     el.style.height = 'auto'
     el.style.height = `${Math.min(el.scrollHeight, 168)}px`
   }
+
+  useEffect(() => {
+    autoGrow()
+  }, [chatId])
 
   // Stop needs a handler to be honest: a session can be busy with a turn this
   // composer doesn't own (a subagent's run is driven by its parent), and a Stop

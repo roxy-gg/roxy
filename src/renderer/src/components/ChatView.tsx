@@ -419,6 +419,7 @@ export function ChatView(): JSX.Element {
           is what the button visibly means in this view. */}
         <Composer
           key={activeChatId}
+          chatId={activeChat.id}
           onSend={submit}
           variant={activeChat.kind === 'bot' ? 'bot' : 'session'}
           sending={sending || subagentRunning}

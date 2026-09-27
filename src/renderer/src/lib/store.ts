@@ -89,6 +89,8 @@ interface RoxyStore {
   hiddenModels: Set<string>
   chats: Chat[]
   activeChatId: string | null
+  /** Unsent text and image attachments, scoped to the chat they belong to. */
+  composerDrafts: Record<string, { value: string; images: ComposerImage[] }>
   messages: Message[]
   /**
    * Which chat `messages` actually holds, or `null` while a load is in flight.
@@ -1036,6 +1038,7 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
   hiddenModels: new Set<string>(),
   chats: [],
   activeChatId: null,
+  composerDrafts: {},
   messages: [],
   messagesChatId: null,
   messagesError: false,
@@ -1309,7 +1312,15 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
         delete activityStartedAt[bot.chatId]
         const automationSpeakers = { ...s.automationSpeakers }
         delete automationSpeakers[bot.chatId]
-        return { runningAutomation, streamingChats, activityStartedAt, automationSpeakers }
+        const composerDrafts = { ...s.composerDrafts }
+        delete composerDrafts[bot.chatId]
+        return {
+          runningAutomation,
+          streamingChats,
+          activityStartedAt,
+          automationSpeakers,
+          composerDrafts
+        }
       })
       if (get().activeChatId === bot.chatId) get().clearActive()
     }
@@ -1923,12 +1934,15 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
       delete stopChats[id]
       const automationSpeakers = { ...s.automationSpeakers }
       delete automationSpeakers[id]
+      const composerDrafts = { ...s.composerDrafts }
+      delete composerDrafts[id]
       return {
         sendingChats,
         streamingChats,
         activityStartedAt,
         stopChats,
-        automationSpeakers
+        automationSpeakers,
+        composerDrafts
       }
     })
     if (get().activeChatId === id) get().clearActive()
