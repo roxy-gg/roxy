@@ -90,6 +90,7 @@ function botSchema(db: Database): void {
   addColumnIfMissing(db, 'queue', 'recipient_id', 'TEXT')
   addColumnIfMissing(db, 'queue', 'reply_to_bot_id', 'TEXT')
   addColumnIfMissing(db, 'queue', 'reply_to_bot_username', 'TEXT')
+  addColumnIfMissing(db, 'queue', 'from_user', 'INTEGER NOT NULL DEFAULT 0')
 }
 
 /** Idempotently finish the old loops-to-bots data migration on repaired databases. */
@@ -682,6 +683,20 @@ export const MIGRATIONS: Migration[] = [
   (db) => {
     addColumnIfMissing(db, 'queue', 'reply_to_bot_id', 'TEXT')
     addColumnIfMissing(db, 'queue', 'reply_to_bot_username', 'TEXT')
+  },
+
+  // ---- v29: queue UI origin is explicit ----
+  // A user-directed collaborator prompt has a source chat just like a machine
+  // handoff. Persist the distinction so retries and reloads never infer it from
+  // mutable execution state such as whether a transcript message was created.
+  (db) => {
+    // Version-skipped databases reach this backfill before schema repair runs.
+    addColumnIfMissing(db, 'queue', 'source_chat_id', 'TEXT')
+    addColumnIfMissing(db, 'queue', 'message_id', 'TEXT')
+    addColumnIfMissing(db, 'queue', 'from_user', 'INTEGER NOT NULL DEFAULT 0')
+    db.exec(`UPDATE queue SET from_user = 1
+      WHERE source_chat_id = chat_id
+        AND message_id IN (SELECT id FROM messages WHERE role = 'user')`)
   }
 ]
 

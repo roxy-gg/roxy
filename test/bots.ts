@@ -72,8 +72,21 @@ async function main(): Promise<void> {
   migrationDb
     .prepare(`UPDATE queue SET recipient_id = 'roxy', source_chat_id = 'one' WHERE id = 'two'`)
     .run()
+  migrationDb.exec(`
+    INSERT INTO queue(id,chat_id,content,created_at,source_chat_id,message_id)
+      VALUES ('collaborator','two','user-directed prompt',2,'two','two');
+  `)
   for (const upgrade of MIGRATIONS.slice(25))
     typeof upgrade === 'function' ? upgrade(migrationDb) : migrationDb.exec(upgrade)
+  assert.deepEqual(
+    migrationDb.prepare('SELECT id, from_user FROM queue ORDER BY id').all(),
+    [
+      { id: 'collaborator', from_user: 1 },
+      { id: 'one', from_user: 0 },
+      { id: 'two', from_user: 0 }
+    ],
+    'v29 backfills only same-chat requests linked to user messages'
+  )
   assert.deepEqual(
     migrationDb
       .prepare('SELECT recipient_id, as_bot_id, state, error FROM queue WHERE id = ?')
@@ -103,7 +116,7 @@ async function main(): Promise<void> {
     (migrationDb.prepare('SELECT COUNT(*) AS n FROM messages').get() as { n: number }).n,
     2
   )
-  assert.equal((migrationDb.prepare('SELECT COUNT(*) AS n FROM queue').get() as { n: number }).n, 2)
+  assert.equal((migrationDb.prepare('SELECT COUNT(*) AS n FROM queue').get() as { n: number }).n, 3)
   assert.deepEqual(
     migrationDb.prepare('SELECT enabled,next_run_at FROM bot_jobs ORDER BY id').all(),
     [
@@ -133,6 +146,24 @@ async function main(): Promise<void> {
     )
     .run()
   skippedDb.pragma('user_version = 27')
+  skippedDb.exec(`INSERT INTO queue(id,chat_id,content,created_at)
+    VALUES ('skipped-queue','skipped-chat','queued before upgrade',1)`)
+  // Match startup ordering: the migration ladder must finish before repair runs.
+  const skippedVersion = skippedDb.pragma('user_version', { simple: true }) as number
+  for (let version = skippedVersion; version < MIGRATIONS.length; version++) {
+    skippedDb.transaction(() => {
+      const step = MIGRATIONS[version]
+      if (typeof step === 'string') skippedDb.exec(step)
+      else step(skippedDb)
+      skippedDb.pragma(`user_version = ${version + 1}`)
+    })()
+  }
+  assert.equal(skippedDb.pragma('user_version', { simple: true }), MIGRATIONS.length)
+  assert.deepEqual(
+    skippedDb.prepare('SELECT content, source_chat_id, message_id, from_user FROM queue').all(),
+    [{ content: 'queued before upgrade', source_chat_id: null, message_id: null, from_user: 0 }],
+    'v29 repairs its backfill dependencies without changing legacy queue content or origin'
+  )
   repairSchema(skippedDb)
   repairSchema(skippedDb)
   assert.equal((skippedDb.prepare('SELECT COUNT(*) AS n FROM loops').get() as { n: number }).n, 0)
