@@ -6,8 +6,9 @@
  * since only main can focus the window when the toast is clicked.
  *
  * The decision of WHETHER to notify also lives on this side: only the renderer
- * knows whether the user stopped the turn, whether a queue is still draining,
- * and whether the window is focused.
+ * knows whether the user stopped the turn and whether the window is focused.
+ * The queue belongs to main, so the store asks it (`api.queue.list`) whether
+ * more work is about to run before calling in here.
  */
 import chime from '../assets/chime.wav'
 import { NOTIFY_VOLUME, type AppSettings, type Chat } from '@shared/types'

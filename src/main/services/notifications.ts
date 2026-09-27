@@ -10,9 +10,8 @@
  * which is the only side with audio output.
  *
  * Deliberately says nothing about WHEN to notify: that decision is the
- * renderer's, because only it knows whether the turn was stopped, whether a
- * queue is still draining, whether the window is focused, and what the strings
- * say.
+ * renderer's, because only it knows whether the turn was stopped, whether the
+ * window is focused, and what the strings say. It asks main for the queue.
  */
 import { app, BrowserWindow, Notification, nativeImage } from 'electron'
 import { CHANNELS } from '../../shared/ipc'
@@ -66,10 +65,21 @@ export function setToastIcon(p: string): void {
  * closed and recreated on macOS `activate`.
  */
 let toastWindow: BrowserWindow | null = null
+/**
+ * Whether `toastWindow`'s renderer is listening yet. It is registered the
+ * moment it is created, but only subscribes to `notifyActivated` once bootstrap
+ * collects its pending click. On macOS, clicking a toast with every window
+ * closed fires `activate` (which creates the window) BEFORE the toast's own
+ * `click`, so the click finds a window that cannot hear it yet.
+ */
+let toastWindowReady = false
 export function setToastWindow(win: BrowserWindow): void {
   toastWindow = win
+  toastWindowReady = false
   win.on('closed', () => {
-    if (toastWindow === win) toastWindow = null
+    if (toastWindow !== win) return
+    toastWindow = null
+    toastWindowReady = false
   })
 }
 
@@ -95,6 +105,7 @@ export function setWindowFactory(fn: () => BrowserWindow): void {
  */
 let pendingChatId: string | null = null
 export function takePendingActivation(): string | null {
+  toastWindowReady = true
   const id = pendingChatId
   pendingChatId = null
   return id
@@ -197,6 +208,11 @@ export function showTurnToast(title: string, subtitle: string, body: string, cha
     existing.show()
     existing.focus()
     focusApp()
+    // Still loading: a push would be dropped, so leave it for bootstrap to pull.
+    if (!toastWindowReady) {
+      pendingChatId = chatId || null
+      return
+    }
     // Raising the window is not enough: it comes back on whatever session was
     // last open, which is exactly the one you did NOT get notified about.
     if (chatId) existing.webContents.send(CHANNELS.notifyActivated, chatId)

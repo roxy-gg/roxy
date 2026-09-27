@@ -455,7 +455,12 @@ function applyAutomationDelta(payload: RemoteDelta): void {
       if (payload.state === 'running')
         automationSpeakers[id] = { botId: payload.botId, botUsername: payload.botUsername }
       else delete automationSpeakers[id]
-      return { automationSpeakers }
+      // A new turn starts clean, like `clearStop()` in sendMessage: a Stop left
+      // over from an idle session or a compaction must not silence this one.
+      if (payload.state !== 'running' || !s.stopChats[id]) return { automationSpeakers }
+      const stopChats = { ...s.stopChats }
+      delete stopChats[id]
+      return { automationSpeakers, stopChats }
     })
   }
   // Reuse the remote fold and publisher; never keep a second live parts tree.
@@ -481,11 +486,16 @@ function applyAutomationDelta(payload: RemoteDelta): void {
           delete stopChats[id]
           return { stopChats }
         })
+      // Captured now: if another turn starts while these round trips are in
+      // flight, this completion is stale and must not announce itself.
+      const turnRevision = automationTurnRevisions.get(id)
       void useRoxyStore
         .getState()
         .refreshChats()
-        .then(() => (stopped ? undefined : notifyIfSessionIdle(id)))
-        .catch(() => {})
+        .then(() =>
+          stopped ? undefined : notifyIfSessionIdle(id, { turnRevision, fromAutomation: true })
+        )
+        .catch((error) => console.warn('Failed to notify turn completion:', error))
       void useRoxyStore.getState().refreshUsage()
     }
   }
@@ -496,20 +506,47 @@ function applyAutomationDelta(payload: RemoteDelta): void {
  *
  * Checking the queue keeps a chain of prompts (or a bot handoff) from chiming
  * once per step: only the turn that leaves the session idle announces itself.
- * Failed items never run on their own, and future scheduled ones are not "next".
+ * Only the HEAD matters, exactly as main's FIFO consumer (`wakeAutomation`)
+ * sees it: a failed or future-scheduled head blocks everything behind it, so
+ * the session is idle even with pending items further down.
+ *
+ * `turnRevision` pins the turn being announced. Main can start the next turn
+ * while the queue is being read; that one will announce itself later.
+ *
+ * `fromAutomation` marks a turn main ran off this queue. Only then is a failed
+ * head necessarily the turn that just ended (a failed head blocks the FIFO, so
+ * nothing behind it could have run); after a direct send it may be stale.
  */
-async function notifyIfSessionIdle(chatId: string): Promise<void> {
-  const { settings } = useRoxyStore.getState()
-  if (!settings?.notifyOnComplete) return
+async function notifyIfSessionIdle(
+  chatId: string,
+  {
+    turnRevision = automationTurnRevisions.get(chatId),
+    fromAutomation = false
+  }: { turnRevision?: number; fromAutomation?: boolean } = {}
+): Promise<void> {
+  if (!useRoxyStore.getState().settings?.notifyOnComplete) return
+  let next: QueueItem | undefined
   try {
-    const now = Date.now()
-    const queue = await api.queue.list(chatId)
-    if (queue.some((q) => q.state !== 'failed' && (q.notBefore ?? 0) <= now)) return
-  } catch {
+    next = (await api.queue.list(chatId))[0]
+  } catch (error) {
+    console.warn('Failed to check queue before notifying:', error)
     return
   }
-  const chat = useRoxyStore.getState().chats.find((c) => c.id === chatId)
-  if (chat) notifyTurnComplete(settings, chat)
+  // Stopped from somewhere this renderer never saw (the phone, a bot tool):
+  // main marks the interrupted item instead of setting `stopChats`.
+  if (fromAutomation && next?.state === 'failed' && next.error === 'Stopped.') return
+  if (next && next.state !== 'failed' && (next.notBefore ?? 0) <= Date.now()) return
+  const state = useRoxyStore.getState()
+  if (
+    automationTurnRevisions.get(chatId) !== turnRevision ||
+    state.sendingChats[chatId] ||
+    state.runningAutomation[chatId] ||
+    state.stopChats[chatId] ||
+    !state.settings?.notifyOnComplete
+  )
+    return
+  const chat = state.chats.find((c) => c.id === chatId)
+  if (chat) notifyTurnComplete(state.settings, chat)
 }
 
 /** Private bot turns always belong to main, even when idle. */

@@ -106,6 +106,11 @@ for (const platform of ['darwin', 'win32', 'linux']) {
     focus() {},
     webContents: { send: (...args) => activated.push(args) }
   })
+  // `activate` registers the window before its renderer subscribes: hold the click.
+  native.showTurnToast('Roxy', 'checkout', 'Response ready.', 'early')
+  notification.events.click()
+  assert.equal(activated.length, 0, 'a loading window is not pushed to')
+  assert.equal(native.takePendingActivation(), 'early', 'click before bootstrap is held for it')
   native.showTurnToast('Roxy', 'checkout', 'Response ready.', 'finished')
   assert.equal(notification.shown, true)
   assert.equal(notification.options.title, 'Roxy')
@@ -261,4 +266,173 @@ for (const pending of ['finished', 'deleted', null, 'failed', 'onboarding']) {
   assert.equal(selections.length, count, 'deleted chat leaves selection untouched')
   assert.equal(window.location.hash, '#/settings')
 }
+
+// Completion decisions in the store: the queue head, Stop, and in-flight races.
+const extract = (pattern, name) => {
+  const code = store.match(pattern)?.[0]
+  assert.ok(code, `${name} found`)
+  return code
+}
+const decisionCode = transformSync(
+  [
+    extract(
+      /^function applyAutomationDelta\(payload: RemoteDelta\): void \{[\s\S]*?\n\}\n/m,
+      'applyAutomationDelta'
+    ),
+    extract(/^async function notifyIfSessionIdle\([\s\S]*?\n\}\n/m, 'notifyIfSessionIdle')
+  ].join('\n'),
+  { loader: 'ts' }
+).code
+const flush = async () => {
+  for (let i = 0; i < 5; i++) await new Promise((resolve) => setTimeout(resolve, 0))
+}
+function decisions({ queue = [], settings = { notifyOnComplete: true }, stopChats = {} } = {}) {
+  const notified = []
+  const warnings = []
+  const h = { queue, onQueueList: null }
+  let state = {
+    settings,
+    chats: [{ id: 'c1', kind: 'main' }],
+    stopChats: { ...stopChats },
+    sendingChats: {},
+    runningAutomation: {},
+    automationSpeakers: {},
+    async refreshChats() {},
+    refreshUsage() {}
+  }
+  const useRoxyStore = {
+    getState: () => state,
+    setState(update) {
+      const patch = typeof update === 'function' ? update(state) : update
+      if (patch !== state) state = { ...state, ...patch }
+    }
+  }
+  const api = {
+    queue: {
+      async list() {
+        await h.onQueueList?.()
+        if (h.queue instanceof Error) throw h.queue
+        return h.queue
+      }
+    }
+  }
+  const fns = new Function(
+    'useRoxyStore',
+    'api',
+    'notifyTurnComplete',
+    'console',
+    `
+    let automationRevision = 0;
+    const automationRevisions = new Map();
+    const automationTurnRevisions = new Map();
+    const applyRemoteDelta = () => {};
+    const mirrorAutomationChat = async () => {};
+    ${decisionCode}
+    return { applyAutomationDelta, notifyIfSessionIdle };
+  `
+  )(useRoxyStore, api, (_settings, chat) => notified.push(chat.id), {
+    warn: (...args) => warnings.push(args)
+  })
+  const turn = (turnState) =>
+    fns.applyAutomationDelta({ sessionId: 'c1', kind: 'turn', state: turnState })
+  return { ...fns, h, turn, notified, warnings, state: () => state }
+}
+const pending = { state: 'pending', notBefore: 0 }
+{
+  const d = decisions()
+  d.turn('running')
+  d.turn('idle')
+  await flush()
+  assert.deepEqual(d.notified, ['c1'], 'an idle session notifies once')
+}
+for (const [label, head] of [
+  ['a due pending head', pending],
+  ['a running head', { state: 'running' }]
+]) {
+  const d = decisions({ queue: [head] })
+  d.turn('running')
+  d.turn('idle')
+  await flush()
+  assert.equal(d.notified.length, 0, `${label} means more work is next`)
+}
+for (const [label, head] of [
+  ['a failed head blocks the FIFO', { state: 'failed', error: 'boom' }],
+  ['a future head is not next', { state: 'pending', notBefore: Date.now() + 60_000 }]
+]) {
+  const d = decisions({ queue: [head, pending] })
+  d.turn('running')
+  d.turn('idle')
+  await flush()
+  assert.deepEqual(d.notified, ['c1'], label)
+}
+{
+  const d = decisions({ queue: [{ state: 'failed', error: 'Stopped.' }] })
+  d.turn('running')
+  d.turn('idle')
+  await flush()
+  assert.equal(d.notified.length, 0, 'a turn stopped in main (phone, bot tool) stays silent')
+  await d.notifyIfSessionIdle('c1')
+  assert.deepEqual(d.notified, ['c1'], 'a stale stopped item does not silence a direct send')
+}
+{
+  const d = decisions()
+  d.turn('running')
+  d.state().stopChats.c1 = true
+  d.turn('idle')
+  assert.equal(d.state().stopChats.c1, undefined, 'the Stop is consumed at turn end')
+  await flush()
+  assert.equal(d.notified.length, 0, 'a stopped automation turn stays silent')
+}
+{
+  const d = decisions({ stopChats: { c1: true } })
+  d.turn('running')
+  assert.equal(d.state().stopChats.c1, undefined, 'a new turn clears a leftover Stop')
+  d.turn('idle')
+  await flush()
+  assert.deepEqual(d.notified, ['c1'], 'a leftover Stop does not silence the next turn')
+}
+{
+  const d = decisions()
+  d.turn('running')
+  d.h.onQueueList = () => {
+    d.h.onQueueList = null
+    d.turn('running')
+  }
+  d.turn('idle')
+  await flush()
+  assert.equal(d.notified.length, 0, 'a turn that starts mid-check makes this completion stale')
+  d.turn('idle')
+  await flush()
+  assert.deepEqual(d.notified, ['c1'], 'the later turn announces itself, once')
+}
+{
+  // A whole turn can start AND end while the first check is in flight: nothing
+  // is running by the time it reads state again, so only the revision tells.
+  const d = decisions()
+  d.turn('running')
+  d.h.onQueueList = () => {
+    d.h.onQueueList = null
+    d.turn('running')
+    d.turn('idle')
+  }
+  d.turn('idle')
+  await flush()
+  assert.deepEqual(d.notified, ['c1'], 'back-to-back turns notify once, not twice')
+}
+{
+  const d = decisions({ settings: { notifyOnComplete: false } })
+  d.turn('running')
+  d.turn('idle')
+  await flush()
+  assert.equal(d.notified.length, 0, 'the setting turns it off')
+}
+{
+  const d = decisions({ queue: new Error('IPC unavailable') })
+  d.turn('running')
+  d.turn('idle')
+  await flush()
+  assert.equal(d.notified.length, 0, 'an unreadable queue does not notify')
+  assert.equal(d.warnings.length, 1, 'an unreadable queue is logged')
+}
+
 console.log('Notification presentation and activation checks passed')
