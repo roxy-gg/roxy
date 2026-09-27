@@ -26,7 +26,6 @@
     "instructionsHint": "Describe who this bot is and how it should help.",
     "interval": "Interval",
     "intro": "What do you want me to be or do?",
-    "introExample": "For example: \"You are Atlas. Check our docs for broken links every morning and list what you find.\"",
     "invalidTimes": "Enter a valid date and time for every run.",
     "lastRun": "Last run:",
     "loading": "Loading…",

@@ -194,12 +194,7 @@ export function ChatView(): JSX.Element {
           {activeBot ? (
             <div className="flex min-w-0 items-center gap-2">
               <BotAvatar username={activeBot.username} size={28} />
-              <div className="min-w-0">
-                <div className="truncate text-sm font-medium">@{activeBot.username}</div>
-                <div className="truncate text-[11px] text-text-subtle">
-                  {t('bots.talkingTo', { username: activeBot.username })}
-                </div>
-              </div>
+              <div className="min-w-0 truncate text-sm font-medium">@{activeBot.username}</div>
             </div>
           ) : (
             <div className="flex min-w-0 items-center gap-2">
@@ -337,10 +332,6 @@ export function ChatView(): JSX.Element {
         ) : isEmpty ? (
           <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-6 text-center">
             {activeBot ? (
-              // A new bot's chat is the only place it explains itself, and it opens
-              // with nothing configured — so this says, in one line, what to type.
-              // The example is a real sentence, not a field list: writing it IS
-              // the configuration.
               <div className="flex flex-col items-center gap-4">
                 <BotAvatar username={activeBot.username} size={56} />
                 <div className="flex max-w-xs flex-col gap-2">
@@ -348,7 +339,6 @@ export function ChatView(): JSX.Element {
                     {t('bots.talkingTo', { username: activeBot.username })}
                   </p>
                   <p className="text-sm text-text-muted">{t('bots.intro')}</p>
-                  <p className="text-xs text-text-subtle">{t('bots.introExample')}</p>
                 </div>
               </div>
             ) : (

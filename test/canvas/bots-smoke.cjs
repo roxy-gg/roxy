@@ -63,6 +63,17 @@ async function run() {
     await text('Tell me who to be and what to do. I save it and keep it.'),
     await evaluate('return document.body.textContent')
   )
+  assert.equal(
+    await evaluate(
+      `return document.body.textContent.match(/You're talking to @bot\\./g)?.length ?? 0`
+    ),
+    1,
+    'the bot identity appears only in the centered empty state'
+  )
+  assert.ok(
+    !(await text('For example: "You are Atlas.')),
+    'the empty state does not show example helper copy'
+  )
   assert.ok(
     await evaluate(
       `return [...document.querySelectorAll('button')].some((el) => el.title === '@bot' && el.querySelector('[data-facehash]'))`
