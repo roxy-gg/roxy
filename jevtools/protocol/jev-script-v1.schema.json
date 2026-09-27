@@ -1,0 +1,132 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jevtools.dev/schemas/jev-script-v1.schema.json",
+  "title": "Jev Script v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "name", "permissions", "steps"],
+  "properties": {
+    "version": {
+      "const": 1
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 100
+    },
+    "permissions": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "origins": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^https?://[^/]+$"
+          }
+        },
+        "applications": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "inputs": {
+      "type": "object"
+    },
+    "steps": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 200,
+      "items": {
+        "oneOf": [
+          {
+            "$ref": "#/$defs/actionStep"
+          },
+          {
+            "$ref": "#/$defs/decisionStep"
+          }
+        ]
+      }
+    }
+  },
+  "$defs": {
+    "actionStep": {
+      "type": "object",
+      "required": ["action"],
+      "properties": {
+        "action": {
+          "type": "string",
+          "enum": [
+            "browser.goto",
+            "browser.fill",
+            "browser.press",
+            "browser.click",
+            "browser.wait",
+            "browser.extract",
+            "browser.assert"
+          ]
+        },
+        "saveAs": {
+          "$ref": "#/$defs/variableName"
+        }
+      }
+    },
+    "decisionStep": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["decide"],
+      "properties": {
+        "decide": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state", "question", "saveAs"],
+          "properties": {
+            "state": {},
+            "question": {
+              "type": "string",
+              "minLength": 1
+            },
+            "options": {
+              "type": "object",
+              "minProperties": 2,
+              "maxProperties": 255,
+              "additionalProperties": {
+                "type": ["string", "null"]
+              }
+            },
+            "optionsFrom": {
+              "type": "string",
+              "minLength": 1
+            },
+            "minimumConfidence": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "saveAs": {
+              "$ref": "#/$defs/variableName"
+            }
+          },
+          "oneOf": [
+            {
+              "required": ["options"]
+            },
+            {
+              "required": ["optionsFrom"]
+            }
+          ]
+        }
+      }
+    },
+    "variableName": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9_]*$"
+    }
+  }
+}

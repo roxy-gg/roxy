@@ -2,7 +2,9 @@
 
 Jev should make small decisions for Roxy.
 
-It should not generate scripts or control the computer directly.
+It should not generate scripts or control the computer directly. A larger model can generate a declarative Jev Script, but the local runtime validates and executes it. Jev only chooses between known options at explicit decision steps.
+
+See [`jevtools/`](../jevtools/README.md) for the proposed local MCP runtime and hosted inference relay.
 
 Roxy executes the tools. Jev chooses between known options.
 
