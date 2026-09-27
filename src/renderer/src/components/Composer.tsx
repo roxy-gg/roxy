@@ -88,6 +88,9 @@ export function Composer({
   const [submitting, setSubmitting] = useState(false)
   const submittingRef = useRef(false)
   const [error, setError] = useState('')
+  const syncMirrorScroll = (): void => {
+    if (ref.current && mirror.current) mirror.current.scrollTop = ref.current.scrollTop
+  }
   /** Explicit pick when several known @bots appear; cleared when no longer mentioned. */
   const [pickedSendId, setPickedSendId] = useState<string | null>(null)
   // A mention can start anywhere, as long as the "@" opens a word (start of
@@ -421,16 +424,24 @@ export function Composer({
             onBlur={() => setFocused(false)}
             onSelect={(e) => setCaret(e.currentTarget.selectionStart)}
             onChange={(e) => {
-              setValue(e.target.value)
+              const nextValue = e.target.value
+              const caretAtEnd = e.target.selectionStart === nextValue.length
+              setValue(nextValue)
               setError('')
               setCaret(e.target.selectionStart)
               setMentionIndex(0)
               setMentionDismissed(false)
+              requestAnimationFrame(() => {
+                // Controlled field sizing does not reliably keep a wrapped end
+                // caret visible once the textarea reaches its height cap.
+                if (caretAtEnd && ref.current) ref.current.scrollTop = ref.current.scrollHeight
+                syncMirrorScroll()
+              })
             }}
             onKeyDown={onKeyDown}
             onPaste={onPaste}
-            onScroll={(e) => {
-              if (mirror.current) mirror.current.scrollTop = e.currentTarget.scrollTop
+            onScroll={() => {
+              syncMirrorScroll()
             }}
             className="relative block max-h-[168px] w-full resize-none overflow-y-auto bg-transparent px-4 pt-3 text-sm text-transparent caret-text outline-none [field-sizing:content]"
           />

@@ -120,7 +120,7 @@ async function run() {
     },
     'ordinary typing does not collapse or resize the canvas viewport'
   )
-  await type(Array.from({ length: 30 }, (_, index) => `line ${index}`).join('\n'))
+  await type(Array.from({ length: 300 }, (_, index) => `word${index}`).join(' '))
   await evaluate(
     `await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`
   )
@@ -131,11 +131,18 @@ async function run() {
       return {
         capped: textarea.getBoundingClientRect().height === 168,
         scrollable: textarea.scrollHeight > textarea.clientHeight,
+        followedCaret:
+          Math.abs(textarea.scrollHeight - textarea.clientHeight - textarea.scrollTop) < 2 &&
+          Math.abs(
+            textarea.previousElementSibling.scrollHeight -
+              textarea.previousElementSibling.clientHeight -
+              textarea.previousElementSibling.scrollTop
+          ) < 2,
         atBottom: Math.abs(canvas.scrollHeight - canvas.clientHeight - canvas.scrollTop) < 2
       }
     `),
-    { capped: true, scrollable: true, atBottom: true },
-    'multiline drafts grow once, cap at the composer limit, and keep the transcript pinned'
+    { capped: true, scrollable: true, followedCaret: true, atBottom: true },
+    'multiline drafts cap, follow the caret, and keep the transcript pinned'
   )
   await type('Hola @roxy!')
   await send()
