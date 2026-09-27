@@ -576,7 +576,7 @@
     "newProjectTitle": "Open a folder as a new project",
     "newSessionInProject": "New session in this project",
     "projects": "Projects",
-    "remoteWorkspace": "Remote Workspace",
+    "remoteWorkspace": "Remote",
     "resizeHandle": "Drag to resize · double-click to reset",
     "rowDirty": "uncommitted changes",
     "rowRepos": "{{count}} repos: {{names}}",
