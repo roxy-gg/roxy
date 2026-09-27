@@ -39,6 +39,61 @@ async function run() {
   await evaluate(`await window.__renameBot('bot', 'reviewer')`)
   await wait()
   const bot = await evaluate(`return (await window.roxy.bots.list())[0]`)
+  await click('#answer')
+  await evaluate(`
+    const textarea = document.querySelector('textarea')
+    const canvas = document.querySelector('[data-canvas-surface]')
+    window.__composerSizing = {
+      initialHeight: textarea.getBoundingClientRect().height,
+      styleMutations: 0,
+      canvasResizes: 0
+    }
+    new MutationObserver(records => {
+      window.__composerSizing.styleMutations += records.length
+    }).observe(textarea, { attributes: true, attributeFilter: ['style'] })
+    new ResizeObserver(() => {
+      window.__composerSizing.canvasResizes++
+    }).observe(canvas)
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+    window.__composerSizing.canvasResizes = 0
+  `)
+  await type('Typing on one line must not resize the transcript.')
+  assert.deepEqual(
+    await evaluate(`
+      const textarea = document.querySelector('textarea')
+      const canvas = document.querySelector('[data-canvas-surface]')
+      return {
+        fieldSizing: getComputedStyle(textarea).fieldSizing,
+        sameHeight: textarea.getBoundingClientRect().height === window.__composerSizing.initialHeight,
+        styleMutations: window.__composerSizing.styleMutations,
+        canvasResizes: window.__composerSizing.canvasResizes,
+        atBottom: Math.abs(canvas.scrollHeight - canvas.clientHeight - canvas.scrollTop) < 2
+      }
+    `),
+    {
+      fieldSizing: 'content',
+      sameHeight: true,
+      styleMutations: 0,
+      canvasResizes: 0,
+      atBottom: true
+    },
+    'ordinary typing does not collapse or resize the canvas viewport'
+  )
+  await type(Array.from({ length: 30 }, (_, index) => `line ${index}`).join('\n'))
+  await evaluate(`await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`)
+  assert.deepEqual(
+    await evaluate(`
+      const textarea = document.querySelector('textarea')
+      const canvas = document.querySelector('[data-canvas-surface]')
+      return {
+        capped: textarea.getBoundingClientRect().height === 168,
+        scrollable: textarea.scrollHeight > textarea.clientHeight,
+        atBottom: Math.abs(canvas.scrollHeight - canvas.clientHeight - canvas.scrollTop) < 2
+      }
+    `),
+    { capped: true, scrollable: true, atBottom: true },
+    'multiline drafts grow once, cap at the composer limit, and keep the transcript pinned'
+  )
   await type('Hola @roxy!')
   await send()
   const privateItem = await evaluate(
