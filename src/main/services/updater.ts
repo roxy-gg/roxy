@@ -16,6 +16,8 @@ const CHECK_INTERVAL_MS = 1000 * 60 * 60 * 6 // 6 hours
 
 let win: BrowserWindow | null = null
 let state: UpdateState = { status: 'idle' }
+let restartPromptOpen = false
+const promptedVersions = new Set<string>()
 
 function setState(next: UpdateState): void {
   state = next
@@ -75,15 +77,24 @@ export function quitAndInstall(): void {
 }
 
 async function promptRestart(version: string): Promise<void> {
-  if (!win || win.isDestroyed()) return
-  const { response } = await dialog.showMessageBox(win, {
-    type: 'info',
-    buttons: ['Restart now', 'Later'],
-    defaultId: 0,
-    cancelId: 1,
-    title: 'Update ready',
-    message: `Roxy ${version} has been downloaded.`,
-    detail: 'Restart the app to finish installing the update.'
-  })
-  if (response === 0) quitAndInstall()
+  if (!win || win.isDestroyed() || restartPromptOpen || promptedVersions.has(version)) return
+
+  // A cached download may emit again on every update check. macOS queues each
+  // native sheet, so reserve this version before opening the asynchronous dialog.
+  restartPromptOpen = true
+  promptedVersions.add(version)
+  try {
+    const { response } = await dialog.showMessageBox(win, {
+      type: 'info',
+      buttons: ['Restart now', 'Later'],
+      defaultId: 0,
+      cancelId: 1,
+      title: 'Update ready',
+      message: `Roxy ${version} has been downloaded.`,
+      detail: 'Restart the app to finish installing the update.'
+    })
+    if (response === 0) quitAndInstall()
+  } finally {
+    restartPromptOpen = false
+  }
 }
