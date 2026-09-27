@@ -30,6 +30,8 @@ import type { Message, MessagePart } from '../../src/shared/types'
 import { parseMarkdown } from '../../src/renderer/src/canvas/markdown'
 import { ansiLineText, parseAnsi } from '../../src/renderer/src/canvas/ansi'
 import { layoutToolCard } from '../../src/renderer/src/canvas/tool-card'
+import { invokeChip } from '../../src/renderer/src/canvas/invoke-status'
+import type { QueueItem } from '../../src/shared/types'
 import { layoutTerminalBody } from '../../src/renderer/src/canvas/terminal'
 import { createStreamPublisher } from '../../src/renderer/src/lib/stream-publisher'
 
@@ -485,6 +487,37 @@ check('returning to an identical IPC snapshot reuses measured text', () => {
   layoutTranscript({ ...input, messages: structuredClone(longMessages) }, cache)
   assert.ok(calls < initialCalls / 3, `revisit ${calls} versus cold ${initialCalls}`)
 })
+check(
+  'bot identity preserves measured text on remount and still invalidates renamed headers',
+  () => {
+    let calls = 0
+    const counted = {
+      ...metrics,
+      measure: (value: string, f: ReturnType<typeof font>) => {
+        calls++
+        return metrics.measure(value, f)
+      }
+    } as unknown as TextMetrics
+    for (const messages of [[longMessages[149]], longMessages]) {
+      const cache = new BlockCache()
+      const input = { ...longInput(messages), metrics: counted, botUsername: 'helper' }
+      calls = 0
+      layoutTranscript(input, cache)
+      const cold = calls
+      cache.detach()
+      calls = 0
+      const revisited = layoutTranscript(
+        { ...input, messages: structuredClone(messages), view: view() },
+        cache
+      )
+      if (messages.length > 1) assert.ok(calls < cold / 2, `remount ${calls} versus cold ${cold}`)
+      assert.ok(JSON.stringify(revisited.blocks.at(-1)!.nodes).includes('@helper'))
+      const renamed = layoutTranscript({ ...input, botUsername: 'reviewer' }, cache)
+      assert.ok(JSON.stringify(renamed.blocks.at(-1)!.nodes).includes('@reviewer'))
+      assert.ok(!JSON.stringify(renamed.blocks.at(-1)!.nodes).includes('@helper'))
+    }
+  }
+)
 check('changed text invalidates cached parts despite stable message ids', () => {
   const cache = new BlockCache()
   const input = longInput(longMessages)
@@ -756,6 +789,166 @@ check('a dragged selection retains its source rows across viewport boundaries', 
   assert.ok(next.window!.end >= next.window!.scrollTop + 600)
 })
 
+check('bot replies use a round Facehash and username in both transcript layouts', () => {
+  const own = {
+    ...FIXTURES[1],
+    id: 'own-bot-reply',
+    parts: [{ type: 'text' as const, text: 'Ready.' }]
+  }
+  const attributed = { ...own, id: 'attributed-reply', botId: 'bot-1', botUsername: 'old-name' }
+  const bot = {
+    id: 'bot-1',
+    username: 'helper',
+    instructions: '',
+    chatId: 'bot-chat',
+    createdAt: 0
+  }
+  for (const messages of [[own], [attributed], [...longMessages, attributed]]) {
+    const scene = layoutTranscript(
+      {
+        ...longInput(messages),
+        botUsername: 'helper',
+        bots: [bot],
+        botAvatar: (name) => `data:image/svg+xml,${name}`
+      },
+      new BlockCache()
+    )
+    const last = scene.blocks.at(-1)!
+    const nodes = JSON.stringify(last.nodes)
+    assert.ok(nodes.includes('@helper'))
+    assert.ok(nodes.includes('data:image/svg+xml,'))
+    assert.ok(!nodes.includes('__roxy__'))
+    assert.ok(!nodes.includes('@old-name'))
+  }
+  // Work handed over from another session is stored as a USER turn - it is a
+  // prompt for this one - but a bot wrote it and the row says so. Reading the
+  // role alone drew it as "You", crediting it to whoever received it.
+  const fromAnotherSession = {
+    ...own,
+    id: 'cross-session-request',
+    role: 'user' as const,
+    botId: 'bot-1',
+    botUsername: 'helper',
+    parts: [{ type: 'text' as const, text: 'Please review the diff.' }]
+  }
+  for (const messages of [[fromAnotherSession], [...longMessages, fromAnotherSession]]) {
+    const scene = layoutTranscript(
+      {
+        ...longInput(messages),
+        bots: [bot],
+        botAvatar: (name) => `data:image/svg+xml,${name}`
+      },
+      new BlockCache()
+    )
+    const nodes = JSON.stringify(scene.blocks.at(-1)!.nodes)
+    assert.ok(nodes.includes('@helper'), 'a delegated request keeps its author')
+    assert.ok(!nodes.includes('__roxy__'), 'and is not drawn as the person reading it')
+  }
+  // An ordinary user turn is still the user's, with no bot name attached.
+  const typedHere = {
+    ...fromAnotherSession,
+    id: 'typed-here',
+    botId: undefined,
+    botUsername: undefined
+  }
+  assert.ok(
+    !JSON.stringify(
+      layoutTranscript({ ...longInput([typedHere]), bots: [bot] }, new BlockCache()).blocks.at(-1)!
+        .nodes
+    ).includes('@helper'),
+    'what the user typed here is not attributed to a bot'
+  )
+
+  // The HOST answering inside a bot's chat: `botUsername` names the chat owner,
+  // so an unsigned row is drawn as that bot. Roxy signs hers, and must come out
+  // as @roxy with the host avatar - not as @helper wearing the bot's.
+  const bySigningHost = {
+    ...own,
+    id: 'host-reply',
+    botUsername: 'roxy',
+    parts: [{ type: 'text' as const, text: 'Roxy here.' }]
+  }
+  for (const messages of [[bySigningHost], [...longMessages, bySigningHost]]) {
+    const scene = layoutTranscript(
+      {
+        ...longInput(messages),
+        botUsername: 'helper',
+        bots: [bot],
+        botAvatar: (name) => `data:image/svg+xml,${name}`
+      },
+      new BlockCache()
+    )
+    const nodes = JSON.stringify(scene.blocks.at(-1)!.nodes)
+    assert.ok(!nodes.includes('@helper'), 'the host is not drawn as the chat owner')
+    assert.ok(nodes.includes('@roxy'), 'the host is named like any other speaker')
+    assert.ok(nodes.includes('__roxy__'), 'it keeps the host avatar')
+    // The avatar shape is what separates host from guest: square for Roxy,
+    // round for a bot. Naming the host must not hand it the guest treatment.
+    assert.ok(
+      !nodes.includes('data:image/svg+xml,roxy'),
+      'the host keeps its own avatar, not a generated bot one'
+    )
+  }
+  // The same row streaming live, which is the other half of the bug: the
+  // speaker arrives on the turn event before anything is persisted.
+  const liveHost = layoutTranscript(
+    {
+      ...longInput(longMessages),
+      streaming: [],
+      botUsername: 'helper',
+      streamingBot: { botUsername: 'roxy' },
+      bots: [bot],
+      botAvatar: (name) => `data:image/svg+xml,${name}`
+    },
+    new BlockCache()
+  )
+  const liveHostNodes = JSON.stringify(liveHost.blocks.at(-1)!.nodes)
+  assert.ok(!liveHostNodes.includes('@helper'), 'a streaming host is not the chat owner either')
+  assert.ok(liveHostNodes.includes('__roxy__'))
+  // While a turn streams there is no name on the row yet, so the pending
+  // indicator is the only thing saying WHO the wait belongs to.
+  assert.ok(liveHostNodes.includes('@roxy is thinking'), 'a streaming host says who is thinking')
+  const liveGuestIndicator = JSON.stringify(
+    layoutTranscript(
+      {
+        ...longInput(longMessages),
+        streaming: [],
+        botUsername: 'helper',
+        streamingBot: { botId: bot.id, botUsername: 'helper' },
+        bots: [bot],
+        botAvatar: (name) => `data:image/svg+xml,${name}`
+      },
+      new BlockCache()
+    ).blocks.at(-1)!.nodes
+  )
+  assert.ok(
+    liveGuestIndicator.includes('@helper is thinking'),
+    'and a streaming guest is named too, not left as a bare "thinking"'
+  )
+
+  const live = layoutTranscript(
+    { ...longInput(longMessages), streaming: [], botUsername: 'helper' },
+    new BlockCache()
+  )
+  assert.ok(JSON.stringify(live.blocks.at(-1)!.nodes).includes('@helper'))
+  for (const messages of [[own], longMessages]) {
+    const guest = layoutTranscript(
+      {
+        ...longInput(messages),
+        streaming: [],
+        streamingBot: { botId: bot.id, botUsername: 'old-name' },
+        bots: [bot],
+        botAvatar: (name) => `data:image/svg+xml,${name}`
+      },
+      new BlockCache()
+    )
+    const nodes = JSON.stringify(guest.blocks.at(-1)!.nodes)
+    assert.ok(nodes.includes('@helper'), 'a live guest is named in a project transcript')
+    assert.ok(nodes.includes('data:image/svg+xml,'))
+    assert.ok(!nodes.includes('__roxy__'))
+  }
+})
+
 check('Windows terminal lines survive CRLF and ANSI style changes', () => {
   assert.deepEqual(parseAnsi('first\r\nsecond\r\n').map(ansiLineText), ['first', 'second', ''])
   assert.deepEqual(parseAnsi('\u001b[31merror\r\u001b[0m\nnext').map(ansiLineText), [
@@ -1011,6 +1204,127 @@ check('stream publishing stays frame-coalesced with a non-resetting timer fallba
     globalThis.setTimeout = original.timeout
     globalThis.clearTimeout = original.clear
   }
+})
+
+check(
+  'only known mentions highlight in both roles and layouts; roster changes invalidate caches',
+  () => {
+    const text =
+      'Hola @reviewer, @roxy. @unknown @modelcontextprotocol/sdk @reviewer/sdk user@reviewer.com'
+    const bot = {
+      id: 'mention-bot',
+      username: 'reviewer',
+      instructions: '',
+      chatId: 'bot-chat',
+      createdAt: 0
+    }
+    for (const role of ['user', 'assistant'] as const) {
+      const message = {
+        ...FIXTURES[0],
+        id: 'mention-message',
+        role,
+        parts: [{ type: 'text' as const, text }]
+      }
+      for (const messages of [[message], [...longMessages, message]]) {
+        const cache = new BlockCache()
+        const input = { ...longInput(messages), bots: [bot] }
+        const highlighted = (scene: Scene) =>
+          scene.blocks
+            .at(-1)!
+            .selectable.flatMap((line) => line.runs)
+            .filter((run) => run.color === theme.palette.accent)
+            .map((run) => run.text)
+            .join('')
+        assert.equal(highlighted(layoutTranscript(input, cache)), '@reviewer@roxy')
+        assert.equal(highlighted(layoutTranscript({ ...input, bots: [] }, cache)), '@roxy')
+        assert.equal(
+          highlighted(
+            layoutTranscript({ ...input, bots: [{ ...bot, username: 'unknown' }] }, cache)
+          ),
+          '@roxy@unknown'
+        )
+      }
+    }
+  }
+)
+
+check('bot_invoke chip tracks the queued guest', () => {
+  const part = {
+    type: 'tool' as const,
+    tool: 'bot_invoke',
+    state: 'done' as const,
+    input: { bot: 'reviewer', prompt: 'look' },
+    output: JSON.stringify({ id: 'q1', content: '@reviewer look' })
+  }
+  assert.equal(
+    invokeChip(part, [
+      {
+        id: 'q1',
+        chatId: 'c',
+        content: '@reviewer look',
+        createdAt: 1,
+        state: 'pending'
+      } as QueueItem
+    ]).kind,
+    'calling'
+  )
+  assert.equal(
+    invokeChip(part, [
+      {
+        id: 'q1',
+        chatId: 'c',
+        content: '@reviewer look',
+        createdAt: 1,
+        state: 'running'
+      } as QueueItem
+    ]).kind,
+    'calling'
+  )
+  assert.equal(
+    invokeChip(part, [
+      {
+        id: 'q1',
+        chatId: 'c',
+        content: '@reviewer look',
+        createdAt: 1,
+        state: 'failed'
+      } as QueueItem
+    ]).kind,
+    'failed'
+  )
+  assert.equal(invokeChip(part, []).kind, 'replied')
+  assert.equal(invokeChip({ ...part, state: 'running' }, []).kind, 'calling')
+  assert.equal(invokeChip({ ...part, state: 'error' }, []).kind, 'failed')
+  assert.equal(invokeChip(part, []).name, 'reviewer')
+
+  // A pending row for a DIFFERENT call must not satisfy this card.
+  assert.equal(
+    invokeChip(part, [
+      { id: 'other', chatId: 'c', content: 'x', createdAt: 1, state: 'pending' } as QueueItem
+    ]).kind,
+    'replied'
+  )
+
+  // An empty queue is only evidence once it has actually loaded. On a reload
+  // the store starts at [] and fills in after the fetch, so reading absence as
+  // an answer announced "@reviewer replied" for a call still waiting.
+  assert.equal(invokeChip(part, [], false).kind, 'calling')
+  assert.equal(invokeChip(part, [], true).kind, 'replied')
+
+  // Output with no id cannot be correlated at all - a transcript older than
+  // this field, or a result that did not serialize. Claiming an outcome there
+  // is inventing one, so no chip is shown.
+  assert.equal(invokeChip({ ...part, output: 'queued' }, []).kind, 'none')
+  assert.equal(invokeChip({ ...part, output: undefined }, []).kind, 'none')
+  // ...but a live or failed call still reports itself without needing an id.
+  assert.equal(invokeChip({ ...part, output: undefined, state: 'running' }, []).kind, 'calling')
+  assert.equal(invokeChip({ ...part, output: undefined, state: 'error' }, []).kind, 'failed')
+
+  // The handle is display-only and must survive the shapes users actually type.
+  assert.equal(invokeChip({ ...part, input: { bot: '@reviewer' } }, []).name, 'reviewer')
+  assert.equal(invokeChip({ ...part, input: { bot: '  spaced  ' } }, []).name, 'spaced')
+  assert.equal(invokeChip({ ...part, input: {} }, []).name, 'bot')
+  assert.equal(invokeChip({ ...part, input: { bot: 42 } as never }, []).name, 'bot')
 })
 
 console.log(`DIFF/CANVAS MODEL OK - ${checks} checks passed`)

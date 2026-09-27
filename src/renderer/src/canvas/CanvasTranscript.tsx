@@ -7,6 +7,8 @@ import { transcriptCache, layoutTranscript } from './transcript'
 import type { HitAction } from './scene'
 import { promptEntries } from './prompt-history'
 import roxyLogo from '../assets/roxy.png'
+import { useRoxyStore } from '../lib/store'
+import { botAvatarUrl } from '../components/BotAvatar'
 
 export type { CanvasProbe } from './CanvasSurface'
 
@@ -57,6 +59,13 @@ export function CanvasTranscript({
   const [clock, setClock] = useState(0)
   const [quietSignature, setQuietSignature] = useState<string | null>(null)
   const prompts = useMemo(() => promptEntries(messages), [messages])
+  const bots = useRoxyStore((s) => s.bots)
+  const queue = useRoxyStore((s) => s.queue)
+  // The queue is fetched with the messages, so it is only trustworthy once
+  // this chat's transcript has landed.
+  const queueLoaded = useRoxyStore((s) => s.messagesChatId === chatId)
+  const ownBot = bots.find((bot) => bot.chatId === chatId)
+  const speaker = useRoxyStore((s) => (chatId ? s.automationSpeakers[chatId] : undefined))
   const signature = streaming === null ? null : streamSignature(streaming)
   const quiet = signature !== null && quietSignature === signature
 
@@ -101,6 +110,12 @@ export function CanvasTranscript({
           ...context,
           messages,
           streaming,
+          botUsername: ownBot?.username,
+          streamingBot: speaker,
+          bots,
+          queue,
+          queueLoaded,
+          botAvatar: botAvatarUrl,
           quiet,
           canCancel: (part) => {
             if (part.tool === 'task') return Boolean(part.subChatId)
@@ -113,7 +128,19 @@ export function CanvasTranscript({
         cache
       )
     },
-    [messages, streaming, quiet, clock, logo, cache]
+    [
+      messages,
+      streaming,
+      quiet,
+      clock,
+      logo,
+      cache,
+      bots,
+      queue,
+      queueLoaded,
+      ownBot?.username,
+      speaker
+    ]
   )
 
   const onAction = (action: HitAction): void => {
