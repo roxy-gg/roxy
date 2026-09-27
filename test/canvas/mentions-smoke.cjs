@@ -80,7 +80,9 @@ async function run() {
     'ordinary typing does not collapse or resize the canvas viewport'
   )
   await type(Array.from({ length: 30 }, (_, index) => `line ${index}`).join('\n'))
-  await evaluate(`await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`)
+  await evaluate(
+    `await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`
+  )
   assert.deepEqual(
     await evaluate(`
       const textarea = document.querySelector('textarea')
