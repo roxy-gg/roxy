@@ -41,8 +41,6 @@ export interface LayoutInput {
   messages: Message[]
   /** The live turn's parts, or null when nothing is streaming. */
   streaming: MessagePart[] | null
-  /** True once a live turn has produced no visible update for a short interval. */
-  quiet?: boolean
   width: number
   metrics: TextMetrics
   theme: CanvasTheme
@@ -454,13 +452,11 @@ export function layoutParts(
     cursor += SPACE.partGap
   })
 
-  // The thinking indicator: shown for the whole live turn EXCEPT when something
-  // else is already signalling progress — a tool mid-execution has its own
-  // spinner, and text actively arriving is its own evidence.
+  // The activity row belongs to the live turn, not to gaps between its deltas.
+  // Keeping it mounted through prose and tool updates also keeps one elapsed
+  // timestamp for the complete activity period instead of blinking it away.
   const last = parts[parts.length - 1]
-  const runningTool = last?.type === 'tool' && last.state === 'running'
-  const liveText = (last?.type === 'text' || last?.type === 'reasoning') && last.text.trim() !== ''
-  if (indicator && streaming && !runningTool && (!liveText || input.quiet)) {
+  if (indicator && streaming) {
     const thinkingLabel = speakingAs
       ? builder.t(last === undefined ? 'transcript.thinkingAs' : 'transcript.writingAs', {
           name: `@${speakingAs}`

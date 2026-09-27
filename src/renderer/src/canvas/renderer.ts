@@ -52,6 +52,16 @@ export interface SelectionRange {
   all?: boolean
 }
 
+export function formatElapsed(seconds: number): string {
+  const elapsed = Math.max(0, Math.floor(seconds))
+  const hours = Math.floor(elapsed / 3600)
+  const minutes = Math.floor((elapsed % 3600) / 60)
+  const remainder = elapsed % 60
+  if (hours > 0) return `${hours}h ${minutes}m ${remainder}s`
+  if (minutes > 0) return `${minutes}m ${remainder}s`
+  return `${remainder}s`
+}
+
 /** Track the last-assigned context state so redundant sets are skipped. */
 class Pen {
   private font = ''
@@ -166,10 +176,9 @@ function paintNode(node: Node, paint: PaintContext, pen: Pen): void {
 
     case 'elapsed': {
       const seconds = Math.floor((paint.now - node.startedAt) / 1000)
-      if (seconds < 1) return
       pen.setFont(fontCss(node.font, theme))
       pen.setFill(node.color)
-      ctx.fillText(`${seconds}s`, node.x, node.y + baselineOffset(node.font))
+      ctx.fillText(formatElapsed(seconds), node.x, node.y + baselineOffset(node.font))
       return
     }
 

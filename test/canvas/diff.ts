@@ -12,6 +12,7 @@ import { layoutDiffViewer } from '../../src/renderer/src/components/diff/layout'
 import { Builder } from '../../src/renderer/src/canvas/builder'
 import { font, wrapSpans, type TextMetrics } from '../../src/renderer/src/canvas/text'
 import {
+  formatElapsed,
   hitTest,
   hitText,
   selectionText,
@@ -95,6 +96,18 @@ const sceneOf = (builder: Builder, height: number): Scene => ({
   blocks: [builder.finish('test', 0, height)],
   width: 600,
   height
+})
+
+check('elapsed time uses compact whole units at each boundary', () => {
+  assert.equal(formatElapsed(0), '0s')
+  assert.equal(formatElapsed(37.9), '37s')
+  assert.equal(formatElapsed(59), '59s')
+  assert.equal(formatElapsed(60), '1m 0s')
+  assert.equal(formatElapsed(90), '1m 30s')
+  assert.equal(formatElapsed(631), '10m 31s')
+  assert.equal(formatElapsed(3599), '59m 59s')
+  assert.equal(formatElapsed(3600), '1h 0m 0s')
+  assert.equal(formatElapsed(4830), '1h 20m 30s')
 })
 
 check('source offsets preserve LF, CRLF, blank lines and final newline', () => {
@@ -737,17 +750,49 @@ check('an empty streaming turn remains visible beside windowed history', () => {
   layoutTranscript({ ...input, streaming: null, now: 5000 }, new BlockCache())
   assert.equal(state.startedAt.has('__turn__'), false)
 })
-check('a quiet live turn restores working after visible prose', () => {
+check('one live turn keeps its activity row and start time across updates', () => {
+  const state = view()
+  const cache = new BlockCache()
   const input = {
-    ...longInput(longMessages),
-    streaming: [{ type: 'text' as const, text: 'I found the integration issue.' }]
+    ...longInput([], state),
+    streaming: [] as MessagePart[],
+    botUsername: 'bot',
+    now: 1000,
+    viewport: undefined
   }
-  const active = layoutTranscript(input, new BlockCache())
-  assert.equal(JSON.stringify(active.blocks.at(-1)!.nodes).includes('braille'), false)
+  const startedAt = (scene: Scene): number | undefined => {
+    const elapsed = scene.blocks.at(-1)?.nodes.find((node) => node.kind === 'elapsed')
+    return elapsed?.kind === 'elapsed' ? elapsed.startedAt : undefined
+  }
 
-  const quiet = layoutTranscript({ ...input, quiet: true }, new BlockCache())
-  assert.ok(quiet.blocks.at(-1)!.animated)
-  assert.ok(JSON.stringify(quiet.blocks.at(-1)!.nodes).includes('braille'))
+  const thinking = layoutTranscript(input, cache)
+  assert.equal(startedAt(thinking), 1000)
+  assert.ok(JSON.stringify(thinking.blocks.at(-1)!.nodes).includes('@bot is thinking'))
+
+  const writing = layoutTranscript(
+    {
+      ...input,
+      now: 38_000,
+      streaming: [{ type: 'text', text: 'Still producing the same reply.' }]
+    },
+    cache
+  )
+  assert.equal(startedAt(writing), 1000)
+  assert.ok(writing.blocks.at(-1)!.animated)
+  assert.ok(JSON.stringify(writing.blocks.at(-1)!.nodes).includes('@bot is writing'))
+
+  const usingTool = layoutTranscript(
+    {
+      ...input,
+      now: 61_000,
+      streaming: [{ type: 'tool', tool: 'bash', state: 'running', title: 'npm test' }]
+    },
+    cache
+  )
+  assert.equal(startedAt(usingTool), 1000)
+
+  layoutTranscript({ ...input, streaming: null, now: 62_000 }, cache)
+  assert.equal(state.startedAt.has('__turn__'), false)
 })
 check('live reasoning starts collapsed and can be toggled closed again', () => {
   const state = view()
