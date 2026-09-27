@@ -15,6 +15,8 @@ import { ImagePreview } from './ImagePreview'
 import { useRoxyStore } from '../lib/store'
 import { BotAvatar } from './BotAvatar'
 import { cn } from '../lib/cn'
+import roxy from '../assets/roxy.png'
+import { HOST_USERNAME } from '@shared/bots'
 import { MENTION, isKnownMention, mentionedBots } from '@shared/mentions'
 
 export function Composer({
@@ -50,7 +52,7 @@ export function Composer({
   const mirror = useRef<HTMLDivElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const bots = useRoxyStore((s) => s.bots)
-  const recipients = [{ id: 'roxy', username: 'roxy' }, ...bots]
+  const recipients = [{ id: HOST_USERNAME, username: HOST_USERNAME }, ...bots]
   const [caret, setCaret] = useState(0)
   const [mentionIndex, setMentionIndex] = useState(0)
   const [mentionDismissed, setMentionDismissed] = useState(false)
@@ -351,7 +353,11 @@ export function Composer({
                     : 'text-text-muted hover:bg-white/5'
                 )}
               >
-                <BotAvatar username={bot.username} size={24} />
+                {bot.username === HOST_USERNAME ? (
+                  <img src={roxy} alt="" aria-hidden className="h-6 w-6 shrink-0 object-cover" />
+                ) : (
+                  <BotAvatar username={bot.username} size={24} />
+                )}
                 <span className="truncate">@{bot.username}</span>
               </button>
             ))}

@@ -48,6 +48,29 @@ async function run() {
   assert.equal(privateItem.asBotId, undefined)
   await click('button[title="Project session"]')
   await click('#busy')
+  await type('@')
+  assert.deepEqual(
+    await evaluate(`
+      return [...document.querySelectorAll('[role=option]')].map(option => ({
+        username: option.textContent.trim(),
+        canonicalAppIcon: option.querySelector('img')
+          ? decodeURIComponent(new URL(option.querySelector('img').src).pathname).endsWith(
+              '/src/renderer/src/assets/roxy.png'
+            )
+          : false,
+        facehash: !!option.querySelector('[data-facehash]')
+      }))
+    `),
+    [
+      {
+        username: '@roxy',
+        canonicalAppIcon: true,
+        facehash: false
+      },
+      { username: '@reviewer', canonicalAppIcon: false, facehash: true }
+    ],
+    'Roxy uses the canonical app icon while collaborators keep BotAvatar'
+  )
   for (const draft of [
     'Hola @reviewer',
     '@reviewer hola',
