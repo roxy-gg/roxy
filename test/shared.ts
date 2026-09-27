@@ -331,6 +331,11 @@ import {
   countMatchesByProvider
 } from '../src/renderer/src/lib/modelRows'
 import {
+  pruneComposerDrafts,
+  restoreComposerDraft,
+  updateComposerDraft
+} from '../src/renderer/src/lib/composerDrafts'
+import {
   contextMenuItems as clipboardMenuItems,
   hasUsableItems,
   type ClickContext
@@ -1359,6 +1364,60 @@ check(
   'convertWebContent html format returns raw html',
   convertWebContent('<p>hi</p>', 'text/html', 'html') === '<p>hi</p>'
 )
+
+console.log('\ncomposer drafts\n')
+const image = (id: string) => ({
+  id,
+  dataUrl: `data:image/png;base64,${id}`,
+  mediaType: 'image/png',
+  name: `${id}.png`
+})
+const chats = [{ id: 'chat-a' }, { id: 'chat-b' }]
+let drafts = updateComposerDraft({}, chats, 'chat-a', () => ({
+  value: 'draft a',
+  images: [image('a')]
+}))
+drafts = updateComposerDraft(drafts, chats, 'chat-b', () => ({
+  value: 'draft b',
+  images: [image('b')]
+}))
+check(
+  'drafts: text and images stay scoped to their chat',
+  drafts['chat-a']?.value === 'draft a' &&
+    drafts['chat-a']?.images[0]?.id === 'a' &&
+    drafts['chat-b']?.value === 'draft b' &&
+    drafts['chat-b']?.images[0]?.id === 'b'
+)
+const beforeLateWrite = drafts
+drafts = updateComposerDraft(drafts, [{ id: 'chat-b' }], 'chat-a', (current) => ({
+  ...current,
+  images: [...current.images, image('late')]
+}))
+check('drafts: late image reads cannot recreate a deleted chat', drafts === beforeLateWrite)
+const pruned = pruneComposerDrafts(drafts, [{ id: 'chat-b' }])
+check(
+  'drafts: authoritative chat refresh prunes deleted sessions',
+  !pruned['chat-a'] && pruned['chat-b']?.value === 'draft b'
+)
+const restored = restoreComposerDraft(
+  {
+    'chat-b': { value: 'follow-up', images: [image('new'), image('failed')] }
+  },
+  [{ id: 'chat-b' }],
+  'chat-b',
+  'failed prompt',
+  [image('failed'), image('old')]
+)
+check(
+  'drafts: failed sends merge with a follow-up without dropping text or images',
+  restored['chat-b']?.value === 'failed prompt\n\nfollow-up' &&
+    restored['chat-b']?.images.map((item) => item.id).join(',') === 'failed,old,new'
+)
+const cleared = updateComposerDraft(restored, [{ id: 'chat-b' }], 'chat-b', () => ({
+  value: '',
+  images: []
+}))
+check('drafts: empty drafts are removed', !cleared['chat-b'])
 
 // ---- context management (Phase 9) ----
 console.log('\ncontext management\n')

@@ -1042,13 +1042,48 @@ async function main(): Promise<void> {
         model: 'test-bot-model',
         messages: [{ role: 'user', content: 'Direct turn' }]
       }
+      holdReply = true
+      await win.webContents.executeJavaScript(
+        `window.localTurn = window.roxy.llm.start(${JSON.stringify(input)}); 'started'`
+      )
+      const localDeadline = Date.now() + 5000
+      while (!sessionBusy(local.id) && Date.now() < localDeadline)
+        await new Promise((resolve) => setTimeout(resolve, 10))
+      assert.ok(sessionBusy(local.id), 'local turn starts before navigation checks')
+      win.webContents.emit('did-start-loading')
+      assert.ok(sessionBusy(local.id), 'generic loading does not cancel a local turn')
+      win.webContents.emit('did-start-navigation', {
+        url: 'data:text/html,<title>Bot IPC test</title>#/settings',
+        isSameDocument: true,
+        isMainFrame: true
+      })
+      assert.ok(sessionBusy(local.id), 'same-document Settings navigation keeps the turn alive')
+      win.webContents.emit('did-start-navigation', {
+        url: 'https://frame.invalid/',
+        isSameDocument: false,
+        isMainFrame: false
+      })
+      assert.ok(sessionBusy(local.id), 'subframe navigation keeps the turn alive')
+      win.webContents.emit('did-start-navigation', {
+        url: 'data:text/html,<title>Reloaded</title>',
+        isSameDocument: false,
+        isMainFrame: true
+      })
+      const abandonedDeadline = Date.now() + 5000
+      while (sessionBusy(local.id) && Date.now() < abandonedDeadline)
+        await new Promise((resolve) => setTimeout(resolve, 10))
+      assert.ok(!sessionBusy(local.id), 'real main-frame navigation abandons the local turn')
+      await win.webContents.executeJavaScript('window.localTurn')
+
+      holdReply = false
+      input.requestId = 'test-local-lock-persisted'
       const result = await win.webContents.executeJavaScript(
         `window.roxy.llm.start(${JSON.stringify(input)})`
       )
       assert.ok(result.ok, result.error)
       assert.ok(sessionBusy(local.id), 'lock must cover renderer persistence')
       repo.addMessage({ chatId: local.id, role: 'assistant', content: 'Persisted direct answer' })
-      await win.webContents.executeJavaScript(`window.roxy.llm.finish('test-local-lock')`)
+      await win.webContents.executeJavaScript(`window.roxy.llm.finish('test-local-lock-persisted')`)
       assert.ok(!sessionBusy(local.id), 'renderer ack releases the turn')
     } finally {
       win.destroy()

@@ -12,6 +12,7 @@ import { ModelPicker } from './ModelPicker'
 import { ContextMeter, ContextPicker, ThinkingPicker, AgentPicker } from './InferenceControls'
 import { imageFilesFrom, readImageFile, type ComposerImage } from '../lib/images'
 import { ImagePreview } from './ImagePreview'
+import { restoreComposerDraft, updateComposerDraft } from '../lib/composerDrafts'
 import { useRoxyStore } from '../lib/store'
 import { BotAvatar } from './BotAvatar'
 import { cn } from '../lib/cn'
@@ -20,11 +21,13 @@ import { HOST_USERNAME } from '@shared/bots'
 import { MENTION, isKnownMention, mentionedBots } from '@shared/mentions'
 
 export function Composer({
+  chatId,
   onSend,
   sending,
   onStop,
   variant = 'session'
 }: {
+  chatId: string
   onSend: (text: string, images?: ComposerImage[]) => void | Promise<void>
   sending?: boolean
   onStop?: () => void
@@ -45,8 +48,33 @@ export function Composer({
   variant?: 'session' | 'bot'
 }): JSX.Element {
   const { t } = useTranslation()
-  const [value, setValue] = useState('')
-  const [images, setImages] = useState<ComposerImage[]>([])
+  const draft = useRoxyStore((s) => s.composerDrafts[chatId])
+  const value = draft?.value ?? ''
+  const images = draft?.images ?? []
+  const updateDraft = (
+    update: (current: { value: string; images: ComposerImage[] }) => {
+      value: string
+      images: ComposerImage[]
+    }
+  ): void => {
+    useRoxyStore.setState((state) => ({
+      composerDrafts: updateComposerDraft(state.composerDrafts, state.chats, chatId, update)
+    }))
+  }
+  const setValue = (next: string | ((current: string) => string)): void => {
+    updateDraft((current) => ({
+      ...current,
+      value: typeof next === 'function' ? next(current.value) : next
+    }))
+  }
+  const setImages = (
+    next: ComposerImage[] | ((current: ComposerImage[]) => ComposerImage[])
+  ): void => {
+    updateDraft((current) => ({
+      ...current,
+      images: typeof next === 'function' ? next(current.images) : next
+    }))
+  }
   const [dragging, setDragging] = useState(false)
   const ref = useRef<HTMLTextAreaElement>(null)
   const mirror = useRef<HTMLDivElement>(null)
@@ -153,8 +181,15 @@ export function Composer({
         await onSend(text, snapshotImages.length ? snapshotImages : undefined)
       }
     } catch (e) {
-      setValue((draft) => draft || text)
-      setImages((draft) => (draft.length ? draft : snapshotImages))
+      useRoxyStore.setState((state) => ({
+        composerDrafts: restoreComposerDraft(
+          state.composerDrafts,
+          state.chats,
+          chatId,
+          text,
+          snapshotImages
+        )
+      }))
       setError(e instanceof Error ? e.message : String(e))
     } finally {
       submittingRef.current = false

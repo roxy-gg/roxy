@@ -959,24 +959,36 @@ export function registerIpc(): void {
     if (!release)
       return { ok: false, error: 'This session is already running. Queue your message instead.' }
     let abandoned = false
-    const onDestroyed = (): void => {
+    const removeAbandonListeners = (): void => {
+      event.sender.removeListener('destroyed', onAbandoned)
+      event.sender.removeListener('did-start-navigation', onNavigation)
+      event.sender.removeListener('render-process-gone', onAbandoned)
+    }
+    const onAbandoned = (): void => {
       abandoned = true
       controller.abort()
       if (!llmControllers.has(input.requestId)) release()
-      event.sender.removeListener('destroyed', onDestroyed)
-      event.sender.removeListener('did-start-loading', onDestroyed)
-      event.sender.removeListener('render-process-gone', onDestroyed)
+      removeAbandonListeners()
       localTurnReleases.delete(input.requestId)
     }
-    event.sender.once('destroyed', onDestroyed)
-    event.sender.once('did-start-loading', onDestroyed)
-    event.sender.once('render-process-gone', onDestroyed)
+    const onNavigation = (
+      details: Electron.Event<{
+        isSameDocument: boolean
+        isMainFrame: boolean
+      }>
+    ): void => {
+      // HashRouter changes (including opening Settings) stay in the same
+      // document. Only a real main-frame navigation abandons the renderer that
+      // owns persistence for this turn.
+      if (details.isMainFrame && !details.isSameDocument) onAbandoned()
+    }
+    event.sender.once('destroyed', onAbandoned)
+    event.sender.on('did-start-navigation', onNavigation)
+    event.sender.once('render-process-gone', onAbandoned)
     localTurnReleases.set(input.requestId, {
       senderId: event.sender.id,
       release: () => {
-        event.sender.removeListener('destroyed', onDestroyed)
-        event.sender.removeListener('did-start-loading', onDestroyed)
-        event.sender.removeListener('render-process-gone', onDestroyed)
+        removeAbandonListeners()
         release()
       }
     })

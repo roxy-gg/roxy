@@ -43,6 +43,7 @@ import { api } from './api'
 import { applyMotion, motionSnapshot, type MotionPreference } from './motion'
 import { createStreamPublisher, type StreamPublisher } from './stream-publisher'
 import type { ComposerImage } from './images'
+import { pruneComposerDrafts, type ComposerDrafts } from './composerDrafts'
 import type {
   GitStatusView,
   MultiSyncOutcome,
@@ -89,6 +90,8 @@ interface RoxyStore {
   hiddenModels: Set<string>
   chats: Chat[]
   activeChatId: string | null
+  /** Unsent text and image attachments, scoped to the chat they belong to. */
+  composerDrafts: ComposerDrafts
   messages: Message[]
   /**
    * Which chat `messages` actually holds, or `null` while a load is in flight.
@@ -1036,6 +1039,7 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
   hiddenModels: new Set<string>(),
   chats: [],
   activeChatId: null,
+  composerDrafts: {},
   messages: [],
   messagesChatId: null,
   messagesError: false,
@@ -1108,6 +1112,7 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
       copilotNeedsReauthentication: {},
       recentModels: {},
       hiddenModels: new Set(),
+      composerDrafts: pruneComposerDrafts(get().composerDrafts, chats),
       ready: true
     })
     // Warm the usage/cost dashboard for the titlebar pill (best-effort, async).
@@ -1262,7 +1267,11 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
     // Project order can change when a session is created or deleted, so
     // pull it in the same round trip — one set, so the sidebar re-renders once.
     const [chats, projectOrder] = await Promise.all([api.chats.list(), api.projects.listOrder()])
-    set({ chats, projectOrder })
+    set((state) => ({
+      chats,
+      projectOrder,
+      composerDrafts: pruneComposerDrafts(state.composerDrafts, chats)
+    }))
   },
 
   refreshBots: async () => {
@@ -1309,7 +1318,15 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
         delete activityStartedAt[bot.chatId]
         const automationSpeakers = { ...s.automationSpeakers }
         delete automationSpeakers[bot.chatId]
-        return { runningAutomation, streamingChats, activityStartedAt, automationSpeakers }
+        const composerDrafts = { ...s.composerDrafts }
+        delete composerDrafts[bot.chatId]
+        return {
+          runningAutomation,
+          streamingChats,
+          activityStartedAt,
+          automationSpeakers,
+          composerDrafts
+        }
       })
       if (get().activeChatId === bot.chatId) get().clearActive()
     }
@@ -1923,12 +1940,15 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
       delete stopChats[id]
       const automationSpeakers = { ...s.automationSpeakers }
       delete automationSpeakers[id]
+      const composerDrafts = { ...s.composerDrafts }
+      delete composerDrafts[id]
       return {
         sendingChats,
         streamingChats,
         activityStartedAt,
         stopChats,
-        automationSpeakers
+        automationSpeakers,
+        composerDrafts
       }
     })
     if (get().activeChatId === id) get().clearActive()
