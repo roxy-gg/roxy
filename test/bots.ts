@@ -162,6 +162,36 @@ async function main(): Promise<void> {
   )
   skippedDb.close()
 
+  // An older bot build could advance through v26 without adding as_bot_id.
+  // The next migration must repair the columns it uses before its data cleanup,
+  // because the unconditional schema repair only runs after the ladder finishes.
+  const partialQueueDb = new Database(':memory:')
+  for (const step of MIGRATIONS.slice(0, 23)) {
+    if (typeof step === 'string') partialQueueDb.exec(step)
+    else step(partialQueueDb)
+  }
+  partialQueueDb.exec(`
+    ALTER TABLE queue ADD COLUMN source_chat_id TEXT;
+    ALTER TABLE queue ADD COLUMN recipient_id TEXT;
+    INSERT INTO chats(id,title,created_at,updated_at,kind)
+      VALUES ('partial-chat','Partial',1,1,'main');
+    INSERT INTO queue(id,chat_id,content,created_at,recipient_id)
+      VALUES ('partial-queue','partial-chat','queued',1,'stale');
+  `)
+  partialQueueDb.pragma('user_version = 26')
+  for (const upgrade of MIGRATIONS.slice(26)) {
+    if (typeof upgrade === 'function') partialQueueDb.transaction(() => upgrade(partialQueueDb))()
+    else partialQueueDb.exec(upgrade)
+  }
+  assert.deepEqual(
+    partialQueueDb
+      .prepare('SELECT recipient_id, as_bot_id FROM queue WHERE id = ?')
+      .get('partial-queue'),
+    { recipient_id: null, as_bot_id: null },
+    'v27 repairs an older queue schema before clearing stale user routing'
+  )
+  partialQueueDb.close()
+
   const bot = bots.createBot('reviewer')
   assert.equal(repo.getChat(bot.chatId)?.kind, 'bot')
   assert.equal(repo.getChat(bot.chatId)?.workspacePath, null)

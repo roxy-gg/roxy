@@ -666,8 +666,15 @@ export const MIGRATIONS: Migration[] = [
 
   // ---- v27: user turns belong to the session owner, not a parsed mention ----
   // Keep explicit tool handoffs and failure states; upgrading must not retry work.
-  `UPDATE queue SET recipient_id = NULL, as_bot_id = NULL
-   WHERE source_chat_id IS NULL;`,
+  (db) => {
+    // Older bot builds used these version positions with an earlier queue
+    // schema. Establish every column this cleanup touches before using it.
+    addColumnIfMissing(db, 'queue', 'source_chat_id', 'TEXT')
+    addColumnIfMissing(db, 'queue', 'recipient_id', 'TEXT')
+    addColumnIfMissing(db, 'queue', 'as_bot_id', 'TEXT')
+    db.exec(`UPDATE queue SET recipient_id = NULL, as_bot_id = NULL
+      WHERE source_chat_id IS NULL`)
+  },
 
   // ---- v28: a delegation returns to the actor that sent it ----
   // In-flight rows keep resuming the session owner, which is what they were
