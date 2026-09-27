@@ -52,6 +52,14 @@ async function run() {
   win.focus()
   await new Promise((resolve) => setTimeout(resolve, 2000))
   assert.ok(await text('New bot'))
+  assert.ok(
+    await evaluate(`
+      const section = document.querySelector('button[title="New bot"]').parentElement;
+      const styles = getComputedStyle(section);
+      return styles.paddingTop === '0px' && styles.paddingBottom === '0px';
+    `),
+    'the new-bot-only row has no vertical padding'
+  )
   // Creating a bot asks NOTHING: one click lands in its chat, ready to be told
   // who it is. No dialog, no username, no empty form to abandon.
   await click('button[title="New bot"]')
@@ -79,6 +87,14 @@ async function run() {
       `return [...document.querySelectorAll('button')].some((el) => el.title === '@bot' && el.querySelector('[data-facehash]'))`
     ),
     'the new bot is selected and carries a generated handle'
+  )
+  assert.ok(
+    await evaluate(`
+      const section = document.querySelector('button[title="New bot"]').parentElement;
+      const styles = getComputedStyle(section);
+      return styles.paddingTop === '12px' && styles.paddingBottom === '12px';
+    `),
+    'bot rows keep vertical padding above the projects list'
   )
   // You configure a bot by TALKING to it, so the caret has to already be in the
   // composer: otherwise one click creates the bot and a second is needed before
