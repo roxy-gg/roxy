@@ -564,7 +564,7 @@
     "deleteSubagentSession": "Delete subagent session",
     "empty": "No sessions yet — open a folder to start one.",
     "expand": "Expand sidebar",
-    "mcpServers": "MCP Servers",
+    "mcpServers": "MCP",
     "menu": {
       "fork": "Fork session history",
       "rename": "Rename",
