@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type MutableRefObject } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Pencil, Play, Plus, Trash2, X } from 'lucide-react'
 import type { Bot, BotJob, BotJobInput, BotSchedule } from '@shared/bots'
@@ -15,7 +15,15 @@ const selectClass =
 const message = (error: unknown): string => (error instanceof Error ? error.message : String(error))
 
 /** Settings stay alongside the existing chat; jobs are configuration, not a second chat stack. */
-export function BotSettingsPane({ bot, onClose }: { bot: Bot; onClose: () => void }): JSX.Element {
+export function BotSettingsPane({
+  bot,
+  onClose,
+  closeRequest
+}: {
+  bot: Bot
+  onClose: () => void
+  closeRequest: MutableRefObject<(() => void) | null>
+}): JSX.Element {
   const { t } = useTranslation()
   const refreshBots = useRoxyStore((s) => s.refreshBots)
   const refreshQueue = useRoxyStore((s) => s.refreshQueue)
@@ -42,6 +50,10 @@ export function BotSettingsPane({ bot, onClose }: { bot: Bot; onClose: () => voi
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [saved, setSaved] = useState(false)
+  const [confirmClose, setConfirmClose] = useState(false)
+  const formRef = useRef<HTMLFormElement>(null)
+  const currentEdit = useRef({ username, instructions })
+  currentEdit.current = { username, instructions }
   const [queuedJob, setQueuedJob] = useState<string | null>(null)
   const confirmDelete = useRoxyStore(
     (s) => s.botSettings?.botId === bot.id && s.botSettings.confirmDelete
@@ -50,6 +62,19 @@ export function BotSettingsPane({ bot, onClose }: { bot: Bot; onClose: () => voi
   const paneRef = useRef<HTMLElement>(null)
   const deleteSection = useRef<HTMLDivElement>(null)
   const [editingJob, setEditingJob] = useState<BotJob | 'new' | null>(null)
+  const dirty = username !== bot.username || instructions !== bot.instructions
+  const requestClose = (): void => {
+    if (busy || confirmClose) return
+    if (dirty) setConfirmClose(true)
+    else onClose()
+  }
+  closeRequest.current = requestClose
+  useEffect(
+    () => () => {
+      closeRequest.current = null
+    },
+    [closeRequest]
+  )
 
   useEffect(() => {
     if (confirmDelete) {
@@ -100,7 +125,8 @@ export function BotSettingsPane({ bot, onClose }: { bot: Bot; onClose: () => voi
       onKeyDown={(e) => {
         if (e.key === 'Escape') {
           e.stopPropagation()
-          onClose()
+          if (confirmClose) setConfirmClose(false)
+          else requestClose()
         }
       }}
     >
@@ -109,22 +135,35 @@ export function BotSettingsPane({ bot, onClose }: { bot: Bot; onClose: () => voi
           <BotAvatar username={bot.username} size={24} />
           <h2 className="text-sm font-medium">{t('bots.settings')}</h2>
         </div>
-        <Button variant="ghost" size="sm" onClick={onClose} title={t('bots.close')}>
+        <Button variant="ghost" size="sm" onClick={requestClose} title={t('bots.close')}>
           <X className="h-4 w-4" />
         </Button>
       </div>
       <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto p-4">
         <form
+          ref={formRef}
           id="bot-profile-form"
           className="flex flex-col gap-3"
           onSubmit={(e) => {
             e.preventDefault()
+            const closing = confirmClose
+            const submitted = { username, instructions }
             void run(async () => {
-              await api.bots.update(bot.id, { username, instructions })
+              await api.bots.update(bot.id, submitted)
               await refreshBots()
+              if (closing) {
+                onClose()
+                return
+              }
               setSaved(true)
-              // Saving is the end of an edit: confirm briefly, then close the pane.
-              setTimeout(onClose, 600)
+              // Only close if the user hasn't started another edit during the save.
+              setTimeout(() => {
+                if (
+                  currentEdit.current.username === submitted.username &&
+                  currentEdit.current.instructions === submitted.instructions
+                )
+                  onClose()
+              }, 600)
             })
           }}
         >
@@ -365,6 +404,55 @@ export function BotSettingsPane({ bot, onClose }: { bot: Bot; onClose: () => voi
           </div>
         </div>
       </footer>
+      {confirmClose && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="bot-unsaved-title"
+            aria-describedby="bot-unsaved-description"
+            className="w-full rounded-xl border border-border bg-surface p-4 shadow-2xl"
+          >
+            <h3 id="bot-unsaved-title" className="text-sm font-semibold">
+              {t('bots.unsavedTitle')}
+            </h3>
+            <p id="bot-unsaved-description" className="mt-2 text-xs text-text-muted">
+              {t('bots.unsavedDescription')}
+            </p>
+            {error && (
+              <p role="alert" className="mt-2 break-words text-xs text-danger">
+                {error}
+              </p>
+            )}
+            <div className="mt-4 flex flex-wrap justify-end gap-2">
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={busy}
+                onClick={() => setConfirmClose(false)}
+                autoFocus
+              >
+                {t('bots.keepEditing')}
+              </Button>
+              <Button size="sm" variant="danger" disabled={busy} onClick={onClose}>
+                {t('bots.discardAndClose')}
+              </Button>
+              <Button
+                size="sm"
+                disabled={busy || username.toLowerCase() === 'roxy'}
+                onClick={() => {
+                  if (!formRef.current?.checkValidity()) {
+                    setConfirmClose(false)
+                    requestAnimationFrame(() => formRef.current?.reportValidity())
+                  } else formRef.current.requestSubmit()
+                }}
+              >
+                {t('bots.saveAndClose')}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </aside>
   )
 }

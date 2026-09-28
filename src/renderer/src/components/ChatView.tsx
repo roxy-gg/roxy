@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
   Check,
   ChevronRight,
@@ -129,6 +129,7 @@ export function ChatView(): JSX.Element {
   const isEmpty = !hasContent && !loading
   const botSettings = useRoxyStore((s) => s.botSettings)
   const setBotSettings = useRoxyStore((s) => s.setBotSettings)
+  const botCloseRequest = useRef<(() => void) | null>(null)
   const [infoOpen, setInfoOpen] = useState(false)
 
   // The keyed canvas owns bottom-first arrival and resize anchoring. Queue changes must not re-pin it.
@@ -180,7 +181,12 @@ export function ChatView(): JSX.Element {
   return (
     <div className="@container/chat relative flex h-full min-w-0 flex-1 bg-bg">
       {botPaneOpen && activeBot && (
-        <BotSettingsPane key={activeBot.id} bot={activeBot} onClose={() => setBotSettings(null)} />
+        <BotSettingsPane
+          key={activeBot.id}
+          bot={activeBot}
+          onClose={() => setBotSettings(null)}
+          closeRequest={botCloseRequest}
+        />
       )}
       <div key="conversation" className="flex min-h-0 min-w-0 flex-1 flex-col">
         <header className="titlebar reserve-controls-right flex h-12 shrink-0 items-center justify-between gap-3 px-4">
@@ -285,7 +291,10 @@ export function ChatView(): JSX.Element {
           <div className="flex shrink-0 items-center gap-2">
             {activeBot && (
               <button
-                onClick={() => setBotSettings(botPaneOpen ? null : activeBot.id)}
+                onClick={() => {
+                  if (botPaneOpen) botCloseRequest.current?.()
+                  else setBotSettings(activeBot.id)
+                }}
                 title={t('bots.settings')}
                 aria-expanded={botPaneOpen}
                 aria-controls={botPaneOpen ? 'bot-settings-pane' : undefined}
