@@ -173,15 +173,18 @@ async function runTurn(
   // mid-upgrade); if any of it throws, the right outcome is a session that runs
   // in its project folder, not a chat that refuses to answer.
   try {
-    const materialized = await materializePendingWorktree(input.sessionId)
+    if (signal.aborted) return { ok: false, error: 'Stopped.' }
+    const materialized = await materializePendingWorktree(input.sessionId, signal)
     // A session that materialized its own git worktree is running as a
     // workstream - isolated branch, isolated tree. Counted only on success, so
     // the number means "sessions that got one", not "sessions that asked".
     if (materialized.ok) trackFeature(input.sessionId, 'worktree')
-    if (materialized.error) emit({ type: 'text', delta: `_${materialized.error}_\n\n` })
+    if (materialized.error && !signal.aborted)
+      emit({ type: 'text', delta: `_${materialized.error}_\n\n` })
   } catch (e) {
     console.warn('[worktree] materialize failed; running in the project folder:', e)
   }
+  if (signal.aborted) return { ok: false, error: 'Stopped.' }
   // Where this session's tools run — its worktree when it has one, else the
   // project folder. The single resolver; never read workspace_path directly.
   const cwd = safeSessionCwd(input.sessionId)

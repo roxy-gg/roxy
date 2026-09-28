@@ -165,8 +165,15 @@ function serialize<T>(key: string, task: () => Promise<T>): Promise<T> {
  * Run one git command. Never throws — a missing binary, a non-zero exit and a
  * timeout all come back as `{ ok: false }` with whatever stderr git produced.
  */
-function execGit(args: string[], cwd: string, timeoutMs = GIT_TIMEOUT_MS): Promise<GitResult> {
+function execGit(
+  args: string[],
+  cwd: string,
+  timeoutMs = GIT_TIMEOUT_MS,
+  signal?: AbortSignal,
+  interruptOnAbort = true
+): Promise<GitResult> {
   return new Promise((resolve) => {
+    if (signal?.aborted) return resolve({ ok: false, stdout: '', stderr: 'Stopped.', code: null })
     let child: ReturnType<typeof spawn>
     try {
       child = spawn('git', args, {
@@ -202,8 +209,15 @@ function execGit(args: string[], cwd: string, timeoutMs = GIT_TIMEOUT_MS): Promi
       if (done) return
       done = true
       clearTimeout(timer)
+      signal?.removeEventListener('abort', onAbort)
       resolve(r)
     }
+
+    const onAbort = (): void => {
+      if (interruptOnAbort) child.kill()
+    }
+    signal?.addEventListener('abort', onAbort, { once: true })
+    if (signal?.aborted) onAbort()
 
     const timer = setTimeout(() => {
       try {
@@ -220,14 +234,28 @@ function execGit(args: string[], cwd: string, timeoutMs = GIT_TIMEOUT_MS): Promi
     child.stderr?.on('data', (d: Buffer) => {
       if (stderr.length < MAX_GIT_OUTPUT) stderr += d.toString()
     })
-    child.on('error', (e) => finish({ ok: false, stdout, stderr: e.message, code: null }))
-    child.on('close', (code) => finish({ ok: code === 0, stdout, stderr, code: code ?? null }))
+    child.on('error', (e) =>
+      finish({ ok: false, stdout, stderr: signal?.aborted ? 'Stopped.' : e.message, code: null })
+    )
+    child.on('close', (code) =>
+      finish(
+        signal?.aborted && interruptOnAbort
+          ? { ok: false, stdout, stderr: 'Stopped.', code: null }
+          : { ok: code === 0, stdout, stderr, code: code ?? null }
+      )
+    )
   })
 }
 
 /** Run a git command serialized against everything else touching this repo. */
-function git(args: string[], cwd: string, timeoutMs?: number): Promise<GitResult> {
-  return serialize(cwd, () => execGit(args, cwd, timeoutMs))
+function git(
+  args: string[],
+  cwd: string,
+  timeoutMs?: number,
+  signal?: AbortSignal,
+  interruptOnAbort = true
+): Promise<GitResult> {
+  return serialize(cwd, () => execGit(args, cwd, timeoutMs, signal, interruptOnAbort))
 }
 
 // ---------------------------------------------------------------------------
@@ -240,9 +268,11 @@ let gitAvailable: boolean | null = null
  * Whether a usable `git` binary exists. Probed once and cached: worktree UI is
  * hidden entirely when this is false, so it's checked on a hot path.
  */
-export async function isGitAvailable(): Promise<boolean> {
+export async function isGitAvailable(signal?: AbortSignal): Promise<boolean> {
+  if (signal?.aborted) return false
   if (gitAvailable !== null) return gitAvailable
-  const r = await execGit(['--version'], process.cwd(), 5_000)
+  const r = await execGit(['--version'], process.cwd(), 5_000, signal)
+  if (signal?.aborted) return false
   gitAvailable = r.ok && /git version/i.test(r.stdout)
   return gitAvailable
 }
@@ -257,18 +287,18 @@ export function _resetGitAvailability(): void {
 // ---------------------------------------------------------------------------
 
 /** The repository root containing `cwd`, or null when it isn't in a repo. */
-export async function repoRoot(cwd: string): Promise<string | null> {
+export async function repoRoot(cwd: string, signal?: AbortSignal): Promise<string | null> {
   if (!cwd) return null
-  const r = await git(['rev-parse', '--show-toplevel'], cwd)
+  const r = await git(['rev-parse', '--show-toplevel'], cwd, undefined, signal)
   if (!r.ok) return null
   const out = r.stdout.trim()
   return out ? canonicalPath(out) : null
 }
 
 /** The checked-out branch, or null when detached / not a repo. */
-export async function currentBranch(cwd: string): Promise<string | null> {
+export async function currentBranch(cwd: string, signal?: AbortSignal): Promise<string | null> {
   if (!cwd) return null
-  const r = await git(['rev-parse', '--abbrev-ref', 'HEAD'], cwd)
+  const r = await git(['rev-parse', '--abbrev-ref', 'HEAD'], cwd, undefined, signal)
   if (!r.ok) return null
   const name = r.stdout.trim()
   return !name || name === 'HEAD' ? null : name
@@ -282,9 +312,18 @@ export async function currentBranch(cwd: string): Promise<string | null> {
  * the meantime degrades to a different base instead of a `fatal:` on the path
  * that was going to use it. Defaults to HEAD.
  */
-export async function resolveCommit(cwd: string, rev = 'HEAD'): Promise<string | null> {
+export async function resolveCommit(
+  cwd: string,
+  rev = 'HEAD',
+  signal?: AbortSignal
+): Promise<string | null> {
   if (!cwd) return null
-  const r = await git(['rev-parse', '--verify', '--quiet', `${rev}^{commit}`], cwd)
+  const r = await git(
+    ['rev-parse', '--verify', '--quiet', `${rev}^{commit}`],
+    cwd,
+    undefined,
+    signal
+  )
   const sha = r.stdout.trim()
   return r.ok && sha ? sha : null
 }
@@ -323,11 +362,17 @@ export async function listBranches(cwd: string): Promise<string[]> {
  * always points at the real `.git` directory, shared by every worktree; its
  * parent is the main working tree.
  */
-async function mainWorktreeRoot(cwd: string): Promise<string | null> {
-  const r = await git(['rev-parse', '--path-format=absolute', '--git-common-dir'], cwd)
+async function mainWorktreeRoot(cwd: string, signal?: AbortSignal): Promise<string | null> {
+  const r = await git(
+    ['rev-parse', '--path-format=absolute', '--git-common-dir'],
+    cwd,
+    undefined,
+    signal
+  )
   const out = r.stdout.trim()
   if (r.ok && out) return canonicalPath(path.dirname(out))
-  return repoRoot(cwd)
+  if (signal?.aborted) return null
+  return repoRoot(cwd, signal)
 }
 
 /**
@@ -337,9 +382,9 @@ async function mainWorktreeRoot(cwd: string): Promise<string | null> {
  * behind its back, so each path is stat'd and only live ones are returned —
  * otherwise the branch picker offers to "attach" to a directory that's gone.
  */
-export async function listWorktrees(root: string): Promise<WorktreeInfo[]> {
+export async function listWorktrees(root: string, signal?: AbortSignal): Promise<WorktreeInfo[]> {
   if (!root) return []
-  const r = await git(['worktree', 'list', '--porcelain'], root)
+  const r = await git(['worktree', 'list', '--porcelain'], root, undefined, signal)
   if (!r.ok) return []
 
   const entries: WorktreeInfo[] = []
@@ -377,7 +422,8 @@ export async function listWorktrees(root: string): Promise<WorktreeInfo[]> {
 
   // Flag the repo's own working tree by identity rather than by position: it's
   // the parent of the shared .git directory. Prune must never offer to delete it.
-  const main = await mainWorktreeRoot(root)
+  if (signal?.aborted) return []
+  const main = await mainWorktreeRoot(root, signal)
   for (const e of entries) e.isMain = main !== null && e.path === main
 
   const live = await Promise.all(
@@ -399,23 +445,38 @@ export async function listWorktrees(root: string): Promise<WorktreeInfo[]> {
  * Tries origin/HEAD (what the remote says), then a local main/master, then
  * whatever is currently checked out. Null only when the repo has no commits.
  */
-export async function defaultBranch(cwd: string): Promise<string | null> {
+export async function defaultBranch(cwd: string, signal?: AbortSignal): Promise<string | null> {
   if (!cwd) return null
-  const sym = await git(['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'], cwd)
+  const sym = await git(
+    ['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'],
+    cwd,
+    undefined,
+    signal
+  )
   if (sym.ok) {
     const name = sym.stdout.trim().replace(/^origin\//, '')
     if (name) return name
   }
   for (const candidate of ['main', 'master']) {
-    const r = await git(['rev-parse', '--verify', '--quiet', `refs/heads/${candidate}`], cwd)
+    const r = await git(
+      ['rev-parse', '--verify', '--quiet', `refs/heads/${candidate}`],
+      cwd,
+      undefined,
+      signal
+    )
     if (r.ok && r.stdout.trim()) return candidate
   }
-  return await currentBranch(cwd)
+  if (signal?.aborted) return null
+  return await currentBranch(cwd, signal)
 }
 
 /** Fetch from a remote (default `origin`). Fails harmlessly when offline. */
-export async function fetchOrigin(cwd: string, remote = 'origin'): Promise<GitResult> {
-  return git(['fetch', '--quiet', remote], cwd, FETCH_TIMEOUT_MS)
+export async function fetchOrigin(
+  cwd: string,
+  remote = 'origin',
+  signal?: AbortSignal
+): Promise<GitResult> {
+  return git(['fetch', '--quiet', remote], cwd, FETCH_TIMEOUT_MS, signal)
 }
 
 /**
@@ -434,8 +495,8 @@ export async function upstreamRemote(cwd: string, branch: string): Promise<strin
 }
 
 /** Whether the repo has an `origin` remote configured. */
-export async function hasOrigin(cwd: string): Promise<boolean> {
-  const r = await git(['remote'], cwd)
+export async function hasOrigin(cwd: string, signal?: AbortSignal): Promise<boolean> {
+  const r = await git(['remote'], cwd, undefined, signal)
   return r.ok && r.stdout.split('\n').some((l) => l.trim() === 'origin')
 }
 
@@ -777,9 +838,19 @@ export function temporaryBranchName(prefix?: string): string {
  * failure, and it would strike on the turn path, in the third repo, after two
  * worktrees already existed.
  */
-async function branchFreeInAll(roots: string[], candidate: string): Promise<boolean> {
+async function branchFreeInAll(
+  roots: string[],
+  candidate: string,
+  signal?: AbortSignal
+): Promise<boolean> {
   for (const root of roots) {
-    const exists = await git(['rev-parse', '--verify', '--quiet', `refs/heads/${candidate}`], root)
+    if (signal?.aborted) return false
+    const exists = await git(
+      ['rev-parse', '--verify', '--quiet', `refs/heads/${candidate}`],
+      root,
+      undefined,
+      signal
+    )
     if (exists.ok && exists.stdout.trim()) return false
   }
   return true
@@ -801,7 +872,11 @@ async function branchFreeInAll(roots: string[], candidate: string): Promise<bool
  * `root` may be one repo or several. With several (a composite workstream) the
  * name has to be free in EVERY one of them, so they can all share it.
  */
-export async function branchNameForTitle(root: string | string[], title: string): Promise<string> {
+export async function branchNameForTitle(
+  root: string | string[],
+  title: string,
+  signal?: AbortSignal
+): Promise<string> {
   const roots = (Array.isArray(root) ? root : [root]).filter(Boolean)
   if (!roots.length) return temporaryBranchName()
 
@@ -814,7 +889,8 @@ export async function branchNameForTitle(root: string | string[], title: string)
   const base = prefix ? prefix + '/' + segment : segment
   for (let i = 0; i < 100; i++) {
     const candidate = i === 0 ? base : base + '-' + (i + 1)
-    if (await branchFreeInAll(roots, candidate)) return candidate
+    if (signal?.aborted) return temporaryBranchName()
+    if ((await branchFreeInAll(roots, candidate, signal)) && !signal?.aborted) return candidate
   }
   return temporaryBranchName()
 }
@@ -949,28 +1025,41 @@ export interface WorktreeResult {
  * unrelated diffs. Falls back to the local ref when there's no origin or the
  * fetch fails (offline is normal, and must still work).
  */
-export async function createWorktree(input: CreateWorktreeInput): Promise<WorktreeResult> {
+export async function createWorktree(
+  input: CreateWorktreeInput,
+  signal?: AbortSignal
+): Promise<WorktreeResult> {
   const { repoRoot: root, branch } = input
+  if (signal?.aborted) return { ok: false, error: 'Stopped.' }
   if (!root || !branch) return { ok: false, error: 'createWorktree: missing repoRoot or branch' }
 
   // Reuse rather than fail: git refuses to check a branch out twice, so if this
   // branch already lives in a worktree, hand that one back.
-  const existing = (await listWorktrees(root)).find((w) => w.branch === branch)
+  const existing = (await listWorktrees(root, signal)).find((w) => w.branch === branch)
+  if (signal?.aborted) return { ok: false, error: 'Stopped.' }
   if (existing) return { ok: true, worktree: existing, attached: true }
 
   let baseRef = input.baseRef
-  const base = input.baseBranch ?? (await defaultBranch(root))
+  const base = input.baseBranch ?? (await defaultBranch(root, signal))
+  if (signal?.aborted) return { ok: false, error: 'Stopped.' }
   if (!baseRef) {
-    if (base && (await hasOrigin(root))) {
-      await fetchOrigin(root) // best-effort; offline just means a local base
+    if (base && (await hasOrigin(root, signal))) {
+      await fetchOrigin(root, 'origin', signal) // best-effort; offline just means a local base
       const remote = await git(
         ['rev-parse', '--verify', '--quiet', `refs/remotes/origin/${base}^{commit}`],
-        root
+        root,
+        undefined,
+        signal
       )
       if (remote.ok && remote.stdout.trim()) baseRef = remote.stdout.trim()
     }
     if (!baseRef && base) {
-      const local = await git(['rev-parse', '--verify', '--quiet', `${base}^{commit}`], root)
+      const local = await git(
+        ['rev-parse', '--verify', '--quiet', `${base}^{commit}`],
+        root,
+        undefined,
+        signal
+      )
       if (local.ok && local.stdout.trim()) baseRef = local.stdout.trim()
     }
     if (!baseRef) baseRef = 'HEAD'
@@ -978,7 +1067,15 @@ export async function createWorktree(input: CreateWorktreeInput): Promise<Worktr
 
   const desired = input.path ?? worktreePathFor(root, branch)
   const target = input.exactPath ? desired : await uniquePath(desired)
-  const add = await git(['worktree', 'add', '-b', branch, target, baseRef], root)
+  if (signal?.aborted) return { ok: false, error: 'Stopped.' }
+  // Once checkout starts, let git finish so cancellation cannot strand a half-created tree.
+  const add = await git(
+    ['worktree', 'add', '-b', branch, target, baseRef],
+    root,
+    undefined,
+    signal,
+    false
+  )
   if (!add.ok) {
     return { ok: false, error: cleanGitError(add, `Could not create a worktree for "${branch}"`) }
   }
@@ -987,7 +1084,7 @@ export async function createWorktree(input: CreateWorktreeInput): Promise<Worktr
   // reset, travels with the repo, and is exactly what `gh pr create --base`
   // wants later.
   if (base) {
-    await git(['config', `branch.${branch}.${BASE_CONFIG_SUFFIX}`, base], root)
+    await git(['config', `branch.${branch}.${BASE_CONFIG_SUFFIX}`, base], root, undefined, signal)
   }
 
   return {
@@ -1000,29 +1097,41 @@ export async function createWorktree(input: CreateWorktreeInput): Promise<Worktr
  * Create a worktree for a branch that ALREADY exists (local or origin-only).
  * Attaches to the existing worktree when the branch is checked out elsewhere.
  */
-export async function attachWorktree(input: {
-  repoRoot: string
-  branch: string
-  path?: string
-  /** Use `path` verbatim; see `CreateWorktreeInput.exactPath`. */
-  exactPath?: boolean
-}): Promise<WorktreeResult> {
+export async function attachWorktree(
+  input: {
+    repoRoot: string
+    branch: string
+    path?: string
+    /** Use `path` verbatim; see `CreateWorktreeInput.exactPath`. */
+    exactPath?: boolean
+  },
+  signal?: AbortSignal
+): Promise<WorktreeResult> {
   const { repoRoot: root, branch } = input
+  if (signal?.aborted) return { ok: false, error: 'Stopped.' }
   if (!root || !branch) return { ok: false, error: 'attachWorktree: missing repoRoot or branch' }
 
-  const existing = (await listWorktrees(root)).find((w) => w.branch === branch)
+  const existing = (await listWorktrees(root, signal)).find((w) => w.branch === branch)
+  if (signal?.aborted) return { ok: false, error: 'Stopped.' }
   if (existing) return { ok: true, worktree: existing, attached: true }
 
   const desired = input.path ?? worktreePathFor(root, branch)
   const target = input.exactPath ? desired : await uniquePath(desired)
-  const localRef = await git(['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`], root)
+  const localRef = await git(
+    ['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`],
+    root,
+    undefined,
+    signal
+  )
   const args =
     localRef.ok && localRef.stdout.trim()
       ? ['worktree', 'add', target, branch]
       : // origin-only: create a local branch tracking the remote one
         ['worktree', 'add', '-b', branch, target, `origin/${branch}`]
 
-  const add = await git(args, root)
+  if (signal?.aborted) return { ok: false, error: 'Stopped.' }
+  // Do not interrupt a checkout mid-write; the caller records it even if Stop arrived.
+  const add = await git(args, root, undefined, signal, false)
   if (!add.ok) {
     return { ok: false, error: cleanGitError(add, `Could not check out "${branch}"`) }
   }

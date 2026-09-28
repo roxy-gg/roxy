@@ -1942,6 +1942,30 @@ async function main(): Promise<void> {
         repo.removeChat(auto.id)
       }
 
+      // ---- cancellation before worktree creation ----
+      const cancelled = repo.createChat({
+        title: 'cancelled worktree',
+        kind: 'main',
+        workspacePath: gitRepo,
+        worktree: { mode: 'new' }
+      })
+      const stopped = new AbortController()
+      stopped.abort()
+      const skipped = await materializePendingWorktree(cancelled.id, stopped.signal)
+      check('stopped materialization does not create a worktree', !skipped.ok)
+      check(
+        'stopped materialization retains the intent',
+        !!repo.getChat(cancelled.id)?.worktreePending
+      )
+      check(
+        'stopped materialization leaves no worktree path',
+        !repo.getChat(cancelled.id)?.worktreePath
+      )
+      const resumed = await materializePendingWorktree(cancelled.id)
+      check('the next turn can create the pending worktree', resumed.ok, resumed.error ?? '')
+      await removeWorktreeForChat(cancelled.id)
+      repo.removeChat(cancelled.id)
+
       // ---- lazy materialization ----
       const lazy = repo.createChat({
         title: 'lazy worktree',
