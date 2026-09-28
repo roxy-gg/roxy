@@ -15,6 +15,7 @@ import {
 } from '../../shared/session-config'
 import { pickDefaultModel } from '../../shared/models'
 import { HOST_USERNAME, isHostSpeaker } from '../../shared/bots'
+import { queueOrigin } from '../../shared/queue'
 import * as repo from '../db/repo'
 import * as bots from '../db/bots'
 import { getDb } from '../db/database'
@@ -226,8 +227,22 @@ export function wakeAutomation(): void {
     for (const { chat_id: chatId } of rows) {
       if (live.size >= 4) break
       if (sessionBusy(chatId) || queuePaused(chatId) || subagentSnapshot(chatId) !== null) continue
-      const item = repo.listQueue(chatId)[0]
-      if (!item || item.state !== 'pending' || (item.notBefore ?? 0) > Date.now()) continue
+      const queue = repo.listQueue(chatId)
+      let item = queue[0]
+      const now = Date.now()
+      // Hidden automation failures/delays must not lock the user out. Bypass
+      // only for user work; the automated chain and visible failures stay paused.
+      if (
+        item &&
+        item.state !== 'running' &&
+        queueOrigin(item) !== 'user' &&
+        (item.state === 'failed' || (item.notBefore ?? 0) > now)
+      ) {
+        const userItem = queue.find((entry) => queueOrigin(entry) === 'user')
+        if (!userItem) continue
+        item = userItem
+      }
+      if (!item || item.state !== 'pending' || (item.notBefore ?? 0) > now) continue
       void deliver(item).catch((error) => console.error('[bots] delivery failed', error))
     }
   } catch (error) {

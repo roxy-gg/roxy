@@ -79,8 +79,10 @@ Pausing affects future beats; already queued messages remain editable in the
 queue. Deleting a schedule cancels its not-yet-started pending deliveries.
 
 The main process owns queue consumption for desktop, phone, bots, and scheduled
-jobs. Failed requests remain in the queue with an error and block later work
-until edited/retried or removed. Stop pauses draining. Interrupted deliveries
+jobs. Failed requests remain in the queue with an error until edited/retried or
+removed. Hidden failed or delayed automation blocks later automated work, but
+user prompts can pass it in user-queue order. Visible failed user requests still
+block later work until retried or removed. Stop pauses draining. Interrupted deliveries
 are marked failed on startup rather than replaying potentially non-idempotent
 tool actions. There is no exactly-once guarantee for external side effects.
 

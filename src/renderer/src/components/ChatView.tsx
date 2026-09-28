@@ -81,8 +81,7 @@ export function ChatView(): JSX.Element {
   const allQueued = useRoxyStore((s) => s.queue)
   // A running item's prompt is already persisted to the transcript by the main
   // process, so showing its queue row too renders the same message twice.
-  // Pending rows from every origin stay visible in their real FIFO order; each
-  // row identifies whether it came from the user, an agent, or a schedule.
+  // Only user requests appear here; automated handoffs and schedules stay hidden.
   const queue = useMemo(() => allQueued.filter(isVisibleQueueItem), [allQueued])
   const newSession = useRoxyStore((s) => s.newSession)
   const selectChat = useRoxyStore((s) => s.selectChat)

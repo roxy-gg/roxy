@@ -1807,6 +1807,95 @@ async function main(): Promise<void> {
       'the global mode does not leak into the bot that owns the chat'
     )
     repo.setActiveAgent('build')
+
+    // Hidden failed/delayed automation must not trap user prompts in an idle bot chat.
+    for (const origin of ['agent', 'schedule'] as const) {
+      for (const blockedState of ['failed', 'delayed'] as const) {
+        const blocker = enqueuePrompt(memoryBot.chatId, 'Hidden automation', undefined, {
+          ...(origin === 'agent' ? { sourceChatId: session.id } : { scheduleId: workerJob.id }),
+          ...(blockedState === 'delayed' ? { notBefore: Date.now() + 60000 } : {})
+        })
+        if (blockedState === 'failed')
+          getDb()
+            .prepare("UPDATE queue SET state = 'failed', error = 'Automation failed' WHERE id = ?")
+            .run(blocker.id)
+        const blocked = repo.listQueue(memoryBot.chatId)[0]
+        const followup = enqueuePrompt(memoryBot.chatId, 'Automated follow-up', undefined, {
+          sourceChatId: session.id
+        })
+        const first = enqueuePrompt(memoryBot.chatId, 'First user request')
+        const second = enqueuePrompt(memoryBot.chatId, 'Second user request')
+        const before = requests.length
+
+        const release = claimTurn(memoryBot.chatId, new AbortController())!
+        wakeAutomation()
+        assert.equal(requests.length, before, 'an active turn still owns the bot chat')
+        release()
+        stopTurn(memoryBot.chatId)
+        wakeAutomation()
+        assert.equal(requests.length, before, 'Stop still pauses user delivery')
+        resumeQueue(memoryBot.chatId)
+
+        for (const item of [first, second]) {
+          wakeAutomation()
+          wakeAutomation()
+          await settle(memoryBot.chatId)
+          assert.equal(requests.at(-1)?.messages.at(-1)?.content, item.content)
+          assert.ok(!repo.listQueue(memoryBot.chatId).some((entry) => entry.id === item.id))
+        }
+        assert.equal(
+          requests.length,
+          before + 2,
+          `${origin} ${blockedState}: users run once in order`
+        )
+        assert.deepEqual(repo.listQueue(memoryBot.chatId), [blocked, followup])
+        wakeAutomation()
+        assert.equal(
+          requests.length,
+          before + 2,
+          'the failed/delayed automated chain stays blocked'
+        )
+
+        // Retained automation remains explicitly retryable/deliverable when due.
+        repo.updateQueueItem(blocker.id, 'Recovered automation')
+        getDb().prepare('UPDATE queue SET not_before = 0 WHERE id = ?').run(blocker.id)
+        wakeAutomation()
+        await settle(memoryBot.chatId)
+        assert.equal(requests.length, before + 3)
+        assert.deepEqual(repo.listQueue(memoryBot.chatId), [followup])
+        repo.removeQueueItem(followup.id)
+      }
+    }
+
+    // Visible failures, including user-requested guest turns, still require explicit retry.
+    for (const fromUser of [false, true]) {
+      const hidden = enqueuePrompt(memoryBot.chatId, 'Hidden failed continuation', undefined, {
+        sourceChatId: session.id
+      })
+      const failedUser = enqueuePrompt(
+        memoryBot.chatId,
+        'Failed user request',
+        undefined,
+        fromUser ? { sourceChatId: memoryBot.chatId, fromUser: true, asBotId: worker.id } : {}
+      )
+      getDb()
+        .prepare("UPDATE queue SET state = 'failed' WHERE id IN (?, ?)")
+        .run(hidden.id, failedUser.id)
+      enqueuePrompt(memoryBot.chatId, 'Do not bypass a visible failure')
+      const before = requests.length
+      wakeAutomation()
+      assert.equal(requests.length, before)
+      assert.ok(!sessionBusy(memoryBot.chatId))
+      repo.updateQueueItem(failedUser.id, 'Retried user request')
+      wakeAutomation()
+      await settle(memoryBot.chatId)
+      assert.equal(requests.length, before + 1)
+      assert.equal(
+        repo.listMessages(memoryBot.chatId).at(-1)?.botId,
+        fromUser ? worker.id : memoryBot.id
+      )
+      for (const item of repo.listQueue(memoryBot.chatId)) repo.removeQueueItem(item.id)
+    }
   } finally {
     stopAutomation()
     setPromptText({})
