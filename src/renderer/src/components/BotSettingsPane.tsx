@@ -50,10 +50,8 @@ export function BotSettingsPane({
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [saved, setSaved] = useState(false)
-  const [confirmClose, setConfirmClose] = useState(false)
+  const [confirmAction, setConfirmAction] = useState<'close' | 'save' | null>(null)
   const formRef = useRef<HTMLFormElement>(null)
-  const currentEdit = useRef({ username, instructions })
-  currentEdit.current = { username, instructions }
   const [queuedJob, setQueuedJob] = useState<string | null>(null)
   const confirmDelete = useRoxyStore(
     (s) => s.botSettings?.botId === bot.id && s.botSettings.confirmDelete
@@ -64,8 +62,8 @@ export function BotSettingsPane({
   const [editingJob, setEditingJob] = useState<BotJob | 'new' | null>(null)
   const dirty = username !== bot.username || instructions !== bot.instructions
   const requestClose = (): void => {
-    if (busy || confirmClose) return
-    if (dirty) setConfirmClose(true)
+    if (busy || confirmAction) return
+    if (dirty) setConfirmAction('close')
     else onClose()
   }
   closeRequest.current = requestClose
@@ -125,7 +123,7 @@ export function BotSettingsPane({
       onKeyDown={(e) => {
         if (e.key === 'Escape') {
           e.stopPropagation()
-          if (confirmClose) setConfirmClose(false)
+          if (confirmAction && !busy) setConfirmAction(null)
           else requestClose()
         }
       }}
@@ -146,24 +144,22 @@ export function BotSettingsPane({
           className="flex flex-col gap-3"
           onSubmit={(e) => {
             e.preventDefault()
-            const closing = confirmClose
+            if (busy) return
+            if (!confirmAction) {
+              setError('')
+              setConfirmAction('save')
+              return
+            }
+            const closing = confirmAction === 'close'
             const submitted = { username, instructions }
             void run(async () => {
               await api.bots.update(bot.id, submitted)
               await refreshBots()
-              if (closing) {
-                onClose()
-                return
+              if (closing) onClose()
+              else {
+                setSaved(true)
+                setConfirmAction(null)
               }
-              setSaved(true)
-              // Only close if the user hasn't started another edit during the save.
-              setTimeout(() => {
-                if (
-                  currentEdit.current.username === submitted.username &&
-                  currentEdit.current.instructions === submitted.instructions
-                )
-                  onClose()
-              }, 600)
             })
           }}
         >
@@ -395,16 +391,21 @@ export function BotSettingsPane({
             )}
             <Button
               size="sm"
-              type="submit"
+              type="button"
               form="bot-profile-form"
               disabled={busy || username.toLowerCase() === 'roxy'}
+              onClick={() => {
+                if (!formRef.current?.reportValidity()) return
+                setError('')
+                setConfirmAction('save')
+              }}
             >
               {t('common.save')}
             </Button>
           </div>
         </div>
       </footer>
-      {confirmClose && (
+      {confirmAction && (
         <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
           <div
             role="alertdialog"
@@ -414,10 +415,12 @@ export function BotSettingsPane({
             className="w-full rounded-xl border border-border bg-surface p-4 shadow-2xl"
           >
             <h3 id="bot-unsaved-title" className="text-sm font-semibold">
-              {t('bots.unsavedTitle')}
+              {t(confirmAction === 'close' ? 'bots.unsavedTitle' : 'bots.confirmSaveTitle')}
             </h3>
             <p id="bot-unsaved-description" className="mt-2 text-xs text-text-muted">
-              {t('bots.unsavedDescription')}
+              {t(
+                confirmAction === 'close' ? 'bots.unsavedDescription' : 'bots.confirmSaveDescription'
+              )}
             </p>
             {error && (
               <p role="alert" className="mt-2 break-words text-xs text-danger">
@@ -429,25 +432,27 @@ export function BotSettingsPane({
                 size="sm"
                 variant="ghost"
                 disabled={busy}
-                onClick={() => setConfirmClose(false)}
+                onClick={() => setConfirmAction(null)}
                 autoFocus
               >
-                {t('bots.keepEditing')}
+                {t(confirmAction === 'close' ? 'bots.keepEditing' : 'common.cancel')}
               </Button>
-              <Button size="sm" variant="danger" disabled={busy} onClick={onClose}>
-                {t('bots.discardAndClose')}
-              </Button>
+              {confirmAction === 'close' && (
+                <Button size="sm" variant="danger" disabled={busy} onClick={onClose}>
+                  {t('bots.discardAndClose')}
+                </Button>
+              )}
               <Button
                 size="sm"
                 disabled={busy || username.toLowerCase() === 'roxy'}
                 onClick={() => {
                   if (!formRef.current?.checkValidity()) {
-                    setConfirmClose(false)
+                    setConfirmAction(null)
                     requestAnimationFrame(() => formRef.current?.reportValidity())
                   } else formRef.current.requestSubmit()
                 }}
               >
-                {t('bots.saveAndClose')}
+                {t(confirmAction === 'close' ? 'bots.saveAndClose' : 'bots.confirmSave')}
               </Button>
             </div>
           </div>

@@ -316,27 +316,66 @@ async function run() {
     'Delete is bottom-left and the profile Save is bottom-right'
   )
   await click('button[form="bot-profile-form"]')
-  assert.ok(await text('Saved'))
-  // Saving is the end of an edit, so the pane confirms and closes itself.
-  for (
-    let i = 0;
-    i < 20 && (await evaluate(`return !!document.querySelector('#bot-settings-pane')`));
-    i++
+  assert.ok(await text('Save bot settings?'), 'footer Save opens a save-specific confirmation')
+  assert.ok(!(await text('Discard and close')), 'ordinary Save does not offer discard-and-close')
+  await buttonText('Cancel')
+  assert.equal(
+    await evaluate('return document.querySelector("#bot-profile-form textarea").value'),
+    'Be a helpful daily planner.',
+    'canceling Save keeps the profile draft'
   )
-    await wait()
+  await click('button[form="bot-profile-form"]')
+  await evaluate(`window.__updateBot = window.roxy.bots.update; window.roxy.bots.update = async () => { throw new Error('Test profile write failure') }`)
+  await buttonText('Save changes')
   assert.ok(
-    await evaluate(`return !document.querySelector('#bot-settings-pane')`),
-    'a saved profile closes the pane'
+    await evaluate(`return document.querySelector('[role=alertdialog]')?.textContent.includes('Test profile write failure')`),
+    'failed Save keeps the confirmation and shows the error'
+  )
+  assert.equal(
+    await evaluate('return document.querySelector("#bot-profile-form textarea").value'),
+    'Be a helpful daily planner.',
+    'failed Save preserves the draft'
+  )
+  await evaluate(`window.roxy.bots.update = window.__updateBot`)
+  await buttonText('Save changes')
+  assert.ok(await text('Saved'))
+  await wait()
+  assert.ok(await evaluate(`return !!document.querySelector('#bot-settings-pane')`), 'ordinary Save leaves settings open')
+  assert.ok(!(await text('Save bot settings?')), 'successful Save dismisses the confirmation')
+  await type('#bot-profile-form textarea', 'Save after closing prompt')
+  await click('#bot-settings-pane button[title="Close"]')
+  assert.ok(await text('Save changes before closing?'), 'X prompts for unsaved edits')
+  assert.ok(await text('Discard and close'), 'close prompt offers discard')
+  await buttonText('Keep editing')
+  assert.equal(
+    await evaluate('return document.querySelector("#bot-profile-form textarea").value'),
+    'Save after closing prompt',
+    'keep editing retains draft'
   )
   await click('button[title="Bot settings"]')
+  assert.ok(await text('Save changes before closing?'), 'header toggle uses close confirmation')
+  await buttonText('Save and close')
+  assert.ok(!(await evaluate(`return !!document.querySelector('#bot-settings-pane')`)), 'save and close closes settings')
+  await click('button[title="Bot settings"]')
+  assert.equal(
+    await evaluate('return document.querySelector("#bot-profile-form textarea").value'),
+    'Save after closing prompt',
+    'save and close persisted the edit'
+  )
   await type('#bot-profile-form input', 'x')
   await click('button[form="bot-profile-form"]')
   assert.ok(
     await evaluate(`return !document.querySelector('#bot-profile-form input').validity.valid`),
     'footer Save retains native form validation'
   )
+  assert.ok(!(await text('Save bot settings?')), 'invalid Save does not open confirmation')
   assert.ok(await evaluate(`return !!document.querySelector('button[title="@helper"]')`))
   await type('#bot-profile-form input', 'helper')
+  await type('#bot-profile-form textarea', 'Enter confirmation draft')
+  await evaluate(`document.querySelector('#bot-profile-form').requestSubmit()`)
+  await wait()
+  assert.ok(await text('Save bot settings?'), 'form submission also requires Save confirmation')
+  await buttonText('Cancel')
   await buttonText('Add schedule')
   await type('aside section form input', 'Daily check-in')
   await type('aside section form textarea', 'Plan the day.')
@@ -346,7 +385,7 @@ async function run() {
     await win.webContents.executeJavaScript(
       `window.roxy.bots.list().then(bots => bots.find(b => b.username === 'helper').instructions)`
     ),
-    'Be a helpful daily planner.',
+    'Save after closing prompt',
     'schedule Save does not submit the profile form'
   )
   assert.ok(await text('Every 60 minutes'))
@@ -417,6 +456,8 @@ async function run() {
   await click('button[title="Delete schedule"]')
   assert.ok(await text('No schedules yet.'))
   await click('aside[aria-label="Bot settings"] button[title="Close"]')
+  assert.ok(await text('Save changes before closing?'), 'X protects the unsaved schedule-era profile edit')
+  await buttonText('Discard and close')
   await click('button[title="Bot settings"]')
   await evaluate(`document.querySelector('#bot-settings-pane textarea').focus()`)
   win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Escape' })
