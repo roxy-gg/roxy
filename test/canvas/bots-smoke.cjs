@@ -377,10 +377,14 @@ async function run() {
     'canceling Save keeps the profile draft'
   )
   await click('button[form="bot-profile-form"]')
-  await evaluate(`window.__updateBot = window.roxy.bots.update; window.roxy.bots.update = async () => { throw new Error('Test profile write failure') }`)
+  await evaluate(
+    `window.__updateBot = window.roxy.bots.update; window.roxy.bots.update = async () => { throw new Error('Test profile write failure') }`
+  )
   await buttonText('Save changes')
   assert.ok(
-    await evaluate(`return document.querySelector('[role=alertdialog]')?.textContent.includes('Test profile write failure')`),
+    await evaluate(
+      `return document.querySelector('[role=alertdialog]')?.textContent.includes('Test profile write failure')`
+    ),
     'failed Save keeps the confirmation and shows the error'
   )
   assert.equal(
@@ -392,7 +396,10 @@ async function run() {
   await buttonText('Save changes')
   assert.ok(await text('Saved'))
   await wait()
-  assert.ok(await evaluate(`return !!document.querySelector('#bot-settings-pane')`), 'ordinary Save leaves settings open')
+  assert.ok(
+    await evaluate(`return !!document.querySelector('#bot-settings-pane')`),
+    'ordinary Save leaves settings open'
+  )
   assert.ok(!(await text('Save bot settings?')), 'successful Save dismisses the confirmation')
   await type('#bot-profile-form textarea', 'Save after closing prompt')
   await click('#bot-settings-pane button[title="Close"]')
@@ -407,7 +414,10 @@ async function run() {
   await click('button[title="Bot settings"]')
   assert.ok(await text('Save changes before closing?'), 'header toggle uses close confirmation')
   await buttonText('Save and close')
-  assert.ok(!(await evaluate(`return !!document.querySelector('#bot-settings-pane')`)), 'save and close closes settings')
+  assert.ok(
+    !(await evaluate(`return !!document.querySelector('#bot-settings-pane')`)),
+    'save and close closes settings'
+  )
   await click('button[title="Bot settings"]')
   assert.equal(
     await evaluate('return document.querySelector("#bot-profile-form textarea").value'),
@@ -508,7 +518,10 @@ async function run() {
   await click('button[title="Delete schedule"]')
   assert.ok(await text('No schedules yet.'))
   await click('aside[aria-label="Bot settings"] button[title="Close"]')
-  assert.ok(await text('Save changes before closing?'), 'X protects the unsaved schedule-era profile edit')
+  assert.ok(
+    await text('Save changes before closing?'),
+    'X protects the unsaved schedule-era profile edit'
+  )
   await buttonText('Discard and close')
   await click('button[title="Bot settings"]')
   await evaluate(`document.querySelector('#bot-settings-pane textarea').focus()`)

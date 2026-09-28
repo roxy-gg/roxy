@@ -419,7 +419,9 @@ export function BotSettingsPane({
             </h3>
             <p id="bot-unsaved-description" className="mt-2 text-xs text-text-muted">
               {t(
-                confirmAction === 'close' ? 'bots.unsavedDescription' : 'bots.confirmSaveDescription'
+                confirmAction === 'close'
+                  ? 'bots.unsavedDescription'
+                  : 'bots.confirmSaveDescription'
               )}
             </p>
             {error && (
