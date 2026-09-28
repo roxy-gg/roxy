@@ -131,6 +131,10 @@ async function run() {
       return {
         capped: textarea.getBoundingClientRect().height === 168,
         scrollable: textarea.scrollHeight > textarea.clientHeight,
+        matchingWrap: textarea.scrollHeight === textarea.previousElementSibling.scrollHeight,
+        matchingGutter:
+          getComputedStyle(textarea).scrollbarGutter === 'stable' &&
+          getComputedStyle(textarea.previousElementSibling).scrollbarGutter === 'stable',
         followedCaret:
           Math.abs(textarea.scrollHeight - textarea.clientHeight - textarea.scrollTop) < 2 &&
           Math.abs(
@@ -141,9 +145,79 @@ async function run() {
         atBottom: Math.abs(canvas.scrollHeight - canvas.clientHeight - canvas.scrollTop) < 2
       }
     `),
-    { capped: true, scrollable: true, followedCaret: true, atBottom: true },
+    {
+      capped: true,
+      scrollable: true,
+      matchingWrap: true,
+      matchingGutter: true,
+      followedCaret: true,
+      atBottom: true
+    },
     'multiline drafts cap, follow the caret, and keep the transcript pinned'
   )
+  await evaluate(`
+    const textarea = document.querySelector('textarea')
+    textarea.focus()
+    textarea.setSelectionRange(0, 0)
+    textarea.scrollTop = 0
+  `)
+  await win.webContents.debugger.sendCommand('Input.insertText', { text: 'Start ' })
+  await wait()
+  assert.deepEqual(
+    await evaluate(`
+      const textarea = document.querySelector('textarea')
+      return {
+        caret: textarea.selectionStart,
+        scrollTop: textarea.scrollTop,
+        mirrorScrollTop: textarea.previousElementSibling.scrollTop
+      }
+    `),
+    { caret: 6, scrollTop: 0, mirrorScrollTop: 0 },
+    'typing near the start of a capped draft does not snap the selection to the bottom'
+  )
+  await evaluate(`
+    const textarea = document.querySelector('textarea')
+    textarea.focus()
+    textarea.setSelectionRange(textarea.value.length, textarea.value.length)
+  `)
+  await win.webContents.debugger.sendCommand('Input.insertText', { text: ' tail' })
+  await wait()
+  assert.ok(
+    await evaluate(`
+      const textarea = document.querySelector('textarea')
+      const mirror = textarea.previousElementSibling
+      return textarea.selectionStart === textarea.value.length &&
+        Math.abs(textarea.scrollHeight - textarea.clientHeight - textarea.scrollTop) < 2 &&
+        Math.abs(mirror.scrollHeight - mirror.clientHeight - mirror.scrollTop) < 2
+    `),
+    'typing at the end of a capped draft keeps the caret and visible text in view'
+  )
+  win.setSize(390, 840)
+  await wait()
+  assert.ok(
+    await evaluate(`
+      const textarea = document.querySelector('textarea')
+      return textarea.scrollHeight === textarea.previousElementSibling.scrollHeight &&
+        textarea.scrollHeight > textarea.clientHeight
+    `),
+    'mirror and textarea wrap identically at narrow widths with a visible scrollbar'
+  )
+  await evaluate(`
+    const textarea = document.querySelector('textarea')
+    textarea.scrollTop = Math.floor((textarea.scrollHeight - textarea.clientHeight) / 2)
+    textarea.dispatchEvent(new Event('scroll'))
+  `)
+  await wait()
+  assert.ok(
+    await evaluate(`
+      const textarea = document.querySelector('textarea')
+      return textarea.scrollTop > 0 &&
+        Math.abs(textarea.scrollTop - textarea.previousElementSibling.scrollTop) < 2
+    `),
+    'mouse-style scrolling keeps the highlighted text aligned with the caret'
+  )
+  win.setSize(1280, 840)
+  await wait()
   await type('Hola @roxy!')
   await send()
   const privateItem = await evaluate(

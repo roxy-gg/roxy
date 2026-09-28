@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type ClipboardEvent,
@@ -91,6 +92,7 @@ export function Composer({
   const syncMirrorScroll = (): void => {
     if (ref.current && mirror.current) mirror.current.scrollTop = ref.current.scrollTop
   }
+  useLayoutEffect(syncMirrorScroll, [value])
   /** Explicit pick when several known @bots appear; cleared when no longer mentioned. */
   const [pickedSendId, setPickedSendId] = useState<string | null>(null)
   // A mention can start anywhere, as long as the "@" opens a word (start of
@@ -404,7 +406,7 @@ export function Composer({
           <div
             ref={mirror}
             aria-hidden
-            className="pointer-events-none absolute inset-0 max-h-[168px] overflow-hidden whitespace-pre-wrap break-words px-4 pt-3 text-sm text-transparent"
+            className="pointer-events-none absolute inset-0 max-h-[168px] overflow-hidden whitespace-pre-wrap break-words px-4 pt-3 text-sm text-transparent [scrollbar-gutter:stable]"
           >
             {value ? highlighted : <span className="text-text-subtle">{placeholder}</span>}
           </div>
@@ -425,7 +427,9 @@ export function Composer({
             onSelect={(e) => setCaret(e.currentTarget.selectionStart)}
             onChange={(e) => {
               const nextValue = e.target.value
-              const caretAtEnd = e.target.selectionStart === nextValue.length
+              const caretAtEnd =
+                e.target.selectionStart === nextValue.length &&
+                e.target.selectionEnd === nextValue.length
               setValue(nextValue)
               setError('')
               setCaret(e.target.selectionStart)
@@ -434,7 +438,16 @@ export function Composer({
               requestAnimationFrame(() => {
                 // Controlled field sizing does not reliably keep a wrapped end
                 // caret visible once the textarea reaches its height cap.
-                if (caretAtEnd && ref.current) ref.current.scrollTop = ref.current.scrollHeight
+                if (
+                  caretAtEnd &&
+                  ref.current &&
+                  document.activeElement === ref.current &&
+                  ref.current.value === nextValue &&
+                  ref.current.selectionStart === nextValue.length &&
+                  ref.current.selectionEnd === nextValue.length
+                ) {
+                  ref.current.scrollTop = ref.current.scrollHeight
+                }
                 syncMirrorScroll()
               })
             }}
@@ -443,7 +456,7 @@ export function Composer({
             onScroll={() => {
               syncMirrorScroll()
             }}
-            className="relative block max-h-[168px] w-full resize-none overflow-y-auto bg-transparent px-4 pt-3 text-sm text-transparent caret-text outline-none [field-sizing:content]"
+            className="relative block max-h-[168px] w-full resize-none overflow-y-auto bg-transparent px-4 pt-3 text-sm text-transparent caret-text outline-none [field-sizing:content] [scrollbar-gutter:stable]"
           />
         </div>
         <div className="flex items-center justify-between gap-2 px-2.5 pb-2 pt-1.5">
