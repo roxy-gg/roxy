@@ -1312,7 +1312,7 @@ export function listMessages(chatId: string): Message[] {
 }
 
 export function addMessage(input: AddMessageInput): Message {
-  const id = randomUUID()
+  const id = input.id ?? randomUUID()
   const now = Date.now()
   const parts: MessagePart[] = input.parts ?? [{ type: 'text', text: input.content }]
   const partsJson = JSON.stringify(parts)

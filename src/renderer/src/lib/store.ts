@@ -45,6 +45,7 @@ import { applyMotion, motionSnapshot, type MotionPreference } from './motion'
 import { createStreamPublisher, type StreamPublisher } from './stream-publisher'
 import type { ComposerImage } from './images'
 import { pruneComposerDrafts, type ComposerDrafts } from './composerDrafts'
+import { remainingOptimisticMessages } from './optimistic-messages'
 import type {
   GitStatusView,
   MultiSyncOutcome,
@@ -94,6 +95,12 @@ interface RoxyStore {
   /** Unsent text and image attachments, scoped to the chat they belong to. */
   composerDrafts: ComposerDrafts
   messages: Message[]
+  /** User writes waiting for SQLite, scoped so transcript reloads cannot erase them. */
+  optimisticMessages: Record<string, Message[]>
+  /** Increments on direct submission to pin the transcript to the newly sent prompt. */
+  sentMessageSignal: Record<string, number>
+  /** Incremented only after a user write succeeds, for composer retry safety. */
+  acceptedSends: Record<string, number>
   /**
    * Which chat `messages` actually holds, or `null` while a load is in flight.
    *
@@ -148,6 +155,8 @@ interface RoxyStore {
   composerFocusChatId: string | null
   /** Pending prompts queued on the active chat (FIFO). */
   queue: QueueItem[]
+  /** Queue submissions awaiting IPC, displayed separately from editable durable rows. */
+  optimisticQueue: Record<string, QueueItem[]>
   /** Chats with a pending stop request, keyed by chat id. */
   stopChats: Record<string, boolean>
   /** Chats currently being compacted, keyed by chat id. */
@@ -429,15 +438,39 @@ async function mirrorAutomationChat(chatId: string): Promise<void> {
   const revision = (automationLoads.get(chatId) ?? 0) + 1
   automationLoads.set(chatId, revision)
   try {
+    const acknowledged = new Set(
+      (useRoxyStore.getState().optimisticQueue[chatId] ?? [])
+        .filter((item) => !item.id.startsWith('optimistic:'))
+        .map((item) => item.id)
+    )
     const [messages, queue] = await Promise.all([api.messages.list(chatId), api.queue.list(chatId)])
     const state = useRoxyStore.getState()
     if (state.activeChatId !== chatId || automationLoads.get(chatId) !== revision) return
     if (state.sendingChats[chatId]) {
       deferredAutomation.add(chatId)
-      useRoxyStore.setState({ queue })
       return
     }
-    useRoxyStore.setState({ messages, queue, messagesChatId: chatId, messagesError: false })
+    useRoxyStore.setState((s) => {
+      const optimisticQueue = { ...s.optimisticQueue }
+      optimisticQueue[chatId] = (optimisticQueue[chatId] ?? []).filter(
+        (item) => !queue.some((saved) => saved.id === item.id) && !acknowledged.has(item.id)
+      )
+      if (!optimisticQueue[chatId].length) delete optimisticQueue[chatId]
+      const optimisticMessages = { ...s.optimisticMessages }
+      optimisticMessages[chatId] = remainingOptimisticMessages(
+        messages,
+        optimisticMessages[chatId] ?? []
+      )
+      if (!optimisticMessages[chatId].length) delete optimisticMessages[chatId]
+      return {
+        messages,
+        queue,
+        messagesChatId: chatId,
+        messagesError: false,
+        optimisticQueue,
+        optimisticMessages
+      }
+    })
   } catch {
     // A session can be removed while a completion notification is in flight.
   }
@@ -494,14 +527,54 @@ async function enqueuePrompt(
     fromUser?: boolean
   }
 ): Promise<void> {
-  await api.queue.add(
+  const optimistic: QueueItem = {
+    id: `optimistic:${crypto.randomUUID()}`,
     chatId,
-    text,
-    images?.map(({ dataUrl, mediaType, name }) => ({ dataUrl, mediaType, name })),
-    options
-  )
-  await useRoxyStore.getState().refreshQueue()
-  await api.automation.wake()
+    content: text,
+    images: images?.map(({ dataUrl, mediaType, name }) => ({ dataUrl, mediaType, name })),
+    createdAt: Date.now(),
+    sourceChatId: options?.sourceChatId,
+    asBotId: options?.asBotId,
+    fromUser: options?.fromUser,
+    state: 'pending'
+  }
+  useRoxyStore.setState((s) => ({
+    optimisticQueue: {
+      ...s.optimisticQueue,
+      [chatId]: [...(s.optimisticQueue[chatId] ?? []), optimistic]
+    }
+  }))
+  let item: QueueItem
+  try {
+    item = await api.queue.add(chatId, text, optimistic.images, options)
+  } catch (error) {
+    useRoxyStore.setState((s) => {
+      const optimisticQueue = { ...s.optimisticQueue }
+      optimisticQueue[chatId] = (optimisticQueue[chatId] ?? []).filter(
+        (entry) => entry.id !== optimistic.id
+      )
+      if (!optimisticQueue[chatId].length) delete optimisticQueue[chatId]
+      return { optimisticQueue }
+    })
+    throw error
+  }
+  // Swap the placeholder for the durable item without a missing frame.
+  useRoxyStore.setState((s) => ({
+    optimisticQueue: {
+      ...s.optimisticQueue,
+      [chatId]: (s.optimisticQueue[chatId] ?? []).map((entry) =>
+        entry.id === optimistic.id ? item : entry
+      )
+    },
+    queue:
+      s.activeChatId === chatId && !s.queue.some((entry) => entry.id === item.id)
+        ? [...s.queue, item]
+        : s.queue
+  }))
+  // Once add succeeds, a refresh/wake error must not restore the composer draft
+  // and invite a second copy of this already-durable request.
+  void useRoxyStore.getState().refreshQueue().catch(console.error)
+  void api.automation.wake().catch(console.error)
 }
 
 /**
@@ -1042,6 +1115,9 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
   activeChatId: null,
   composerDrafts: {},
   messages: [],
+  optimisticMessages: {},
+  sentMessageSignal: {},
+  acceptedSends: {},
   messagesChatId: null,
   messagesError: false,
   sendingChats: {},
@@ -1066,6 +1142,7 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
   automationSpeakers: {},
   composerFocusChatId: null,
   queue: [],
+  optimisticQueue: {},
   stopChats: {},
   compactingChats: {},
   runningTasks: {},
@@ -1281,8 +1358,22 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
 
   refreshQueue: async () => {
     const chatId = get().activeChatId
+    const acknowledged = new Set(
+      (chatId ? get().optimisticQueue[chatId] : undefined)
+        ?.filter((item) => !item.id.startsWith('optimistic:'))
+        .map((item) => item.id)
+    )
     const queue = chatId ? await api.queue.list(chatId) : []
-    if (get().activeChatId === chatId) set({ queue })
+    if (chatId && get().activeChatId === chatId) {
+      set((s) => {
+        const optimisticQueue = { ...s.optimisticQueue }
+        optimisticQueue[chatId] = (optimisticQueue[chatId] ?? []).filter(
+          (item) => !queue.some((saved) => saved.id === item.id) && !acknowledged.has(item.id)
+        )
+        if (!optimisticQueue[chatId].length) delete optimisticQueue[chatId]
+        return { queue, optimisticQueue }
+      })
+    }
   },
 
   createBot: async (username, instructions) => {
@@ -1807,8 +1898,28 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
     // back into an onClick where nothing handled it. Now the failure is state,
     // so the transcript can say so and offer a retry.
     try {
+      const acknowledged = new Set(
+        (get().optimisticQueue[id] ?? [])
+          .filter((item) => !item.id.startsWith('optimistic:'))
+          .map((item) => item.id)
+      )
       const [messages, queue] = await Promise.all([api.messages.list(id), api.queue.list(id)])
-      if (get().activeChatId === id) set({ messages, queue, messagesChatId: id })
+      if (get().activeChatId === id) {
+        set((s) => {
+          const optimisticMessages = { ...s.optimisticMessages }
+          optimisticMessages[id] = remainingOptimisticMessages(
+            messages,
+            optimisticMessages[id] ?? []
+          )
+          if (!optimisticMessages[id].length) delete optimisticMessages[id]
+          const optimisticQueue = { ...s.optimisticQueue }
+          optimisticQueue[id] = (optimisticQueue[id] ?? []).filter(
+            (item) => !queue.some((saved) => saved.id === item.id) && !acknowledged.has(item.id)
+          )
+          if (!optimisticQueue[id].length) delete optimisticQueue[id]
+          return { messages, queue, messagesChatId: id, optimisticMessages, optimisticQueue }
+        })
+      }
     } catch (e) {
       console.error('Failed to load transcript:', e)
       if (get().activeChatId === id) set({ messagesError: true })
@@ -1943,13 +2054,25 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
       delete automationSpeakers[id]
       const composerDrafts = { ...s.composerDrafts }
       delete composerDrafts[id]
+      const optimisticMessages = { ...s.optimisticMessages }
+      delete optimisticMessages[id]
+      const sentMessageSignal = { ...s.sentMessageSignal }
+      delete sentMessageSignal[id]
+      const acceptedSends = { ...s.acceptedSends }
+      delete acceptedSends[id]
+      const optimisticQueue = { ...s.optimisticQueue }
+      delete optimisticQueue[id]
       return {
         sendingChats,
         streamingChats,
         activityStartedAt,
         stopChats,
         automationSpeakers,
-        composerDrafts
+        composerDrafts,
+        optimisticMessages,
+        sentMessageSignal,
+        acceptedSends,
+        optimisticQueue
       }
     })
     if (get().activeChatId === id) get().clearActive()
@@ -2058,19 +2181,22 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
       await enqueuePrompt(chatId, content, images)
       return
     }
-    if (get().sendingChats[chatId]) return
+    if (get().sendingChats[chatId]) {
+      await enqueuePrompt(chatId, content, images)
+      return
+    }
     if (content.startsWith('!') && !content.slice(1).trim()) return
     const { settings } = get()
-
-    // Make sure the workspace's instruction files are cached before we size the
-    // window cut (the main process reads them fresh when it builds the prompt).
-    const workspacePath = get().chats.find((c) => c.id === chatId)?.workspacePath
-    if (workspacePath) await get().ensureProjectInstructions(workspacePath)
 
     // Send state is keyed by chat id, so switching chats (or running several
     // sessions at once) never crosses the streams or drops a reply.
     const setSending = (v: boolean): void =>
-      set((s) => ({ sendingChats: { ...s.sendingChats, [chatId]: v } }))
+      set((s) => {
+        const sendingChats = { ...s.sendingChats }
+        if (v) sendingChats[chatId] = true
+        else delete sendingChats[chatId]
+        return { sendingChats }
+      })
 
     // Streamed parts are published at most once per animation frame — see
     // `createStreamPublisher` for why that matters.
@@ -2165,10 +2291,6 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
       if (wakeQueue && !wasStopped) await api.automation.wake()
     }
 
-    clearStop()
-    setSending(true)
-    markActivity(chatId)
-
     // The user turn carries any pasted/dropped images as image parts ahead of
     // the text, so they persist, render as thumbnails, and reach the model.
     const userParts: MessagePart[] = [
@@ -2180,13 +2302,69 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
       })),
       ...(content ? [{ type: 'text' as const, text: content }] : [])
     ]
-    const userMessage = await api.messages.add({
+    const optimistic: Message = {
+      id: crypto.randomUUID(),
       chatId,
       role: 'user',
       content,
-      parts: userParts.length ? userParts : undefined
-    })
-    appendIfActive(userMessage)
+      parts: userParts,
+      createdAt: Date.now()
+    }
+    clearStop()
+    set((s) => ({
+      sendingChats: { ...s.sendingChats, [chatId]: true },
+      sentMessageSignal: {
+        ...s.sentMessageSignal,
+        [chatId]: (s.sentMessageSignal[chatId] ?? 0) + 1
+      },
+      optimisticMessages: {
+        ...s.optimisticMessages,
+        [chatId]: [...(s.optimisticMessages[chatId] ?? []), optimistic]
+      }
+    }))
+    markActivity(chatId)
+    try {
+      // SQLite IPC can take multiple frames; the preview is already visible.
+      const userMessage = await api.messages.add({
+        id: optimistic.id,
+        chatId,
+        role: 'user',
+        content,
+        parts: userParts.length ? userParts : undefined
+      })
+      set((s) => ({
+        // A list request started before the write may resolve afterward.
+        optimisticMessages: {
+          ...s.optimisticMessages,
+          [chatId]: (s.optimisticMessages[chatId] ?? []).map((m) =>
+            m.id === optimistic.id ? userMessage : m
+          )
+        },
+        messages:
+          s.activeChatId === chatId && !s.messages.some((m) => m.id === userMessage.id)
+            ? [...s.messages, userMessage]
+            : s.messages,
+        acceptedSends: { ...s.acceptedSends, [chatId]: (s.acceptedSends[chatId] ?? 0) + 1 }
+      }))
+    } catch (error) {
+      set((s) => {
+        const optimisticMessages = { ...s.optimisticMessages }
+        optimisticMessages[chatId] = (optimisticMessages[chatId] ?? []).filter(
+          (m) => m.id !== optimistic.id
+        )
+        if (!optimisticMessages[chatId].length) delete optimisticMessages[chatId]
+        const sendingChats = { ...s.sendingChats }
+        delete sendingChats[chatId]
+        return { optimisticMessages, sendingChats }
+      })
+      clearActivity(chatId)
+      clearStop()
+      throw error
+    }
+    // Instruction files are needed for window sizing, but the message is already
+    // durable and cannot be retried as a new prompt if this scan fails.
+    const workspacePath = get().chats.find((c) => c.id === chatId)?.workspacePath
+    if (workspacePath) await get().ensureProjectInstructions(workspacePath)
     // Reveal the assistant bubble right away (empty → a cute "thinking"
     // indicator) so there's no empty gap while we wait for the first token.
     setStreaming(parts)
@@ -2524,7 +2702,16 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
       await get().refreshChats()
       const compacted = await api.messages.list(chatId)
       if (get().activeChatId === chatId) {
-        set({ messages: compacted, messagesChatId: chatId })
+        set((s) => {
+          const optimisticMessages = { ...s.optimisticMessages }
+          // Compaction may remove a confirmed row; it must not return as a ghost.
+          optimisticMessages[chatId] = remainingOptimisticMessages(
+            s.messages,
+            optimisticMessages[chatId] ?? []
+          )
+          if (!optimisticMessages[chatId].length) delete optimisticMessages[chatId]
+          return { messages: compacted, messagesChatId: chatId, optimisticMessages }
+        })
       }
     } catch (e) {
       console.error('Compaction failed:', e)

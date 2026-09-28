@@ -15,6 +15,7 @@ import type { Chat } from '@shared/types'
 import { isVisibleQueueItem } from '@shared/queue'
 import { resolveSessionConfig } from '@shared/session-config'
 import { useRoxyStore } from '../lib/store'
+import { visibleMessages, visibleQueue } from '../lib/optimistic-messages'
 import { useTranslation } from 'react-i18next'
 import { cn } from '../lib/cn'
 import { CanvasTranscript } from '../canvas/CanvasTranscript'
@@ -65,7 +66,17 @@ import roxy from '../assets/roxy.png'
 
 export function ChatView(): JSX.Element {
   const { t } = useTranslation()
-  const messages = useRoxyStore((s) => s.messages)
+  const storedMessages = useRoxyStore((s) => s.messages)
+  const optimisticMessages = useRoxyStore((s) =>
+    s.activeChatId ? s.optimisticMessages[s.activeChatId] : undefined
+  )
+  const messages = useMemo(
+    () => visibleMessages(storedMessages, optimisticMessages),
+    [storedMessages, optimisticMessages]
+  )
+  const sentMessageSignal = useRoxyStore((s) =>
+    s.activeChatId ? (s.sentMessageSignal[s.activeChatId] ?? 0) : 0
+  )
   const messagesChatId = useRoxyStore((s) => s.messagesChatId)
   const messagesError = useRoxyStore((s) => s.messagesError)
   const streaming = useRoxyStore((s) =>
@@ -78,7 +89,14 @@ export function ChatView(): JSX.Element {
   )
   const submit = useRoxyStore((s) => s.submit)
   const stop = useRoxyStore((s) => s.stop)
-  const allQueued = useRoxyStore((s) => s.queue)
+  const storedQueue = useRoxyStore((s) => s.queue)
+  const optimisticQueue = useRoxyStore((s) =>
+    s.activeChatId ? s.optimisticQueue[s.activeChatId] : undefined
+  )
+  const allQueued = useMemo(
+    () => visibleQueue(storedQueue, optimisticQueue),
+    [storedQueue, optimisticQueue]
+  )
   // A running item's prompt is already persisted to the transcript by the main
   // process, so showing its queue row too renders the same message twice.
   // Pending rows from every origin stay visible in their real FIFO order; each
@@ -343,6 +361,7 @@ export function ChatView(): JSX.Element {
             messages={messages}
             streaming={streaming}
             chatId={activeChatId}
+            pinSignal={sentMessageSignal}
             onCancelSubagent={(subChatId) => void cancelSubagent(subChatId)}
             onCancelTool={(callId) => void cancelToolCall(callId)}
           />
@@ -388,7 +407,13 @@ export function ChatView(): JSX.Element {
                   <QueueSectionContent>
                     <QueueList>
                       {queue.map((item, i) => (
-                        <QueuedMessage key={item.id} item={item} index={i} total={queue.length} />
+                        <QueuedMessage
+                          key={item.id}
+                          item={item}
+                          index={i}
+                          total={queue.length}
+                          pending={!!optimisticQueue?.some((entry) => entry.id === item.id)}
+                        />
                       ))}
                     </QueueList>
                   </QueueSectionContent>

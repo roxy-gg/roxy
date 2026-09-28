@@ -289,6 +289,8 @@ export interface Message {
 }
 
 export interface AddMessageInput {
+  /** Optional client-generated ID for reconciling an optimistic send. */
+  id?: string
   chatId: string
   role: MessageRole
   content: string

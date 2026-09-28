@@ -175,6 +175,7 @@ export function Composer({
     setError('')
     submittingRef.current = true
     setSubmitting(true)
+    const acceptedBefore = useRoxyStore.getState().acceptedSends[chatId] ?? 0
     try {
       if (toBotId) {
         await useRoxyStore
@@ -184,15 +185,19 @@ export function Composer({
         await onSend(text, snapshotImages.length ? snapshotImages : undefined)
       }
     } catch (e) {
-      useRoxyStore.setState((state) => ({
-        composerDrafts: restoreComposerDraft(
-          state.composerDrafts,
-          state.chats,
-          chatId,
-          text,
-          snapshotImages
-        )
-      }))
+      // Later turn failures are not send failures: the user message may already
+      // be durable. Restoring it would make retry submit a duplicate.
+      if ((useRoxyStore.getState().acceptedSends[chatId] ?? 0) === acceptedBefore) {
+        useRoxyStore.setState((state) => ({
+          composerDrafts: restoreComposerDraft(
+            state.composerDrafts,
+            state.chats,
+            chatId,
+            text,
+            snapshotImages
+          )
+        }))
+      }
       setError(e instanceof Error ? e.message : String(e))
     } finally {
       submittingRef.current = false

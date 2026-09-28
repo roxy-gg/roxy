@@ -41,11 +41,13 @@ function toComposerImages(item: QueueItemType): ComposerImage[] {
 export function QueuedMessage({
   item,
   index,
-  total
+  total,
+  pending = false
 }: {
   item: QueueItemType
   index: number
   total: number
+  pending?: boolean
 }): JSX.Element {
   const { t } = useTranslation()
   const editQueued = useRoxyStore((s) => s.editQueued)
@@ -66,7 +68,7 @@ export function QueuedMessage({
   const fileRef = useRef<HTMLInputElement>(null)
 
   const startEditing = (): void => {
-    if (running) return
+    if (running || pending) return
     setError('')
     setDraft(item.content)
     setDraftImages(toComposerImages(item))
@@ -310,14 +312,14 @@ export function QueuedMessage({
       <QueueItemActions>
         <QueueItemAction
           onClick={startEditing}
-          disabled={running}
+          disabled={running || pending}
           title={failed ? t('queue.editRetry') : t('queue.editMessage')}
         >
           <Pencil className="h-3.5 w-3.5" />
         </QueueItemAction>
         <QueueItemAction
           onClick={() => moveQueued(item.id, 'up')}
-          disabled={running || index === 0}
+          disabled={running || pending || index === 0}
           title={t('queue.moveUp')}
           className="disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-text-subtle"
         >
@@ -325,14 +327,14 @@ export function QueuedMessage({
         </QueueItemAction>
         <QueueItemAction
           onClick={() => moveQueued(item.id, 'down')}
-          disabled={running || index === total - 1}
+          disabled={running || pending || index === total - 1}
           title={t('queue.moveDown')}
           className="disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-text-subtle"
         >
           <ChevronDown className="h-3.5 w-3.5" />
         </QueueItemAction>
         <QueueItemAction
-          disabled={running}
+          disabled={running || pending}
           onClick={() => removeQueued(item.id)}
           title={t('queue.removeFromQueue')}
         >

@@ -532,6 +532,7 @@ const compactState = {
   settings: {},
   providers: [sibling],
   compactingChats: {},
+  optimisticMessages: {},
   modelCatalog: {},
   ensureModels: async () => {
     catalogRequests++
@@ -545,6 +546,7 @@ const compactActions = new Function(
   'asChatId',
   'resolveSessionConfig',
   'resolveProviderModel',
+  'remainingOptimisticMessages',
   `${compactCompiled}\nreturn actions`
 )(
   {
@@ -559,7 +561,8 @@ const compactActions = new Function(
   () => compactState,
   asChatId,
   (chat) => chat,
-  (_provider, _models, selected) => selected || 'sibling-default'
+  (_provider, _models, selected) => selected || 'sibling-default',
+  (stored, pending) => pending.filter((item) => !stored.some((saved) => saved.id === item.id))
 )
 await compactActions.compactConversation('pinned-chat')
 check(

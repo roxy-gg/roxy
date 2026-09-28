@@ -45,7 +45,7 @@
     "smoke:live": "esbuild test/live-multirepo.ts --bundle --platform=node --format=cjs --packages=external --outfile=test/.out/live.cjs && electron test/.out/live.cjs",
     "smoke:cliproxy": "esbuild test/cliproxy.ts --bundle --platform=node --format=cjs --packages=external --outfile=test/.out/cliproxy.cjs && electron test/.out/cliproxy.cjs",
     "worktree:setup": "npm ci --prefer-offline --no-audit --no-fund",
-    "smoke:store": "node test/store-guard.mjs",
+    "smoke:store": "node test/store-guard.mjs && esbuild test/optimistic-messages.ts --bundle --platform=node --format=cjs --packages=external --outfile=test/.out/optimistic-messages.cjs && node test/.out/optimistic-messages.cjs",
     "smoke:provider-models": "esbuild test/provider-models.ts --bundle --platform=node --format=cjs --packages=external --outfile=test/.out/provider-models.cjs && electron test/.out/provider-models.cjs",
     "smoke:bots": "esbuild test/bots-shared.ts --bundle --platform=node --format=cjs --packages=external --outfile=test/.out/bots-shared.cjs && node test/.out/bots-shared.cjs && esbuild src/preload/index.ts --bundle --platform=node --format=cjs --packages=external --outfile=test/.out/bots-preload.cjs && esbuild test/bots.ts --bundle --platform=node --format=cjs --packages=external --outfile=test/.out/bots.cjs && electron test/.out/bots.cjs",
     "smoke:cookies": "esbuild test/cookies.ts --bundle --platform=node --format=cjs --packages=external --outfile=test/.out/cookies.cjs && electron test/.out/cookies.cjs",
