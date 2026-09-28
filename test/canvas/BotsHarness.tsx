@@ -131,7 +131,6 @@ Object.assign(window.roxy, {
     }
   },
   automation: { wake: async () => {} },
-  chats: { list: async () => [...chats] },
   projects: { listOrder: async () => [] },
   messages: { list: async (id: string) => messages.filter((message) => message.chatId === id) },
   queue: {
@@ -159,7 +158,59 @@ Object.assign(window.roxy, {
     reorder: async () => {}
   },
   subagents: { setViewed: async () => {} },
-  models: { pinned: async () => [], hidden: async () => [] },
+  models: {
+    pinned: async () => [],
+    hidden: async () => [],
+    list: async () => ({
+      models: [
+        {
+          id: 'reasoning',
+          name: 'Reasoning',
+          reasoning: true,
+          toolCall: true,
+          reasoningEfforts: ['low', 'high']
+        },
+        { id: 'fast', name: 'Fast', reasoning: false, toolCall: true }
+      ]
+    }),
+    recent: async () => []
+  },
+  providers: {
+    list: async () => [
+      {
+        id: 'test-provider',
+        seedId: 'test',
+        name: 'Test provider',
+        accountNumber: 1,
+        wire: 'openai',
+        auth: 'none',
+        hasCredential: true,
+        enabled: true,
+        sortOrder: 0,
+        createdAt: 0
+      }
+    ]
+  },
+  settings: {
+    ...window.roxy.settings,
+    setActiveProvider: async (providerId: string, model: string) => ({
+      ...useRoxyStore.getState().settings,
+      activeProviderId: providerId,
+      activeModel: model
+    }),
+    setReasoningEffort: async (reasoningEffort: string) => ({
+      ...useRoxyStore.getState().settings,
+      reasoningEffort
+    })
+  },
+  chats: {
+    list: async () => [...chats],
+    setConfig: async (id: string, patch: Partial<Chat>) => {
+      const chat = chats.find((entry) => entry.id === id)!
+      Object.assign(chat, patch)
+      return { ...chat }
+    }
+  },
   skills: { list: async () => [] },
   mcp: { list: async () => [] },
   updates: {
@@ -204,6 +255,25 @@ export function BotsHarness(): JSX.Element {
     useRoxyStore.setState({
       chats: [...chats],
       bots: [...bots],
+      providers: [
+        {
+          id: 'test-provider',
+          seedId: 'test',
+          name: 'Test provider',
+          accountNumber: 1,
+          wire: 'openai',
+          auth: 'none',
+          hasCredential: true,
+          enabled: true,
+          sortOrder: 0,
+          createdAt: 0
+        }
+      ],
+      settings: {
+        activeProviderId: 'test-provider',
+        activeModel: 'reasoning',
+        reasoningEffort: 'high'
+      } as ReturnType<typeof useRoxyStore.getState>['settings'],
       activeChatId: baseChat.id,
       messagesChatId: baseChat.id,
       gitAvailable: false

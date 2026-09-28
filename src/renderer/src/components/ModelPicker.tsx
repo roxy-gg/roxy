@@ -367,7 +367,14 @@ export function ModelPicker({
         }
       }}
     >
-      <button type="button" onClick={() => setOpen((o) => !o)} className={triggerClass}>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className={triggerClass}
+        aria-label={`${t('bots.model')}: ${triggerLabel}`}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+      >
         {activeProvider && (
           <ProviderLogo id={activeProvider.seedId} name={activeProvider.name} size={14} />
         )}
@@ -380,6 +387,8 @@ export function ModelPicker({
           <div
             ref={menuRef}
             data-model-picker-menu
+            role="dialog"
+            aria-label={t('bots.model')}
             className={cn(
               'animate-pop-in fixed z-[100] flex flex-col overflow-hidden sq-frame sq-xl sq-fill-elevated sq-ring edge edge-strong edge-panel rounded-xl border border-border bg-elevated shadow-float',
               side === 'bottom' ? 'origin-top-left' : 'origin-bottom-left'

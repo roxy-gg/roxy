@@ -103,6 +103,38 @@ async function run() {
     await evaluate(`return document.activeElement === document.querySelector('textarea')`),
     'the composer is focused, ready for the first instruction'
   )
+  // Bot composer edits standing chat inference config without opening settings.
+  assert.ok(
+    await evaluate(`return !!document.querySelector('button[aria-label="Model: Reasoning"]')`)
+  )
+  assert.ok(
+    await evaluate(`return !!document.querySelector('button[aria-label="Thinking effort: High"]')`)
+  )
+  await click('button[aria-label="Thinking effort: High"]')
+  assert.deepEqual(
+    await evaluate(
+      `return [...document.querySelectorAll('[role="listbox"][aria-label="Thinking effort"] [role="option"]')].map(el => el.textContent.trim())`
+    ),
+    ['Low', 'HighDefault'],
+    'only supported effort levels are offered'
+  )
+  await click('[role="listbox"][aria-label="Thinking effort"] [role="option"]:first-child')
+  assert.ok(
+    await evaluate(`return !!document.querySelector('button[aria-label="Thinking effort: Low"]')`)
+  )
+  await click('button[aria-label="Model: Reasoning"]')
+  await type('[data-model-picker-menu] input', 'Fast')
+  await click('[data-model-picker-menu] span[title="Fast"]')
+  assert.ok(await evaluate(`return !!document.querySelector('button[aria-label="Model: Fast"]')`))
+  assert.ok(
+    await evaluate(`return !document.querySelector('button[aria-label^="Thinking effort:"]')`),
+    'non-reasoning models hide effort'
+  )
+  await click('button[aria-label="Model: Fast"]')
+  await click('[data-model-picker-menu] span[title="Reasoning"]')
+  assert.ok(
+    await evaluate(`return !!document.querySelector('button[aria-label="Thinking effort: Low"]')`)
+  )
   // Renamed in conversation, exactly as the bot itself would with bot_manage.
   await evaluate(`return window.__renameBot('bot', 'helper')`)
   await wait()
@@ -119,6 +151,26 @@ async function run() {
   assert.ok(await text('Bot limit reached'), 'a failed creation reports why')
   await click('button[title="New bot"]')
   assert.ok(!(await text('Bot limit reached')), 'and the next attempt clears it')
+  assert.ok(
+    await evaluate(`return !!document.querySelector('button[aria-label="Model: Reasoning"]')`),
+    'a new bot inherits the last selected model'
+  )
+  await click('button[title="@helper"]')
+  assert.ok(
+    await evaluate(`return !!document.querySelector('button[aria-label="Thinking effort: Low"]')`),
+    'switching back restores the first bot effort'
+  )
+  assert.deepEqual(
+    await evaluate(
+      `return window.roxy.chats.list().then(chats => chats.filter(chat => chat.kind === 'bot').map(chat => [chat.model, chat.reasoningEffort]))`
+    ),
+    [
+      ['reasoning', 'low'],
+      [null, null]
+    ],
+    'composer changes persist only on the active bot chat'
+  )
+  await click('button[title="@bot"]')
   await evaluate(`return window.__renameBot('bot', 'planner')`)
   await wait()
   await rightClick('button[title="@helper"]')

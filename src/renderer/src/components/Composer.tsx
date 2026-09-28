@@ -38,10 +38,8 @@ export function Composer({
    * - Build/Plan is a *code* mode (Plan narrows tools to read-only over a repo).
    *   A bot has no workstream - it already hides the workstream strip below -
    *   so the choice would name something that does not exist here.
-   * - Model, effort and context budget are standing config for a bot, not a
-   *   per-turn decision: its scheduled runs happen with no window open, so a
-   *   footer picker there promises control nobody is present to exercise. They
-   *   move to the bot's settings pane (`BotInferenceFields`).
+   * - Model and effort edit the bot chat's standing inference config, including
+   *   scheduled runs. Context budget remains in Bot settings.
    *
    * The meter stays - it describes the conversation you are actually looking at.
    */
@@ -313,8 +311,8 @@ export function Composer({
           if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragging(false)
         }}
         onDrop={onDrop}
-        // `sq-frame`, not `sq`: the controls row below renders five popovers
-        // (model, mode, effort, context, usage) that open UPWARD, well outside
+        // `sq-frame`, not `sq`: the controls row below renders popovers
+        // (model, mode, effort, context, usage) that open upward, well outside
         // this box. `.sq` masks, and a mask clips descendants, so it would erase
         // all five. `sq-frame` paints the fill instead of clipping.
         //
@@ -452,7 +450,7 @@ export function Composer({
               five bare labels just scatter across the row) and px-1.5 on every
               control, which against the row's px-2.5 puts each label's first
               glyph exactly on the textarea's px-4 text column. */}
-          <div className="flex items-center gap-1">
+          <div className="flex min-w-0 flex-wrap items-center gap-1">
             <button
               type="button"
               onClick={() => fileRef.current?.click()}
@@ -461,14 +459,10 @@ export function Composer({
             >
               <Plus className="h-3.5 w-3.5" />
             </button>
-            {variant === 'session' && (
-              <>
-                <ModelPicker />
-                <AgentPicker />
-                <ThinkingPicker />
-                <ContextPicker />
-              </>
-            )}
+            <ModelPicker />
+            {variant === 'session' && <AgentPicker />}
+            <ThinkingPicker />
+            {variant === 'session' && <ContextPicker />}
             <ContextMeter />
           </div>
           {showStop ? (
