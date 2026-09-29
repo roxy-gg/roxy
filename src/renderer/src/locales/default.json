@@ -518,6 +518,8 @@
       "description": "Opens a persistent browser the agent shares. Sign in to sites here once — your session (cookies/logins) is saved, so the agent can act with your access.",
       "open": "Open browser",
       "cookiesTitle": "Cookies",
+      "cookiesExpand": "Expand cookies",
+      "cookiesCollapse": "Collapse cookies",
       "cookiesDescription": "Read, edit, import and delete the browser's cookies — the built-in equivalent of the Cookie-Editor extension. Import and export use its JSON format, so a blob copied out of Chrome pastes straight in. To work on just one site, use the cookie button in the browser's own toolbar."
     },
     "codeHosts": {

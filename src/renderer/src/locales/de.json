@@ -482,7 +482,9 @@
       "warning": "Achtung: Die Datei enthält alle MCP-Geheimnisse (Header/Umgebungsvariablen) im Klartext – halten Sie sie privat."
     },
     "browser": {
+      "cookiesCollapse": "Collapse cookies",
       "cookiesDescription": "Lesen, bearbeiten, importieren und löschen Sie die Cookies des Browsers – das integrierte Äquivalent der Cookie-Editor-Erweiterung. Import und Export verwenden dessen JSON-Format, sodass ein aus Chrome kopierter Blob direkt eingefügt werden kann. Um nur auf einer Website zu arbeiten, verwenden Sie die Cookie-Schaltfläche in der Symbolleiste des Browsers.",
+      "cookiesExpand": "Expand cookies",
       "cookiesTitle": "Cookies",
       "description": "Öffnet einen persistenten Browser, den der Agent teilt. Melden Sie sich hier einmal bei Websites an – Ihre Sitzung (Cookies/Anmeldungen) wird gespeichert, sodass der Agent mit Ihrem Zugriff agieren kann.",
       "heading": "Browser",

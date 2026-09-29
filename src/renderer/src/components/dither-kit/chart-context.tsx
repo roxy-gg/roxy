@@ -6,6 +6,7 @@ import type { CommonChart } from './common-context'
 import type { BloomInput } from './dither-paint'
 import type { DitherColor, Seed } from './palette'
 import { seedOfColor } from './palette'
+import { useAccentSeed } from './use-accent-seed'
 import {
   buildBandScale,
   buildXScale,
@@ -201,6 +202,7 @@ export function useChartController({
   // useMemo/useCallback wrappers needed.
   const configKeys = Object.keys(config)
   const revision = useRevision(data, replayToken)
+  const accentSeed = useAccentSeed()
 
   const [selectedDataKey, setSelectedDataKey] = useState<string | null>(defaultSelectedDataKey)
   const [focusDataKey, setFocusDataKey] = useState<string | null>(null)
@@ -274,7 +276,7 @@ export function useChartController({
   }
   const y = buildYScale(max, plotHeight)
 
-  const seedOf = (key: string) => seedOfColor(config[key]?.color ?? 'grey')
+  const seedOf = (key: string) => seedOfColor(config[key]?.color ?? 'grey', accentSeed)
 
   const common: CommonChart = {
     names: configKeys,

@@ -99,7 +99,7 @@ function SpendGraph({ daily }: { daily: UsageDay[] }): JSX.Element {
   // `t` in the deps: the identity change on a language switch is exactly when
   // the series label needs to be rebuilt.
   const config = useMemo<ChartConfig>(
-    () => ({ spend: { label: t('usage.spend'), color: 'blue' } }),
+    () => ({ spend: { label: t('usage.spend'), color: 'accent' } }),
     [t]
   )
 

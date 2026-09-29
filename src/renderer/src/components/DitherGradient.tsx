@@ -10,14 +10,14 @@ import {
   type BloomInput
 } from './dither-kit/dither-paint'
 import type { AreaVariant } from './dither-kit/chart-context'
-import { PALETTE, rgb, type DitherColor } from './dither-kit/palette'
+import { PALETTE, rgb, type DitherHue } from './dither-kit/palette'
 import { useMotion } from '../lib/motion'
 
 export type DitherDirection = 'top' | 'bottom' | 'left' | 'right'
 
 export type DitherGradientProps = {
   /** Palette hue the gradient dissolves in. */
-  from?: DitherColor
+  from?: DitherHue
   /** Edge the fill is solid at; it dithers away toward the opposite edge. */
   direction?: DitherDirection
   /** Dither texture — same four variants as the chart family. */

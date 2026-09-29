@@ -497,7 +497,7 @@ export function ModelPicker({
                       <div className="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-surface">
                         <ProviderLogo id={p.seedId} name={p.name} size={20} />
                         {isSelected && !hasQuery && (
-                          <span className="absolute -bottom-0.5 -end-0.5 flex h-3 w-3 items-center justify-center rounded-full bg-accent text-white ring-2 ring-elevated">
+                          <span className="absolute -bottom-0.5 -end-0.5 flex h-3 w-3 items-center justify-center rounded-full bg-accent text-on-accent ring-2 ring-elevated">
                             <Check aria-hidden="true" className="h-2 w-2" strokeWidth={3} />
                           </span>
                         )}

@@ -482,7 +482,9 @@
       "warning": "Attention : le fichier inclut les secrets MCP (en-têtes/env) en texte brut — gardez-le privé."
     },
     "browser": {
+      "cookiesCollapse": "Collapse cookies",
       "cookiesDescription": "Lisez, modifiez, importez et supprimez les cookies du navigateur — l'équivalent intégré de l'extension Cookie-Editor. L'importation et l'exportation utilisent son format JSON, de sorte qu'un blob copié depuis Chrome se colle directement. Pour travailler sur un seul site, utilisez le bouton cookie dans la barre d'outils du navigateur.",
+      "cookiesExpand": "Expand cookies",
       "cookiesTitle": "Cookies",
       "description": "Ouvre un navigateur persistant que l'agent partage. Connectez-vous aux sites ici une seule fois — votre session (cookies/connexions) est enregistrée, afin que l'agent puisse agir avec votre accès.",
       "heading": "Navigateur",

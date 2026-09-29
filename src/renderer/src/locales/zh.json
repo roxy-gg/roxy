@@ -482,7 +482,9 @@
       "warning": "请注意：文件包含任何 MCP 密钥（标头/环境变量）的明文 — 请妥善保管。"
     },
     "browser": {
+      "cookiesCollapse": "Collapse cookies",
       "cookiesDescription": "读取、编辑、导入和删除浏览器的 cookies — 内置的 Cookie-Editor 扩展的等效功能。导入和导出使用其 JSON 格式，因此从 Chrome 复制的 blob 可以直接粘贴。要仅在一个网站上操作，请使用浏览器工具栏中的 cookie 按钮。",
+      "cookiesExpand": "Expand cookies",
       "cookiesTitle": "Cookie",
       "description": "打开代理共享的持久浏览器。在此处登录网站一次 — 您的会话（cookies/登录）将保存，因此代理可以利用您的访问权限进行操作。",
       "heading": "浏览器",

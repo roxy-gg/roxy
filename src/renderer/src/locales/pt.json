@@ -482,7 +482,9 @@
       "warning": "Atenção: o arquivo inclui quaisquer segredos MCP (cabeçalhos/variáveis de ambiente) em texto simples — mantenha-o privado."
     },
     "browser": {
+      "cookiesCollapse": "Collapse cookies",
       "cookiesDescription": "Leia, edite, importe e exclua os cookies do navegador — o equivalente integrado da extensão Cookie-Editor. A importação e exportação usam seu formato JSON, então um blob copiado do Chrome cola diretamente. Para trabalhar em apenas um site, use o botão de cookie na própria barra de ferramentas do navegador.",
+      "cookiesExpand": "Expand cookies",
       "cookiesTitle": "Cookies",
       "description": "Abre um navegador persistente que o agente compartilha. Faça login em sites aqui uma vez — sua sessão (cookies/logins) é salva, para que o agente possa agir com seu acesso.",
       "heading": "Navegador",

@@ -482,7 +482,9 @@
       "warning": "注意: ファイルにはMCPシークレット（ヘッダー/環境変数）がプレーンテキストで含まれています。非公開にしてください。"
     },
     "browser": {
+      "cookiesCollapse": "Collapse cookies",
       "cookiesDescription": "ブラウザのCookieを読み取り、編集、インポート、削除します。これはCookie-Editor拡張機能に相当する組み込み機能です。インポートとエクスポートにはそのJSON形式が使用されるため、Chromeからコピーしたblobはそのまま貼り付けられます。特定のサイトのみを操作するには、ブラウザのツールバーにあるCookieボタンを使用してください。",
+      "cookiesExpand": "Expand cookies",
       "cookiesTitle": "Cookie",
       "description": "エージェントが共有する永続的なブラウザを開きます。ここで一度サイトにサインインすると、セッション（Cookie/ログイン）が保存され、エージェントがあなたのアクセス権で動作できるようになります。",
       "heading": "ブラウザ",

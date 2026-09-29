@@ -159,9 +159,10 @@ export function BarCanvas() {
         needsFill = true
       } else intensity = itTarget
 
-      // Live tweak repaint (variant, stacking) without replaying the wave.
+      // Live tweak repaint (variant, stacking, and color -- an `accent` series
+      // recolors on a theme switch) without replaying the wave.
       const paintSig = `${s.stackType}|${s.configKeys
-        .map((k) => s.seriesSpecs[k]?.variant ?? '')
+        .map((k) => `${s.seriesSpecs[k]?.variant ?? ''}:${s.seedOf(k).fill.join('.')}`)
         .join(',')}`
       if (paintSig !== lastPaintSig) {
         lastPaintSig = paintSig

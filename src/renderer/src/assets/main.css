@@ -18,6 +18,12 @@
   --color-text-subtle: #6a6a73;
   --color-accent: #4d8dff;
   --color-accent-hover: #6aa0ff;
+  /* Foreground ON an accent fill (switch knob, accent badges). Derived, not a
+     palette entry: `white` is the polarity token and a theme is free to set it
+     to its own accent (Orion does), which made the knob vanish into the track.
+     Picks white or black from the accent's OKLCH lightness, so it follows
+     whatever accent the active theme sets. */
+  --color-on-accent: oklch(from var(--color-accent) clamp(0, (0.75 - l) * 1000, 1) 0 0);
   --color-success: #3fb950;
   --color-warning: #d9a441;
   --color-danger: #f0556a;
