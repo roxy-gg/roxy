@@ -22,8 +22,14 @@
      palette entry: `white` is the polarity token and a theme is free to set it
      to its own accent (Orion does), which made the knob vanish into the track.
      Picks white or black from the accent's OKLCH lightness, so it follows
-     whatever accent the active theme sets. */
-  --color-on-accent: oklch(from var(--color-accent) clamp(0, (0.75 - l) * 1000, 1) 0 0);
+     whatever accent the active theme sets.
+
+     0.66 was picked against the built-in themes plus the Tailwind 400-700
+     ramps (74 accents): no accent drops below 3:1 against its knob/label,
+     and it is the lowest cut that keeps the default accent (#4d8dff,
+     L=0.658) on white. 0.75 left 16 of those 74 under 3:1 (corals, pinks,
+     light greens); going lower flips the default theme to a black knob. */
+  --color-on-accent: oklch(from var(--color-accent) clamp(0, (0.66 - l) * 1000, 1) 0 0);
   --color-success: #3fb950;
   --color-warning: #d9a441;
   --color-danger: #f0556a;
