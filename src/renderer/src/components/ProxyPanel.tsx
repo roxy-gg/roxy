@@ -88,6 +88,7 @@ export function ProxyPanel({ compact = false }: { compact?: boolean }): JSX.Elem
   const toggle = async (value: boolean): Promise<void> => {
     if (value && (!host.trim() || !port)) {
       setEnabled(true)
+      setNote(null)
       return
     }
     setEnabled(value)
@@ -132,6 +133,16 @@ export function ProxyPanel({ compact = false }: { compact?: boolean }): JSX.Elem
             {t('proxy.title')}
           </div>
           <p className="mt-1 text-xs text-text-muted">{t('proxy.description')}</p>
+          {/* The form (and its status line) is hidden while disabled, so a
+              disable confirmation or error would otherwise never be seen. */}
+          {!enabled && note && (
+            <p
+              className={cn('mt-2 text-xs', note.kind === 'error' ? 'text-danger' : 'text-success')}
+            >
+              {note.kind === 'ok' && <Check className="mr-1 inline h-3.5 w-3.5" />}
+              {note.text}
+            </p>
+          )}
         </div>
         <Switch checked={enabled} onChange={(value) => void toggle(value)} disabled={busy} />
       </div>

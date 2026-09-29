@@ -21,9 +21,11 @@ function toRgb(color: string): Rgb | null {
   }
   if (!probe) return null
   probe.clearRect(0, 0, 1, 1)
-  // An unparseable value leaves fillStyle unchanged, so reset first and treat
-  // "still the sentinel" as failure.
-  probe.fillStyle = '#000'
+  // An unparseable value leaves fillStyle unchanged. Reset to a fully
+  // transparent sentinel first, so a failed parse paints alpha 0 and falls
+  // back below -- an opaque sentinel would be indistinguishable from a real
+  // (black) accent.
+  probe.fillStyle = 'rgba(0, 0, 0, 0)'
   probe.fillStyle = color
   probe.fillRect(0, 0, 1, 1)
   const [r, g, b, a] = probe.getImageData(0, 0, 1, 1).data

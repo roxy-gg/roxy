@@ -502,7 +502,7 @@ export function ModelPicker({
                           </span>
                         )}
                         {hasQuery && count !== undefined && count > 0 && (
-                          <span className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-accent/90 px-1.5 py-0.5 text-[10px] font-semibold text-white shadow-xs">
+                          <span className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-accent/90 px-1.5 py-0.5 text-[10px] font-semibold text-on-accent shadow-xs">
                             {count > 99 ? '99+' : count}
                           </span>
                         )}

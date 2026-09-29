@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useTranslation, Trans } from 'react-i18next'
 import { ChevronDown, Globe, Plus, Trash2 } from 'lucide-react'
@@ -55,6 +55,7 @@ export default function Settings(): JSX.Element {
   const [update, setUpdate] = useState<UpdateInfo | null>(null)
   const [confirmingReset, setConfirmingReset] = useState(false)
   const [cookiesOpen, setCookiesOpen] = useState(false)
+  const cookiesPanelId = useId()
   const [resetting, setResetting] = useState(false)
   const [dragProviderId, setDragProviderId] = useState<string | null>(null)
   const [dragOverProviderId, setDragOverProviderId] = useState<string | null>(null)
@@ -374,6 +375,7 @@ export default function Settings(): JSX.Element {
               size="sm"
               className="w-8 shrink-0 px-0"
               aria-expanded={cookiesOpen}
+              aria-controls={cookiesPanelId}
               title={
                 cookiesOpen
                   ? t('settings.browser.cookiesCollapse')
@@ -386,7 +388,9 @@ export default function Settings(): JSX.Element {
               />
             </Button>
           </div>
-          {cookiesOpen && <CookiePanel className="max-h-[420px]" />}
+          <div id={cookiesPanelId} hidden={!cookiesOpen}>
+            {cookiesOpen && <CookiePanel className="max-h-[420px]" />}
+          </div>
         </div>
 
         <div className="mt-3 overflow-hidden sq sq-xl sq-ring rounded-xl border border-border bg-surface">
