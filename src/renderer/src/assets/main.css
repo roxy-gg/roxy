@@ -20,7 +20,7 @@
   --color-accent-hover: #6aa0ff;
   /* Foreground ON an accent fill (switch knob, accent badges). Derived, not a
      palette entry: `white` is the polarity token and a theme is free to set it
-     to its own accent (Orion does), which made the knob vanish into the track.
+     to anything, including its own accent, which made the knob vanish into the track.
      Picks white or black from the accent's OKLCH lightness, so it follows
      whatever accent the active theme sets.
 
