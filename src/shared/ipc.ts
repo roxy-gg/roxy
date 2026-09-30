@@ -112,6 +112,8 @@ export const CHANNELS = {
   cliproxyLogin: 'cliproxy:login',
   cliproxySignOut: 'cliproxy:signOut',
   cliproxyStop: 'cliproxy:stop',
+  /** remaining subscription allowance for one connection */
+  cliproxyQuota: 'cliproxy:quota',
   /** install from a user-picked archive (blocked networks / air-gapped) */
   cliproxyInstallFile: 'cliproxy:installFile',
   /** main -> renderer: sidecar install/run status changed */

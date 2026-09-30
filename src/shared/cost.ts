@@ -144,9 +144,14 @@ export function aggregateUsage(
   todayStart: number
 ): UsageStats {
   const today = records.filter((r) => r.createdAt >= todayStart)
+  // Seven local calendar days, today included - matches the graph's day buckets.
+  const weekStart = todayStart - 6 * 24 * 60 * 60 * 1000
+  const week = (recs: UsageRecord[]): UsageRecord[] => recs.filter((r) => r.createdAt >= weekStart)
   const overview = {
     today: bucket(today),
     last30d: bucket(records),
+    last7d: bucket(week(records)),
+    topModel7d: topModel(week(records)),
     topModel: topModel(records),
     daily: dailySeries(records, now),
     hasEstimates: records.some((r) => r.estimated),
@@ -166,6 +171,8 @@ export function aggregateUsage(
       name: providerNames[providerId] ?? providerId,
       today: bucket(recs.filter((r) => r.createdAt >= todayStart)),
       last30d: bucket(recs),
+      last7d: bucket(week(recs)),
+      topModel7d: topModel(week(recs)),
       topModel: topModel(recs),
       daily: dailySeries(recs, now),
       hasEstimates: recs.some((r) => r.estimated),

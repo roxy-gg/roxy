@@ -29,6 +29,7 @@ import type {
 } from './types'
 import type { McpServerConfig } from './mcp'
 import type { CliProxyLoginResult, CliProxyState } from './cliproxy'
+import type { ConnectionQuota } from './quota'
 import type { ForgeStatusView, ForgeHostView, ForgeKind } from './forge'
 import type { RepoLayout } from './repos'
 import type { SessionConfigPatch } from './session-config'
@@ -531,6 +532,11 @@ export interface ModelInfo {
   contextLimit?: number
   /** Max output tokens, when known. */
   outputLimit?: number
+  /**
+   * GitHub Copilot only: premium requests one prompt to this model spends
+   * (0 = included in the plan, 1 = standard, 10 = Opus-class, ...).
+   */
+  premiumMultiplier?: number
   /** USD price per 1M tokens (from models.dev), when known â€” powers cost math. */
   cost?: ModelCost
 }
@@ -985,6 +991,12 @@ export interface RoxyApi {
     signOut(providerId: string, file: string): Promise<CliProxyState>
     /** Stop the local proxy (keeps the install and the signed-in accounts). */
     stop(): Promise<CliProxyState>
+    /**
+     * Remaining allowance for one subscription connection (a sidecar account
+     * or GitHub Copilot), read from the upstream's own usage endpoint. Cached
+     * for a minute unless `force`.
+     */
+    quota(connectionId: string, force?: boolean): Promise<ConnectionQuota>
     /**
      * Install from an archive the user downloaded themselves, for networks that
      * block or rewrite the download. Opens a file picker; the archive still has

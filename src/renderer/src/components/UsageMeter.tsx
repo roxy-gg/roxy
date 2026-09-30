@@ -1,15 +1,16 @@
 /**
- * The usage/cost "menubar" — a titlebar pill showing today's spend, opening a
- * popover with an Overview tab plus one tab per provider. Each tab shows Today /
- * 30-day cost + tokens, the top model, and a 30-day daily-spend bar graph.
+ * The usage/cost "menubar" - a titlebar pill showing the active session's
+ * provider's last-7-day API spend, opening a popover with that provider's
+ * 7-day cost + tokens, top model, and a daily-spend bar graph.
  *
  * Data is real provider token `usage` where the API reports it (Claude/Gemini
  * always; most OpenAI-compatible providers via `stream_options.include_usage`),
- * and a ~chars/4 estimate otherwise — so the numbers exist regardless of
+ * and a ~chars/4 estimate otherwise - so the numbers exist regardless of
  * provider. Cost is priced from the models.dev catalog at record time.
  */
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { ProviderUsage, UsageDay, UsageStats } from '@shared/types'
+import type { ConnectedProvider, ProviderUsage, UsageDay } from '@shared/types'
+import { localDay } from '@shared/cost'
 import { useTranslation, Trans } from 'react-i18next'
 import type { TFunction } from 'i18next'
 import { useRoxyStore } from '../lib/store'
@@ -77,7 +78,7 @@ function Figure({ label, value }: { label: string; value: string }): JSX.Element
   )
 }
 
-/** 30-day daily-spend bar graph, rendered with dither-kit's dithered `BarChart`.
+/** Daily-spend bar graph, rendered with dither-kit's dithered `BarChart`.
  *  Cost drives each bar's height, falling back to tokens when nothing is priced
  *  yet. A decorative "spark" — the `bloom="aura"` glow plus a hover lift — makes
  *  the fill shimmer without any crosshair/tooltip chrome. */
@@ -99,7 +100,7 @@ function SpendGraph({ daily }: { daily: UsageDay[] }): JSX.Element {
   // `t` in the deps: the identity change on a language switch is exactly when
   // the series label needs to be rebuilt.
   const config = useMemo<ChartConfig>(
-    () => ({ spend: { label: t('usage.spend'), color: 'blue' } }),
+    () => ({ spend: { label: t('usage.spend'), color: 'accent' } }),
     [t]
   )
 
@@ -130,65 +131,6 @@ function SpendGraph({ daily }: { daily: UsageDay[] }): JSX.Element {
   )
 }
 
-/** The body of one tab (Overview or a provider) — the shared stat layout. */
-function UsagePanel({
-  title,
-  subtitle,
-  today,
-  cost30,
-  tokens30,
-  latestTokens,
-  topModel,
-  daily,
-  note
-}: {
-  title: string
-  subtitle?: string
-  today: number
-  cost30: number
-  tokens30: number
-  latestTokens: number
-  topModel: string | null
-  daily: UsageDay[]
-  note: string
-}): JSX.Element {
-  const { t } = useTranslation()
-  const empty = tokens30 === 0
-  return (
-    <div className="p-3.5">
-      <div className="mb-3 border-b border-border pb-3">
-        <div className="text-sm font-semibold text-text">{title}</div>
-        {subtitle && <div className="mt-0.5 text-xs text-text-subtle">{subtitle}</div>}
-      </div>
-      {empty ? (
-        <div className="py-6 text-center text-xs text-text-subtle">{t('usage.empty')}</div>
-      ) : (
-        <>
-          <div className="grid grid-cols-2 gap-x-6 gap-y-3">
-            <Figure label={t('usage.today')} value={formatUsd(today)} />
-            <Figure label={t('usage.cost30d')} value={formatUsd(cost30)} />
-            <Figure label={t('usage.tokens30d')} value={formatTokens(tokens30)} />
-            <Figure label={t('usage.latestTokens')} value={formatTokens(latestTokens)} />
-          </div>
-          <div className="mt-4">
-            <SpendGraph daily={daily} />
-          </div>
-          {topModel && (
-            <div className="mt-3 text-xs text-text-muted">
-              <Trans
-                i18nKey="usage.topModel"
-                values={{ model: prettyModel(topModel) }}
-                components={{ 1: <span className="text-text" /> }}
-              />
-            </div>
-          )}
-          <div className="mt-1 text-[11px] leading-snug text-text-subtle">{note}</div>
-        </>
-      )}
-    </div>
-  )
-}
-
 /** Build the estimate/pricing caveat line for a panel. */
 function noteFor(hasEstimates: boolean, hasUnpriced: boolean, t: TFunction): string {
   const parts: string[] = []
@@ -198,112 +140,122 @@ function noteFor(hasEstimates: boolean, hasUnpriced: boolean, t: TFunction): str
   return t('usage.noteWith', { parts: parts.join('; ') })
 }
 
-/** Latest-call token volume for a provider panel = today's tokens (a proxy for "recent"). */
-function overviewPanel(stats: UsageStats, t: TFunction): JSX.Element {
-  const o = stats.overview
-  return (
-    <UsagePanel
-      title={t('usage.overview')}
-      subtitle={t('usage.allProviders')}
-      today={o.today.cost}
-      cost30={o.last30d.cost}
-      tokens30={o.last30d.tokens}
-      latestTokens={o.today.tokens}
-      topModel={o.topModel}
-      daily={o.daily}
-      note={noteFor(o.hasEstimates, o.hasUnpriced, t)}
-    />
-  )
-}
-
-function providerPanel(p: ProviderUsage, t: TFunction): JSX.Element {
-  return (
-    <UsagePanel
-      title={p.name}
-      subtitle={t('usage.last30Days')}
-      today={p.today.cost}
-      cost30={p.last30d.cost}
-      tokens30={p.last30d.tokens}
-      latestTokens={p.today.tokens}
-      topModel={p.topModel}
-      daily={p.daily}
-      note={noteFor(p.hasEstimates, p.hasUnpriced, t)}
-    />
-  )
-}
-
 /**
- * The titlebar usage pill. Shows today's spend (or 30-day when today is $0) and
- * opens the dashboard popover. Hidden until there's any usage to show.
+ * The titlebar spend pill, scoped to the provider the active session uses:
+ * that provider's last-7-day API spend, opening its 7-day breakdown.
+ *
+ * Subscription connections never render this - their cost is a flat plan fee,
+ * so an API-rate dollar figure would be fiction; `QuotaMeter` shows their
+ * remaining allowance instead.
  */
-export function UsageMeter(): JSX.Element | null {
-  const { t } = useTranslation()
+export function UsageMeter({
+  provider
+}: {
+  provider: Pick<ConnectedProvider, 'id' | 'name' | 'auth'>
+}): JSX.Element | null {
   const usageStats = useRoxyStore((s) => s.usageStats)
   const refreshUsage = useRoxyStore((s) => s.refreshUsage)
   const { open, setOpen, ref } = usePopover()
-  const [tab, setTab] = useState<string>('overview')
 
   // Refresh whenever the popover opens, so it reflects the latest turn.
   useEffect(() => {
     if (open) void refreshUsage()
   }, [open, refreshUsage])
 
-  if (!usageStats || usageStats.overview.last30d.tokens === 0) return null
+  if (!usageStats) return null
+  // A pay-per-use key always shows its spend, $0 on a quiet week included, so
+  // the bill is one glance away. Keyless local servers cost nothing and only
+  // show once they have traffic.
+  const paid = provider.auth === 'api-key'
+  const p =
+    usageStats.providers.find((x) => x.providerId === provider.id) ??
+    (paid ? idleUsage(provider) : undefined)
+  if (!p || (p.last7d.tokens === 0 && !paid)) return null
+  return <SpendPill p={p} open={open} setOpen={setOpen} popoverRef={ref} />
+}
 
-  const o = usageStats.overview
-  // Pill label: prefer today's cost; if nothing today, show the 30-day figure.
-  const pillCost = o.today.cost > 0 ? o.today.cost : o.last30d.cost
-  const pillTitle =
-    o.today.cost > 0
-      ? 'Spent today — click for usage & cost'
-      : 'Spent in the last 30 days — click for usage & cost'
+/** An all-zero summary for a paid provider with no recorded calls yet. */
+function idleUsage(provider: Pick<ConnectedProvider, 'id' | 'name'>): ProviderUsage {
+  const zero = { tokens: 0, cost: 0, calls: 0 }
+  const now = Date.now()
+  const daily: UsageDay[] = []
+  for (let i = 29; i >= 0; i--) daily.push({ date: localDay(now - i * DAY_MS), tokens: 0, cost: 0 })
+  return {
+    providerId: provider.id,
+    name: provider.name,
+    today: zero,
+    last30d: zero,
+    last7d: zero,
+    topModel7d: null,
+    topModel: null,
+    daily,
+    hasEstimates: false,
+    hasUnpriced: false
+  }
+}
 
-  const tabs = [
-    { id: 'overview', label: 'Overview' },
-    ...usageStats.providers.map((p) => ({ id: p.providerId, label: p.name }))
-  ]
-  const activeProvider = usageStats.providers.find((p) => p.providerId === tab)
+const DAY_MS = 24 * 60 * 60 * 1000
 
+function SpendPill({
+  p,
+  open,
+  setOpen,
+  popoverRef: ref
+}: {
+  p: ProviderUsage
+  open: boolean
+  setOpen: (v: boolean) => void
+  popoverRef: React.RefObject<HTMLDivElement>
+}): JSX.Element {
+  const { t } = useTranslation()
+  const week = p.daily.slice(-7)
   return (
     <div ref={ref} className="relative shrink-0">
       <button
         type="button"
         onClick={() => setOpen(!open)}
-        title={pillTitle}
+        title={t('usage.pillTitle', { provider: p.name })}
         className={cn(
           // No leading icon and so no `gap`: the value is already a currency
-          // amount, so the `$` says what it is. A chart glyph beside it was
-          // decoration competing with the number for the same job.
+          // amount, so the `$` says what it is.
           'press-scale flex h-7 items-center sq sq-lg sq-ring edge rounded-lg border px-2 text-xs tabular-nums transition-colors',
           open
             ? 'border-border-strong [--sq-ring:var(--edge-strong)] bg-elevated text-text'
             : 'border-border bg-surface text-text-muted hover:border-border-strong hover:[--sq-ring:var(--edge-strong)] hover:text-text'
         )}
       >
-        <span>{formatUsd(pillCost)}</span>
+        <span>{formatUsd(p.last7d.cost)}</span>
       </button>
 
       {open && (
         <div className="animate-pop-in absolute right-0 top-full z-50 mt-2 w-80 origin-top-right overflow-hidden sq-frame sq-xl sq-fill-elevated sq-ring edge edge-strong edge-panel rounded-xl border border-border bg-elevated shadow-float">
-          <div className="border-b border-border p-2">
-            <select
-              value={tab}
-              onChange={(e) => setTab(e.target.value)}
-              aria-label="Usage provider"
-              className="h-8 w-full cursor-pointer sq sq-lg sq-ring edge [--sq-bevel:transparent] rounded-lg border border-border bg-surface-2 px-2.5 text-xs font-medium text-text outline-none focus:[--sq-ring:var(--edge-strong)]"
-            >
-              {tabs.map((option) => (
-                <option key={option.id} value={option.id}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
+          <div className="p-3.5">
+            <div className="mb-3 border-b border-border pb-3">
+              <div className="text-sm font-semibold text-text">{p.name}</div>
+              <div className="mt-0.5 text-xs text-text-subtle">{t('usage.last7Days')}</div>
+            </div>
+            <div className="grid grid-cols-2 gap-x-6 gap-y-3">
+              <Figure label={t('usage.today')} value={formatUsd(p.today.cost)} />
+              <Figure label={t('usage.cost7d')} value={formatUsd(p.last7d.cost)} />
+              <Figure label={t('usage.tokens7d')} value={formatTokens(p.last7d.tokens)} />
+              <Figure label={t('usage.calls7d')} value={p.last7d.calls.toLocaleString()} />
+            </div>
+            <div className="mt-4">
+              <SpendGraph daily={week} />
+            </div>
+            {p.topModel7d && (
+              <div className="mt-3 text-xs text-text-muted">
+                <Trans
+                  i18nKey="usage.topModel"
+                  values={{ model: prettyModel(p.topModel7d) }}
+                  components={{ 1: <span className="text-text" /> }}
+                />
+              </div>
+            )}
+            <div className="mt-1 text-[11px] leading-snug text-text-subtle">
+              {noteFor(p.hasEstimates, p.hasUnpriced, t)}
+            </div>
           </div>
-          {tab === 'overview'
-            ? overviewPanel(usageStats, t)
-            : activeProvider
-              ? providerPanel(activeProvider, t)
-              : overviewPanel(usageStats, t)}
         </div>
       )}
     </div>

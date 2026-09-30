@@ -42,6 +42,18 @@ import {
   upstreamFor
 } from '../src/shared/cliproxy'
 import { modelLabel, pickDefaultModel, resolveProviderModel } from '../src/shared/models'
+import {
+  bucketsForModel,
+  copilotBucketsForModel,
+  copilotOverageUsd,
+  copilotTokenCost,
+  parseCopilotUser,
+  parseAntigravityModels,
+  parseClaudeUsage,
+  parseCodexUsage,
+  quotaErrorMessage,
+  quotaRequests
+} from '../src/shared/quota'
 import { DEFAULT_MOTION, normalizeMotion, reduceMotion } from '../src/shared/motion'
 import {
   BUILT_IN_THEMES,
@@ -4504,6 +4516,22 @@ async function main(): Promise<void> {
     stats.overview.daily[29].date === localDay(now) &&
       stats.overview.daily[29].tokens === 1500 + 150
   )
+  {
+    const old = rec({ input: 9000, cost: 1, createdAt: todayStart - 10 * DAY })
+    const edge = rec({ input: 7, cost: 0, createdAt: todayStart - 6 * DAY })
+    const wk = aggregateUsage([...records, old, edge], {}, now, todayStart)
+    check(
+      'agg: 7d excludes older records but keeps day 7',
+      wk.overview.last7d.tokens === 1500 + 300 + 6000 + 150 + 7 &&
+        wk.overview.last30d.tokens === 1500 + 300 + 6000 + 150 + 7 + 9000
+    )
+    const oa = wk.providers.find((p) => p.providerId === 'openai')
+    check(
+      'agg: provider 7d isolates its records',
+      oa?.last7d.calls === 3 && Math.abs((oa?.last7d.cost ?? 0) - 0.025) < 1e-9
+    )
+    check('agg: 7d top model', wk.overview.topModel7d === 'claude-y')
+  }
   check('agg: overview flags estimates', stats.overview.hasEstimates === true)
   check('agg: overview flags unpriced', stats.overview.hasUnpriced === true)
   check('agg: one tab per provider', stats.providers.length === 3)
@@ -6311,6 +6339,265 @@ async function main(): Promise<void> {
     !resolveFontStack('SF Mono', 'mono', 'win32')!.match(/'SF Mono'.*'SF Mono'/),
     String(resolveFontStack('SF Mono', 'mono', 'win32'))
   )
+
+  // ---- subscription quota parsers ----
+  console.log('\nsubscription quota\n')
+  {
+    const now = 1_700_000_000_000
+    const codex = parseCodexUsage(
+      JSON.stringify({
+        plan_type: 'Plus',
+        rate_limit: {
+          primary_window: {
+            used_percent: 27,
+            reset_after_seconds: 600,
+            limit_window_seconds: 18000
+          },
+          secondary_window: {
+            used_percent: 90,
+            reset_at: 1_700_100_000,
+            limit_window_seconds: 604800
+          }
+        }
+      }),
+      now
+    )
+    check('quota: codex parses both windows', codex.buckets.length === 2, JSON.stringify(codex))
+    check('quota: codex used% becomes remaining%', codex.buckets[0]?.remaining === 73)
+    check(
+      'quota: codex reset_after is relative to now',
+      codex.buckets[0]?.resetsAt === now + 600_000
+    )
+    check(
+      'quota: codex reset_at seconds become ms',
+      codex.buckets[1]?.resetsAt === 1_700_100_000_000
+    )
+    check(
+      'quota: codex labels windows by length',
+      codex.buckets[1]?.label === 'Weekly' && codex.buckets[0]?.label === '5-hour'
+    )
+    check('quota: codex plan is normalized', codex.plan === 'plus')
+    check('quota: codex garbage yields no buckets', parseCodexUsage('<html>').buckets.length === 0)
+
+    const claude = parseClaudeUsage({
+      five_hour: { utilization: 12.4, resets_at: '2026-09-29T20:00:00Z' },
+      seven_day: { utilization: 40 },
+      seven_day_opus: { utilization: 95 },
+      seven_day_sonnet: null
+    })
+    check(
+      'quota: claude reads present windows only',
+      claude.buckets.length === 3,
+      JSON.stringify(claude)
+    )
+    check('quota: claude utilization is used%', claude.buckets[0]?.remaining === 88)
+    check(
+      'quota: claude ISO reset parses',
+      claude.buckets[0]?.resetsAt === Date.parse('2026-09-29T20:00:00Z')
+    )
+    const cq = { connectionId: 'c', upstream: 'claude' as const, fetchedAt: now, ...claude }
+    check(
+      'quota: opus model sees the opus cap first',
+      bucketsForModel(cq, 'claude-opus-4-5')[0]?.id === 'seven_day_opus'
+    )
+    check(
+      'quota: sonnet model does not see the opus cap',
+      !bucketsForModel(cq, 'roxy-abc/claude-sonnet-4-5').some((b) => b.id === 'seven_day_opus')
+    )
+
+    const anti = parseAntigravityModels({
+      models: {
+        'gemini-3-pro-high': {
+          displayName: 'Gemini 3 Pro',
+          quotaInfo: { remainingFraction: 0.42, resetTime: '2026-09-30T00:00:00Z' }
+        },
+        'gemini-2.5-flash': { quotaInfo: { resetTime: '2026-09-30T00:00:00Z' } },
+        tab_flash_lite_preview: { quotaInfo: { remainingFraction: 1 } },
+        internal: { isInternal: true, quotaInfo: { remainingFraction: 1 } },
+        unmetered: { displayName: 'No quota' }
+      }
+    })
+    check(
+      'quota: antigravity skips tab/internal/unmetered',
+      anti.buckets.length === 2,
+      JSON.stringify(anti)
+    )
+    check(
+      'quota: antigravity fraction becomes percent',
+      anti.buckets.find((b) => b.id === 'gemini-3-pro-high')?.remaining === 42
+    )
+    check(
+      'quota: antigravity missing fraction with reset means exhausted',
+      anti.buckets.find((b) => b.id === 'gemini-2.5-flash')?.remaining === 0
+    )
+    const aq = { connectionId: 'c', upstream: 'antigravity' as const, fetchedAt: now, ...anti }
+    check(
+      'quota: antigravity scopes to the session model',
+      bucketsForModel(aq, 'roxy-abc/gemini-3-pro-high')
+        .map((b) => b.id)
+        .join() === 'gemini-3-pro-high'
+    )
+
+    check(
+      'quota: codex request carries the workspace id',
+      quotaRequests('codex', { accountId: 'acct' })[0].header['Chatgpt-Account-Id'] === 'acct'
+    )
+    check(
+      'quota: every request uses the sidecar token placeholder',
+      (['codex', 'claude', 'antigravity'] as const).every((u) =>
+        quotaRequests(u).every((r) => r.header.Authorization === 'Bearer $TOKEN$')
+      )
+    )
+    // Legacy annual plan: premium requests at a per-model multiplier.
+    const cop = parseCopilotUser({
+      access_type_sku: 'copilot_pro',
+      copilot_plan: 'individual',
+      quota_reset_date_utc: '2026-10-01T00:00:00Z',
+      quota_snapshots: {
+        premium_interactions: {
+          entitlement: 300,
+          remaining: 45.5,
+          percent_remaining: 15.2,
+          overage_count: 12,
+          overage_permitted: true,
+          unlimited: false
+        },
+        chat: { unlimited: true },
+        completions: { unlimited: true }
+      }
+    })
+    check('copilot: plan from sku', cop.plan === 'pro', JSON.stringify(cop))
+    check(
+      'copilot: legacy premium allowance parsed',
+      cop.premium?.unit === 'requests' &&
+        cop.premium.entitlement === 300 &&
+        cop.premium.used === 254.5 &&
+        cop.premium.overageCount === 12 &&
+        cop.premium.overagePermitted &&
+        !cop.premium.blocked
+    )
+    check(
+      'copilot: unlimited snapshots are not buckets',
+      cop.buckets.length === 1 && cop.buckets[0].id === 'premium' && cop.buckets[0].remaining === 15
+    )
+    check(
+      'copilot: reset date parsed',
+      cop.buckets[0].resetsAt === Date.parse('2026-10-01T00:00:00Z')
+    )
+    check(
+      'copilot: legacy overage is $0.04 per request',
+      Math.abs(copilotOverageUsd(cop.premium!) - 0.48) < 1e-9
+    )
+    const cq2 = { connectionId: 'c', upstream: 'copilot' as const, fetchedAt: now, ...cop }
+    check('copilot: included model ignores premium', copilotBucketsForModel(cq2, 0).length === 0)
+    check('copilot: premium model is metered', copilotBucketsForModel(cq2, 10)[0]?.id === 'premium')
+
+    // Usage-based billing (shape captured from a live enterprise account).
+    const ubb = parseCopilotUser({
+      access_type_sku: 'copilot_enterprise_seat_multi_quota',
+      copilot_plan: 'enterprise',
+      token_based_billing: true,
+      quota_reset_date_utc: '2026-10-01T00:00:00.000Z',
+      quota_snapshots: {
+        chat: { percent_remaining: 100, unlimited: true, entitlement: 0, remaining: 0 },
+        completions: { percent_remaining: 100, unlimited: true, entitlement: 0, remaining: 0 },
+        premium_interactions: {
+          overage_count: 0,
+          overage_permitted: false,
+          percent_remaining: 0,
+          quota_remaining: 0,
+          unlimited: false,
+          has_quota: false,
+          token_based_billing: true,
+          credits_used: 200066,
+          overage_entitlement: 0,
+          remaining: 0,
+          entitlement: 200000
+        }
+      }
+    })
+    check(
+      'copilot: credit plan reads the absolute counter',
+      ubb.premium?.unit === 'credits' && ubb.premium.used === 200066,
+      JSON.stringify(ubb)
+    )
+    check(
+      'copilot: overshooting a hard cap is not billed',
+      ubb.premium?.overageCount === 0 && copilotOverageUsd(ubb.premium!) === 0
+    )
+    const paid = parseCopilotUser({
+      token_based_billing: true,
+      quota_snapshots: {
+        premium_interactions: {
+          entitlement: 1000,
+          quota_remaining: 0,
+          percent_remaining: 0,
+          credits_used: 1250,
+          overage_permitted: true,
+          has_quota: true
+        }
+      }
+    })
+    check(
+      'copilot: credits past a budgeted allowance are billed at $0.01',
+      paid.premium?.overageCount === 250 &&
+        Math.abs(copilotOverageUsd(paid.premium!) - 2.5) < 1e-9 &&
+        !paid.premium.blocked
+    )
+    check('copilot: org-blocked allowance is flagged', ubb.premium?.blocked === true)
+    check('copilot: credit bucket is labelled', ubb.buckets[0]?.label === 'AI credits')
+    const ubq = { connectionId: 'c', upstream: 'copilot' as const, fetchedAt: now, ...ubb }
+    check(
+      'copilot: on credit plans a 0x model still draws the allowance',
+      copilotBucketsForModel(ubq, 0)[0]?.id === 'premium'
+    )
+    const price = copilotTokenCost({
+      token_prices: {
+        batch_size: 1000000,
+        default: { cache_price: 17, cache_write_price: 219, input_price: 175, output_price: 1400 }
+      }
+    })
+    check(
+      'copilot: token prices convert credits to USD per 1M',
+      price?.input === 1.75 &&
+        price.output === 14 &&
+        Math.abs((price.cacheRead ?? 0) - 0.17) < 1e-9 &&
+        Math.abs((price.cacheWrite ?? 0) - 2.19) < 1e-9,
+      JSON.stringify(price)
+    )
+    check(
+      'copilot: batch size scales prices',
+      copilotTokenCost({ token_prices: { batch_size: 1000, default: { input_price: 1 } } })
+        ?.input === 10
+    )
+    check(
+      'copilot: no token prices means no cost',
+      copilotTokenCost({ multiplier: 1 }) === undefined
+    )
+
+    const free = parseCopilotUser({
+      access_type_sku: 'free_limited_copilot',
+      limited_user_quotas: { chat: 10, completions: 1000 },
+      monthly_quotas: { chat: 50, completions: 2000 }
+    })
+    check(
+      'copilot: free plan reads parallel maps',
+      free.plan === 'free' && free.buckets.find((b) => b.id === 'chat')?.remaining === 20,
+      JSON.stringify(free)
+    )
+    check(
+      'copilot: completions never gate a chat model',
+      !copilotBucketsForModel(
+        { connectionId: 'c', upstream: 'copilot', fetchedAt: now, ...free },
+        1
+      ).some((b) => b.id === 'completions')
+    )
+    check('quota: 401 maps to a reconnect hint', /Reconnect/.test(quotaErrorMessage(401, '')))
+    check(
+      'quota: upstream error message is surfaced',
+      quotaErrorMessage(500, '{"error":{"message":"boom"}}') === 'boom'
+    )
+  }
 
   if (fails.length) {
     console.error(`\nSHARED FAILED \u2014 ${fails.length} failing: ${fails.join(', ')}`)
