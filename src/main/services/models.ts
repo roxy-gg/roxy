@@ -13,6 +13,7 @@ import {
   listConnectedProviders
 } from '../db/repo'
 import { isCliProxyProvider } from '../../shared/cliproxy'
+import { copilotTokenCost } from '../../shared/quota'
 import { listConnectionModels } from './cliproxy'
 import { copilotEndpoint, withCopilotRetry } from './llm'
 
@@ -43,6 +44,7 @@ interface CopilotModel {
   is_chat_default?: boolean
   policy?: { state?: string }
   supported_endpoints?: string[]
+  billing?: { is_premium?: boolean; multiplier?: number; token_prices?: unknown }
   capabilities?: {
     type?: string
     limits?: { max_context_window_tokens?: number; max_output_tokens?: number }
@@ -114,7 +116,14 @@ async function listCopilotModels(connectionId: string): Promise<ModelInfo[]> {
         .map((m): ModelInfo => {
           const supports = m.capabilities?.supports
           const efforts = REASONING_EFFORTS.filter((e) => supports?.reasoning_effort?.includes(e))
+          const multiplier = m.billing?.multiplier
+          // Usage-based plans price every token; this is what the account is billed.
+          const cost = copilotTokenCost(m.billing)
           return {
+            ...(typeof multiplier === 'number' && Number.isFinite(multiplier) && multiplier >= 0
+              ? { premiumMultiplier: multiplier }
+              : {}),
+            ...(cost ? { cost } : {}),
             id: m.id,
             name: m.name || m.id,
             reasoning: supports?.thinking === true || Boolean(supports?.reasoning_effort?.length),
@@ -435,6 +444,11 @@ export function modelCost(providerId: string, modelId: string): ModelCost | unde
   const seedId = getProviderSeedId(providerId)
   if (seedId === 'roxy') {
     return roxyCaches.get(providerId)?.data.find((m) => m.id === modelId)?.cost
+  }
+  // Copilot's own per-token rates for this account, not models.dev's list price.
+  if (seedId === 'github-copilot') {
+    const own = copilotCaches.get(providerId)?.data.find((m) => m.id === modelId)?.cost
+    if (own) return own
   }
   if (!cache) return undefined
   const models = cache.data[seedId]?.models

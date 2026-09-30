@@ -252,6 +252,18 @@ async function getCopilotToken(connectionId: string): Promise<CopilotToken> {
   }
 }
 
+/**
+ * The account's GitHub OAuth token, renewed first if it has expired. Going
+ * through the Copilot exchange spends the refresh token at most once, shared
+ * with any concurrent inference, instead of racing it.
+ */
+export async function freshGitHubAccessToken(connectionId: string): Promise<string> {
+  await getCopilotToken(connectionId)
+  const credential = repo.getCopilotCredential(connectionId)
+  if (!credential) throw new Error('GitHub Copilot is not linked.')
+  return credential.accessToken
+}
+
 /** Drop the cached Copilot token so the next call re-exchanges it (used on a 401). */
 export function invalidateCopilotToken(
   rejectedAuthorization?: string,

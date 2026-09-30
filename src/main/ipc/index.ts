@@ -34,6 +34,7 @@ import type {
 import * as repo from '../db/repo'
 import * as copilot from '../services/copilot'
 import * as cliproxy from '../services/cliproxy'
+import { copilotQuota } from '../services/copilot-quota'
 import * as browser from '../services/browser'
 import * as browserProxy from '../services/browser-proxy'
 import * as cookies from '../services/cookies'
@@ -720,6 +721,14 @@ export function registerIpc(): void {
     return cliproxy.status()
   })
   ipcMain.handle(CHANNELS.cliproxyStop, () => cliproxy.stop())
+  // One quota channel for every plan-based provider; the renderer needn't know
+  // whether an account is served by the sidecar or by GitHub directly.
+  ipcMain.handle(CHANNELS.cliproxyQuota, (_e, connectionId: string, force?: boolean) => {
+    const id = String(connectionId)
+    return repo.getProviderSeedId(id) === 'github-copilot'
+      ? copilotQuota(id, force === true)
+      : cliproxy.connectionQuota(id, force === true)
+  })
   ipcMain.handle(CHANNELS.cliproxyInstallFile, async (event) => {
     const win = BrowserWindow.fromWebContents(event.sender)
     const filters = [

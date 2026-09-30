@@ -536,6 +536,9 @@ export interface ProviderUsage {
   name: string
   today: UsageBucket
   last30d: UsageBucket
+  /** The last 7 local days, today included (the titlebar pill's window). */
+  last7d: UsageBucket
+  topModel7d: string | null
   /** Most-used model over the window, by token volume. */
   topModel: string | null
   /** Daily spend for the last 30 days (bar graph). */
@@ -551,6 +554,8 @@ export interface UsageStats {
   overview: {
     today: UsageBucket
     last30d: UsageBucket
+    last7d: UsageBucket
+    topModel7d: string | null
     topModel: string | null
     daily: UsageDay[]
     hasEstimates: boolean

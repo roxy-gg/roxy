@@ -27,6 +27,9 @@ import { SessionInfo } from './SessionInfo'
 import { WorkstreamStrip } from './WorkstreamStrip'
 import { QueuedMessage } from './QueuedMessage'
 import { UsageMeter } from './UsageMeter'
+import { QuotaMeter } from './QuotaMeter'
+import { upstreamFor } from '@shared/cliproxy'
+import { planSource } from '@shared/quota'
 import {
   Queue,
   QueueList,
@@ -157,7 +160,8 @@ export function ChatView(): JSX.Element {
   const queueHasUserRequests = queue.some(
     (item) => !item.scheduleId && (item.fromUser || !item.sourceChatId)
   )
-  const selectedProvider = settings ? resolveSessionConfig(activeChat, settings).providerId : null
+  const sessionConfig = settings ? resolveSessionConfig(activeChat, settings) : null
+  const selectedProvider = sessionConfig?.providerId ?? null
   const provider = selectedProvider
     ? providers.find((p) => p.id === selectedProvider)
     : providers[0]
@@ -325,7 +329,14 @@ export function ChatView(): JSX.Element {
                 <Settings className="h-3.5 w-3.5" /> {t('bots.settings')}
               </button>
             )}
-            <UsageMeter />
+            {/* Plan-billed (subscriptions, Copilot): remaining allowance. Per-token: recent spend. */}
+            {activeChat && provider && selectedProvider ? (
+              planSource(provider.seedId, upstreamFor) ? (
+                <QuotaMeter provider={provider} model={sessionConfig?.model} />
+              ) : (
+                <UsageMeter provider={provider} />
+              )
+            ) : null}
           </div>
         </header>
 
