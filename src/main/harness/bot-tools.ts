@@ -7,6 +7,7 @@ import { getDb } from '../db/database'
 import {
   automationSnapshot,
   enqueuePrompt,
+  resolveQueueBlocker,
   notifyAutomation,
   notifyBots
 } from '../services/automation'
@@ -274,7 +275,9 @@ export async function runBotTool(
               'This message is running; stop its session before editing or deleting it'
             )
           if (action === 'delete') {
-            repo.removeQueueItem(id)
+            if (row.state === 'failed' || row.state === 'cancelled')
+              resolveQueueBlocker(id, 'discard')
+            else repo.removeQueueItem(id)
             notifyTranscriptChanged(row.chat_id)
             result = { deleted: id }
           } else if (action === 'update') {

@@ -1308,7 +1308,32 @@ export function listMessages(chatId: string): Message[] {
   const rows = getDb()
     .prepare('SELECT * FROM messages WHERE chat_id = ? ORDER BY created_at ASC, rowid ASC')
     .all(chatId) as MessageRow[]
-  return rows.map(rowToMessage)
+  const receipts = new Map(
+    (
+      getDb()
+        .prepare('SELECT id, payload FROM queue_receipts WHERE source_chat_id = ?')
+        .all(chatId) as { id: string; payload: string }[]
+    ).map((row) => [row.id, row.payload])
+  )
+  return rows.map((row) => {
+    const message = rowToMessage(row)
+    message.parts = message.parts.map((part) => {
+      if (
+        part.type !== 'tool' ||
+        !part.output ||
+        !['bot_invoke', 'session_manage', 'queue_manage'].includes(part.tool)
+      )
+        return part
+      try {
+        const output = JSON.parse(part.output) as { id?: string }
+        const receipt = output.id ? receipts.get(output.id) : undefined
+        return receipt ? { ...part, output: JSON.stringify(JSON.parse(receipt), null, 2) } : part
+      } catch {
+        return part
+      }
+    })
+    return message
+  })
 }
 
 export function addMessage(input: AddMessageInput): Message {
@@ -1398,7 +1423,7 @@ interface QueueRow {
   reply_to_chat_id: string | null
   hops: number
   not_before: number
-  state: 'pending' | 'running' | 'failed'
+  state: 'pending' | 'running' | 'failed' | 'cancelled'
   error: string | null
   bot_id: string | null
   bot_username: string | null
@@ -1422,6 +1447,7 @@ export function listQueue(chatId: string): QueueItem[] {
     hops: r.hops,
     notBefore: r.not_before,
     state: r.state,
+    retryAfter: queueRetryRisk(r.id),
     error: r.error ?? undefined,
     botId: r.bot_id ?? undefined,
     botUsername: r.bot_username ?? undefined,
@@ -1439,6 +1465,17 @@ export function enqueue(chatId: string, content: string, images?: QueueImage[]):
     .prepare('INSERT INTO queue(id, chat_id, content, images, created_at) VALUES(?, ?, ?, ?, ?)')
     .run(id, chatId, content, imagesJson, now)
   return { id, chatId, content, ...(images && images.length ? { images } : {}), createdAt: now }
+}
+
+export function queueRetryRisk(id: string): number | undefined {
+  const row = getDb()
+    .prepare(
+      `SELECT MAX(m.rowid) AS latest FROM queue q JOIN messages m ON m.chat_id = q.chat_id
+    WHERE q.id = ? AND q.state IN ('failed', 'cancelled')
+      AND (CASE WHEN q.blocked_after_rowid IS NULL THEN m.created_at > q.created_at ELSE m.rowid > q.blocked_after_rowid END)`
+    )
+    .get(id) as { latest: number | null }
+  return row.latest ?? undefined
 }
 
 export function removeQueueItem(id: string): void {
@@ -1483,6 +1520,10 @@ export function updateQueueItem(
       }
     | undefined
   if (previous?.state === 'running') throw new Error('This message is already running')
+  if (queueRetryRisk(id) !== undefined)
+    throw new Error(
+      'Later work exists in this session. Use the queue banner to review and confirm Retry, or Discard.'
+    )
   // Pending collaborator prompts already have a user bubble. Edit that bubble
   // in place; detaching it leaves stale history and loses the user's authorship.
   // Failed turns keep their history and append a correction when edited.

@@ -62,7 +62,7 @@ export function QueuedMessage({
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const running = item.state === 'running'
-  const failed = item.state === 'failed'
+  const failed = item.state === 'failed' || item.state === 'cancelled'
   const recipient = item.asBotId ? bots.find((bot) => bot.id === item.asBotId) : undefined
   const textRef = useRef<HTMLTextAreaElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
@@ -103,6 +103,7 @@ export function QueuedMessage({
     // An empty edit would silently drop the item — treat clearing everything as
     // a removal instead (matches the × affordance), so nothing invisible remains.
     if (!text && draftImages.length === 0) {
+      if (failed && !window.confirm(t('queue.discardConfirm'))) return
       await removeQueued(item.id)
       cancelEditing()
       return
@@ -281,7 +282,11 @@ export function QueuedMessage({
           )}
           {(running || failed) && (
             <span className={failed ? 'text-danger' : 'text-accent'}>
-              {failed ? t('queue.failed') : t('queue.running')}
+              {item.state === 'cancelled'
+                ? t('queue.cancelled')
+                : failed
+                  ? t('queue.failed')
+                  : t('queue.running')}
             </span>
           )}
         </div>
@@ -335,7 +340,9 @@ export function QueuedMessage({
         </QueueItemAction>
         <QueueItemAction
           disabled={running || pending}
-          onClick={() => removeQueued(item.id)}
+          onClick={() => {
+            if (!failed || window.confirm(t('queue.discardConfirm'))) void removeQueued(item.id)
+          }}
           title={t('queue.removeFromQueue')}
         >
           <X className="h-3.5 w-3.5" />

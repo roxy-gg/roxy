@@ -142,6 +142,7 @@ export const CHANNELS = {
   toolsCancel: 'tools:cancel',
 
   queueList: 'queue:list',
+  queueResolve: 'queue:resolve',
   queueAdd: 'queue:add',
   queueRemove: 'queue:remove',
   queueReorder: 'queue:reorder',

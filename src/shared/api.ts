@@ -1026,6 +1026,7 @@ export interface RoxyApi {
     cancel(callId: string): Promise<boolean>
   }
   queue: {
+    resolve(id: string, action: 'retry' | 'discard', retryAfter?: number): Promise<void>
     list(chatId: string): Promise<QueueItem[]>
     add(
       chatId: string,

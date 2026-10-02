@@ -107,6 +107,7 @@ import type { BotJobInput } from '../../shared/bots'
 import {
   automationSnapshot,
   enqueuePrompt,
+  resolveQueueBlocker,
   notifyAutomation,
   notifyBots,
   wakeAutomation
@@ -417,6 +418,7 @@ export function registerIpc(): void {
   ipcMain.handle(CHANNELS.messagesList, (_e, chatId: string) => repo.listMessages(chatId))
   ipcMain.handle(CHANNELS.messagesAdd, (_e, input: AddMessageInput) => {
     const message = repo.addMessage(input)
+    notifyAutomation(input.chatId)
     remote.notifyTranscriptChanged(input.chatId)
     return message
   })
@@ -911,6 +913,11 @@ export function registerIpc(): void {
   // no-op when nothing is shared), so desktop-side edits stay in sync on both ends.
   ipcMain.handle(CHANNELS.queueList, (_e, chatId: string) => repo.listQueue(chatId))
   ipcMain.handle(
+    CHANNELS.queueResolve,
+    (_e, id: string, action: 'retry' | 'discard', retryAfter?: number) =>
+      resolveQueueBlocker(id, action, retryAfter)
+  )
+  ipcMain.handle(
     CHANNELS.queueAdd,
     (_e, chatId: string, content: string, images?: QueueImage[], options?: unknown) => {
       // Only a plain options object may choose a guest. A bare string (legacy
@@ -922,9 +929,11 @@ export function registerIpc(): void {
     }
   )
   ipcMain.handle(CHANNELS.queueRemove, (_e, id: string) => {
-    const item = getDb().prepare('SELECT chat_id FROM queue WHERE id = ?').get(id) as
-      | { chat_id: string }
+    const item = getDb().prepare('SELECT chat_id, state FROM queue WHERE id = ?').get(id) as
+      | { chat_id: string; state: string }
       | undefined
+    if (item?.state === 'failed' || item?.state === 'cancelled')
+      return resolveQueueBlocker(id, 'discard')
     repo.removeQueueItem(id)
     remote.notifyQueueChanged()
     if (item) {

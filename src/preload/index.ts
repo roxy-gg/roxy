@@ -194,6 +194,8 @@ const roxy: RoxyApi = {
     cancel: (callId) => ipcRenderer.invoke(CHANNELS.toolsCancel, callId)
   },
   queue: {
+    resolve: (id, action, retryAfter) =>
+      ipcRenderer.invoke(CHANNELS.queueResolve, id, action, retryAfter),
     list: (chatId) => ipcRenderer.invoke(CHANNELS.queueList, chatId),
     add: (chatId, content, images, options) =>
       ipcRenderer.invoke(CHANNELS.queueAdd, chatId, content, images, options),

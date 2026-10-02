@@ -926,8 +926,8 @@ async function main(): Promise<void> {
     stopTurn(worker.chatId)
     await waitIdle()
     const stopped = repo.listQueue(worker.chatId)[0]
-    assert.equal(stopped.state, 'failed')
-    assert.match(stopped.error!, /Stopped/)
+    assert.equal(stopped.state, 'cancelled')
+    assert.match(stopped.error!, /Cancelled/)
     wakeAutomation()
     assert.equal(requests.length, 4)
     repo.updateQueueItem(stopped.id, 'Corrected retry')
@@ -1448,7 +1448,7 @@ async function main(): Promise<void> {
     while (sessionBusy(handoff.id) && Date.now() < cancelDeadline)
       await new Promise((resolve) => setTimeout(resolve, 10))
     assert.ok(!sessionBusy(handoff.id))
-    assert.equal(repo.listQueue(handoff.id)[0].state, 'failed')
+    assert.equal(repo.listQueue(handoff.id)[0].state, 'cancelled')
     assert.equal(
       repo.listMessages(handoff.id).at(-1)?.botUsername,
       'worker',
@@ -1848,7 +1848,13 @@ async function main(): Promise<void> {
           before + 2,
           `${origin} ${blockedState}: users run once in order`
         )
-        assert.deepEqual(repo.listQueue(memoryBot.chatId), [blocked, followup])
+        assert.deepEqual(
+          repo.listQueue(memoryBot.chatId).map((item) => [item.id, item.state]),
+          [
+            [blocked.id, blocked.state],
+            [followup.id, followup.state]
+          ]
+        )
         wakeAutomation()
         assert.equal(
           requests.length,
@@ -1857,12 +1863,26 @@ async function main(): Promise<void> {
         )
 
         // Retained automation remains explicitly retryable/deliverable when due.
+        if (blockedState === 'failed') {
+          assert.throws(
+            () => repo.updateQueueItem(blocker.id, 'Recovered automation'),
+            /Later work/
+          )
+          getDb()
+            .prepare(
+              'UPDATE queue SET blocked_after_rowid = (SELECT MAX(rowid) FROM messages WHERE chat_id = ?) WHERE id = ?'
+            )
+            .run(memoryBot.chatId, blocker.id)
+        }
         repo.updateQueueItem(blocker.id, 'Recovered automation')
         getDb().prepare('UPDATE queue SET not_before = 0 WHERE id = ?').run(blocker.id)
         wakeAutomation()
         await settle(memoryBot.chatId)
         assert.equal(requests.length, before + 3)
-        assert.deepEqual(repo.listQueue(memoryBot.chatId), [followup])
+        assert.deepEqual(
+          repo.listQueue(memoryBot.chatId).map((item) => item.id),
+          [followup.id]
+        )
         repo.removeQueueItem(followup.id)
       }
     }

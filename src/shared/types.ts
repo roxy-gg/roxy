@@ -368,7 +368,19 @@ export interface QueueItem {
   notBefore?: number
   error?: string
   /** Claimed items remain durable until their result has been persisted. */
-  state?: 'pending' | 'running' | 'failed'
+  state?: 'pending' | 'running' | 'failed' | 'cancelled'
+  /** Honest handoff receipt: acceptance is not execution. */
+  delivery?:
+    | 'enqueued'
+    | 'waiting_behind_failure'
+    | 'running'
+    | 'failed'
+    | 'cancelled'
+    | 'completed'
+    | 'discarded'
+  blockedBy?: string
+  /** Latest message after the failed attempt, used as a retry confirmation token. */
+  retryAfter?: number
   /** Set when a bot, not the user, wrote this prompt — the transcript attributes it. */
   botId?: string
   botUsername?: string

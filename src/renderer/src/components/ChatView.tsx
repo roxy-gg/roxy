@@ -105,6 +105,7 @@ export function ChatView(): JSX.Element {
   // process, so showing its queue row too renders the same message twice.
   // Only user requests appear here; automated handoffs and schedules stay hidden.
   const queue = useMemo(() => allQueued.filter(isVisibleQueueItem), [allQueued])
+  const blocker = queueBlocker(allQueued)
   const newSession = useRoxyStore((s) => s.newSession)
   const selectChat = useRoxyStore((s) => s.selectChat)
   const activeChatId = useRoxyStore((s) => s.activeChatId)
@@ -407,11 +408,15 @@ export function ChatView(): JSX.Element {
           className="pointer-events-none relative z-10 -mt-6 mr-2.5 h-6 shrink-0 bg-gradient-to-b from-transparent to-bg"
         />
 
-        {queueBlocker(allQueued) && (
+        {blocker && (
           <QueueBlocker
-            key={queueBlocker(allQueued)!.id}
-            item={queueBlocker(allQueued)!}
-            waiting={allQueued.filter((item) => item.state === 'pending').length}
+            key={blocker.id}
+            item={blocker}
+            waiting={
+              allQueued
+                .slice(allQueued.findIndex((item) => item.id === blocker.id) + 1)
+                .filter((item) => item.state === 'pending').length
+            }
           />
         )}
         {queue.length > 0 && (

@@ -4,7 +4,7 @@ export type QueueOrigin = 'user' | 'agent' | 'schedule'
 
 /** Terminal requests stay in FIFO until explicitly retried or discarded. */
 export function queueBlocker(items: readonly QueueItem[]): QueueItem | undefined {
-  return items.find((item) => item.state === 'failed')
+  return items.find((item) => item.state === 'failed' || item.state === 'cancelled')
 }
 
 /** Who created a queued request. The responder is a separate concern. */
