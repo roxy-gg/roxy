@@ -7,6 +7,9 @@ import { getDb } from '../db/database'
 import {
   automationSnapshot,
   enqueuePrompt,
+  resolveQueueBlocker,
+  discardQueueItem,
+  refreshQueueReceipts,
   notifyAutomation,
   notifyBots
 } from '../services/automation'
@@ -274,7 +277,9 @@ export async function runBotTool(
               'This message is running; stop its session before editing or deleting it'
             )
           if (action === 'delete') {
-            repo.removeQueueItem(id)
+            if (row.state === 'failed' || row.state === 'cancelled')
+              resolveQueueBlocker(id, 'discard')
+            else discardQueueItem(id)
             notifyTranscriptChanged(row.chat_id)
             result = { deleted: id }
           } else if (action === 'update') {
@@ -286,7 +291,12 @@ export async function runBotTool(
               (!Number.isSafeInteger(input.not_before) || Number(input.not_before) < 0)
             )
               throw new Error('Invalid not_before timestamp')
-            repo.updateQueueItem(id, prompt, old.images)
+            if (
+              input.retry_after !== undefined &&
+              (!Number.isSafeInteger(input.retry_after) || Number(input.retry_after) < 0)
+            )
+              throw new Error('Invalid retry_after token')
+            repo.updateQueueItem(id, prompt, old.images, input.retry_after as number | undefined)
             notifyTranscriptChanged(row.chat_id)
             resumeQueue(row.chat_id)
             if (input.not_before !== undefined)
@@ -295,6 +305,7 @@ export async function runBotTool(
                 .run(input.not_before, id)
             result = repo.listQueue(row.chat_id).find((item) => item.id === id)
           } else throw new Error('Unknown queue action')
+          refreshQueueReceipts(row.chat_id)
           notifyAutomation(row.chat_id)
         }
       }

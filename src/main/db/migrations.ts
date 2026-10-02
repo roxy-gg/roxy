@@ -91,6 +91,12 @@ function botSchema(db: Database): void {
   addColumnIfMissing(db, 'queue', 'reply_to_bot_id', 'TEXT')
   addColumnIfMissing(db, 'queue', 'reply_to_bot_username', 'TEXT')
   addColumnIfMissing(db, 'queue', 'from_user', 'INTEGER NOT NULL DEFAULT 0')
+  addColumnIfMissing(db, 'queue', 'blocked_after_rowid', 'INTEGER')
+  db.exec(`CREATE TABLE IF NOT EXISTS queue_receipts (
+    id TEXT PRIMARY KEY,
+    source_chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+    payload TEXT NOT NULL
+  ); CREATE INDEX IF NOT EXISTS idx_queue_receipts_source ON queue_receipts(source_chat_id);`)
 }
 
 /** Idempotently finish the old loops-to-bots data migration on repaired databases. */
@@ -697,6 +703,14 @@ export const MIGRATIONS: Migration[] = [
     db.exec(`UPDATE queue SET from_user = 1
       WHERE source_chat_id = chat_id
         AND message_id IN (SELECT id FROM messages WHERE role = 'user')`)
+  },
+  // ---- v30: establish an upgrade-time baseline for legacy blocked requests ----
+  (db) => {
+    addColumnIfMissing(db, 'queue', 'state', "TEXT NOT NULL DEFAULT 'pending'")
+    addColumnIfMissing(db, 'queue', 'blocked_after_rowid', 'INTEGER')
+    db.exec(`UPDATE queue SET blocked_after_rowid =
+      (SELECT COALESCE(MAX(rowid), 0) FROM messages WHERE chat_id = queue.chat_id)
+      WHERE state IN ('failed', 'cancelled') AND blocked_after_rowid IS NULL`)
   }
 ]
 

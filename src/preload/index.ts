@@ -194,12 +194,15 @@ const roxy: RoxyApi = {
     cancel: (callId) => ipcRenderer.invoke(CHANNELS.toolsCancel, callId)
   },
   queue: {
+    resolve: (id, action, retryAfter) =>
+      ipcRenderer.invoke(CHANNELS.queueResolve, id, action, retryAfter),
     list: (chatId) => ipcRenderer.invoke(CHANNELS.queueList, chatId),
     add: (chatId, content, images, options) =>
       ipcRenderer.invoke(CHANNELS.queueAdd, chatId, content, images, options),
     remove: (id) => ipcRenderer.invoke(CHANNELS.queueRemove, id),
     reorder: (chatId, ids) => ipcRenderer.invoke(CHANNELS.queueReorder, chatId, ids),
-    update: (id, content, images) => ipcRenderer.invoke(CHANNELS.queueUpdate, id, content, images)
+    update: (id, content, images, retryAfter) =>
+      ipcRenderer.invoke(CHANNELS.queueUpdate, id, content, images, retryAfter)
   },
   usage: {
     stats: () => ipcRenderer.invoke(CHANNELS.usageStats)

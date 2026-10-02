@@ -291,7 +291,12 @@ interface RoxyStore {
   removeQueued: (id: string) => Promise<void>
   moveQueued: (id: string, direction: 'up' | 'down') => Promise<void>
   /** Edit a queued prompt in place (text + images), keeping its queue position. */
-  editQueued: (id: string, content: string, images?: ComposerImage[]) => Promise<void>
+  editQueued: (
+    id: string,
+    content: string,
+    images?: ComposerImage[],
+    retryAfter?: number
+  ) => Promise<void>
   /** Refresh the usage/cost dashboard (called on turn end + when the pill opens). */
   refreshUsage: () => Promise<void>
   /**
@@ -2607,11 +2612,12 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
     await get().refreshQueue()
   },
 
-  editQueued: async (id, content, images) => {
+  editQueued: async (id, content, images, retryAfter) => {
     await api.queue.update(
       id,
       content,
-      images?.map(({ dataUrl, mediaType, name }) => ({ dataUrl, mediaType, name }))
+      images?.map(({ dataUrl, mediaType, name }) => ({ dataUrl, mediaType, name })),
+      retryAfter
     )
     await get().refreshQueue()
     await api.automation.wake()

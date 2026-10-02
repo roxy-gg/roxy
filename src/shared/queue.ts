@@ -14,6 +14,13 @@ export function isVisibleQueueItem(item: QueueItem): boolean {
   return item.state !== 'running' && queueOrigin(item) === 'user'
 }
 
+/** Automated blockers have a banner; user requests already have composer rows. */
+export function queueBlocker(items: readonly QueueItem[]): QueueItem | undefined {
+  return items.find(
+    (item) => (item.state === 'failed' || item.state === 'cancelled') && !isVisibleQueueItem(item)
+  )
+}
+
 /**
  * Swap user prompts without changing the slots occupied by running or automated work.
  */
