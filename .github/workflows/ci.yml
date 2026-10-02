@@ -123,6 +123,16 @@ jobs:
           SMOKE_TIMEOUT_MS: '300000'
         run: npm run smoke:app
 
+      - name: Failed queue recovery regression (Linux)
+        if: runner.os == 'Linux'
+        env:
+          ELECTRON_DISABLE_SANDBOX: '1'
+        run: xvfb-run --auto-servernum npm run smoke:queue
+
+      - name: Failed queue recovery regression
+        if: runner.os != 'Linux'
+        run: npm run smoke:queue
+
       - name: Canvas interactions (real Chromium input and clipboard menus)
         if: runner.os == 'Linux'
         env:
