@@ -6,7 +6,7 @@ import { app } from 'electron'
 import { getDb, closeDb } from '../src/main/db/database'
 import * as repo from '../src/main/db/repo'
 import { enqueuePrompt, wakeAutomation } from '../src/main/services/automation'
-import { isVisibleQueueItem } from '../src/shared/queue'
+import { queueBlocker } from '../src/shared/queue'
 
 app.setPath('userData', mkdtempSync(path.join(tmpdir(), 'roxy-failed-queue-')))
 app.whenReady().then(() => {
@@ -26,7 +26,11 @@ app.whenReady().then(() => {
     const queue = repo.listQueue(destination.id)
     assert.equal(queue.find((item) => item.id === b.id)?.state, 'pending')
     assert.equal(queue[0].id, a.id)
-    assert.ok(isVisibleQueueItem(queue[0]), 'Failed cross-session head must be visible in the chat')
+    assert.equal(
+      queueBlocker(queue)?.id,
+      a.id,
+      'Failed cross-session head must be exposed by the chat banner contract'
+    )
     console.log('FAILED QUEUE REGRESSION OK')
     closeDb()
     app.exit(0)

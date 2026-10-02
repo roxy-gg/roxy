@@ -12,7 +12,8 @@ import {
   Square
 } from 'lucide-react'
 import type { Chat } from '@shared/types'
-import { isVisibleQueueItem } from '@shared/queue'
+import { isVisibleQueueItem, queueBlocker } from '@shared/queue'
+import { QueueBlocker } from './QueueBlocker'
 import { resolveSessionConfig } from '@shared/session-config'
 import { useRoxyStore } from '../lib/store'
 import { visibleMessages, visibleQueue } from '../lib/optimistic-messages'
@@ -406,6 +407,13 @@ export function ChatView(): JSX.Element {
           className="pointer-events-none relative z-10 -mt-6 mr-2.5 h-6 shrink-0 bg-gradient-to-b from-transparent to-bg"
         />
 
+        {queueBlocker(allQueued) && (
+          <QueueBlocker
+            key={queueBlocker(allQueued)!.id}
+            item={queueBlocker(allQueued)!}
+            waiting={allQueued.filter((item) => item.state === 'pending').length}
+          />
+        )}
         {queue.length > 0 && (
           <div className="bg-bg px-4 pt-2">
             <div className="mx-auto max-w-3xl">

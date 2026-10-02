@@ -375,6 +375,11 @@
     "activeSummary": "Active: {{scheme}}://{{host}}:{{port}}"
   },
   "queue": {
+    "blocked": "Failed request is blocking the queue",
+    "source": "From {{source}}",
+    "waiting_one": "{{count}} pending request waiting",
+    "waiting_other": "{{count}} pending requests waiting",
+    "jobId": "Queue ID: {{id}}",
     "userRequest": "You",
     "toCollaborator": "to @{{username}}",
     "image": "Image",

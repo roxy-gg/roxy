@@ -2,6 +2,11 @@ import type { QueueItem } from './types'
 
 export type QueueOrigin = 'user' | 'agent' | 'schedule'
 
+/** Terminal requests stay in FIFO until explicitly retried or discarded. */
+export function queueBlocker(items: readonly QueueItem[]): QueueItem | undefined {
+  return items.find((item) => item.state === 'failed')
+}
+
 /** Who created a queued request. The responder is a separate concern. */
 export function queueOrigin(item: QueueItem): QueueOrigin {
   if (item.scheduleId) return 'schedule'
