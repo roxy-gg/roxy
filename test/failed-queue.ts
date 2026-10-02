@@ -9,7 +9,9 @@ import {
   enqueuePrompt,
   wakeAutomation,
   resolveQueueBlocker,
-  notifyAutomation
+  notifyAutomation,
+  startAutomation,
+  stopAutomation
 } from '../src/main/services/automation'
 import { sessionBusy, stopTurn } from '../src/main/services/turn-state'
 import { invokeChip } from '../src/renderer/src/canvas/invoke-status'
@@ -139,6 +141,38 @@ app.whenReady().then(async () => {
       'Retry must not duplicate prompt payload'
     )
     assert.equal(repo.listQueue(destination.id).length, 0)
+    const crash = enqueuePrompt(destination.id, 'D: interrupted by shutdown', undefined, {
+      sourceChatId: source.id
+    })
+    repo.addMessage({
+      chatId: source.id,
+      role: 'assistant',
+      content: '',
+      parts: [
+        {
+          type: 'tool',
+          callId: 'crash',
+          tool: 'session_manage',
+          state: 'done',
+          input: { action: 'send' },
+          output: JSON.stringify(crash)
+        }
+      ]
+    })
+    getDb().prepare("UPDATE queue SET state = 'running' WHERE id = ?").run(crash.id)
+    notifyAutomation(destination.id)
+    startAutomation()
+    stopAutomation()
+    assert.equal(repo.listQueue(destination.id)[0].state, 'failed')
+    const crashPart = repo
+      .listMessages(source.id)
+      .flatMap((m) => m.parts)
+      .find((p) => p.type === 'tool' && p.callId === 'crash')!
+    assert.equal(
+      invokeChip(crashPart, []).kind,
+      'failed',
+      'restart must refresh origin running receipt'
+    )
     globalThis.fetch = originalFetch
     console.log('FAILED QUEUE REGRESSION OK')
     closeDb()

@@ -240,12 +240,16 @@ export function enqueuePrompt(
 
 export function startAutomation(): void {
   if (timer) return
+  const interrupted = getDb()
+    .prepare("SELECT DISTINCT chat_id FROM queue WHERE state = 'running'")
+    .all() as { chat_id: string }[]
   // Never replay uncertain tool side effects automatically after a crash.
   getDb()
     .prepare(
       `UPDATE queue SET state = 'failed', error = 'Interrupted by app shutdown. Edit this message to retry.' WHERE state = 'running'`
     )
     .run()
+  for (const row of interrupted) notifyAutomation(row.chat_id)
   timer = setInterval(wakeAutomation, 1000)
   wakeAutomation()
 }
