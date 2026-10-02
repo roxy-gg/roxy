@@ -1,6 +1,14 @@
 import type { MessagePart, QueueItem } from '@shared/types'
 
-export type InvokeChipKind = 'calling' | 'replied' | 'failed' | 'none'
+export type InvokeChipKind =
+  | 'calling'
+  | 'replied'
+  | 'failed'
+  | 'cancelled'
+  | 'enqueued'
+  | 'blocked'
+  | 'discarded'
+  | 'none'
 
 export interface InvokeChip {
   kind: InvokeChipKind
@@ -8,14 +16,7 @@ export interface InvokeChip {
   name: string
 }
 
-/**
- * Status chip for a `bot_invoke` tool card.
- *
- * The tool itself finishes as soon as the prompt is queued, so the card's
- * `state` alone cannot tell "still waiting" from "guest answered". Correlate
- * the queue row id in the tool output with the live queue: present → calling
- * (or failed), gone after a successful done → replied.
- */
+/** Acceptance is not execution; only a durable receipt proves completion. */
 export function invokeChip(
   part: Extract<MessagePart, { type: 'tool' }>,
   queue: readonly QueueItem[] = [],
@@ -25,7 +26,7 @@ export function invokeChip(
   const name = raw.replace(/^@/, '').trim() || 'bot'
 
   if (part.state === 'error') return { kind: 'failed', name }
-  if (part.state === 'running') return { kind: 'calling', name }
+  if (part.state === 'running') return { kind: 'enqueued', name }
 
   const id = queueIdFromOutput(part.output)
   // No id to correlate: a transcript written before this field existed, or a
@@ -34,11 +35,32 @@ export function invokeChip(
   if (!id) return { kind: 'none', name }
   // The queue for this chat has not arrived yet (a reload, or a chat switch
   // mid-flight). Absence here is ignorance, not evidence of an answer.
-  if (!queueLoaded) return { kind: 'calling', name }
+  if (!queueLoaded) return { kind: 'enqueued', name }
   const item = queue.find((entry) => entry.id === id)
   if (item?.state === 'failed') return { kind: 'failed', name }
-  if (item) return { kind: 'calling', name }
-  return { kind: 'replied', name }
+  if (item?.state === 'cancelled') return { kind: 'cancelled', name }
+  if (item?.state === 'running') return { kind: 'calling', name }
+  if (item)
+    return {
+      kind: queue.some((entry) => entry.state === 'failed' || entry.state === 'cancelled')
+        ? 'blocked'
+        : 'enqueued',
+      name
+    }
+  try {
+    const receipt = JSON.parse(part.output!) as { delivery?: string }
+    const kinds: Record<string, InvokeChipKind> = {
+      completed: 'replied',
+      running: 'calling',
+      failed: 'failed',
+      cancelled: 'cancelled',
+      discarded: 'discarded',
+      waiting_behind_failure: 'blocked'
+    }
+    return { kind: kinds[receipt.delivery ?? ''] ?? 'enqueued', name }
+  } catch {
+    return { kind: 'none', name }
+  }
 }
 
 function queueIdFromOutput(output: string | undefined): string | undefined {

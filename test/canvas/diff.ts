@@ -1445,7 +1445,7 @@ check('bot_invoke chip tracks the queued guest', () => {
         state: 'pending'
       } as QueueItem
     ]).kind,
-    'calling'
+    'enqueued'
   )
   assert.equal(
     invokeChip(part, [
@@ -1471,8 +1471,8 @@ check('bot_invoke chip tracks the queued guest', () => {
     ]).kind,
     'failed'
   )
-  assert.equal(invokeChip(part, []).kind, 'replied')
-  assert.equal(invokeChip({ ...part, state: 'running' }, []).kind, 'calling')
+  assert.equal(invokeChip(part, []).kind, 'enqueued')
+  assert.equal(invokeChip({ ...part, state: 'running' }, []).kind, 'enqueued')
   assert.equal(invokeChip({ ...part, state: 'error' }, []).kind, 'failed')
   assert.equal(invokeChip(part, []).name, 'reviewer')
 
@@ -1481,14 +1481,28 @@ check('bot_invoke chip tracks the queued guest', () => {
     invokeChip(part, [
       { id: 'other', chatId: 'c', content: 'x', createdAt: 1, state: 'pending' } as QueueItem
     ]).kind,
-    'replied'
+    'enqueued'
   )
 
-  // An empty queue is only evidence once it has actually loaded. On a reload
-  // the store starts at [] and fills in after the fetch, so reading absence as
-  // an answer announced "@reviewer replied" for a call still waiting.
-  assert.equal(invokeChip(part, [], false).kind, 'calling')
-  assert.equal(invokeChip(part, [], true).kind, 'replied')
+  // Absence is not completion: only an explicit durable receipt proves a reply.
+  assert.equal(invokeChip(part, [], false).kind, 'enqueued')
+  assert.equal(invokeChip(part, [], true).kind, 'enqueued')
+
+  assert.equal(
+    invokeChip({ ...part, output: JSON.stringify({ id: 'q1', delivery: 'completed' }) }, []).kind,
+    'replied'
+  )
+  assert.equal(
+    invokeChip(
+      { ...part, output: JSON.stringify({ id: 'q1', delivery: 'waiting_behind_failure' }) },
+      []
+    ).kind,
+    'blocked'
+  )
+  assert.equal(
+    invokeChip({ ...part, output: JSON.stringify({ id: 'q1', delivery: 'discarded' }) }, []).kind,
+    'discarded'
+  )
 
   // Output with no id cannot be correlated at all - a transcript older than
   // this field, or a result that did not serialize. Claiming an outcome there
@@ -1496,7 +1510,7 @@ check('bot_invoke chip tracks the queued guest', () => {
   assert.equal(invokeChip({ ...part, output: 'queued' }, []).kind, 'none')
   assert.equal(invokeChip({ ...part, output: undefined }, []).kind, 'none')
   // ...but a live or failed call still reports itself without needing an id.
-  assert.equal(invokeChip({ ...part, output: undefined, state: 'running' }, []).kind, 'calling')
+  assert.equal(invokeChip({ ...part, output: undefined, state: 'running' }, []).kind, 'enqueued')
   assert.equal(invokeChip({ ...part, output: undefined, state: 'error' }, []).kind, 'failed')
 
   // The handle is display-only and must survive the shapes users actually type.

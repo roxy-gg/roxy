@@ -148,6 +148,44 @@ export function layoutToolCard(
   )
 
   let cursor = top + HEADER_HEIGHT
+  if (['bot_invoke', 'session_manage', 'queue_manage'].includes(part.tool) && part.output) {
+    try {
+      const receipt = JSON.parse(part.output) as { id?: string; delivery?: string }
+      if (receipt.id && receipt.delivery) {
+        const copy = builder.t('transcript.copy')
+        const copyFont = font(FONT_SIZE.micro, 500, 'sans')
+        const copyWidth = builder.metrics.measure(copy, copyFont) + 12
+        const rowHeight =
+          layoutPlainText(
+            builder,
+            builder.t('queue.jobId', { id: receipt.id }),
+            x + SPACE.bodyPadX,
+            cursor + 4,
+            Math.max(40, width - SPACE.bodyPadX * 2 - copyWidth - 8),
+            { size: FONT_SIZE.micro, color: palette.textSubtle },
+            'mono'
+          ) + 8
+        builder.text(
+          x + width - SPACE.bodyPadX - copyWidth,
+          cursor + 4,
+          copy,
+          copyFont,
+          palette.textMuted
+        )
+        builder.region(
+          x + width - SPACE.bodyPadX - copyWidth - 4,
+          cursor,
+          copyWidth + 8,
+          rowHeight,
+          { type: 'copy', text: receipt.id },
+          { hover: 'subtle', title: builder.t('queue.copyId') }
+        )
+        cursor += rowHeight
+      }
+    } catch {
+      /* Non-queue tool output. */
+    }
+  }
   const contentWidth = width - 2
 
   if (showNested && live && !open) {
@@ -288,7 +326,9 @@ function measureRail(builder: Builder, input: ToolCardInput): Rail {
   const showCancel = input.cancellable
   const gap = 6
   const invoke =
-    part.tool === 'bot_invoke' ? invokeChip(part, input.queue, input.queueLoaded) : null
+    part.tool === 'bot_invoke' || (part.tool === 'session_manage' && part.input?.action === 'send')
+      ? invokeChip(part, input.queue, input.queueLoaded)
+      : null
   const invokeLabel =
     invoke && invoke.kind !== 'none' ? invokeLabelFor(builder, invoke.kind, invoke.name) : null
   const invokeWidth = invokeLabel
@@ -380,6 +420,10 @@ function layoutRail(
 function invokeLabelFor(builder: Builder, kind: InvokeChipKind, name: string): string {
   if (kind === 'calling') return builder.t('transcript.invokeCalling', { name })
   if (kind === 'none') return ''
+  if (kind === 'enqueued') return builder.t('transcript.invokeEnqueued')
+  if (kind === 'blocked') return builder.t('transcript.invokeBlocked')
+  if (kind === 'cancelled') return builder.t('queue.cancelled')
+  if (kind === 'discarded') return builder.t('queue.discarded')
   if (kind === 'replied') return builder.t('transcript.invokeReplied', { name })
   return builder.t('transcript.invokeFailed')
 }
