@@ -703,6 +703,14 @@ export const MIGRATIONS: Migration[] = [
     db.exec(`UPDATE queue SET from_user = 1
       WHERE source_chat_id = chat_id
         AND message_id IN (SELECT id FROM messages WHERE role = 'user')`)
+  },
+  // ---- v30: establish an upgrade-time baseline for legacy blocked requests ----
+  (db) => {
+    addColumnIfMissing(db, 'queue', 'state', "TEXT NOT NULL DEFAULT 'pending'")
+    addColumnIfMissing(db, 'queue', 'blocked_after_rowid', 'INTEGER')
+    db.exec(`UPDATE queue SET blocked_after_rowid =
+      (SELECT COALESCE(MAX(rowid), 0) FROM messages WHERE chat_id = queue.chat_id)
+      WHERE state IN ('failed', 'cancelled') AND blocked_after_rowid IS NULL`)
   }
 ]
 

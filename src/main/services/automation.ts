@@ -15,7 +15,7 @@ import {
 } from '../../shared/session-config'
 import { pickDefaultModel } from '../../shared/models'
 import { HOST_USERNAME, isHostSpeaker } from '../../shared/bots'
-import { queueOrigin, queueBlocker } from '../../shared/queue'
+import { queueOrigin } from '../../shared/queue'
 import * as repo from '../db/repo'
 import * as bots from '../db/bots'
 import { getDb } from '../db/database'
@@ -51,9 +51,9 @@ const speakers = new Map<string, { botId?: string; botUsername: string }>()
  */
 const MAX_HOPS = 8
 
-export function notifyAutomation(chatId: string): void {
+export function refreshQueueReceipts(chatId: string): void {
   const items = repo.listQueue(chatId)
-  const blocker = queueBlocker(items)
+  const blocker = items.find((item) => item.state === 'failed' || item.state === 'cancelled')
   for (const item of items) {
     item.delivery =
       item.state === 'pending'
@@ -64,6 +64,9 @@ export function notifyAutomation(chatId: string): void {
     item.blockedBy = item.delivery === 'waiting_behind_failure' ? blocker?.id : undefined
     persistQueueReceipt(item)
   }
+}
+
+export function notifyAutomation(chatId: string): void {
   for (const win of BrowserWindow.getAllWindows()) {
     try {
       if (!win.isDestroyed()) win.webContents.send(CHANNELS.automationChanged, chatId)
@@ -82,7 +85,17 @@ function persistQueueReceipt(item: QueueItem): void {
     .prepare(
       'INSERT INTO queue_receipts(id, source_chat_id, payload) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET payload = excluded.payload'
     )
-    .run(item.id, item.sourceChatId, JSON.stringify(item))
+    .run(
+      item.id,
+      item.sourceChatId,
+      JSON.stringify({
+        id: item.id,
+        delivery: item.delivery,
+        blockedBy: item.blockedBy,
+        state: item.state,
+        error: item.error
+      })
+    )
   if (item.sourceChatId !== item.chatId) {
     for (const win of BrowserWindow.getAllWindows()) {
       try {
@@ -221,6 +234,7 @@ export function enqueuePrompt(
     return item
   })()
   if (!options.sourceChatId) resumeQueue(chatId)
+  refreshQueueReceipts(chatId)
   notifyAutomation(chatId)
   if (options.fromUser && options.sourceChatId) notifyTranscriptChanged(chatId)
   // Drain on the next event-loop pass, after callers have persisted their own tool result.
@@ -230,7 +244,7 @@ export function enqueuePrompt(
     })
   const queue = repo.listQueue(chatId)
   const saved = queue.find((entry) => entry.id === item.id)!
-  const blocker = queueBlocker(queue)
+  const blocker = queue.find((entry) => entry.state === 'failed' || entry.state === 'cancelled')
   return {
     ...saved,
     delivery: blocker ? 'waiting_behind_failure' : 'enqueued',
@@ -246,10 +260,15 @@ export function startAutomation(): void {
   // Never replay uncertain tool side effects automatically after a crash.
   getDb()
     .prepare(
-      `UPDATE queue SET state = 'failed', error = 'Interrupted by app shutdown. Edit this message to retry.' WHERE state = 'running'`
+      `UPDATE queue SET state = 'failed', error = 'Interrupted by app shutdown. Edit this message to retry.',
+        blocked_after_rowid = (SELECT COALESCE(MAX(rowid), 0) FROM messages WHERE chat_id = queue.chat_id)
+        WHERE state = 'running'`
     )
     .run()
-  for (const row of interrupted) notifyAutomation(row.chat_id)
+  for (const row of interrupted) {
+    refreshQueueReceipts(row.chat_id)
+    notifyAutomation(row.chat_id)
+  }
   timer = setInterval(wakeAutomation, 1000)
   wakeAutomation()
 }
@@ -257,6 +276,19 @@ export function startAutomation(): void {
 export function stopAutomation(): void {
   if (timer) clearInterval(timer)
   timer = null
+}
+
+/** Preserve a terminal receipt on every explicit removal, including pending handoffs. */
+export function discardQueueItem(id: string): void {
+  getDb().transaction(() => {
+    const row = getDb().prepare('SELECT chat_id FROM queue WHERE id = ?').get(id) as
+      | { chat_id: string }
+      | undefined
+    if (!row) return
+    const item = repo.listQueue(row.chat_id).find((entry) => entry.id === id)!
+    repo.removeQueueItem(id)
+    persistQueueReceipt({ ...item, delivery: 'discarded', blockedBy: undefined })
+  })()
 }
 
 /** Resolve a durable blocker in place, then drive the next request without a restart. */
@@ -272,9 +304,7 @@ export function resolveQueueBlocker(
   if (row.state !== 'failed' && row.state !== 'cancelled')
     throw new Error('This request is no longer blocked. Refresh the queue.')
   if (action === 'discard') {
-    const item = repo.listQueue(row.chat_id).find((item) => item.id === id)!
-    persistQueueReceipt({ ...item, delivery: 'discarded', blockedBy: undefined })
-    repo.removeQueueItem(id)
+    discardQueueItem(id)
   } else if (action === 'retry') {
     if (sessionBusy(row.chat_id))
       throw new Error('Wait for the current task to finish before retrying this request.')
@@ -289,6 +319,7 @@ export function resolveQueueBlocker(
       .run(id)
   } else throw new Error('Unknown queue action')
   resumeQueue(row.chat_id)
+  refreshQueueReceipts(row.chat_id)
   notifyAutomation(row.chat_id)
   wakeAutomation()
 }
@@ -297,7 +328,10 @@ export function wakeAutomation(): void {
   try {
     const scheduled = bots.enqueueDueJobs()
     if (scheduled.length) notifyBots()
-    for (const id of scheduled) notifyAutomation(id)
+    for (const id of scheduled) {
+      refreshQueueReceipts(id)
+      notifyAutomation(id)
+    }
     const rows = getDb()
       .prepare(`SELECT DISTINCT chat_id FROM queue WHERE state = 'pending'`)
       .all() as { chat_id: string }[]
@@ -428,6 +462,7 @@ async function deliver(item: QueueItem): Promise<void> {
   let returnAuthor: { botId?: string; botUsername?: string } = {}
   const relay = relayLocalTurnStart(item.chatId)
   try {
+    refreshQueueReceipts(item.chatId)
     notifyAutomation(item.chatId)
     // Read persisted handoff metadata before choosing the speaker and config.
     const previous = getDb()
@@ -701,6 +736,7 @@ async function deliver(item: QueueItem): Promise<void> {
     release()
     if (relay) relayLocalTurnEnd(relay)
     notifyTranscriptChanged(item.chatId)
+    refreshQueueReceipts(item.chatId)
     notifyAutomation(item.chatId)
     emit({ sessionId: item.chatId, kind: 'turn', state: 'idle' })
   }

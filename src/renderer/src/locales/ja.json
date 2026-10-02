@@ -815,6 +815,7 @@
     "invokeEnqueued": "Enqueued, not started",
     "invokeFailed": "失敗しました",
     "invokeReplied": "@{{name}}が返信しました",
+    "invokeSessionCompleted": "Completed",
     "noOutput": "(出力なし)",
     "openImage": "画像を開く",
     "openLink": "リンクを開く",

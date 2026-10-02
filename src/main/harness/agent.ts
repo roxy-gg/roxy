@@ -972,6 +972,11 @@ const BASE_SCHEMAS = [
       id: str('Queue item ID.'),
       session: str('Target chat ID; defaults to this session.'),
       prompt: str('Prompt content.'),
+      retry_after: {
+        type: 'integer',
+        description:
+          'For update: after reviewing newer work, confirm with the retryAfter token returned by queue read/list. An outdated token is rejected.'
+      },
       not_before: {
         type: 'integer',
         description: 'Do not deliver before this epoch millisecond timestamp.'

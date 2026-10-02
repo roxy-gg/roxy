@@ -10,12 +10,15 @@ import {
   wakeAutomation,
   resolveQueueBlocker,
   notifyAutomation,
+  refreshQueueReceipts,
   startAutomation,
   stopAutomation
 } from '../src/main/services/automation'
 import { sessionBusy, stopTurn } from '../src/main/services/turn-state'
 import { invokeChip } from '../src/renderer/src/canvas/invoke-status'
-import { queueBlocker } from '../src/shared/queue'
+import { queueBlocker, isVisibleQueueItem } from '../src/shared/queue'
+import { MIGRATIONS } from '../src/main/db/migrations'
+import { runBotTool } from '../src/main/harness/bot-tools'
 
 app.setPath('userData', mkdtempSync(path.join(tmpdir(), 'roxy-failed-queue-')))
 app.whenReady().then(async () => {
@@ -93,8 +96,29 @@ app.whenReady().then(async () => {
         (typeof receipt.parts)[number],
         { type: 'tool' }
       >
+    refreshQueueReceipts(destination.id)
+    const receiptPayload = JSON.parse(
+      (
+        getDb().prepare('SELECT payload FROM queue_receipts WHERE id = ?').get(b.id) as {
+          payload: string
+        }
+      ).payload
+    )
+    assert.deepEqual(Object.keys(receiptPayload).sort(), ['blockedBy', 'delivery', 'id', 'state'])
+    assert.equal(
+      JSON.parse(tool().output!).content,
+      b.content,
+      'receipt overlay preserves original tool output'
+    )
+    const writes = getDb().prepare('SELECT total_changes() AS writes').get() as { writes: number }
     notifyAutomation(destination.id)
-    assert.equal(invokeChip(tool(), []).kind, 'blocked')
+    assert.deepEqual(
+      getDb().prepare('SELECT total_changes() AS writes').get(),
+      writes,
+      'notification must not write receipts'
+    )
+    assert.equal(invokeChip(tool(), []).kind, 'none', 'a receipt alone cannot prove a live blocker')
+    assert.equal(invokeChip(tool(), repo.listQueue(destination.id)).kind, 'blocked')
     const idle = async (): Promise<void> => {
       const deadline = Date.now() + 10000
       while (sessionBusy(destination.id) && Date.now() < deadline)
@@ -108,8 +132,45 @@ app.whenReady().then(async () => {
     await idle()
     assert.equal(calls, 1, 'Discard must deliver B exactly once despite repeated wake/discard')
     assert.equal(repo.listQueue(destination.id).length, 0)
+    assert.equal(
+      JSON.parse(tool().output!).blockedBy,
+      undefined,
+      'completion clears old blocker metadata'
+    )
     assert.equal(repo.listMessages(destination.id).filter((m) => m.content === b.content).length, 1)
     assert.equal(invokeChip(tool(), []).kind, 'replied', 'completion requires explicit receipt')
+    const deleted = enqueuePrompt(destination.id, 'Pending handoff removed by a tool', undefined, {
+      sourceChatId: source.id
+    })
+    const deletedPart = {
+      type: 'tool' as const,
+      tool: 'bot_invoke',
+      state: 'done' as const,
+      input: { bot: 'reviewer' },
+      output: JSON.stringify({ ...deleted, delivery: 'enqueued' })
+    }
+    assert.equal(invokeChip(deletedPart, repo.listQueue(destination.id)).kind, 'enqueued')
+    await runBotTool(
+      'queue_manage',
+      { action: 'delete', id: deleted.id },
+      {
+        cwd: app.getPath('userData'),
+        sessionId: source.id
+      }
+    )
+    assert.equal(invokeChip(deletedPart, repo.listQueue(destination.id)).kind, 'none')
+    const discardedReceipt = JSON.parse(
+      (
+        getDb().prepare('SELECT payload FROM queue_receipts WHERE id = ?').get(deleted.id) as {
+          payload: string
+        }
+      ).payload
+    )
+    assert.equal(discardedReceipt.delivery, 'discarded')
+    assert.equal(
+      invokeChip({ ...deletedPart, output: JSON.stringify(discardedReceipt) }, []).kind,
+      'discarded'
+    )
     const retry = enqueuePrompt(destination.id, 'C: cancelled task', undefined, {
       sourceChatId: source.id
     })
@@ -161,6 +222,11 @@ app.whenReady().then(async () => {
     })
     getDb().prepare("UPDATE queue SET state = 'running' WHERE id = ?").run(crash.id)
     notifyAutomation(destination.id)
+    repo.addMessage({
+      chatId: destination.id,
+      role: 'assistant',
+      content: 'Own interrupted partial output'
+    })
     startAutomation()
     stopAutomation()
     assert.equal(repo.listQueue(destination.id)[0].state, 'failed')
@@ -173,6 +239,75 @@ app.whenReady().then(async () => {
       'failed',
       'restart must refresh origin running receipt'
     )
+    assert.equal(
+      repo.queueRetryRisk(crash.id),
+      undefined,
+      'shutdown partial output is not newer work'
+    )
+    repo.updateQueueItem(crash.id, crash.content)
+    repo.removeQueueItem(crash.id)
+
+    const legacy = repo.enqueue(destination.id, 'Legacy user prompt')
+    getDb()
+      .prepare("UPDATE queue SET state = 'failed', blocked_after_rowid = NULL WHERE id = ?")
+      .run(legacy.id)
+    repo.addMessage({ chatId: destination.id, role: 'assistant', content: 'Legacy partial output' })
+    assert.equal(repo.queueRetryRisk(legacy.id), undefined)
+    const legacyQueue = repo.listQueue(destination.id)
+    assert.equal(isVisibleQueueItem(legacyQueue[0]), true)
+    assert.equal(
+      queueBlocker(legacyQueue),
+      undefined,
+      'user prompt must only have composer recovery'
+    )
+    repo.updateQueueItem(legacy.id, 'Edited legacy prompt')
+    getDb()
+      .prepare("UPDATE queue SET state = 'failed', blocked_after_rowid = NULL WHERE id = ?")
+      .run(legacy.id)
+    const upgrade = MIGRATIONS.at(-1)!
+    assert.equal(typeof upgrade, 'function')
+    if (typeof upgrade === 'function') upgrade(getDb())
+    assert.equal(
+      repo.queueRetryRisk(legacy.id),
+      undefined,
+      'upgrade treats existing partial work as baseline'
+    )
+    assert.ok(
+      (
+        getDb()
+          .prepare('SELECT blocked_after_rowid AS baseline FROM queue WHERE id = ?')
+          .get(legacy.id) as { baseline: number }
+      ).baseline > 0
+    )
+    repo.addMessage({ chatId: destination.id, role: 'user', content: 'Post-upgrade work' })
+    const legacyToken = repo.queueRetryRisk(legacy.id)!
+    assert.ok(legacyToken)
+    assert.throws(() => repo.updateQueueItem(legacy.id, legacy.content), /Later work/)
+    repo.addMessage({ chatId: destination.id, role: 'assistant', content: 'Post-upgrade answer' })
+    assert.throws(
+      () => repo.updateQueueItem(legacy.id, legacy.content, undefined, legacyToken),
+      /Later work/
+    )
+    await assert.rejects(
+      runBotTool(
+        'queue_manage',
+        { action: 'update', id: legacy.id, retry_after: legacyToken },
+        { cwd: app.getPath('userData'), sessionId: source.id }
+      ),
+      /Later work/
+    )
+    const confirmedUpdate = await runBotTool(
+      'queue_manage',
+      {
+        action: 'update',
+        id: legacy.id,
+        prompt: 'Retry from tool',
+        retry_after: repo.queueRetryRisk(legacy.id)
+      },
+      { cwd: app.getPath('userData'), sessionId: source.id }
+    )
+    assert.equal(confirmedUpdate.ok, true)
+    assert.equal(repo.listQueue(destination.id)[0].state, 'pending')
     globalThis.fetch = originalFetch
     console.log('FAILED QUEUE REGRESSION OK')
     closeDb()

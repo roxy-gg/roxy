@@ -1038,7 +1038,12 @@ export interface RoxyApi {
     /** Reorder a chat's queue; `ids` is the full queue front-to-back. */
     reorder(chatId: string, ids: string[]): Promise<void>
     /** Edit a queued item in place â€” new text + images, same queue position. */
-    update(id: string, content: string, images?: QueueImage[]): Promise<QueueItem | undefined>
+    update(
+      id: string,
+      content: string,
+      images?: QueueImage[],
+      retryAfter?: number
+    ): Promise<QueueItem | undefined>
   }
   usage: {
     /** The token-usage + cost dashboard payload for the last 30 days. */

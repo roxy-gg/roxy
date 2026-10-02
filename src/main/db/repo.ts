@@ -1327,7 +1327,23 @@ export function listMessages(chatId: string): Message[] {
       try {
         const output = JSON.parse(part.output) as { id?: string }
         const receipt = output.id ? receipts.get(output.id) : undefined
-        return receipt ? { ...part, output: JSON.stringify(JSON.parse(receipt), null, 2) } : part
+        return receipt
+          ? {
+              ...part,
+              output: JSON.stringify(
+                {
+                  ...output,
+                  delivery: undefined,
+                  blockedBy: undefined,
+                  state: undefined,
+                  error: undefined,
+                  ...JSON.parse(receipt)
+                },
+                null,
+                2
+              )
+            }
+          : part
       } catch {
         return part
       }
@@ -1468,11 +1484,12 @@ export function enqueue(chatId: string, content: string, images?: QueueImage[]):
 }
 
 export function queueRetryRisk(id: string): number | undefined {
+  // NULL means no known baseline; 0 is a known empty transcript baseline.
   const row = getDb()
     .prepare(
       `SELECT MAX(m.rowid) AS latest FROM queue q JOIN messages m ON m.chat_id = q.chat_id
     WHERE q.id = ? AND q.state IN ('failed', 'cancelled')
-      AND (CASE WHEN q.blocked_after_rowid IS NULL THEN m.created_at > q.created_at ELSE m.rowid > q.blocked_after_rowid END)`
+      AND q.blocked_after_rowid IS NOT NULL AND m.rowid > q.blocked_after_rowid`
     )
     .get(id) as { latest: number | null }
   return row.latest ?? undefined
@@ -1504,7 +1521,8 @@ export function removeQueueItem(id: string): void {
 export function updateQueueItem(
   id: string,
   content: string,
-  images?: QueueImage[]
+  images?: QueueImage[],
+  retryAfter?: number
 ): QueueItem | undefined {
   if (!content.trim() && !images?.length) throw new Error('A prompt is required')
   const imagesJson = images && images.length ? JSON.stringify(images) : null
@@ -1520,9 +1538,9 @@ export function updateQueueItem(
       }
     | undefined
   if (previous?.state === 'running') throw new Error('This message is already running')
-  if (queueRetryRisk(id) !== undefined)
+  if (queueRetryRisk(id) !== retryAfter)
     throw new Error(
-      'Later work exists in this session. Use the queue banner to review and confirm Retry, or Discard.'
+      'Later work exists or changed. Read the queue item, review the newer work, then confirm Retry with its retryAfter token (queue_manage update: retry_after), or Discard.'
     )
   // Pending collaborator prompts already have a user bubble. Edit that bubble
   // in place; detaching it leaves stale history and loses the user's authorship.

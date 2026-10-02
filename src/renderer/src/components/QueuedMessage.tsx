@@ -35,6 +35,27 @@ function toComposerImages(item: QueueItemType): ComposerImage[] {
   }))
 }
 
+function DiscardConfirm({
+  onConfirm,
+  onCancel
+}: {
+  onConfirm: () => Promise<void>
+  onCancel: () => void
+}): JSX.Element {
+  const { t } = useTranslation()
+  return (
+    <div className="flex flex-wrap items-center gap-2 text-xs">
+      <p className="text-danger">{t('queue.discardConfirm')}</p>
+      <button type="button" onClick={() => void onConfirm()} className="text-danger">
+        {t('queue.confirmDiscard')}
+      </button>
+      <button type="button" onClick={onCancel}>
+        {t('common.cancel')}
+      </button>
+    </div>
+  )
+}
+
 /**
  * One user-authored prompt in the composer queue, including requests to collaborators.
  */
@@ -56,6 +77,9 @@ export function QueuedMessage({
   const bots = useRoxyStore((s) => s.bots)
 
   const [editing, setEditing] = useState(false)
+  const [confirmDiscard, setConfirmDiscard] = useState(false)
+  const [confirmedRetry, setConfirmedRetry] = useState<number>()
+  const discarding = useRef(false)
   const [draft, setDraft] = useState('')
   const [draftImages, setDraftImages] = useState<ComposerImage[]>([])
   const [dragging, setDragging] = useState(false)
@@ -67,7 +91,25 @@ export function QueuedMessage({
   const textRef = useRef<HTMLTextAreaElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
 
+  const discard = async (): Promise<void> => {
+    if (discarding.current) return
+    if (failed && !confirmDiscard) {
+      setConfirmDiscard(true)
+      return
+    }
+    discarding.current = true
+    try {
+      await removeQueued(item.id)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      discarding.current = false
+    }
+  }
+
   const startEditing = (): void => {
+    setConfirmDiscard(false)
+    setConfirmedRetry(undefined)
     if (running || pending) return
     setError('')
     setDraft(item.content)
@@ -85,6 +127,8 @@ export function QueuedMessage({
   }
 
   const cancelEditing = (): void => {
+    setConfirmDiscard(false)
+    setConfirmedRetry(undefined)
     setEditing(false)
     setDraft('')
     setDraftImages([])
@@ -103,15 +147,17 @@ export function QueuedMessage({
     // An empty edit would silently drop the item — treat clearing everything as
     // a removal instead (matches the × affordance), so nothing invisible remains.
     if (!text && draftImages.length === 0) {
-      if (failed && !window.confirm(t('queue.discardConfirm'))) return
-      await removeQueued(item.id)
-      cancelEditing()
+      await discard()
+      return
+    }
+    if (item.retryAfter !== undefined && confirmedRetry !== item.retryAfter) {
+      setConfirmedRetry(item.retryAfter)
       return
     }
     setSaving(true)
     setError('')
     try {
-      await editQueued(item.id, text, draftImages.length ? draftImages : undefined)
+      await editQueued(item.id, text, draftImages.length ? draftImages : undefined, confirmedRetry)
       cancelEditing()
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -234,11 +280,24 @@ export function QueuedMessage({
                 disabled={saving}
                 className="press-scale flex h-6 items-center gap-1 sq sq-md rounded-md bg-white px-2 text-[11px] font-medium text-black hover:bg-white/90 disabled:opacity-40"
               >
-                <Check className="h-3.5 w-3.5" /> {failed ? t('queue.saveRetry') : t('common.save')}
+                <Check className="h-3.5 w-3.5" />{' '}
+                {item.retryAfter !== undefined && confirmedRetry === item.retryAfter
+                  ? t('queue.confirmRetry')
+                  : failed
+                    ? t('queue.saveRetry')
+                    : t('common.save')}
               </button>
             </div>
           </div>
         </div>
+        {item.retryAfter !== undefined && (
+          <p className="px-2.5 text-xs text-danger">{t('queue.staleRetry')}</p>
+        )}
+        {confirmDiscard && (
+          <div className="px-2.5 pb-2">
+            <DiscardConfirm onConfirm={discard} onCancel={() => setConfirmDiscard(false)} />
+          </div>
+        )}
         {error && (
           <p role="alert" className="px-2.5 pb-2 text-xs text-danger">
             {error}
@@ -303,9 +362,9 @@ export function QueuedMessage({
             {t('queue.empty')}
           </QueueItemContent>
         )}
-        {item.error && (
-          <p className="mt-1 whitespace-pre-wrap break-words text-[11px] text-danger">
-            {item.error}
+        {(error || item.error) && (
+          <p role="alert" className="mt-1 whitespace-pre-wrap break-words text-[11px] text-danger">
+            {error || item.error}
           </p>
         )}
         {item.notBefore != null && item.notBefore > Date.now() && (
@@ -314,6 +373,9 @@ export function QueuedMessage({
           </p>
         )}
       </div>
+      {confirmDiscard && (
+        <DiscardConfirm onConfirm={discard} onCancel={() => setConfirmDiscard(false)} />
+      )}
       <QueueItemActions>
         <QueueItemAction
           onClick={startEditing}
@@ -340,9 +402,7 @@ export function QueuedMessage({
         </QueueItemAction>
         <QueueItemAction
           disabled={running || pending}
-          onClick={() => {
-            if (!failed || window.confirm(t('queue.discardConfirm'))) void removeQueued(item.id)
-          }}
+          onClick={() => void discard()}
           title={t('queue.removeFromQueue')}
         >
           <X className="h-3.5 w-3.5" />

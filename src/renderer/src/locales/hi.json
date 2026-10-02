@@ -815,6 +815,7 @@
     "invokeEnqueued": "Enqueued, not started",
     "invokeFailed": "विफल",
     "invokeReplied": "@{{name}} ने जवाब दिया",
+    "invokeSessionCompleted": "Completed",
     "noOutput": "(कोई आउटपुट नहीं)",
     "openImage": "छवि खोलें",
     "openLink": "लिंक खोलें",

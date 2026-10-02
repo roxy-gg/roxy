@@ -108,6 +108,8 @@ import {
   automationSnapshot,
   enqueuePrompt,
   resolveQueueBlocker,
+  discardQueueItem,
+  refreshQueueReceipts,
   notifyAutomation,
   notifyBots,
   wakeAutomation
@@ -934,9 +936,10 @@ export function registerIpc(): void {
       | undefined
     if (item?.state === 'failed' || item?.state === 'cancelled')
       return resolveQueueBlocker(id, 'discard')
-    repo.removeQueueItem(id)
+    discardQueueItem(id)
     remote.notifyQueueChanged()
     if (item) {
+      refreshQueueReceipts(item.chat_id)
       notifyAutomation(item.chat_id)
       remote.notifyTranscriptChanged(item.chat_id)
     }
@@ -944,18 +947,28 @@ export function registerIpc(): void {
   ipcMain.handle(CHANNELS.queueReorder, (_e, chatId: string, ids: string[]) => {
     repo.reorderQueue(chatId, ids)
     remote.notifyQueueChanged()
+    refreshQueueReceipts(chatId)
     notifyAutomation(chatId)
   })
-  ipcMain.handle(CHANNELS.queueUpdate, (_e, id: string, content: string, images?: QueueImage[]) => {
-    const item = repo.updateQueueItem(id, content, images)
-    remote.notifyQueueChanged()
-    if (item) {
-      resumeQueue(item.chatId)
-      notifyAutomation(item.chatId)
-      remote.notifyTranscriptChanged(item.chatId)
+  ipcMain.handle(
+    CHANNELS.queueUpdate,
+    (_e, id: string, content: string, images?: QueueImage[], retryAfter?: number) => {
+      const item = repo.updateQueueItem(
+        id,
+        content,
+        images,
+        typeof retryAfter === 'number' ? retryAfter : undefined
+      )
+      remote.notifyQueueChanged()
+      if (item) {
+        resumeQueue(item.chatId)
+        refreshQueueReceipts(item.chatId)
+        notifyAutomation(item.chatId)
+        remote.notifyTranscriptChanged(item.chatId)
+      }
+      return item
     }
-    return item
-  })
+  )
 
   // ---- usage / cost dashboard ----
   ipcMain.handle(CHANNELS.usageStats, () => getUsageStats())

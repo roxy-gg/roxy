@@ -1041,6 +1041,21 @@ async function main(): Promise<void> {
       assert.equal(publicUpdated.asBotId, undefined)
       assert.ok(!('recipientId' in publicUpdated))
       repo.removeQueueItem(publicQueued.id)
+      const pendingHandoff = enqueuePrompt(local.id, 'Pending IPC handoff', undefined, {
+        sourceChatId: session.id
+      })
+      await win.webContents.executeJavaScript(
+        `window.roxy.queue.remove(${JSON.stringify(pendingHandoff.id)})`
+      )
+      assert.equal(repo.listQueue(local.id).length, 0)
+      const removalReceipt = getDb()
+        .prepare('SELECT payload FROM queue_receipts WHERE id = ?')
+        .get(pendingHandoff.id) as { payload: string }
+      assert.equal(
+        JSON.parse(removalReceipt.payload).delivery,
+        'discarded',
+        'IPC removal leaves a terminal receipt'
+      )
       // Explicit options (composer Send to @bot) do route — same contract as bot_invoke.
       const routed = await win.webContents.executeJavaScript(
         `window.roxy.queue.add(${JSON.stringify(local.id)}, 'Hola @worker, review this', undefined, ${JSON.stringify(
@@ -1817,7 +1832,9 @@ async function main(): Promise<void> {
         })
         if (blockedState === 'failed')
           getDb()
-            .prepare("UPDATE queue SET state = 'failed', error = 'Automation failed' WHERE id = ?")
+            .prepare(
+              "UPDATE queue SET state = 'failed', error = 'Automation failed', blocked_after_rowid = (SELECT COALESCE(MAX(rowid), 0) FROM messages WHERE chat_id = queue.chat_id) WHERE id = ?"
+            )
             .run(blocker.id)
         const blocked = repo.listQueue(memoryBot.chatId)[0]
         const followup = enqueuePrompt(memoryBot.chatId, 'Automated follow-up', undefined, {

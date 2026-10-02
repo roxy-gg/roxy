@@ -418,13 +418,17 @@ function layoutRail(
 }
 
 function invokeLabelFor(builder: Builder, kind: InvokeChipKind, name: string): string {
-  if (kind === 'calling') return builder.t('transcript.invokeCalling', { name })
+  if (kind === 'calling')
+    return name ? builder.t('transcript.invokeCalling', { name }) : builder.t('queue.running')
   if (kind === 'none') return ''
   if (kind === 'enqueued') return builder.t('transcript.invokeEnqueued')
   if (kind === 'blocked') return builder.t('transcript.invokeBlocked')
   if (kind === 'cancelled') return builder.t('queue.cancelled')
   if (kind === 'discarded') return builder.t('queue.discarded')
-  if (kind === 'replied') return builder.t('transcript.invokeReplied', { name })
+  if (kind === 'replied')
+    return name
+      ? builder.t('transcript.invokeReplied', { name })
+      : builder.t('transcript.invokeSessionCompleted')
   return builder.t('transcript.invokeFailed')
 }
 

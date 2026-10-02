@@ -2,11 +2,6 @@ import type { QueueItem } from './types'
 
 export type QueueOrigin = 'user' | 'agent' | 'schedule'
 
-/** Terminal requests stay in FIFO until explicitly retried or discarded. */
-export function queueBlocker(items: readonly QueueItem[]): QueueItem | undefined {
-  return items.find((item) => item.state === 'failed' || item.state === 'cancelled')
-}
-
 /** Who created a queued request. The responder is a separate concern. */
 export function queueOrigin(item: QueueItem): QueueOrigin {
   if (item.scheduleId) return 'schedule'
@@ -17,6 +12,13 @@ export function queueOrigin(item: QueueItem): QueueOrigin {
 /** The composer queue contains only user prompts that have not started or need retrying. */
 export function isVisibleQueueItem(item: QueueItem): boolean {
   return item.state !== 'running' && queueOrigin(item) === 'user'
+}
+
+/** Automated blockers have a banner; user requests already have composer rows. */
+export function queueBlocker(items: readonly QueueItem[]): QueueItem | undefined {
+  return items.find(
+    (item) => (item.state === 'failed' || item.state === 'cancelled') && !isVisibleQueueItem(item)
+  )
 }
 
 /**

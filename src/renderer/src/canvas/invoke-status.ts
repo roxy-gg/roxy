@@ -23,7 +23,7 @@ export function invokeChip(
   queueLoaded = true
 ): InvokeChip {
   const raw = typeof part.input?.bot === 'string' ? part.input.bot : ''
-  const name = raw.replace(/^@/, '').trim() || 'bot'
+  const name = part.tool === 'session_manage' ? '' : raw.replace(/^@/, '').trim() || 'bot'
 
   if (part.state === 'error') return { kind: 'failed', name }
   if (part.state === 'running') return { kind: 'enqueued', name }
@@ -51,13 +51,11 @@ export function invokeChip(
     const receipt = JSON.parse(part.output!) as { delivery?: string }
     const kinds: Record<string, InvokeChipKind> = {
       completed: 'replied',
-      running: 'calling',
       failed: 'failed',
       cancelled: 'cancelled',
-      discarded: 'discarded',
-      waiting_behind_failure: 'blocked'
+      discarded: 'discarded'
     }
-    return { kind: kinds[receipt.delivery ?? ''] ?? 'enqueued', name }
+    return { kind: kinds[receipt.delivery ?? ''] ?? 'none', name }
   } catch {
     return { kind: 'none', name }
   }

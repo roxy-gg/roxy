@@ -13,6 +13,17 @@ Legacy failures containing Stopped. remain Failed because that text alone does
 not establish who cancelled the request. App-shutdown interruptions remain
 Failed, and are never replayed automatically.
 
+User-origin failures recover only in their composer row, with inline discard
+confirmation. Automated failures use the banner; these surfaces never overlap.
+Bot tools can retry after reviewing newer work using `queue_manage update` with
+`retry_after` equal to the `retryAfter` token returned by read/list.
+
+Legacy blocked rows get an upgrade-time transcript baseline. Restart marks
+interrupted requests failed and checkpoints their own partial output atomically.
+Receipts store only status fields and are refreshed on queue transitions, not
+on message notifications. Historical completed tools without a receipt remain
+unknown instead of claiming they are still enqueued.
+
 Retry keeps the queue ID, FIFO position, prompt, images, and existing prompt
 message. It is not an exactly-once guarantee for tool side effects that happened
 before interruption. Review partial work first. If newer session messages exist,

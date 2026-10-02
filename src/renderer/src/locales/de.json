@@ -815,6 +815,7 @@
     "invokeEnqueued": "Enqueued, not started",
     "invokeFailed": "Fehlgeschlagen",
     "invokeReplied": "@{{name}} antwortete",
+    "invokeSessionCompleted": "Completed",
     "noOutput": "(keine Ausgabe)",
     "openImage": "Bild öffnen",
     "openLink": "Link öffnen",

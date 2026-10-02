@@ -815,6 +815,7 @@
     "invokeEnqueued": "Enqueued, not started",
     "invokeFailed": "失败",
     "invokeReplied": "@{{name}} 已回复",
+    "invokeSessionCompleted": "Completed",
     "noOutput": "（无输出）",
     "openImage": "打开图片",
     "openLink": "打开链接",
