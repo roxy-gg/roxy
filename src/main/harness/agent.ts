@@ -893,7 +893,7 @@ const BASE_SCHEMAS = [
   fn('project_list', 'List all projects across Roxy with their workspace paths.', {}, []),
   fn(
     'session_manage',
-    'Create, list, read, update, delete, stop, or send a prompt to a session in any project. send queues work and returns its result to this chat asynchronously.',
+    'Create, list, read, update, delete, stop, or send a prompt to a session in any project. send only enqueues work: retain the returned queue ID and delivery status; never report started, delivered, or completed from acceptance. waiting_behind_failure means the destination requires Retry or Discard. Complete one task, review its result, then send the next.',
     {
       action: {
         type: 'string',
