@@ -90,6 +90,21 @@ async function run() {
   )
   assert.ok(
     await evaluate(`
+      const avatar = document.querySelector('button[title="@bot"] [data-facehash]');
+      const bounds = avatar.getBoundingClientRect();
+      const button = avatar.parentElement.getBoundingClientRect();
+      const avatars = [...document.querySelectorAll('[data-facehash]')];
+      return bounds.width === 32 && bounds.height === 32
+        && button.width === bounds.width && button.height === bounds.height
+        && getComputedStyle(avatar.parentElement).padding === '0px'
+        && avatars.every(el => getComputedStyle(el).containerType === 'normal'
+          && parseFloat(getComputedStyle(el).borderRadius) === el.getBoundingClientRect().width / 4)
+        && document.querySelector('header [data-facehash]').parentElement.getBoundingClientRect().width >= 28;
+    `),
+    'avatar surfaces fill their buttons and do not collapse parent layout width'
+  )
+  assert.ok(
+    await evaluate(`
       const section = document.querySelector('button[title="New bot"]').parentElement;
       const styles = getComputedStyle(section);
       return styles.paddingTop === '12px' && styles.paddingBottom === '12px';
@@ -535,6 +550,34 @@ async function run() {
   await click('button[title="Bot settings"]')
   await click('button[title="Project session"]')
   assert.ok(await evaluate(`return !document.querySelector('#bot-settings-pane')`))
+  await click('#requests')
+  assert.ok(
+    await evaluate(`
+      const blocks = window.__canvasTranscript.scene().blocks;
+      const bot = blocks.find(block => block.copyText().includes('Implement the avatar fixes'));
+      const human = blocks.find(block => block.copyText().includes('Human request mentioning'));
+      const findImage = nodes => nodes.flatMap(node => node.kind === 'group' ? findImage(node.children) : node.kind === 'image' ? [node.src] : []);
+      const src = findImage(bot.nodes).find(src => src.startsWith('data:image/svg+xml,'));
+      const svg = src ? decodeURIComponent(src.split(',')[1]) : '';
+      return JSON.stringify(bot.nodes).includes('data:image/svg+xml,')
+        && svg.includes('<rect width="100" height="100" rx="25"')
+        && svg.includes('x="20" y="30" width="60" height="40"')
+        && !svg.includes('preserveAspectRatio="none"')
+        && !JSON.stringify(bot.nodes).includes('"name":"user"')
+        && JSON.stringify(human.nodes).includes('"name":"user"')
+        && !JSON.stringify(human.nodes).includes('data:image/svg+xml,');
+    `),
+    'bot-authored project prompts use their avatar while human mentions keep the person icon'
+  )
+  await click('button[title="@helper"]')
+  await click('button[title="Project session"]')
+  assert.ok(
+    await evaluate(`
+      const block = window.__canvasTranscript.scene().blocks.find(block => block.copyText().includes('Implement the avatar fixes'));
+      return JSON.stringify(block.nodes).includes('data:image/svg+xml,');
+    `),
+    'bot prompt avatars survive transcript reload'
+  )
   await type('textarea', '@he')
   assert.ok(await evaluate('return !!document.querySelector("[role=listbox] [role=option]")'))
   win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Tab' })

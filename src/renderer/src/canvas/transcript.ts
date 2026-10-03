@@ -252,7 +252,7 @@ export function layoutMessageHeader(
 
   // Avatar.
   const avatarY = top + 2
-  if (isUser) {
+  if (isUser && !botUsername) {
     builder.rect(
       x + SPACE.messagePadX,
       avatarY,
@@ -271,7 +271,7 @@ export function layoutMessageHeader(
       w: SPACE.avatar,
       h: SPACE.avatar,
       src: botUsername === HOST_USERNAME ? '__roxy__' : (botAvatarSrc ?? '__roxy__'),
-      radius: !botUsername || botUsername === HOST_USERNAME ? SPACE.radiusLg : SPACE.avatar / 2,
+      radius: !botUsername || botUsername === HOST_USERNAME ? SPACE.radiusLg : SPACE.avatar / 4,
       border: palette.border
     })
   }

@@ -327,6 +327,38 @@ export function BotsHarness(): JSX.Element {
         >
           Bot response fixture
         </button>
+        <button
+          id="requests"
+          onClick={() => {
+            const state = useRoxyStore.getState()
+            const bot = state.bots[0]
+            if (!bot || !state.activeChatId) return
+            messages = [
+              ...messages,
+              {
+                id: crypto.randomUUID(),
+                chatId: state.activeChatId,
+                role: 'user',
+                botId: bot.id,
+                botUsername: bot.username,
+                content: 'Implement the avatar fixes in this project.',
+                parts: [{ type: 'text', text: 'Implement the avatar fixes in this project.' }],
+                createdAt: Date.now()
+              },
+              {
+                id: crypto.randomUUID(),
+                chatId: state.activeChatId,
+                role: 'user',
+                content: `Human request mentioning @${bot.username}.`,
+                parts: [{ type: 'text', text: `Human request mentioning @${bot.username}.` }],
+                createdAt: Date.now() + 1
+              }
+            ]
+            void state.selectChat(state.activeChatId)
+          }}
+        >
+          Bot and human requests fixture
+        </button>
       </div>
       <div className="flex min-h-0 flex-1">
         <Sidebar />

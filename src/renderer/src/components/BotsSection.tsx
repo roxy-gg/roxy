@@ -97,7 +97,7 @@ export function BotsSection({ rail = false }: { rail?: boolean }): JSX.Element {
               }
             }}
             className={cn(
-              'press-scale relative shrink-0 rounded-full outline-none focus-visible:ring-2 focus-visible:ring-accent',
+              'press-scale relative shrink-0 rounded-lg p-0 outline-none focus-visible:ring-2 focus-visible:ring-accent',
               active === bot.chatId && 'ring-2 ring-accent ring-offset-2 ring-offset-surface'
             )}
           >

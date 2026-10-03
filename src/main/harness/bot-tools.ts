@@ -259,7 +259,8 @@ export async function runBotTool(
         result = enqueuePrompt(chatId, text(input.prompt), undefined, {
           sourceChatId: source,
           hops,
-          notBefore: input.not_before as number | undefined
+          notBefore: input.not_before as number | undefined,
+          ...author
         })
         resumeQueue(chatId)
       } else {

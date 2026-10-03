@@ -1688,6 +1688,40 @@ async function main(): Promise<void> {
     assert.equal(repo.listQueue(memorySession.id)[0].botId, memoryBot.id)
     assert.equal(repo.listQueue(memorySession.id)[0].botUsername, 'final-reviewer')
     for (const item of repo.listQueue(memorySession.id)) repo.removeQueueItem(item.id)
+    const queuedByBot = await runTool(
+      'queue_manage',
+      { action: 'create', session: memorySession.id, prompt: 'Bot-authored queued request' },
+      { cwd: sessionCwd(memoryBot.chatId), sessionId: memoryBot.chatId, botId: memoryBot.id }
+    )
+    assert.ok(queuedByBot.ok, queuedByBot.output)
+    const botPrompt = repo.listQueue(memorySession.id).at(-1)!
+    assert.equal(botPrompt.botId, memoryBot.id)
+    assert.equal(botPrompt.botUsername, 'final-reviewer')
+    closeDb()
+    assert.equal(
+      repo.listQueue(memorySession.id).at(-1)?.botId,
+      memoryBot.id,
+      'queued author survives reopening'
+    )
+    wakeAutomation()
+    await settle(memorySession.id)
+    const deliveredPrompt = repo
+      .listMessages(memorySession.id)
+      .find((message) => message.content === botPrompt.content)!
+    assert.ok(deliveredPrompt)
+    assert.equal(deliveredPrompt.role, 'user', 'cross-session delivery remains a prompt')
+    assert.equal(deliveredPrompt.botId, memoryBot.id)
+    assert.equal(deliveredPrompt.botUsername, 'final-reviewer')
+    closeDb()
+    assert.deepEqual(
+      repo.listMessages(memorySession.id).find((message) => message.id === deliveredPrompt.id),
+      deliveredPrompt,
+      'delivered attribution survives a database reload'
+    )
+    const humanPrompt = enqueuePrompt(memorySession.id, 'Human request mentioning @final-reviewer')
+    assert.equal(humanPrompt.botId, undefined)
+    assert.equal(humanPrompt.botUsername, undefined)
+    for (const item of repo.listQueue(memorySession.id)) repo.removeQueueItem(item.id)
     // Delegating from ANOTHER bot's chat: the work is the guest's, so the answer
     // has to come back to the guest. Resuming the chat's owner handed the
     // continuation to a bot that never asked for it, with its identity and config.
@@ -1702,6 +1736,12 @@ async function main(): Promise<void> {
     assert.equal(guestHandoff.botId, visitor.id, "the request is the guest's, not the owner's")
     wakeAutomation()
     await settle(memorySession.id)
+    const deliveredSend = repo
+      .listMessages(memorySession.id)
+      .find((message) => message.content === 'Guest follow-up')!
+    assert.equal(deliveredSend.role, 'user')
+    assert.equal(deliveredSend.botId, visitor.id)
+    assert.equal(deliveredSend.botUsername, visitor.username)
     const guestNudge = repo
       .listQueue(memoryBot.chatId)
       .find((q) => q.content.includes('answered above'))
