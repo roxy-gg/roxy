@@ -71,7 +71,6 @@ import {
 import {
   endSubagentRuns,
   listRunningSubagents,
-  setViewedSubChat,
   subagentSnapshot,
   cancelSubagentRun,
   cancelSubagentRunsFor
@@ -1067,7 +1066,7 @@ export function registerIpc(): void {
   })
 
   // ---- background subagent tasks (Phase 11) ----
-  ipcMain.handle(CHANNELS.tasksListRunning, (_e, sessionId: string) =>
+  ipcMain.handle(CHANNELS.tasksListRunning, (_e, sessionId?: string) =>
     listRunningBackgroundJobs(sessionId)
   )
   ipcMain.handle(CHANNELS.tasksCancel, (_e, jobId: string) => cancelBackgroundJob(jobId))
@@ -1080,9 +1079,6 @@ export function registerIpc(): void {
   // prompt with no reply.
   ipcMain.handle(CHANNELS.subagentSnapshot, (_e, subChatId: string) => subagentSnapshot(subChatId))
   ipcMain.handle(CHANNELS.subagentListRunning, () => listRunningSubagents())
-  ipcMain.handle(CHANNELS.subagentSetViewed, (_e, chatId: string | null) =>
-    setViewedSubChat(chatId)
-  )
   // Cancel one delegate without stopping the turn that launched it. The run
   // tears itself down through its own exit path (see cancelSubagentRun), so
   // there's nothing to clean up here.

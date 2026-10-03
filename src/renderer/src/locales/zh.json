@@ -98,7 +98,9 @@
     "queued": "已排队",
     "runsAfterReply": "此回复后运行",
     "settings": "设置",
-    "working": "正在工作"
+    "working": "正在工作",
+    "backgroundRunning_one": "{{count}} subagent still running",
+    "backgroundRunning_other": "{{count}} subagents still running"
   },
   "codeHosts": {
     "connected": "已连接",
@@ -789,7 +791,8 @@
     "unchanged_other": "{{count}} 行未更改",
     "working": "工作中",
     "writingAs": "{{name}} 正在书写…",
-    "you": "你"
+    "you": "你",
+    "openSubagent": "Open subagent session"
   },
   "usage": {
     "allProviders": "所有提供商，最近 30 天",

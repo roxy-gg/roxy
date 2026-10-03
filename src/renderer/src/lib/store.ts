@@ -14,6 +14,7 @@ import type {
   UsageStats
 } from '@shared/types'
 import type {
+  AutomationDelta,
   ChatMessage,
   LlmEvent,
   LlmResult,
@@ -28,7 +29,7 @@ import type {
 import { selectPromptName, buildEnvironment, assembleSystemPrompt } from '@shared/prompt'
 import { PROMPT_TEXT, AGENT_PROMPT_TEXT } from '@shared/prompt-text'
 import { reconstructTurn, REPLAY_OUTPUT_CAP } from '@shared/tool-history'
-import { PartsFold, partsToContent } from '@shared/parts'
+import { PartsFold, partsToContent, restorePartsSnapshot, taskPreview } from '@shared/parts'
 import { isOverflow, pruneToolMessages, KEEP_RECENT_TOKENS } from '@shared/context'
 import { resolveProviderModel } from '@shared/models'
 import {
@@ -45,7 +46,7 @@ import { applyMotion, motionSnapshot, type MotionPreference } from './motion'
 import { createStreamPublisher, type StreamPublisher } from './stream-publisher'
 import type { ComposerImage } from './images'
 import { pruneComposerDrafts, type ComposerDrafts } from './composerDrafts'
-import { remainingOptimisticMessages } from './optimistic-messages'
+import { remainingOptimisticMessages, visibleMessages } from './optimistic-messages'
 import type {
   GitStatusView,
   MultiSyncOutcome,
@@ -59,6 +60,8 @@ import type { ForgeStatusView } from '@shared/forge'
 import type { Bot } from '@shared/bots'
 
 interface RoxyStore {
+  /** Bounded live transcripts for task cards, including detached delegates. */
+  subagentPreviews: Record<string, MessagePart[]>
   ready: boolean
   settings: AppSettings | null
   /**
@@ -424,19 +427,40 @@ const chatRequests = new Map<string, string>()
 const modelCatalogInflight = new Map<string, Promise<void>>()
 /** Same, for the hidden-model deny-list — every ModelPicker and Settings mount asks. */
 let hiddenModelsLoaded = false
-/** Set when a remote turn lands while a local send streams into the shared chat. */
-const remoteMirror = { deferred: false }
-let automationRevision = 0
-const automationRevisions = new Map<string, number>()
-/** Turn starts/ends only. A snapshot is stale about WHO is speaking once the
- *  turn itself has moved on, but streamed tokens say nothing about identity. */
-const automationTurnRevisions = new Map<string, number>()
-const automationLoads = new Map<string, number>()
-const deferredAutomation = new Set<string>()
+/** Events buffered until the automation snapshot supplies their missing prefix. */
+let automationSnapshotEvents: AutomationDelta[] | null = null
+let subagentRevision = 0
+const subagentRunRevisions = new Map<string, number>()
+const subagentHydrations = new Map<string, SubagentDelta[]>()
+let taskRevision = 0
+const taskRevisions = new Map<string, number>()
+const transcriptLoads = new Map<string, number>()
 
-async function mirrorAutomationChat(chatId: string): Promise<void> {
-  const revision = (automationLoads.get(chatId) ?? 0) + 1
-  automationLoads.set(chatId, revision)
+/** A persisted reply must exist locally before its live bubble is cleared. */
+function rememberMessage(message: Message): void {
+  useRoxyStore.setState((s) =>
+    s.activeChatId !== message.chatId
+      ? s
+      : {
+          optimisticMessages: {
+            ...s.optimisticMessages,
+            [message.chatId]: [
+              ...(s.optimisticMessages[message.chatId] ?? []).filter((m) => m.id !== message.id),
+              message
+            ]
+          },
+          ...(s.messagesChatId === message.chatId
+            ? { messages: visibleMessages(s.messages, [message]) }
+            : {})
+        }
+  )
+}
+
+/** One ordering guard for every transcript read, including navigation and task completion. */
+async function loadTranscript(chatId: string): Promise<void> {
+  if (useRoxyStore.getState().activeChatId !== chatId) return
+  const revision = (transcriptLoads.get(chatId) ?? 0) + 1
+  transcriptLoads.set(chatId, revision)
   try {
     const acknowledged = new Set(
       (useRoxyStore.getState().optimisticQueue[chatId] ?? [])
@@ -445,11 +469,7 @@ async function mirrorAutomationChat(chatId: string): Promise<void> {
     )
     const [messages, queue] = await Promise.all([api.messages.list(chatId), api.queue.list(chatId)])
     const state = useRoxyStore.getState()
-    if (state.activeChatId !== chatId || automationLoads.get(chatId) !== revision) return
-    if (state.sendingChats[chatId]) {
-      deferredAutomation.add(chatId)
-      return
-    }
+    if (state.activeChatId !== chatId || transcriptLoads.get(chatId) !== revision) return
     useRoxyStore.setState((s) => {
       const optimisticQueue = { ...s.optimisticQueue }
       optimisticQueue[chatId] = (optimisticQueue[chatId] ?? []).filter(
@@ -472,15 +492,21 @@ async function mirrorAutomationChat(chatId: string): Promise<void> {
       }
     })
   } catch {
-    // A session can be removed while a completion notification is in flight.
+    const state = useRoxyStore.getState()
+    if (
+      state.activeChatId === chatId &&
+      transcriptLoads.get(chatId) === revision &&
+      state.messagesChatId !== chatId
+    )
+      useRoxyStore.setState({ messagesError: true })
   }
 }
 
-function applyAutomationDelta(payload: RemoteDelta): void {
+function applyAutomationDelta(payload: AutomationDelta): void {
   const id = payload.sessionId
-  automationRevisions.set(id, ++automationRevision)
+  automationSnapshotEvents?.push(payload)
   if (payload.kind === 'turn') {
-    automationTurnRevisions.set(id, automationRevision)
+    if (payload.message) rememberMessage(payload.message)
     useRoxyStore.setState((s) => {
       const automationSpeakers = { ...s.automationSpeakers }
       if (payload.state === 'running')
@@ -500,7 +526,7 @@ function applyAutomationDelta(payload: RemoteDelta): void {
     return { runningAutomation }
   })
   if (payload.kind === 'turn') {
-    void mirrorAutomationChat(id)
+    void loadTranscript(id)
     if (payload.state !== 'running') {
       void useRoxyStore.getState().refreshChats()
       void useRoxyStore.getState().refreshUsage()
@@ -597,7 +623,12 @@ function publishStream(chatId: string, parts: MessagePart[] | null): void {
         const next = { ...s.streamingChats }
         if (parts === null) delete next[chatId]
         else next[chatId] = parts
-        return { streamingChats: next }
+        if (!subagentTurns.has(chatId) && !s.subagentPreviews[chatId])
+          return { streamingChats: next }
+        const subagentPreviews = { ...s.subagentPreviews }
+        if (parts === null) delete subagentPreviews[chatId]
+        else subagentPreviews[chatId] = taskPreview(parts)
+        return { streamingChats: next, subagentPreviews }
       })
     )
     streamPublishers.set(chatId, publisher)
@@ -801,29 +832,11 @@ async function persistGlobalConfig(patch: SessionConfigPatch): Promise<AppSettin
 }
 
 /**
- * Desktop live-mirror: reload the shared chat's transcript from disk after a
- * remote (phone) turn, but only if it's still the chat on screen, no local send
- * is streaming into it, and no *newer* remote rev has superseded this one — the
- * rev guard makes concurrent reloads resolve last-writer-wins instead of racing.
- */
-async function mirrorSharedChat(sessionId: string, rev: number): Promise<void> {
-  const messages = await api.messages.list(sessionId)
-  const s = useRoxyStore.getState()
-  if (s.activeChatId !== sessionId || s.remote.rev !== rev) return
-  if (s.sendingChats[sessionId]) {
-    // A local send began mid-reload — reconcile once it finishes (finishTurn).
-    remoteMirror.deferred = true
-    return
-  }
-  useRoxyStore.setState({ messages, messagesChatId: sessionId })
-}
-
-/**
  * Fold one phone-driven turn's streamed event (or turn boundary) into a live
  * parts list and, when that session is on screen, reflect it into `streamingChats`
  * so the desktop shows the reply token-by-token — the remote twin of a local
  * send's delta handler. A `turn:idle` clears the live parts; the persisted reply
- * (reconciled from disk by `mirrorSharedChat` on the state bump) then takes over,
+ * (reconciled from disk by `loadTranscript` on the state bump) then takes over,
  * so there's no gap between the live bubble and the saved message.
  */
 function applyRemoteDelta(payload: RemoteDelta): void {
@@ -918,12 +931,15 @@ async function applySessionsUpdated(payload: SessionsUpdated): Promise<void> {
  */
 function applySubagentDelta(payload: SubagentDelta): void {
   const { subChatId } = payload
+  subagentHydrations.get(subChatId)?.push(payload)
   const reflect = (parts: MessagePart[] | null): void => {
-    if (useRoxyStore.getState().activeChatId !== subChatId) return
+    // Offscreen delegates still feed the parent's task card. Terminal updates
+    // must clear their cached bubble too, or reopening resurrects a dead run.
     publishStream(subChatId, parts)
   }
 
   if (payload.kind === 'run') {
+    subagentRunRevisions.set(subChatId, ++subagentRevision)
     if (payload.state === 'running') {
       markActivity(subChatId)
       // Open an empty live bubble the moment the run starts, so a viewer who is
@@ -934,8 +950,10 @@ function applySubagentDelta(payload: SubagentDelta): void {
         runningSubagents: { ...s.runningSubagents, [subChatId]: true }
       }))
       reflect([])
+      void useRoxyStore.getState().refreshChats()
       return
     }
+    if (payload.message) rememberMessage(payload.message)
     subagentTurns.delete(subChatId)
     clearActivity(subChatId)
     useRoxyStore.setState((s) => {
@@ -944,15 +962,8 @@ function applySubagentDelta(payload: SubagentDelta): void {
       return { runningSubagents }
     })
     reflect(null)
-    // The run's transcript landed a moment ago — swap the live bubble for the
-    // persisted message, and refresh the sidebar (a finished sub may now prune).
-    void (async () => {
-      const subMessages = await api.messages.list(subChatId)
-      if (useRoxyStore.getState().activeChatId === subChatId) {
-        useRoxyStore.setState({ messages: subMessages, messagesChatId: subChatId })
-      }
-      await useRoxyStore.getState().refreshChats()
-    })()
+    void loadTranscript(subChatId)
+    void useRoxyStore.getState().refreshChats()
     return
   }
 
@@ -992,23 +1003,23 @@ function applySubagentDelta(payload: SubagentDelta): void {
  * `tool-end` arrives instead of spinning forever.
  */
 async function hydrateSubagent(subChatId: string): Promise<void> {
-  const parts = await api.subagents.snapshot(subChatId).catch(() => null)
-  // The run may have finished (or the user navigated away) during the round trip;
-  // its persisted message is then the truth and must not be overwritten.
-  if (!parts || useRoxyStore.getState().activeChatId !== subChatId) return
-  const fold = subagentTurns.get(subChatId) ?? new PartsFold()
-  // Never rewind: deltas that arrived while the snapshot was in flight are
-  // already folded locally and are strictly newer than what main sent back.
-  if (fold.parts.length === 0) fold.seed(parts)
+  if (subagentHydrations.has(subChatId)) return
+  const deltas: SubagentDelta[] = []
+  subagentHydrations.set(subChatId, deltas)
+  const snapshot = await api.subagents.snapshot(subChatId).catch(() => null)
+  subagentHydrations.delete(subChatId)
+  if (!snapshot) return
+  const fold = restorePartsSnapshot(snapshot, deltas)
+  if (!fold) return
   subagentTurns.set(subChatId, fold)
   useRoxyStore.setState((s) => ({
     runningSubagents: { ...s.runningSubagents, [subChatId]: true },
     activityStartedAt: {
       ...s.activityStartedAt,
-      [subChatId]: s.activityStartedAt[subChatId] ?? Date.now()
-    },
-    streamingChats: { ...s.streamingChats, [subChatId]: fold.parts }
+      [subChatId]: Math.max(s.activityStartedAt[subChatId] ?? 0, snapshot.activityStartedAt)
+    }
   }))
+  publishStream(subChatId, fold.parts)
 }
 
 /**
@@ -1147,6 +1158,7 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
   compactingChats: {},
   runningTasks: {},
   runningSubagents: {},
+  subagentPreviews: {},
   remote: { phase: 'idle', guests: 0, rev: 0 },
   services: [],
   gitAvailable: null,
@@ -1206,33 +1218,33 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
     if (!automationSubscribed) {
       automationSubscribed = true
       api.automation.onDelta((payload) => applyAutomationDelta(payload))
-      api.automation.onChanged((chatId) => void mirrorAutomationChat(chatId))
-      // Subscribe before requesting a snapshot; an event received during this
-      // round trip wins over its older snapshot (including a completed turn).
-      const revision = automationRevision
+      api.automation.onChanged((chatId) => void loadTranscript(chatId))
+      // Keep the live tail until the snapshot supplies its missing prefix.
+      const deltas: AutomationDelta[] = []
+      automationSnapshotEvents = deltas
       void api.automation
         .snapshot()
         .then((running) => {
           for (const run of running) {
-            // A newer TURN transition knows better than this snapshot. A token
-            // that merely raced it does not: identity is announced once, when
-            // the turn starts, so dropping the snapshot over a delta left a
-            // guest's reply streaming under the host's name until it finished.
-            if ((automationTurnRevisions.get(run.sessionId) ?? 0) > revision) continue
+            const fold = restorePartsSnapshot(
+              run,
+              deltas.filter((delta) => delta.sessionId === run.sessionId)
+            )
+            if (!fold) continue
             set((s) => ({
               runningAutomation: { ...s.runningAutomation, [run.sessionId]: true },
               activityStartedAt: {
                 ...s.activityStartedAt,
-                [run.sessionId]: run.activityStartedAt
+                [run.sessionId]: Math.max(
+                  s.activityStartedAt[run.sessionId] ?? 0,
+                  run.activityStartedAt
+                )
               },
               automationSpeakers: {
                 ...s.automationSpeakers,
                 [run.sessionId]: { botId: run.botId, botUsername: run.botUsername }
               }
             }))
-            if ((automationRevisions.get(run.sessionId) ?? 0) > revision) continue
-            const fold = new PartsFold()
-            fold.seed(run.parts)
             remoteTurns.set(run.sessionId, fold)
             if (get().activeChatId === run.sessionId && !get().sendingChats[run.sessionId]) {
               publishStream(run.sessionId, fold.parts)
@@ -1240,6 +1252,9 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
           }
         })
         .catch(() => {})
+        .finally(() => {
+          automationSnapshotEvents = null
+        })
     }
 
     if (!llmDeltaSubscribed) {
@@ -1267,6 +1282,16 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
       api.tasks.onUpdate((update) => {
         void get().handleTaskUpdate(update)
       })
+      const revision = taskRevision
+      void api.tasks
+        .listRunning()
+        .then((running) => {
+          for (const update of running) {
+            if ((taskRevisions.get(update.jobId) ?? 0) <= revision)
+              void get().handleTaskUpdate(update)
+          }
+        })
+        .catch(() => {})
     }
 
     // A subagent's own live stream. Separate from the requestId-keyed llm:delta
@@ -1276,6 +1301,7 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
     if (!subagentDeltaSubscribed) {
       subagentDeltaSubscribed = true
       api.subagents.onDelta((payload) => applySubagentDelta(payload))
+      const revision = subagentRevision
       // A window that just (re)loaded missed every `run: running` frame, so
       // restore the in-flight set from main — otherwise a delegate that is very
       // much still working shows no spinner anywhere until it happens to emit.
@@ -1287,13 +1313,20 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
             const runningSubagents = { ...s.runningSubagents }
             const activityStartedAt = { ...s.activityStartedAt }
             for (const r of running) {
+              if ((subagentRunRevisions.get(r.subChatId) ?? 0) > revision) continue
               runningSubagents[r.subChatId] = true
-              activityStartedAt[r.subChatId] = r.activityStartedAt
+              activityStartedAt[r.subChatId] = Math.max(
+                activityStartedAt[r.subChatId] ?? 0,
+                r.activityStartedAt
+              )
             }
             return { runningSubagents, activityStartedAt }
           })
-          const active = get().activeChatId
-          if (active && running.some((r) => r.subChatId === active)) void hydrateSubagent(active)
+          for (const run of running) {
+            if ((subagentRunRevisions.get(run.subChatId) ?? 0) <= revision)
+              void hydrateSubagent(run.subChatId)
+          }
+          void get().refreshChats()
         })
         .catch(() => {
           // best-effort — a failed restore costs a spinner, never correctness
@@ -1314,13 +1347,7 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
         if (!shared || shared !== get().activeChatId || state.rev === prevRev) return
         // The queue may have changed from the phone (a prompt was queued, removed,
         // or drained) — keep the desktop's queue view in sync with the shared one.
-        void get().refreshQueue()
-        if (get().sendingChats[shared]) {
-          // Don't clobber an in-flight local stream — reconcile after it lands.
-          remoteMirror.deferred = true
-          return
-        }
-        void mirrorSharedChat(shared, state.rev)
+        void loadTranscript(shared)
       })
       // A share may already be live from before this window (re)loaded.
       void get().refreshRemote()
@@ -1885,9 +1912,6 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
     }))
     const workspace = chat?.workspacePath
     if (workspace) void get().ensureProjectInstructions(workspace)
-    // Tell main which sub session is on screen so the end-of-turn prune spares
-    // it — a one-shot delegate you're reading shouldn't vanish mid-sentence.
-    void api.subagents.setViewed(chat?.kind === 'sub' ? id : null).catch(() => {})
     // Opening a subagent mid-run: pull what it has already done so the live
     // bubble starts from the whole transcript, not from the next delta.
     if (chat?.kind === 'sub') void hydrateSubagent(id)
@@ -1897,33 +1921,7 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
     // already cleared above, the set below never ran, and the promise floated
     // back into an onClick where nothing handled it. Now the failure is state,
     // so the transcript can say so and offer a retry.
-    try {
-      const acknowledged = new Set(
-        (get().optimisticQueue[id] ?? [])
-          .filter((item) => !item.id.startsWith('optimistic:'))
-          .map((item) => item.id)
-      )
-      const [messages, queue] = await Promise.all([api.messages.list(id), api.queue.list(id)])
-      if (get().activeChatId === id) {
-        set((s) => {
-          const optimisticMessages = { ...s.optimisticMessages }
-          optimisticMessages[id] = remainingOptimisticMessages(
-            messages,
-            optimisticMessages[id] ?? []
-          )
-          if (!optimisticMessages[id].length) delete optimisticMessages[id]
-          const optimisticQueue = { ...s.optimisticQueue }
-          optimisticQueue[id] = (optimisticQueue[id] ?? []).filter(
-            (item) => !queue.some((saved) => saved.id === item.id) && !acknowledged.has(item.id)
-          )
-          if (!optimisticQueue[id].length) delete optimisticQueue[id]
-          return { messages, queue, messagesChatId: id, optimisticMessages, optimisticQueue }
-        })
-      }
-    } catch (e) {
-      console.error('Failed to load transcript:', e)
-      if (get().activeChatId === id) set({ messagesError: true })
-    }
+    await loadTranscript(id)
   },
 
   clearActive: () =>
@@ -2207,16 +2205,8 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
         delete next[chatId]
         return { stopChats: next }
       })
-    const isActive = (): boolean => get().activeChatId === chatId
     const chatExists = (): boolean => get().chats.some((c) => c.id === chatId)
     const stopped = (): boolean => !!get().stopChats[chatId]
-    // Append a freshly-persisted message to the visible list — only when this
-    // chat is on screen and it isn't already there (guards a load/append race).
-    const appendIfActive = (m: Message): void => {
-      if (!isActive()) return
-      if (get().messages.some((x) => x.id === m.id)) return
-      set({ messages: [...get().messages, m] })
-    }
 
     // The assistant turn is an ordered list of parts so reasoning, tool calls,
     // and prose interleave through one render path instead of being grouped.
@@ -2263,29 +2253,22 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
           content: partsToContent(parts),
           parts
         })
-        appendIfActive(assistantMessage)
+        rememberMessage(assistantMessage)
       }
       setStreaming(null)
       setSending(false)
       clearActivity(chatId)
       clearStop()
-      // If a remote (phone) turn landed while this local send was streaming, we
-      // deferred the mirror to avoid clobbering the stream — reconcile it now.
-      if (remoteMirror.deferred && get().remote.sessionId === chatId) {
-        remoteMirror.deferred = false
-        void mirrorSharedChat(chatId, get().remote.rev)
-      }
+      void loadTranscript(chatId)
       await get().refreshChats()
       // A turn just recorded usage rows — refresh the cost dashboard so the
       // titlebar pill reflects the new spend without waiting for a manual open.
       void get().refreshUsage()
-      // Completed subagent sessions get pruned in main — if we were viewing one
-      // (now gone), fall back to this turn's chat so the pane isn't left empty.
+      // If the user deleted the session on screen, return to this turn's chat.
       const active = get().activeChatId
       if (active && !get().chats.some((c) => c.id === active)) {
         await get().selectChat(chatId)
       }
-      if (deferredAutomation.delete(chatId)) void mirrorAutomationChat(chatId)
       // Main is the only queue consumer. Wake it after the renderer has
       // persisted this direct turn, never pop items or execute them here.
       if (wakeQueue && !wasStopped) await api.automation.wake()
@@ -2486,11 +2469,7 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
               await get().refreshChats()
               const active = get().activeChatId
               if (active && get().chats.find((c) => c.id === active)?.kind === 'sub') {
-                const loaded = await api.messages.list(active)
-                // Re-check: two awaits have passed since `active` was read.
-                if (get().activeChatId === active) {
-                  set({ messages: loaded, messagesChatId: active })
-                }
+                await loadTranscript(active)
               }
             })()
           } else if (
@@ -2645,32 +2624,21 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
   },
 
   cancelSubagent: async (subChatId) => {
-    // Optimistic: the spinner has to go the instant you click, or the button
-    // reads as broken while the run tears itself down. Main is the source of
-    // truth and will broadcast the real end state a moment later.
-    set((s) => {
-      const next = { ...s.runningSubagents }
-      delete next[subChatId]
-      return { runningSubagents: next }
-    })
+    // The terminal event owns liveness. Hiding optimistically marks the parent
+    // card done even if the cancellation failed or the delegate is still exiting.
     await api.subagents.cancel(subChatId)
   },
 
   cancelToolCall: async (callId) => {
-    // No optimistic update, unlike cancelSubagent: the card's `running` state is
+    // No optimistic update: the card's `running` state is
     // owned by the live fold, and a local flip would be overwritten by the very
     // next delta anyway. The real end state arrives as the `tool-end` the
     // cancelled call emits on its way out, which is a single frame later.
     await api.tools.cancel(callId)
   },
 
-  cancelBackgroundTask: async (sessionId, jobId) => {
-    set((s) => ({
-      runningTasks: {
-        ...s.runningTasks,
-        [sessionId]: (s.runningTasks[sessionId] ?? []).filter((t) => t.jobId !== jobId)
-      }
-    }))
+  cancelBackgroundTask: async (_sessionId, jobId) => {
+    // Keep the pending-work strip until main confirms this job actually ended.
     await api.tasks.cancel(jobId)
   },
 
@@ -2700,19 +2668,7 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
     try {
       await api.context.compact(chatId, provider.id, model)
       await get().refreshChats()
-      const compacted = await api.messages.list(chatId)
-      if (get().activeChatId === chatId) {
-        set((s) => {
-          const optimisticMessages = { ...s.optimisticMessages }
-          // Compaction may remove a confirmed row; it must not return as a ghost.
-          optimisticMessages[chatId] = remainingOptimisticMessages(
-            s.messages,
-            optimisticMessages[chatId] ?? []
-          )
-          if (!optimisticMessages[chatId].length) delete optimisticMessages[chatId]
-          return { messages: compacted, messagesChatId: chatId, optimisticMessages }
-        })
-      }
+      await loadTranscript(chatId)
     } catch (e) {
       console.error('Compaction failed:', e)
     } finally {
@@ -2725,6 +2681,7 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
   },
 
   handleTaskUpdate: async (update) => {
+    taskRevisions.set(update.jobId, ++taskRevision)
     // Track the per-session running set for the badge: a `running` update adds
     // the job, a terminal one removes it.
     set((s) => {
@@ -2737,16 +2694,13 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
       return { runningTasks }
     })
 
-    // Keep the sidebar in sync (a sub-session appeared or, once done, may be
-    // pruned on the next turn) and reload whichever transcript the user is on:
+    // Keep the sidebar in sync and reload whichever transcript the user is on:
     // the parent gets the delivered report card; the sub session shows its work.
     await get().refreshChats()
     const active = get().activeChatId
     if (!active) return
     if (active === update.sessionId || active === update.subChatId) {
-      const loaded = await api.messages.list(active)
-      // `active` was captured before the await above — confirm it still holds.
-      if (get().activeChatId === active) set({ messages: loaded, messagesChatId: active })
+      await loadTranscript(active)
     }
   }
 }))

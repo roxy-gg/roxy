@@ -458,9 +458,17 @@ export interface LlmDelta {
  * `run` frames bracket the stream so the renderer knows exactly when to open the
  * live bubble and when to drop it in favour of the persisted transcript.
  */
-export type SubagentDelta =
+export type SubagentDelta = (
   | { subChatId: string; kind: 'event'; event: LlmChildEvent }
-  | { subChatId: string; kind: 'run'; state: 'running' | 'completed' | 'error' }
+  | { subChatId: string; kind: 'run'; state: 'running' | 'completed' | 'error'; message?: Message }
+) & { sequence: number }
+
+/** A snapshot's sequence separates already-folded events from its live tail. */
+export interface SubagentSnapshot {
+  parts: MessagePart[]
+  sequence: number
+  activityStartedAt: number
+}
 
 /** A subagent run in flight, for restoring live state after a window (re)load. */
 export interface SubagentRunView {
@@ -734,9 +742,13 @@ export type RemoteDelta =
       sessionId: string
       kind: 'turn'
       state: 'running' | 'idle'
+      /** Persisted before the terminal event, so swapping out live parts is lossless. */
+      message?: Message
       botId?: string
       botUsername?: string
     }
+
+export type AutomationDelta = RemoteDelta & { sequence: number }
 
 /** Outcome of exporting the portable config bundle (skills + MCP servers). */
 export interface ConfigExportResult {
@@ -784,11 +796,12 @@ export interface RoxyApi {
   }
   automation: {
     /** Main owns queued turns; renderers only mirror these events. */
-    onDelta(callback: (payload: RemoteDelta) => void): () => void
+    onDelta(callback: (payload: AutomationDelta) => void): () => void
     snapshot(): Promise<
       {
         sessionId: string
         parts: MessagePart[]
+        sequence: number
         activityStartedAt: number
         botId?: string
         botUsername?: string
@@ -1062,8 +1075,8 @@ export interface RoxyApi {
     onDelta(callback: (payload: LlmDelta) => void): () => void
   }
   tasks: {
-    /** The background subagent tasks still running for a session. */
-    listRunning(sessionId: string): Promise<TaskUpdate[]>
+    /** Running background tasks, optionally restricted to one session. */
+    listRunning(sessionId?: string): Promise<TaskUpdate[]>
     /** Cancel a running background task by its job id. */
     cancel(jobId: string): Promise<void>
     /** Subscribe to background-task state changes; returns an unsubscribe fn. */
@@ -1075,14 +1088,9 @@ export interface RoxyApi {
      * session halfway through. Null when nothing is running for that id (its
      * persisted transcript is then the truth).
      */
-    snapshot(subChatId: string): Promise<MessagePart[] | null>
+    snapshot(subChatId: string): Promise<SubagentSnapshot | null>
     /** Every subagent currently running â€” restores live state after a window reload. */
     listRunning(): Promise<SubagentRunView[]>
-    /**
-     * Tell main which chat is on screen, so the end-of-turn prune spares a sub
-     * session the user is reading. Pass null when the open chat isn't a sub.
-     */
-    setViewed(chatId: string | null): Promise<void>
     /**
      * Cancel ONE running subagent, foreground or background, without touching
      * the turn that spawned it. Resolves false when nothing was running for that

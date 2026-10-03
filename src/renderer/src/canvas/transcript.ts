@@ -65,6 +65,7 @@ export interface LayoutInput {
   }
   /** Which calls can actually be cancelled (the store knows; layout does not). */
   canCancel: (part: Extract<MessagePart, { type: 'tool' }>) => boolean
+  subagentIds?: ReadonlySet<string>
   /** Injectable so activity-phrase selection is deterministic in focused tests. */
   activityRandom?: () => number
   /**
@@ -89,7 +90,8 @@ export function layoutTranscript(input: LayoutInput, cache: BlockCache): Scene {
       input.queue?.map((item) => `${item.id}:${item.state ?? ''}`).join('|') ?? '',
       // Part of the identity: the same queue before and after it loads must not
       // reuse a block that rendered "replied" out of ignorance.
-      input.queueLoaded === false ? 'q:loading' : 'q:loaded'
+      input.queueLoaded === false ? 'q:loading' : 'q:loaded',
+      [...(input.subagentIds ?? [])].join(',')
     ].join('|')
   )
   const { messages, streaming, width, theme, view } = input
@@ -399,6 +401,7 @@ export function layoutParts(
         open: input.view.open.has(id),
         live: part.state === 'running',
         cancellable: cancelReady(part, input),
+        canOpenSubagent: Boolean(part.subChatId && input.subagentIds?.has(part.subChatId)),
         queue: input.queue,
         queueLoaded: input.queueLoaded,
         view: input.view,

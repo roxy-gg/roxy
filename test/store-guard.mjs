@@ -11,7 +11,7 @@
  * Run: node test/store-guard.mjs
  */
 import { globSync, readFileSync } from 'node:fs'
-import { transformSync } from 'esbuild'
+import { buildSync, transformSync } from 'esbuild'
 
 // Normalize CRLF up front: this repo checks out with Windows line endings and
 // every multiline pattern below would otherwise silently never match.
@@ -372,33 +372,77 @@ check(
   state.modelCatalog[roxyA.id][0]?.id === 'fresh-account' && !state.modelsLoading[roxyA.id]
 )
 
-// A reload mid-turn asks main for a snapshot of what is already streaming.
-// WHO is speaking is announced once, when the turn starts, so a token that
-// merely raced the round trip must not discard the snapshot's identity - it
-// left a guest's (or Roxy's) reply streaming under the chat owner's name until
-// the turn ended. A newer TURN transition still wins.
-console.log('store: a reload mid-turn keeps the speaker')
+// Use the real fold, not a fake seed counter: discarding snapshot parts after
+// ANY racing token used to pass this guard while losing the whole prefix.
+const partsModule = { exports: {} }
+new Function(
+  'module',
+  'exports',
+  buildSync({
+    entryPoints: ['src/shared/parts.ts'],
+    bundle: true,
+    platform: 'node',
+    format: 'cjs',
+    write: false
+  }).outputFiles[0].text
+)(partsModule, partsModule.exports)
+const { PartsFold, restorePartsSnapshot, taskPreview } = partsModule.exports
+const messagesModule = { exports: {} }
+new Function(
+  'module',
+  'exports',
+  buildSync({
+    entryPoints: ['src/renderer/src/lib/optimistic-messages.ts'],
+    bundle: true,
+    platform: 'node',
+    format: 'cjs',
+    write: false
+  }).outputFiles[0].text
+)(messagesModule, messagesModule.exports)
+const { visibleMessages, remainingOptimisticMessages } = messagesModule.exports
+const publisherModule = { exports: {} }
+new Function(
+  'module',
+  'exports',
+  buildSync({
+    entryPoints: ['src/renderer/src/lib/stream-publisher.ts'],
+    bundle: true,
+    platform: 'node',
+    format: 'cjs',
+    write: false
+  }).outputFiles[0].text
+)(publisherModule, publisherModule.exports)
+let frameId = 0
+const frames = new Map()
+globalThis.requestAnimationFrame = (callback) => {
+  frames.set(++frameId, callback)
+  return frameId
+}
+globalThis.cancelAnimationFrame = (id) => frames.delete(id)
+const flushFrames = () => {
+  for (const callback of [...frames.values()]) callback()
+}
+console.log('store: reload snapshots preserve prefixes, live tails and speakers')
 const snapshotBody = src.match(/\.then\(\(running\) => \{\n([\s\S]*?)\n {8}\}\)\n {8}\.catch/)?.[1]
 check('snapshot handler found', snapshotBody !== undefined)
-const runSnapshot = ({ turnRevision, partsRevision }) => {
+const runSnapshot = (deltas) => {
   const state = {
     runningAutomation: {},
     automationSpeakers: {},
+    activityStartedAt: {},
     activeChatId: null,
     sendingChats: {}
   }
-  const seeded = []
+  const turns = new Map()
   const body = transformSync(`async function apply(running) {${snapshotBody}}`, {
     loader: 'ts'
   }).code
   new Function(
     'running',
-    'revision',
-    'automationTurnRevisions',
-    'automationRevisions',
+    'deltas',
     'set',
     'get',
-    'PartsFold',
+    'restorePartsSnapshot',
     'remoteTurns',
     'publishStream',
     `${body}
@@ -407,44 +451,576 @@ return apply(running)`
     [
       {
         sessionId: 'chat-1',
-        parts: [{ type: 'text', text: 'hi' }],
+        sequence: 5,
+        activityStartedAt: 100,
+        parts: [
+          { type: 'text', text: 'prefix' },
+          {
+            type: 'tool',
+            tool: 'task',
+            callId: 'task-1',
+            subChatId: 'sub-1',
+            state: 'running',
+            children: [{ type: 'tool', tool: 'read', callId: 'read-1', state: 'running' }]
+          },
+          {
+            type: 'tool',
+            tool: 'task',
+            callId: 'task-2',
+            subChatId: 'sub-2',
+            state: 'running',
+            children: [{ type: 'tool', tool: 'read', callId: 'read-1', state: 'running' }]
+          }
+        ],
         botId: 'bot-1',
         botUsername: 'helper'
       }
     ],
-    5,
-    new Map([['chat-1', turnRevision]]),
-    new Map([['chat-1', partsRevision]]),
+    deltas,
     (patch) => Object.assign(state, typeof patch === 'function' ? patch(state) : patch),
     () => state,
-    class {
-      seed(parts) {
-        seeded.push(parts)
-      }
-    },
-    new Map(),
+    restorePartsSnapshot,
+    turns,
     () => {}
   )
-  return { state, seeded }
+  return { state, turns }
 }
-// A streamed token raced the snapshot: its parts are stale, its identity is not.
-const raced = runSnapshot({ turnRevision: 0, partsRevision: 9 })
+const snapshotDeltas = [
+  {
+    sessionId: 'chat-1',
+    sequence: 4,
+    kind: 'event',
+    event: { type: 'text', delta: 'already included' }
+  },
+  {
+    sessionId: 'chat-1',
+    sequence: 6,
+    kind: 'event',
+    event: {
+      type: 'tool-child',
+      callId: 'task-1',
+      event: { type: 'tool-end', callId: 'read-1', ok: true, output: 'file contents' }
+    }
+  },
+  {
+    sessionId: 'chat-1',
+    sequence: 7,
+    kind: 'event',
+    event: { type: 'tool-child', callId: 'task-1', event: { type: 'text', delta: 'report' } }
+  },
+  {
+    sessionId: 'chat-1',
+    sequence: 8,
+    kind: 'event',
+    event: {
+      type: 'tool-child',
+      callId: 'task-2',
+      event: { type: 'tool-end', callId: 'read-1', ok: true, output: 'second file contents' }
+    }
+  },
+  { sessionId: 'other-chat', sequence: 9, kind: 'turn', state: 'idle' }
+]
+const raced = runSnapshot(snapshotDeltas)
 check(
   'a racing token does not erase who is speaking',
   raced.state.automationSpeakers['chat-1']?.botUsername === 'helper'
 )
-check('but its stale parts are still discarded', raced.seeded.length === 0)
-// A newer turn transition genuinely supersedes the snapshot.
-const superseded = runSnapshot({ turnRevision: 9, partsRevision: 9 })
+check(
+  'a racing child delta keeps both foreground task cards and preceding transcript',
+  raced.turns.get('chat-1')?.parts[0].text === 'prefix' &&
+    raced.turns.get('chat-1')?.parts.length === 3
+)
+check(
+  'only the unseen tail is replayed, with child call indexes restored',
+  raced.turns.get('chat-1')?.parts[1].children[0].state === 'done' &&
+    raced.turns.get('chat-1')?.parts[1].children[1].text === 'report' &&
+    raced.turns.get('chat-1')?.parts[2].children[0].output === 'second file contents'
+)
+for (let split = 0; split <= snapshotDeltas.length; split++) {
+  const restored = runSnapshot(snapshotDeltas.slice(0, split))
+  const fold = restored.turns.get('chat-1')
+  for (const delta of snapshotDeltas.slice(split)) {
+    if (delta.sessionId === 'chat-1' && delta.sequence > 5 && delta.kind === 'event')
+      fold.apply(delta.event)
+  }
+  check(
+    `two foreground tasks survive catch-up timing ${split}/${snapshotDeltas.length}`,
+    JSON.stringify(fold.parts) === JSON.stringify(raced.turns.get('chat-1').parts)
+  )
+}
+const superseded = runSnapshot([{ sessionId: 'chat-1', sequence: 9, kind: 'turn', state: 'idle' }])
 check(
   'a newer turn transition still wins over the snapshot',
   superseded.state.automationSpeakers['chat-1'] === undefined
 )
 // The ordinary case: nothing raced, so both identity and parts are adopted.
-const clean = runSnapshot({ turnRevision: 0, partsRevision: 0 })
+const clean = runSnapshot([])
 check(
   'an unraced snapshot restores the speaker and the stream',
-  clean.state.automationSpeakers['chat-1']?.botUsername === 'helper' && clean.seeded.length === 1
+  clean.state.automationSpeakers['chat-1']?.botUsername === 'helper' && clean.turns.size === 1
+)
+
+console.log('store: subagent hydration and offscreen completion')
+const subagentCode = [
+  src.match(/function rememberMessage\([\s\S]*?\n\}/)?.[0],
+  src.match(/async function loadTranscript\([\s\S]*?\n\}/)?.[0],
+  src.match(/function applyAutomationDelta\([\s\S]*?\n\}/)?.[0],
+  src.match(/function applyRemoteDelta\([\s\S]*?\n\}/)?.[0],
+  src.match(/function publishStream\([\s\S]*?\n\}/)?.[0],
+  src.match(/function applySubagentDelta\([\s\S]*?\n\}/)?.[0],
+  src.match(/async function hydrateSubagent\([\s\S]*?\n\}/)?.[0]
+].join('\n')
+const subagentState = {
+  activeChatId: 'parent',
+  messagesChatId: 'parent',
+  messages: [],
+  optimisticMessages: {},
+  optimisticQueue: {},
+  sendingChats: {},
+  runningAutomation: {},
+  automationSpeakers: {},
+  runningSubagents: {},
+  streamingChats: {},
+  subagentPreviews: {},
+  activityStartedAt: {},
+  refreshChats: async () => {
+    subagentRefreshes++
+  },
+  refreshUsage: async () => {}
+}
+let subagentRefreshes = 0
+const subagentSet = (patch) =>
+  Object.assign(subagentState, typeof patch === 'function' ? patch(subagentState) : patch)
+let snapshotRequest = deferred()
+let readMessages = async () => []
+const taskUpdateAction = src.match(
+  /^  handleTaskUpdate: async \(update\) => \{[\s\S]*?\n  \}/m
+)?.[0]
+const subagentFns = new Function(
+  'useRoxyStore',
+  'api',
+  'PartsFold',
+  'restorePartsSnapshot',
+  'createStreamPublisher',
+  'taskPreview',
+  'markActivity',
+  'clearActivity',
+  'visibleMessages',
+  'remainingOptimisticMessages',
+  'isToolStart',
+  transformSync(
+    `
+    let subagentRevision = 0
+    const subagentRunRevisions = new Map()
+    const subagentHydrations = new Map()
+    const subagentTurns = new Map()
+    const streamPublishers = new Map()
+    const transcriptLoads = new Map()
+    const remoteTurns = new Map()
+    let automationSnapshotEvents = null
+    let taskRevision = 0
+    const taskRevisions = new Map()
+    const get = useRoxyStore.getState, set = useRoxyStore.setState
+    ${subagentCode}
+    const actions = {${taskUpdateAction}}
+    return { apply: applySubagentDelta, hydrate: hydrateSubagent, turns: subagentTurns,
+      load: loadTranscript, remember: rememberMessage, automate: applyAutomationDelta,
+      updateTask: actions.handleTaskUpdate }
+  `,
+    { loader: 'ts' }
+  ).code
+)(
+  { getState: () => subagentState, setState: subagentSet },
+  {
+    subagents: { snapshot: () => snapshotRequest.promise },
+    messages: { list: (...args) => readMessages(...args) },
+    queue: { list: async () => [] }
+  },
+  PartsFold,
+  restorePartsSnapshot,
+  publisherModule.exports.createStreamPublisher,
+  taskPreview,
+  () => {},
+  () => {},
+  visibleMessages,
+  remainingOptimisticMessages,
+  (event) => event.type === 'tool-start'
+)
+subagentFns.apply({ subChatId: 'sub-1', sequence: 1, kind: 'run', state: 'running' })
+check(
+  'subagent start refreshes the sidebar for automation and local turns',
+  subagentRefreshes === 1
+)
+const hydration = subagentFns.hydrate('sub-1')
+subagentFns.apply({
+  subChatId: 'sub-1',
+  sequence: 8,
+  kind: 'event',
+  event: { type: 'text', delta: ' tail' }
+})
+snapshotRequest.resolve({
+  sequence: 7,
+  activityStartedAt: 100,
+  parts: [{ type: 'text', text: 'complete prefix' }]
+})
+await hydration
+flushFrames()
+check(
+  'a partial local fold does not discard the snapshot prefix',
+  subagentState.streamingChats['sub-1'][0].text === 'complete prefix tail'
+)
+subagentFns.apply({ subChatId: 'sub-1', sequence: 9, kind: 'run', state: 'completed' })
+check(
+  'offscreen completion removes stale bubbles and running flags',
+  !subagentState.streamingChats['sub-1'] &&
+    !subagentState.runningSubagents['sub-1'] &&
+    !subagentState.subagentPreviews['sub-1']
+)
+
+snapshotRequest = deferred()
+subagentFns.apply({ subChatId: 'sub-2', sequence: 10, kind: 'run', state: 'running' })
+const lateHydration = subagentFns.hydrate('sub-2')
+subagentFns.apply({ subChatId: 'sub-2', sequence: 12, kind: 'run', state: 'completed' })
+snapshotRequest.resolve({
+  sequence: 11,
+  activityStartedAt: 100,
+  parts: [{ type: 'text', text: 'stale running snapshot' }]
+})
+await lateHydration
+check(
+  'a snapshot resolving after completion cannot resurrect the run',
+  !subagentFns.turns.has('sub-2') &&
+    !subagentState.runningSubagents['sub-2'] &&
+    !subagentState.streamingChats['sub-2'] &&
+    !subagentState.subagentPreviews['sub-2']
+)
+
+subagentFns.apply({ subChatId: 'detached-review', sequence: 13, kind: 'run', state: 'running' })
+subagentFns.apply({
+  subChatId: 'detached-review',
+  sequence: 14,
+  kind: 'event',
+  event: {
+    type: 'tool-start',
+    callId: 'inspect',
+    tool: 'read',
+    title: 'src/shared/parts.ts'
+  }
+})
+flushFrames()
+check(
+  'without reloading, an offscreen detached task publishes progress into the parent preview',
+  subagentState.activeChatId === 'parent' &&
+    !subagentState.streamingChats.parent &&
+    subagentState.runningSubagents['detached-review'] &&
+    subagentState.subagentPreviews['detached-review'][0].state === 'running'
+)
+subagentFns.apply({
+  subChatId: 'detached-review',
+  sequence: 15,
+  kind: 'event',
+  event: {
+    type: 'tool-end',
+    callId: 'inspect',
+    ok: true,
+    output: 'inspection complete'
+  }
+})
+flushFrames()
+check(
+  'a completed child tool is visible without falsely completing the detached review',
+  subagentState.subagentPreviews['detached-review'][0].state === 'done' &&
+    subagentState.runningSubagents['detached-review']
+)
+subagentFns.apply({
+  subChatId: 'detached-review',
+  sequence: 16,
+  kind: 'event',
+  event: { type: 'text', delta: 'Final report' }
+})
+subagentFns.apply({ subChatId: 'detached-review', sequence: 17, kind: 'run', state: 'completed' })
+flushFrames()
+check(
+  'completion clears pending preview frames as well as the running indicator',
+  !subagentState.subagentPreviews['detached-review'] &&
+    !subagentState.runningSubagents['detached-review'] &&
+    !subagentState.streamingChats['detached-review'] &&
+    frames.size === 0
+)
+
+console.log('store: completed transcript survives delayed task refreshes')
+const userRow = {
+  id: 'user',
+  chatId: 'parent',
+  role: 'user',
+  createdAt: 1,
+  content: 'Original request',
+  parts: [{ type: 'text', text: 'Original request' }]
+}
+const resultRow = {
+  id: 'result',
+  chatId: 'parent',
+  role: 'assistant',
+  createdAt: 2,
+  content: '',
+  parts: [{ type: 'tool', tool: 'task', state: 'done', output: 'Background report' }]
+}
+const parentRow = {
+  id: 'parent-answer',
+  chatId: 'parent',
+  role: 'assistant',
+  createdAt: 3,
+  content: 'Full parent reply',
+  parts: [
+    { type: 'text', text: 'Full parent reply' },
+    { type: 'tool', tool: 'read', callId: 'parent-read', state: 'done', output: 'All parent work' }
+  ]
+}
+subagentState.messages = [userRow]
+subagentState.runningTasks = {}
+const staleMessages = deferred()
+const taskLoadStarted = deferred()
+readMessages = () => {
+  taskLoadStarted.resolve()
+  return staleMessages.promise
+}
+const taskLoad = subagentFns.updateTask({
+  jobId: 'result-job',
+  sessionId: 'parent',
+  state: 'completed'
+})
+await taskLoadStarted.promise
+subagentFns.remember(parentRow)
+staleMessages.resolve([userRow, resultRow])
+await taskLoad
+check(
+  'a background refresh begun before parent persistence cannot erase the saved parent reply',
+  visibleMessages(subagentState.messages, subagentState.optimisticMessages.parent).some(
+    (row) => row === parentRow
+  )
+)
+const oldLoad = deferred(),
+  newLoad = deferred()
+readMessages = () => oldLoad.promise
+const olderRead = subagentFns.load('parent')
+readMessages = () => newLoad.promise
+const newerRead = subagentFns.load('parent')
+newLoad.resolve([userRow, resultRow, parentRow])
+await newerRead
+oldLoad.resolve([userRow, resultRow])
+await olderRead
+check(
+  'an older read cannot erase a confirmed reply after the overlay retires',
+  subagentState.messages.at(-1) === parentRow && !subagentState.optimisticMessages.parent
+)
+
+let terminalRead = deferred()
+readMessages = () => terminalRead.promise
+subagentFns.automate({
+  sessionId: 'parent',
+  sequence: 20,
+  kind: 'turn',
+  state: 'running',
+  botId: 'guest',
+  botUsername: 'helper'
+})
+subagentFns.automate({
+  sessionId: 'parent',
+  sequence: 21,
+  kind: 'event',
+  event: { type: 'text', delta: 'Second full answer' }
+})
+flushFrames()
+const nextRow = {
+  ...parentRow,
+  id: 'next-answer',
+  createdAt: 4,
+  botId: 'guest',
+  botUsername: 'helper',
+  parts: [{ type: 'text', text: 'Second full answer' }]
+}
+subagentFns.automate({
+  sessionId: 'parent',
+  sequence: 22,
+  kind: 'turn',
+  state: 'idle',
+  message: nextRow
+})
+check(
+  'automation idle replaces the live bubble with the full saved reply before its read resolves',
+  !subagentState.streamingChats.parent &&
+    !subagentState.runningAutomation.parent &&
+    visibleMessages(subagentState.messages, subagentState.optimisticMessages.parent).at(-1) ===
+      nextRow
+)
+terminalRead.resolve(Promise.reject(new Error('temporary read failure')))
+await new Promise(setImmediate)
+check(
+  'failed reconciliation cannot hide the finished automation transcript',
+  visibleMessages(subagentState.messages, subagentState.optimisticMessages.parent).at(-1) ===
+    nextRow && !subagentState.messagesError
+)
+
+subagentState.activeChatId = 'retained-sub'
+subagentState.messagesChatId = 'retained-sub'
+subagentState.messages = [{ ...userRow, chatId: 'retained-sub' }]
+terminalRead = deferred()
+readMessages = () => terminalRead.promise
+subagentFns.apply({ subChatId: 'retained-sub', sequence: 23, kind: 'run', state: 'running' })
+subagentFns.apply({
+  subChatId: 'retained-sub',
+  sequence: 24,
+  kind: 'event',
+  event: { type: 'text', delta: 'Full child transcript' }
+})
+flushFrames()
+const childRow = {
+  ...parentRow,
+  chatId: 'retained-sub',
+  id: 'retained-child',
+  parts: [{ type: 'text', text: 'Full child transcript' }]
+}
+subagentFns.apply({
+  subChatId: 'retained-sub',
+  sequence: 25,
+  kind: 'run',
+  state: 'completed',
+  message: childRow
+})
+check(
+  'child completion retains the full transcript without a blank frame',
+  !subagentState.streamingChats['retained-sub'] &&
+    visibleMessages(subagentState.messages, subagentState.optimisticMessages['retained-sub']).at(
+      -1
+    ) === childRow
+)
+terminalRead.resolve([{ ...userRow, chatId: 'retained-sub' }, childRow])
+await new Promise(setImmediate)
+check(
+  'child transcript reconciliation deduplicates, rather than dropping, the saved answer',
+  subagentState.messages.length === 2 && !subagentState.optimisticMessages['retained-sub']
+)
+
+console.log('store: cancellation never lies about task completion')
+for (const name of ['cancelSubagent', 'cancelBackgroundTask']) {
+  const action = src.match(
+    new RegExp(`^  ${name}: async \\([^)]*\\) => \\{\\n[\\s\\S]*?\\n  \\},`, 'm')
+  )?.[0]
+  check(`${name}: cancellation handler found`, !!action)
+  let request = deferred()
+  let stateWrites = 0
+  const cancel = new Function(
+    'api',
+    'set',
+    transformSync(`const actions = {${action}}; return actions.${name}`, { loader: 'ts' }).code
+  )(
+    { subagents: { cancel: () => request.promise }, tasks: { cancel: () => request.promise } },
+    () => {
+      stateWrites++
+    }
+  )
+  const pending = cancel('parent-or-sub', 'job')
+  check(`${name}: pending cancellation keeps real running state`, stateWrites === 0)
+  request.resolve(Promise.reject(new Error('IPC unavailable')))
+  await pending.catch(() => {})
+  check(`${name}: failed cancellation does not hide unfinished work`, stateWrites === 0)
+  request = deferred()
+  const accepted = cancel('parent-or-sub', 'job')
+  request.resolve(true)
+  await accepted
+  check(`${name}: accepted cancellation still waits for the terminal event`, stateWrites === 0)
+}
+
+console.log('store: window recreation restores running tasks without reviving completed work')
+const taskBootstrap = src.match(/^    if \(!taskUpdateSubscribed\) \{[\s\S]*?^    \}/m)?.[0]
+const subagentBootstrap = src.match(/^    if \(!subagentDeltaSubscribed\) \{[\s\S]*?^    \}/m)?.[0]
+check('task and subagent restore handlers found', !!taskBootstrap && !!subagentBootstrap)
+const taskList = deferred()
+const subagentList = deferred()
+let taskListener
+let subagentListener
+const restored = {
+  runningSubagents: {},
+  activityStartedAt: {},
+  tasks: [],
+  refreshChats: async () => {}
+}
+const hydrated = []
+const taskRevisions = new Map()
+const subagentRunRevisions = new Map()
+const restoreState = (patch) =>
+  Object.assign(restored, typeof patch === 'function' ? patch(restored) : patch)
+new Function(
+  'api',
+  'get',
+  'set',
+  'taskRevisions',
+  'subagentRunRevisions',
+  'hydrateSubagent',
+  transformSync(
+    `
+    let taskUpdateSubscribed = false, subagentDeltaSubscribed = false
+    let taskRevision = 0, subagentRevision = 0
+    function applySubagentDelta(update) {
+      subagentRunRevisions.set(update.subChatId, ++subagentRevision)
+    }
+    ${taskBootstrap}
+    ${subagentBootstrap}
+  `,
+    { loader: 'ts' }
+  ).code
+)(
+  {
+    tasks: {
+      onUpdate: (cb) => {
+        taskListener = cb
+      },
+      listRunning: () => taskList.promise
+    },
+    subagents: {
+      onDelta: (cb) => {
+        subagentListener = cb
+      },
+      listRunning: () => subagentList.promise
+    }
+  },
+  () => ({
+    ...restored,
+    handleTaskUpdate: (update) => {
+      taskRevisions.set(update.jobId, 1)
+      if (update.state === 'running') restored.tasks.push(update)
+    }
+  }),
+  restoreState,
+  taskRevisions,
+  subagentRunRevisions,
+  (id) => {
+    hydrated.push(id)
+  }
+)
+taskListener({ jobId: 'finished', state: 'completed' })
+subagentListener({ subChatId: 'finished-sub', kind: 'run', state: 'completed' })
+taskList.resolve([
+  { jobId: 'finished', state: 'running' },
+  { jobId: 'running', state: 'running' }
+])
+subagentList.resolve([
+  { subChatId: 'finished-sub', activityStartedAt: 10 },
+  { subChatId: 'running-sub', activityStartedAt: 20 }
+])
+await taskList.promise
+await subagentList.promise
+check(
+  'a fresh window restores background task badges',
+  restored.tasks.length === 1 && restored.tasks[0].jobId === 'running'
+)
+check(
+  'late listRunning responses cannot restore finished subagents',
+  !restored.runningSubagents['finished-sub'] && restored.runningSubagents['running-sub']
+)
+check(
+  'running children hydrate even while the parent is on screen',
+  hydrated.length === 1 && hydrated[0] === 'running-sub'
 )
 
 const app = readFileSync(new URL('../src/renderer/src/App.tsx', import.meta.url), 'utf8').replace(
@@ -547,6 +1123,7 @@ const compactActions = new Function(
   'resolveSessionConfig',
   'resolveProviderModel',
   'remainingOptimisticMessages',
+  'loadTranscript',
   `${compactCompiled}\nreturn actions`
 )(
   {
@@ -562,7 +1139,8 @@ const compactActions = new Function(
   asChatId,
   (chat) => chat,
   (_provider, _models, selected) => selected || 'sibling-default',
-  (stored, pending) => pending.filter((item) => !stored.some((saved) => saved.id === item.id))
+  (stored, pending) => pending.filter((item) => !stored.some((saved) => saved.id === item.id)),
+  async () => {}
 )
 await compactActions.compactConversation('pinned-chat')
 check(

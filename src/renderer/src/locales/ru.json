@@ -98,7 +98,9 @@
     "queued": "В очереди",
     "runsAfterReply": "запускается после этого ответа",
     "settings": "Настройки",
-    "working": "работает"
+    "working": "работает",
+    "backgroundRunning_one": "{{count}} subagent still running",
+    "backgroundRunning_other": "{{count}} subagents still running"
   },
   "codeHosts": {
     "connected": "Подключено",
@@ -789,7 +791,8 @@
     "unchanged_other": "{{count}} неизменённых строк",
     "working": "работает",
     "writingAs": "{{name}} пишет…",
-    "you": "Вы"
+    "you": "Вы",
+    "openSubagent": "Open subagent session"
   },
   "usage": {
     "allProviders": "Все провайдеры, последние 30 дней",

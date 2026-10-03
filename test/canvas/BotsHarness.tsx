@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { HashRouter } from 'react-router-dom'
 import type { Bot, BotJob, BotJobInput } from '../../src/shared/bots'
-import type { Chat, Message, QueueItem } from '../../src/shared/types'
+import type { Chat, Message, MessagePart, QueueItem } from '../../src/shared/types'
 import { useRoxyStore } from '../../src/renderer/src/lib/store'
 import { Sidebar } from '../../src/renderer/src/components/Sidebar'
 import { ChatView } from '../../src/renderer/src/components/ChatView'
@@ -157,7 +157,22 @@ Object.assign(window.roxy, {
     },
     reorder: async () => {}
   },
-  subagents: { setViewed: async () => {} },
+  subagents: {
+    snapshot: async (id: string) => ({
+      parts: useRoxyStore.getState().subagentPreviews[id] ?? [],
+      sequence: 0,
+      activityStartedAt: Date.now()
+    }),
+    cancel: async (id: string) => {
+      window.__canvasTest.cancelled.push(id)
+      return true
+    }
+  },
+  tasks: {
+    cancel: async (id: string) => {
+      window.__canvasTest.cancelled.push(id)
+    }
+  },
   models: {
     pinned: async () => [],
     hidden: async () => [],
@@ -246,6 +261,151 @@ Object.assign(window.roxy, {
       ...state.sendingChats,
       [state.activeChatId]: !state.sendingChats[state.activeChatId]
     }
+  })
+}
+
+// Production ChatView projects the saved launch + live delegate + late result.
+;(
+  window as unknown as {
+    __taskFixture: (phase: 'running' | 'completed', continued?: boolean) => void
+  }
+).__taskFixture = (phase, continued = false) => {
+  const state = useRoxyStore.getState()
+  const chatId = state.activeChatId!
+  const owner = state.bots.find((bot) => bot.chatId === chatId)
+  const author = owner ? { botId: owner.id, botUsername: owner.username } : {}
+  const card: Extract<MessagePart, { type: 'tool' }> = {
+    type: 'tool',
+    tool: 'task',
+    callId: 'fixture-launch',
+    subChatId: 'fixture-sub',
+    state: 'done',
+    title: 'Explore: provider research',
+    input: { background: true },
+    output: 'Started'
+  }
+  const children: MessagePart[] = [
+    { type: 'text', text: 'Live delegate progress is visible here.' }
+  ]
+  const subChat = {
+    ...baseChat,
+    id: 'fixture-sub',
+    title: 'Explore: provider research',
+    kind: 'sub' as const,
+    parentId: chatId
+  }
+  const subIndex = chats.findIndex((chat) => chat.id === subChat.id)
+  if (subIndex < 0) chats.push(subChat)
+  else chats[subIndex] = subChat
+  messages = [
+    {
+      id: 'fixture-user',
+      chatId,
+      role: 'user',
+      createdAt: 1,
+      content: 'Research providers',
+      parts: [{ type: 'text', text: 'Research providers' }]
+    },
+    {
+      id: 'fixture-parent',
+      chatId,
+      role: 'assistant',
+      createdAt: 2,
+      content: '',
+      parts: [card],
+      ...author
+    },
+    ...(continued
+      ? Array.from(
+          { length: 12 },
+          (_, i): Message => ({
+            id: `fixture-followup-${i}`,
+            chatId,
+            role: i % 2 === 0 ? 'user' : 'assistant',
+            createdAt: 3 + i,
+            content: 'The parent conversation continued while the review was still running.',
+            parts: [
+              {
+                type: 'text',
+                text: 'The parent conversation continued while the review was still running.'
+              }
+            ],
+            ...(i % 2 ? author : {})
+          })
+        )
+      : []),
+    ...(phase === 'completed'
+      ? [
+          {
+            id: 'fixture-result',
+            chatId,
+            role: 'assistant' as const,
+            createdAt: 20,
+            content: '',
+            parts: [
+              {
+                ...card,
+                callId: 'fixture-result',
+                resultFor: card.callId,
+                output: 'Research complete.',
+                children
+              }
+            ],
+            ...author
+          }
+        ]
+      : [])
+  ]
+  messages.push(
+    {
+      id: 'fixture-sub-user',
+      chatId: 'fixture-sub',
+      role: 'user',
+      createdAt: 1,
+      content: 'Investigate provider boundaries',
+      parts: [{ type: 'text', text: 'Investigate provider boundaries' }]
+    },
+    ...(phase === 'completed'
+      ? [
+          {
+            id: 'fixture-sub-answer',
+            chatId: 'fixture-sub',
+            role: 'assistant' as const,
+            createdAt: 2,
+            content: 'Full retained delegate transcript',
+            parts: [
+              ...children,
+              { type: 'text' as const, text: 'Full retained delegate transcript' }
+            ]
+          }
+        ]
+      : [])
+  )
+  useRoxyStore.setState({
+    chats: [...chats],
+    messages: messages.filter((message) => message.chatId === chatId),
+    messagesChatId: chatId,
+    streamingChats: {},
+    sendingChats: {},
+    runningAutomation: {},
+    subagentPreviews: phase === 'running' ? { 'fixture-sub': children } : {},
+    runningSubagents: phase === 'running' ? { 'fixture-sub': true } : {},
+    runningTasks:
+      phase === 'running'
+        ? {
+            [chatId]: [
+              {
+                jobId: 'fixture-job',
+                sessionId: chatId,
+                subChatId: 'fixture-sub',
+                description: 'provider research',
+                subagentType: 'explore',
+                state: 'running',
+                startedAt: Date.now()
+              }
+            ]
+          }
+        : {}
   })
 }
 

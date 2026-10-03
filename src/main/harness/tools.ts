@@ -65,6 +65,9 @@ export interface ToolContext {
    * instead of inheriting one.
    */
   botId?: string
+  /** Durable conversation/actor to receive a subagent's asynchronous handoffs.
+   * This does not grant the delegate its parent's bot identity or settings. */
+  delegationOwner?: { sessionId: string; botId?: string; botUsername: string }
   /**
    * The key that isolates this turn's browser (window + tabs + console). Defaults
    * to sessionId, so each chat drives its own browser and concurrent chats never

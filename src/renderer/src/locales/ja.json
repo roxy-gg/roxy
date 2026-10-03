@@ -98,7 +98,9 @@
     "queued": "キューに入っています",
     "runsAfterReply": "この返信の後に実行",
     "settings": "設定",
-    "working": "作業中"
+    "working": "作業中",
+    "backgroundRunning_one": "{{count}} subagent still running",
+    "backgroundRunning_other": "{{count}} subagents still running"
   },
   "codeHosts": {
     "connected": "接続済み",
@@ -789,7 +791,8 @@
     "unchanged_other": "{{count}}行変更なし",
     "working": "作業中",
     "writingAs": "{{name}}が作成中…",
-    "you": "あなた"
+    "you": "あなた",
+    "openSubagent": "Open subagent session"
   },
   "usage": {
     "allProviders": "すべてのプロバイダー、過去30日間",

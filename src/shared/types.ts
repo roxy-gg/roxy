@@ -246,6 +246,8 @@ export type MessagePart =
        * on every other tool, and on task cards from before this existed.
        */
       subChatId?: string
+      /** An out-of-band task result attaches to this launching call in the UI. */
+      resultFor?: string
       /**
        * Whether this call could be cancelled while it was running — set from the
        * `tool-start` event (see LlmEvent), which resolves it from the tool

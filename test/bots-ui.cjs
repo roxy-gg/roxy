@@ -51,7 +51,7 @@ async function run() {
       bots: { ...api.bots, list: async () => f.bots },
       chats: { list: async () => f.chats, onUpdated: noop },
       tasks: { onUpdate: noop },
-      subagents: { setViewed: async () => {}, onDelta: noop, listRunning: async () => [] },
+  subagents: { onDelta: noop, listRunning: async () => [] },
       remote: { status: async () => store.getState().remote, onState: noop, onDelta: noop },
       usage: { stats: async () => null },
       automation: {

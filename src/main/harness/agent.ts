@@ -11,10 +11,16 @@
  * Wires without tool support yet (azure/bedrock) fall back to a plain answer.
  */
 import type { ChatMessage, LlmEvent } from '../../shared/api'
-import type { MessagePart, ReasoningEffort, TokenUsage, ToolResult } from '../../shared/types'
+import type {
+  Message,
+  MessagePart,
+  ReasoningEffort,
+  TokenUsage,
+  ToolResult
+} from '../../shared/types'
 import type { Bot, BotJob } from '../../shared/bots'
 import { isInterruptibleTool } from '../../shared/tools'
-import { PartsFold, partsToContent } from '../../shared/parts'
+import { PartsFold, partsToContent, taskPreview } from '../../shared/parts'
 import {
   getAgent,
   isReadOnlyAgent,
@@ -32,6 +38,8 @@ import { flattenToolHistory, sanitizeToolCallId } from '../../shared/tool-histor
 import { pruneToolMessages, KEEP_RECENT_TOKENS, messageTokens } from '../../shared/context'
 import {
   MAX_PARALLEL_SUBAGENTS,
+  BACKGROUND_TASK_CONTINUATION,
+  backgroundTaskRequest,
   parseTaskInput,
   partitionToolCalls,
   runTasksByWriteCapability,
@@ -43,9 +51,9 @@ import {
 import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import * as repo from '../db/repo'
-import { isHostSpeaker } from '../../shared/bots'
+import { HOST_USERNAME, isHostSpeaker } from '../../shared/bots'
 import { botActivity, chatBot, getBot, listBots, listJobs } from '../db/bots'
-import { runTool } from './tools'
+import { runTool, type ToolContext } from './tools'
 import { boundToolOutput } from '../services/tool-output-store'
 import { modelCost } from '../services/models'
 import {
@@ -77,6 +85,9 @@ import {
   cancelBackgroundJob
 } from '../services/background-tasks'
 import { startSubagentRun } from '../services/subagent-stream'
+import { enqueuePrompt } from '../services/automation'
+import { queuePaused } from '../services/turn-state'
+import { notifyTranscriptChanged } from '../services/remote'
 import { startToolRun } from '../services/tool-runs'
 import {
   recordRetry,
@@ -1412,6 +1423,7 @@ export async function runAgentTurn(opts: RunTurnOptions): Promise<void> {
     // Who the bot tools treat as "me": a guest keeps its own identity inside the
     // host's session, and Roxy has none.
     botId: actingBot?.id,
+    botUsername: actingBot?.username,
     browserKey: chatId,
     signal,
     emitTool: emit,
@@ -1431,6 +1443,7 @@ export async function runAgentTurn(opts: RunTurnOptions): Promise<void> {
 }
 
 interface LoopOptions {
+  delegationOwner?: ToolContext['delegationOwner']
   /** The connected provider — re-resolved each call so Copilot's token can refresh. */
   providerId: string
   copilotSession?: string | null
@@ -1446,6 +1459,7 @@ interface LoopOptions {
   /** The bot speaking this turn — the bot tools' notion of "me". Deliberately
    *  NOT inherited by subagents: a delegate names the bot it means. */
   botId?: string
+  botUsername?: string
   /** Isolation key for this turn's browser window/tabs. Top session = its chatId;
    *  subagents inherit the parent's key so a project shares one browser window. */
   browserKey?: string
@@ -1532,6 +1546,8 @@ async function runLoop(o: LoopOptions): Promise<string> {
     metricsId
   } = o
   let lastText = ''
+  let acceptingBackground = true
+  const backgroundResults: { message: Message; resume: () => void }[] = []
 
   // The tool list is normally fixed for the turn, but the `mcp` tool can connect a
   // brand-new server mid-turn. When it does, we recompute the MCP schemas and merge
@@ -1546,231 +1562,260 @@ async function runLoop(o: LoopOptions): Promise<string> {
 
   // No step cap — keep streaming → running tools → repeating until the model
   // finishes with prose (no tool calls) or the user stops it (signal aborts).
-  for (;;) {
-    if (signal.aborted) return lastText
-    if (
-      o.copilotSession !== undefined &&
-      repo.getCopilotSessionKey(providerId) !== o.copilotSession
-    ) {
-      throw new ModelHttpError(409, 'GitHub Copilot account changed during this turn. Try again.')
-    }
-    const { text, toolCalls, usage } = await streamTurn(
-      providerId,
-      vision,
-      model,
-      trimConvo(convo, contextLimit, metricsId),
-      signal,
-      reasoning,
-      effort,
-      liveTools,
-      onText,
-      onReasoning,
-      { onRetry: () => recordRetry(metricsId) }
-    )
-    // Record this model call's usage/cost (subagents pass their own sessionId).
-    const cost = recordCall(providerId, model, sessionId, usage)
-    // ...and the same call's shape into the in-flight turn summary. Attributed
-    // to `metricsId` (the TOP-level session) rather than `sessionId`, so a
-    // subagent's model calls roll up into the turn the user actually started -
-    // its own sub-session has no collector and its work would otherwise vanish.
-    recordStep(
-      metricsId,
-      model,
-      usage ? { input: usage.input, output: usage.output, cacheRead: usage.cacheRead } : null,
-      cost
-    )
-    if (text) lastText = text
-    if (toolCalls.length === 0) return lastText // model finished with prose
-
-    convo.push({
-      role: 'assistant',
-      content: text || null,
-      tool_calls: toolCalls.map((tc) => ({
-        id: tc.id,
-        type: 'function',
-        function: { name: tc.name, arguments: tc.args }
-      }))
-    })
-
-    // Run the turn's tool calls. `task` delegations overlap with the other
-    // tools, which stay sequential so file-mutating calls can't race each other.
-    // Every result is paired back to its call id in the ORIGINAL order, so the
-    // assistant.tool_calls → role:'tool' structure the model sees stays valid.
-    const { tasks, others } = partitionToolCalls(toolCalls)
-
-    // Subagents inherit their parent's cwd verbatim — they must, since their
-    // work has to land in the tree that spawned them. That makes two parallel
-    // WRITE-capable subagents a file race inside a single session, so
-    // concurrency is constrained by write capability rather than by worktree:
-    //   - readers (explore) still fan out through the bounded pool
-    //   - writers (general) run strictly one at a time
-    // Parallel writes belong in separate top-level sessions, which get their own
-    // worktrees and therefore their own filesystem.
-    //
-    // KNOWN GAP: a BACKGROUND write-capable subagent (background: true) is
-    // detached by design and is not covered by this rule, so it can still race a
-    // foreground writer. Guarding it with the same lock was considered and
-    // rejected: a background subagent can run for minutes, so a shared mutex
-    // would let detached work stall an interactive turn — head-of-line blocking
-    // that's a worse failure than the race it prevents. It's handled at the
-    // prompt level instead (see renderBackgroundStarted, which tells the model
-    // not to touch the same files as a running background task).
-    const runTask = async (tc: PlannedCall): Promise<{ id: string; content: string }> => {
-      const parsed = parseTaskInput(tc.args)
-      try {
-        const result = await runSubagent({
-          callId: tc.id,
-          input: parsed,
-          providerId,
-          copilotSession: o.copilotSession,
-          vision,
-          model,
-          cwd,
-          parentChatId,
-          // Subagents share their parent's browser window (its project's one window).
-          browserKey,
-          readOnly,
-          signal,
-          emit: emitTool,
-          reasoning,
-          effort,
-          contextLimit,
-          depth,
-          mcpTools: liveMcpTools,
-          skillTools,
-          skillInfo,
-          metricsId
+  try {
+    for (;;) {
+      if (signal.aborted) return lastText
+      if (backgroundResults.length) {
+        convo.push({
+          role: 'user',
+          content: backgroundTaskRequest(backgroundResults.splice(0).map(({ message }) => message))
         })
-        return { id: tc.id, content: result.slice(0, 12_000) }
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e)
-        return { id: tc.id, content: renderTaskResult(parsed.subagentType, 'error', msg) }
       }
-    }
-
-    // Started here, not awaited, so the subagents run while the sequential tools
-    // below execute. runTask never throws (runSubagent handles its own errors,
-    // and the guard inside turns any setup failure into a task_error).
-    // Delegation is one of the strongest signals we have about how Roxy is
-    // really used - a session that fans out to subagents is a different product
-    // from one that answers questions - so count the spawns and flag the
-    // capability once per session.
-    for (let i = 0; i < tasks.length; i++) recordSubagent(metricsId)
-    if (tasks.length > 0) trackFeature(metricsId, 'subagent')
-
-    const tasksSettled = runTasksByWriteCapability(tasks, {
-      isWriteCapable: (tc) => isWriteCapableSubagent(parseTaskInput(tc.args).subagentType),
-      limit: MAX_PARALLEL_SUBAGENTS,
-      run: runTask,
-      aborted: () => signal.aborted
-    })
-
-    const resultById = new Map<string, string>()
-    for (const tc of others) {
-      if (signal.aborted) break
-      let input: Record<string, unknown> = {}
-      try {
-        input = tc.args.trim() ? (JSON.parse(tc.args) as Record<string, unknown>) : {}
-      } catch {
-        input = {}
+      if (
+        o.copilotSession !== undefined &&
+        repo.getCopilotSessionKey(providerId) !== o.copilotSession
+      ) {
+        throw new ModelHttpError(409, 'GitHub Copilot account changed during this turn. Try again.')
+      }
+      const { text, toolCalls, usage } = await streamTurn(
+        providerId,
+        vision,
+        model,
+        trimConvo(convo, contextLimit, metricsId),
+        signal,
+        reasoning,
+        effort,
+        liveTools,
+        onText,
+        onReasoning,
+        { onRetry: () => recordRetry(metricsId) }
+      )
+      // Record this model call's usage/cost (subagents pass their own sessionId).
+      const cost = recordCall(providerId, model, sessionId, usage)
+      // ...and the same call's shape into the in-flight turn summary. Attributed
+      // to `metricsId` (the TOP-level session) rather than `sessionId`, so a
+      // subagent's model calls roll up into the turn the user actually started -
+      // its own sub-session has no collector and its work would otherwise vanish.
+      recordStep(
+        metricsId,
+        model,
+        usage ? { input: usage.input, output: usage.output, cacheRead: usage.cacheRead } : null,
+        cost
+      )
+      if (text) lastText = text
+      if (toolCalls.length === 0) {
+        // A detached result may have arrived DURING this model response. Give it
+        // another step instead of silently ending before it has seen the report.
+        if (!backgroundResults.length) return lastText
+        if (text) {
+          convo.push({ role: 'assistant', content: text })
+          onText('\n\n')
+        }
+        continue
       }
 
-      emitTool({
-        type: 'tool-start',
-        callId: tc.id,
-        tool: tc.name,
-        title: toolTitle(tc.name, input),
-        input,
-        // Whether this card gets a cancel button. Resolved here, in the one place
-        // that knows the tool's real name (MCP names are only known at runtime),
-        // rather than re-derived in the renderer from a list that would drift.
-        cancellable: isInterruptibleTool(tc.name)
-      })
-      // Its OWN controller, chained to the turn's signal rather than being it —
-      // the same shape a subagent gets, and for the same reason. Stop still
-      // cascades (the listener below), but cancelling this ONE call aborts only
-      // this controller, so the turn survives, the model reads a cancelled result
-      // for this call, and every other tool result in the step is preserved.
-      const callController = new AbortController()
-      const cascade = (): void => callController.abort()
-      if (signal.aborted) callController.abort()
-      else signal.addEventListener('abort', cascade, { once: true })
-      const run = startToolRun({
-        callId: tc.id,
-        tool: tc.name,
-        sessionId: sessionId ?? '',
-        cancel: cascade
-      })
-      let result: ToolResult
-      try {
-        result = await runTool(tc.name, input, {
-          cwd,
-          sessionId,
-          botId,
-          browserKey,
-          // Stop must reach INSIDE the tool, not just between calls. Without this
-          // the loop's `if (signal.aborted) break` above only fires once the
-          // current tool returns on its own, which is why Stop looked stuck
-          // during a long bash or a hanging fetch.
-          signal: callController.signal,
-          onChunk: (chunk) => emitTool({ type: 'tool-delta', callId: tc.id, chunk })
-        })
-        // Distinguish "the user cancelled this one call" from "Stop killed the
-        // turn". Both abort the same signal, so the tool can't tell them apart —
-        // only the registry knows which lever was pulled. The wording matters:
-        // the turn CONTINUES after a per-call cancel, and the model is about to
-        // read this, so it has to understand not to immediately retry.
-        if (run.wasCancelled())
-          result = { ...result, ok: false, output: cancelledToolReport(result.output) }
-      } finally {
-        run.end()
-        signal.removeEventListener('abort', cascade)
-      }
-      emitTool({
-        type: 'tool-end',
-        callId: tc.id,
-        output: result.output,
-        ok: result.ok,
-        image: result.image,
-        diff: result.diff
-      })
-      // Count the call. `recordTool` collapses the name through the closed
-      // vocabulary, so an MCP tool reports as the literal `mcp` and its
-      // server id (which is user-chosen, and often an employer's internal
-      // service name) never leaves the process.
-      recordTool(metricsId, tc.name, result.ok)
-      if (tc.name.startsWith('mcp__')) trackFeature(metricsId, 'mcp_server')
-      else if (tc.name === SKILL_TOOL_NAME) trackFeature(metricsId, 'skill')
-      else if (tc.name.startsWith('browser_')) trackFeature(metricsId, 'browser')
-      else if (tc.name.startsWith('bot_')) trackFeature(metricsId, 'bot')
-      // Full output still streams to the UI (tool-end above); for the model's
-      // rolling context, spill oversized results to disk and keep a head/tail
-      // preview + a read-tool pointer instead of a blind 8k cut (Phase 9.3).
-      const toolText = stripAnsi(result.output) || '(no output)'
-      resultById.set(tc.id, await boundToolOutput(sessionId ?? '', tc.id, toolText))
-    }
-
-    // If the model just added/enabled/reconnected an MCP server via the `mcp` tool,
-    // its connection is now live in the process-global pool — recompute this
-    // workspace's MCP schemas and merge them into the tool list so the new tools
-    // are callable on the very next model step (this turn), not only next message.
-    if (cwd && !readOnly && others.some((tc) => tc.name === 'mcp')) {
-      const ids = new Set(gatherMcpRecords(cwd).map((r) => r.id))
-      liveMcpTools = mcpToolSchemas(ids)
-      liveTools = [...baseTools, ...liveMcpTools]
-    }
-
-    // Join the subagents, then append every tool result in the original
-    // tool_calls order so the paired structure is preserved for the next stream.
-    for (const r of await tasksSettled) resultById.set(r.result.id, r.result.content)
-    if (signal.aborted) return lastText
-    for (const tc of toolCalls) {
       convo.push({
-        role: 'tool',
-        tool_call_id: tc.id,
-        content: resultById.get(tc.id) ?? '(no result)'
+        role: 'assistant',
+        content: text || null,
+        tool_calls: toolCalls.map((tc) => ({
+          id: tc.id,
+          type: 'function',
+          function: { name: tc.name, arguments: tc.args }
+        }))
       })
+
+      // Run the turn's tool calls. `task` delegations overlap with the other
+      // tools, which stay sequential so file-mutating calls can't race each other.
+      // Every result is paired back to its call id in the ORIGINAL order, so the
+      // assistant.tool_calls → role:'tool' structure the model sees stays valid.
+      const { tasks, others } = partitionToolCalls(toolCalls)
+
+      // Subagents inherit their parent's cwd verbatim — they must, since their
+      // work has to land in the tree that spawned them. That makes two parallel
+      // WRITE-capable subagents a file race inside a single session, so
+      // concurrency is constrained by write capability rather than by worktree:
+      //   - readers (explore) still fan out through the bounded pool
+      //   - writers (general) run strictly one at a time
+      // Parallel writes belong in separate top-level sessions, which get their own
+      // worktrees and therefore their own filesystem.
+      //
+      // KNOWN GAP: a BACKGROUND write-capable subagent (background: true) is
+      // detached by design and is not covered by this rule, so it can still race a
+      // foreground writer. Guarding it with the same lock was considered and
+      // rejected: a background subagent can run for minutes, so a shared mutex
+      // would let detached work stall an interactive turn — head-of-line blocking
+      // that's a worse failure than the race it prevents. It's handled at the
+      // prompt level instead (see renderBackgroundStarted, which tells the model
+      // not to touch the same files as a running background task).
+      const runTask = async (tc: PlannedCall): Promise<{ id: string; content: string }> => {
+        const parsed = parseTaskInput(tc.args)
+        try {
+          const result = await runSubagent({
+            callId: tc.id,
+            input: parsed,
+            providerId,
+            copilotSession: o.copilotSession,
+            vision,
+            model,
+            cwd,
+            parentChatId,
+            parentActor: { botId, botUsername: o.botUsername ?? HOST_USERNAME },
+            onBackgroundResult: (message, resume) => {
+              if (!acceptingBackground || signal.aborted) return false
+              backgroundResults.push({ message, resume })
+              return true
+            },
+            // Subagents share their parent's browser window (its project's one window).
+            browserKey,
+            readOnly,
+            signal,
+            emit: emitTool,
+            reasoning,
+            effort,
+            contextLimit,
+            depth,
+            mcpTools: liveMcpTools,
+            skillTools,
+            skillInfo,
+            metricsId
+          })
+          return { id: tc.id, content: result.slice(0, 12_000) }
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e)
+          return { id: tc.id, content: renderTaskResult(parsed.subagentType, 'error', msg) }
+        }
+      }
+
+      // Started here, not awaited, so the subagents run while the sequential tools
+      // below execute. runTask never throws (runSubagent handles its own errors,
+      // and the guard inside turns any setup failure into a task_error).
+      // Delegation is one of the strongest signals we have about how Roxy is
+      // really used - a session that fans out to subagents is a different product
+      // from one that answers questions - so count the spawns and flag the
+      // capability once per session.
+      for (let i = 0; i < tasks.length; i++) recordSubagent(metricsId)
+      if (tasks.length > 0) trackFeature(metricsId, 'subagent')
+
+      const tasksSettled = runTasksByWriteCapability(tasks, {
+        isWriteCapable: (tc) => isWriteCapableSubagent(parseTaskInput(tc.args).subagentType),
+        limit: MAX_PARALLEL_SUBAGENTS,
+        run: runTask,
+        aborted: () => signal.aborted
+      })
+
+      const resultById = new Map<string, string>()
+      for (const tc of others) {
+        if (signal.aborted) break
+        let input: Record<string, unknown> = {}
+        try {
+          input = tc.args.trim() ? (JSON.parse(tc.args) as Record<string, unknown>) : {}
+        } catch {
+          input = {}
+        }
+
+        emitTool({
+          type: 'tool-start',
+          callId: tc.id,
+          tool: tc.name,
+          title: toolTitle(tc.name, input),
+          input,
+          // Whether this card gets a cancel button. Resolved here, in the one place
+          // that knows the tool's real name (MCP names are only known at runtime),
+          // rather than re-derived in the renderer from a list that would drift.
+          cancellable: isInterruptibleTool(tc.name)
+        })
+        // Its OWN controller, chained to the turn's signal rather than being it —
+        // the same shape a subagent gets, and for the same reason. Stop still
+        // cascades (the listener below), but cancelling this ONE call aborts only
+        // this controller, so the turn survives, the model reads a cancelled result
+        // for this call, and every other tool result in the step is preserved.
+        const callController = new AbortController()
+        const cascade = (): void => callController.abort()
+        if (signal.aborted) callController.abort()
+        else signal.addEventListener('abort', cascade, { once: true })
+        const run = startToolRun({
+          callId: tc.id,
+          tool: tc.name,
+          sessionId: sessionId ?? '',
+          cancel: cascade
+        })
+        let result: ToolResult
+        try {
+          result = await runTool(tc.name, input, {
+            cwd,
+            sessionId,
+            botId,
+            delegationOwner: o.delegationOwner,
+            browserKey,
+            // Stop must reach INSIDE the tool, not just between calls. Without this
+            // the loop's `if (signal.aborted) break` above only fires once the
+            // current tool returns on its own, which is why Stop looked stuck
+            // during a long bash or a hanging fetch.
+            signal: callController.signal,
+            onChunk: (chunk) => emitTool({ type: 'tool-delta', callId: tc.id, chunk })
+          })
+          // Distinguish "the user cancelled this one call" from "Stop killed the
+          // turn". Both abort the same signal, so the tool can't tell them apart —
+          // only the registry knows which lever was pulled. The wording matters:
+          // the turn CONTINUES after a per-call cancel, and the model is about to
+          // read this, so it has to understand not to immediately retry.
+          if (run.wasCancelled())
+            result = { ...result, ok: false, output: cancelledToolReport(result.output) }
+        } finally {
+          run.end()
+          signal.removeEventListener('abort', cascade)
+        }
+        emitTool({
+          type: 'tool-end',
+          callId: tc.id,
+          output: result.output,
+          ok: result.ok,
+          image: result.image,
+          diff: result.diff
+        })
+        // Count the call. `recordTool` collapses the name through the closed
+        // vocabulary, so an MCP tool reports as the literal `mcp` and its
+        // server id (which is user-chosen, and often an employer's internal
+        // service name) never leaves the process.
+        recordTool(metricsId, tc.name, result.ok)
+        if (tc.name.startsWith('mcp__')) trackFeature(metricsId, 'mcp_server')
+        else if (tc.name === SKILL_TOOL_NAME) trackFeature(metricsId, 'skill')
+        else if (tc.name.startsWith('browser_')) trackFeature(metricsId, 'browser')
+        else if (tc.name.startsWith('bot_')) trackFeature(metricsId, 'bot')
+        // Full output still streams to the UI (tool-end above); for the model's
+        // rolling context, spill oversized results to disk and keep a head/tail
+        // preview + a read-tool pointer instead of a blind 8k cut (Phase 9.3).
+        const toolText = stripAnsi(result.output) || '(no output)'
+        resultById.set(tc.id, await boundToolOutput(sessionId ?? '', tc.id, toolText))
+      }
+
+      // If the model just added/enabled/reconnected an MCP server via the `mcp` tool,
+      // its connection is now live in the process-global pool — recompute this
+      // workspace's MCP schemas and merge them into the tool list so the new tools
+      // are callable on the very next model step (this turn), not only next message.
+      if (cwd && !readOnly && others.some((tc) => tc.name === 'mcp')) {
+        const ids = new Set(gatherMcpRecords(cwd).map((r) => r.id))
+        liveMcpTools = mcpToolSchemas(ids)
+        liveTools = [...baseTools, ...liveMcpTools]
+      }
+
+      // Join the subagents, then append every tool result in the original
+      // tool_calls order so the paired structure is preserved for the next stream.
+      for (const r of await tasksSettled) resultById.set(r.result.id, r.result.content)
+      if (signal.aborted) return lastText
+      for (const tc of toolCalls) {
+        convo.push({
+          role: 'tool',
+          tool_call_id: tc.id,
+          content: resultById.get(tc.id) ?? '(no result)'
+        })
+      }
     }
+  } finally {
+    acceptingBackground = false
+    // If another tool failed before the next model step, keep undelivered
+    // reports routable. The continuation still respects the session's Stop.
+    for (const result of backgroundResults) result.resume()
   }
 }
 
@@ -1784,6 +1829,8 @@ interface SubagentOptions {
   model: string
   cwd: string
   parentChatId?: string
+  parentActor: { botId?: string; botUsername: string }
+  onBackgroundResult: (message: Message, resume: () => void) => boolean
   /** Browser isolation key inherited from the parent, so the subagent shares the
    *  project's one browser window instead of spawning its own. */
   browserKey?: string
@@ -1833,6 +1880,9 @@ async function runSubagent(o: SubagentOptions): Promise<string> {
     metricsId
   } = o
   const { description, prompt, subagentType, background } = input
+  const parentHops = parentChatId
+    ? repo.listQueue(parentChatId).find((item) => item.state === 'running')?.hops
+    : undefined
   const fail = (msg: string): string => {
     emit({
       type: 'tool-start',
@@ -1894,22 +1944,27 @@ async function runSubagent(o: SubagentOptions): Promise<string> {
     runSignal: AbortSignal,
     forwardToParent: boolean,
     onCancel: () => void
-  ): Promise<{ report: string; state: 'completed' | 'error' | 'cancelled' }> => {
+  ): Promise<{
+    report: string
+    state: 'completed' | 'error' | 'cancelled'
+    children: MessagePart[]
+  }> => {
     // One fold builds the subagent's transcript; the same events fan out to the
     // parent's `task` card and to the sub session's own live stream, so all three
     // views are the same thing by construction and cannot drift.
     const fold = new PartsFold()
-    const persistSub = (): void => {
+    const persistSub = (): Message | undefined => {
       if (!subChatId) return
       try {
-        repo.addMessage({
+        return repo.addMessage({
           chatId: subChatId,
           role: 'assistant',
           content: partsToContent(fold.parts),
-          parts: fold.parts
+          parts: fold.parts.length ? fold.parts : undefined
         })
       } catch {
         // best-effort — never break the parent turn over sub-session persistence
+        return undefined
       }
     }
     // The sub session's own live feed. Registered only when the subagent was
@@ -1963,6 +2018,7 @@ async function runSubagent(o: SubagentOptions): Promise<string> {
         // Attribute the subagent's model calls to its own sub-session (or the
         // parent when it wasn't persisted), so its spend still lands in totals.
         sessionId: subChatId ?? parentChatId ?? undefined,
+        delegationOwner: parentChatId ? { sessionId: parentChatId, ...o.parentActor } : undefined,
         // Inherit the parent's browser window so the project keeps ONE browser.
         browserKey,
         signal: runSignal,
@@ -1992,22 +2048,39 @@ async function runSubagent(o: SubagentOptions): Promise<string> {
       // report would be handed to the parent model as a real answer. (The
       // background path already guarded this; the foreground path did not.)
       const cancelled = runSignal.aborted
-      persistSub()
+      const savedMessage = persistSub()
       // Persist BEFORE ending the run: the renderer reloads the sub session's
       // transcript on the end frame, and reloading before the row exists would
       // blank the view for a beat between the live bubble and the saved message.
-      live?.finish(cancelled ? 'error' : 'completed')
+      live?.finish(cancelled ? 'error' : 'completed', savedMessage)
       if (cancelled) {
-        return { report: cancelledReport(description, text), state: 'cancelled' }
+        return {
+          report: cancelledReport(description, text),
+          state: 'cancelled',
+          children: taskPreview(fold.parts)
+        }
       }
-      return { report: text.trim() || '(subagent returned no report)', state: 'completed' }
+      return {
+        report: text.trim() || '(subagent returned no report)',
+        state: 'completed',
+        children: taskPreview(fold.parts)
+      }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
       const cancelled = runSignal.aborted
-      persistSub()
-      live?.finish('error')
-      if (cancelled) return { report: cancelledReport(description, ''), state: 'cancelled' }
-      return { report: `Subagent failed: ${msg}`, state: 'error' }
+      const savedMessage = persistSub()
+      live?.finish('error', savedMessage)
+      if (cancelled)
+        return {
+          report: cancelledReport(description, ''),
+          state: 'cancelled',
+          children: taskPreview(fold.parts)
+        }
+      return {
+        report: `Subagent failed: ${msg}`,
+        state: 'error',
+        children: taskPreview(fold.parts)
+      }
     }
   }
 
@@ -2044,7 +2117,7 @@ async function runSubagent(o: SubagentOptions): Promise<string> {
       subagentType
     })
     void runBody(bgSignal, false, () => cancelBackgroundJob(jobId))
-      .then(({ report, state }) => {
+      .then(({ report, state, children }) => {
         // A cancelled job (session delete, app quit, or explicit cancel) aborts
         // bgSignal. That abort can land BETWEEN steps, where runLoop returns
         // normally with a partial/empty report — so `state` may be 'completed'
@@ -2060,10 +2133,11 @@ async function runSubagent(o: SubagentOptions): Promise<string> {
         // so it's visible in the transcript AND becomes structured tool history the
         // next turn can see (reconstructTurn pairs the call with its result).
         try {
-          repo.addMessage({
+          const message = repo.addMessage({
             chatId: parentChatId,
             role: 'assistant',
             content: '',
+            ...o.parentActor,
             parts: [
               {
                 type: 'tool',
@@ -2073,11 +2147,43 @@ async function runSubagent(o: SubagentOptions): Promise<string> {
                   cancelled ? 'cancelled' : finalState === 'error' ? 'failed' : 'done'
                 }: ${description}`,
                 callId: `bgres_${jobId}`,
+                resultFor: callId,
+                subChatId: subChatId ?? undefined,
                 input: { description, subagent_type: subagentType, background: true },
-                output: finalReport
+                output: finalReport,
+                children
               }
             ]
           })
+          notifyTranscriptChanged(parentChatId)
+          if (!cancelled) {
+            const resume = (): void => {
+              if (queuePaused(parentChatId) || !repo.getChat(parentChatId)) return
+              // One pending continuation per actor can consume several reports.
+              // Never dedupe against a running turn: its context is already fixed.
+              if (
+                repo
+                  .listQueue(parentChatId)
+                  .some(
+                    (item) =>
+                      item.state === 'pending' &&
+                      item.content === BACKGROUND_TASK_CONTINUATION &&
+                      item.botId === o.parentActor.botId &&
+                      (!!item.botId || item.botUsername === o.parentActor.botUsername)
+                  )
+              )
+                return
+              enqueuePrompt(parentChatId, BACKGROUND_TASK_CONTINUATION, undefined, {
+                sourceChatId: parentChatId,
+                recipientId: o.parentActor.botId ?? HOST_USERNAME,
+                asBotId: o.parentActor.botId,
+                messageId: message.id,
+                hops: parentHops,
+                ...o.parentActor
+              })
+            }
+            if (!o.onBackgroundResult(message, resume)) resume()
+          }
         } catch {
           // parent may have been deleted mid-run — the broadcast below still fires
         }

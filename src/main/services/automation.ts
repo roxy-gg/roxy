@@ -1,7 +1,7 @@
 /** Main-process queue owner. Claims are durable; renderer windows only mirror turns. */
 import { BrowserWindow } from 'electron'
 import { randomUUID } from 'node:crypto'
-import type { QueueImage, QueueItem, MessagePart } from '../../shared/types'
+import type { QueueImage, QueueItem, Message, MessagePart } from '../../shared/types'
 import type { ChatMessage, RemoteDelta } from '../../shared/api'
 import { CHANNELS } from '../../shared/ipc'
 import { PartsFold, partsToContent } from '../../shared/parts'
@@ -16,6 +16,7 @@ import {
 import { pickDefaultModel } from '../../shared/models'
 import { HOST_USERNAME, isHostSpeaker } from '../../shared/bots'
 import { queueOrigin } from '../../shared/queue'
+import { backgroundTaskRequest } from '../../shared/parallel'
 import * as repo from '../db/repo'
 import * as bots from '../db/bots'
 import { getDb } from '../db/database'
@@ -41,6 +42,7 @@ const activityStartedAt = new Map<string, number>()
  * has no bot row - and staying unnamed there would read as that chat's bot.
  */
 const speakers = new Map<string, { botId?: string; botUsername: string }>()
+let sequence = 0
 
 /**
  * How far a request may be handed on before it needs a human again.
@@ -73,9 +75,10 @@ export function notifyBots(): void {
 }
 
 function emit(delta: RemoteDelta): void {
+  const payload = { ...delta, sequence: ++sequence }
   for (const win of BrowserWindow.getAllWindows()) {
     try {
-      if (!win.isDestroyed()) win.webContents.send(CHANNELS.automationDelta, delta)
+      if (!win.isDestroyed()) win.webContents.send(CHANNELS.automationDelta, payload)
     } catch {
       /* window teardown */
     }
@@ -85,6 +88,7 @@ function emit(delta: RemoteDelta): void {
 export function automationSnapshot(): {
   sessionId: string
   parts: MessagePart[]
+  sequence: number
   activityStartedAt: number
   botId?: string
   botUsername?: string
@@ -92,6 +96,7 @@ export function automationSnapshot(): {
   return [...live].map(([sessionId, fold]) => ({
     sessionId,
     parts: fold.parts,
+    sequence,
     activityStartedAt: activityStartedAt.get(sessionId) ?? Date.now(),
     ...speakers.get(sessionId)
   }))
@@ -123,6 +128,8 @@ export function enqueuePrompt(
      * drain does not re-attribute it as an assistant handoff row.
      */
     fromUser?: boolean
+    /** Reuse an already-persisted result rather than inserting a synthetic prompt. */
+    messageId?: string
   } = {}
 ): QueueItem {
   if (!repo.getChat(chatId)) throw new Error('Session not found')
@@ -151,7 +158,7 @@ export function enqueuePrompt(
   if (count.n >= 100) throw new Error('This session already has 100 queued messages')
   const trimmed = content.trim()
   const item = getDb().transaction(() => {
-    let messageId: string | null = null
+    let messageId: string | null = options.messageId ?? null
     if (options.fromUser && options.sourceChatId) {
       const message = repo.addMessage({
         chatId,
@@ -264,13 +271,19 @@ function history(
   budget: number,
   outputReserve: number,
   speaker?: ReturnType<typeof bots.getBot>,
-  asHost = false
+  asHost = false,
+  suppliedReports: ReadonlySet<string> = new Set()
 ): ChatMessage[] {
   const since = repo.getChat(chatId)?.contextSummaryAt ?? 0
   const self = asHost ? undefined : (speaker ?? bots.chatBot(chatId))
   const groups = repo
     .listMessages(chatId)
-    .filter((m) => (m.role === 'user' || m.role === 'assistant') && m.createdAt > since)
+    .filter(
+      (m) =>
+        (m.role === 'user' || m.role === 'assistant') &&
+        m.createdAt > since &&
+        !suppliedReports.has(m.id)
+    )
     .map((m) => reconstructTurn(m, self))
     .filter((g) => g.length)
   const pruned = pruneToolMessages(groups.flat(), { keepRecentTokens: KEEP_RECENT_TOKENS })
@@ -349,6 +362,7 @@ async function deliver(item: QueueItem): Promise<void> {
   // How a reply copied to the CALLER's transcript is signed. Same reason, one
   // transcript over: unsigned there means "the bot that owns that chat".
   let returnAuthor: { botId?: string; botUsername?: string } = {}
+  let savedMessage: Message | undefined
   const relay = relayLocalTurnStart(item.chatId)
   try {
     // Read persisted handoff metadata before choosing the speaker and config.
@@ -453,6 +467,25 @@ async function deliver(item: QueueItem): Promise<void> {
     if (!guest && !hostVisiting && estimated > budget * 0.8)
       await compactChat(item.chatId, provider.id, model, controller.signal)
     if (controller.signal.aborted) throw new Error('Stopped.')
+    // message_id anchors the first pending report. Later sibling reports are
+    // coalesced into this continuation even if compaction covered their rows.
+    const transcript = repo.listMessages(item.chatId)
+    const firstReport = transcript.findIndex(
+      (message) =>
+        message.id === previous.message_id &&
+        message.parts.some((part) => part.type === 'tool' && part.resultFor)
+    )
+    const reports =
+      firstReport < 0
+        ? []
+        : transcript
+            .slice(firstReport)
+            .filter(
+              (message) =>
+                message.botId === (previous.bot_id ?? undefined) &&
+                (!!message.botId || message.botUsername === (previous.bot_username ?? undefined)) &&
+                message.parts.some((part) => part.type === 'tool' && part.resultFor)
+            )
     const result = await runSessionTurn(
       {
         requestId: randomUUID(),
@@ -460,8 +493,15 @@ async function deliver(item: QueueItem): Promise<void> {
         providerId: provider.id,
         model,
         messages: withRequest(
-          history(item.chatId, budget, info?.outputLimit ?? 4096, guest, asHost),
-          item.content,
+          history(
+            item.chatId,
+            budget,
+            info?.outputLimit ?? 4096,
+            guest,
+            asHost,
+            new Set(reports.map((message) => message.id))
+          ),
+          reports.length ? backgroundTaskRequest(reports, item.content) : item.content,
           guest?.username ?? (previous.bot_id && !bot ? 'Roxy' : undefined)
         ),
         agentId: config.agentId,
@@ -495,16 +535,17 @@ async function deliver(item: QueueItem): Promise<void> {
         ? { botUsername: HOST_USERNAME }
         : {}
     returnAuthor = author
-    getDb().transaction(() => {
+    savedMessage = getDb().transaction(() => {
       if (!repo.getChat(item.chatId)) return
-      if (parts.length)
-        repo.addMessage({
-          chatId: item.chatId,
-          role: 'assistant',
-          content: partsToContent(parts),
-          parts,
-          ...author
-        })
+      const message = parts.length
+        ? repo.addMessage({
+            chatId: item.chatId,
+            role: 'assistant',
+            content: partsToContent(parts),
+            parts,
+            ...author
+          })
+        : undefined
       if (!result.ok) throw new Error(result.error ?? 'Model request failed')
       if (
         item.replyToChatId &&
@@ -562,6 +603,7 @@ async function deliver(item: QueueItem): Promise<void> {
         }
       }
       getDb().prepare('DELETE FROM queue WHERE id = ?').run(item.id)
+      return message
     })()
     if (bot) notifyBots()
     if (item.replyToChatId) {
@@ -588,7 +630,7 @@ async function deliver(item: QueueItem): Promise<void> {
       notifyTranscriptChanged(item.replyToChatId)
     }
     if (fold.parts.length && repo.getChat(item.chatId)) {
-      repo.addMessage({
+      savedMessage = repo.addMessage({
         chatId: item.chatId,
         role: 'assistant',
         content: partsToContent(fold.parts),
@@ -608,6 +650,6 @@ async function deliver(item: QueueItem): Promise<void> {
     if (relay) relayLocalTurnEnd(relay)
     notifyTranscriptChanged(item.chatId)
     notifyAutomation(item.chatId)
-    emit({ sessionId: item.chatId, kind: 'turn', state: 'idle' })
+    emit({ sessionId: item.chatId, kind: 'turn', state: 'idle', message: savedMessage })
   }
 }
