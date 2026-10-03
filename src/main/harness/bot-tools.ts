@@ -18,6 +18,7 @@ import { endSubagentRuns } from '../services/subagent-stream'
 import { killSessionBackground } from './tools'
 import { disposeSession } from '../services/browser'
 import { removeWorktreeForChat } from '../services/worktree'
+import { attachmentSafeJson, resolveImageRefs } from '../services/attachments'
 
 const text = (value: unknown): string => (typeof value === 'string' ? value : '')
 
@@ -166,7 +167,7 @@ export async function runBotTool(
       const username = bot?.username ?? 'Roxy'
       const addressed = new RegExp(`^\\s*@${username}(?=$|[\\s,:])`, 'i').test(prompt)
       const content = addressed ? prompt : `@${username} ${prompt}`
-      result = enqueuePrompt(source, content, undefined, {
+      result = enqueuePrompt(source, content, resolveImageRefs(source, input.image_refs), {
         sourceChatId: source,
         hops,
         asBotId: bot?.id,
@@ -230,17 +231,22 @@ export async function runBotTool(
           }
           result = { deleted: id }
         } else if (action === 'send') {
-          result = enqueuePrompt(id, text(input.prompt), undefined, {
-            sourceChatId: source,
-            replyToChatId: source,
-            hops,
-            continueReply: id !== source,
-            // The actor that delegated has to be the one the answer comes back
-            // to: resuming the session's owner instead handed the continuation
-            // to a bot that never asked for it, with its identity and config.
-            replyToActor: author,
-            ...author
-          })
+          result = enqueuePrompt(
+            id,
+            text(input.prompt),
+            resolveImageRefs(source, input.image_refs),
+            {
+              sourceChatId: source,
+              replyToChatId: source,
+              hops,
+              continueReply: id !== source,
+              // The actor that delegated has to be the one the answer comes back
+              // to: resuming the session's owner instead handed the continuation
+              // to a bot that never asked for it, with its identity and config.
+              replyToActor: author,
+              ...author
+            }
+          )
           resumeQueue(id)
         } else if (action === 'stop') {
           stopTurn(id)
@@ -256,11 +262,17 @@ export async function runBotTool(
         if (!repo.getChat(chatId)) throw new Error('Session not found')
         result = repo.listQueue(chatId)
       } else if (action === 'create') {
-        result = enqueuePrompt(chatId, text(input.prompt), undefined, {
-          sourceChatId: source,
-          hops,
-          notBefore: input.not_before as number | undefined
-        })
+        result = enqueuePrompt(
+          chatId,
+          text(input.prompt),
+          resolveImageRefs(source, input.image_refs),
+          {
+            sourceChatId: source,
+            ...(!self && source && bots.chatBot(chatId) ? { botUsername: HOST_USERNAME } : author),
+            hops,
+            notBefore: input.not_before as number | undefined
+          }
+        )
         resumeQueue(chatId)
       } else {
         const row = getDb().prepare('SELECT chat_id, state FROM queue WHERE id = ?').get(id) as
@@ -286,7 +298,11 @@ export async function runBotTool(
               (!Number.isSafeInteger(input.not_before) || Number(input.not_before) < 0)
             )
               throw new Error('Invalid not_before timestamp')
-            repo.updateQueueItem(id, prompt, old.images)
+            const images =
+              input.image_refs === undefined
+                ? old.images
+                : resolveImageRefs(source, input.image_refs)
+            repo.updateQueueItem(id, prompt, images)
             notifyTranscriptChanged(row.chat_id)
             resumeQueue(row.chat_id)
             if (input.not_before !== undefined)
@@ -303,5 +319,5 @@ export async function runBotTool(
     default:
       throw new Error('Unknown bot tool')
   }
-  return { ok: true, output: JSON.stringify(result, null, 2) }
+  return { ok: true, output: attachmentSafeJson(result) }
 }

@@ -340,6 +340,8 @@ export interface ChatImage {
   dataUrl: string
   /** MIME type, e.g. 'image/png'. */
   mediaType: string
+  /** A delegated image must not be replayed to an unverified model. */
+  forwarded?: boolean
 }
 
 /** A single chat-completion message sent to the model. */
@@ -521,6 +523,8 @@ export interface ModelInfo {
   name: string
   reasoning: boolean
   toolCall: boolean
+  /** Affirmative input-image support; undefined means the catalog does not say. */
+  imageInput?: boolean
   /**
    * The effort levels this model actually accepts, when the provider says so.
    * Undefined = unknown, so the full Low..Max ladder is offered and clamping

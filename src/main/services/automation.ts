@@ -16,6 +16,8 @@ import {
 import { pickDefaultModel } from '../../shared/models'
 import { HOST_USERNAME, isHostSpeaker } from '../../shared/bots'
 import { queueOrigin } from '../../shared/queue'
+import { imageReferenceText, redactImageData } from '../../shared/attachments'
+import { omitMessageImages, validateForwardedImages } from './attachments'
 import * as repo from '../db/repo'
 import * as bots from '../db/bots'
 import { getDb } from '../db/database'
@@ -309,17 +311,32 @@ function history(
  * and no request. Even without trimming, a generic continue asks the guest to
  * continue the host's behavior instead of accepting its own assignment.
  */
-function withRequest(messages: ChatMessage[], request: string, assignee?: string): ChatMessage[] {
+function withRequest(
+  messages: ChatMessage[],
+  request: string,
+  assignee?: string,
+  images?: QueueImage[]
+): ChatMessage[] {
   const text = request.trim()
   if (!text) return messages
-  if (!assignee && messages.some((m) => m.content.includes(text))) return messages
+  if (!assignee && !images?.length && messages.some((m) => m.content.includes(text)))
+    return messages
   // A handoff is a NEW request to its recipient, including work returned to
   // Roxy. Never leave it continuing the previous participant's tool history.
   const restated = {
     role: 'user' as const,
+    ...(images?.length ? { images } : {}),
     content: assignee
       ? `This turn is assigned to you, @${assignee}. The preceding assistant messages include other participants' work, not actions you performed. Carry out the following request yourself and answer here. Do not wait for or invoke @${assignee}: that is you.\n\n${text}`
       : text
+  }
+  if (images?.length) {
+    const attached = new Set(images.map((image) => image.dataUrl))
+    messages = messages.map((message) =>
+      message.images?.length
+        ? { ...message, images: message.images.filter((image) => !attached.has(image.dataUrl)) }
+        : message
+    )
   }
   // Replace the placeholder rather than trail it: they say the same thing, and
   // the real request is the better last word.
@@ -419,7 +436,8 @@ async function deliver(item: QueueItem): Promise<void> {
       pickDefaultModel(catalog)
     if (!model) throw new Error(`Select a model for ${owner}, then retry.`)
     if (controller.signal.aborted) throw new Error('Stopped.')
-    if (!previous.message_id)
+    let requestMessageId = previous.message_id
+    if (!requestMessageId)
       getDb().transaction(() => {
         const message = repo.addMessage({
           chatId: item.chatId,
@@ -427,7 +445,7 @@ async function deliver(item: QueueItem): Promise<void> {
           // is not something the user said — attributing it to the user made the
           // request show up as "You", and attributing it to the guest made the
           // guest appear to ask itself.
-          role: item.sourceChatId === item.chatId ? 'assistant' : 'user',
+          role: !item.fromUser && item.sourceChatId === item.chatId ? 'assistant' : 'user',
           ...(previous.bot_id ? { botId: previous.bot_id } : {}),
           ...(previous.bot_username ? { botUsername: previous.bot_username } : {}),
           content: item.content,
@@ -437,10 +455,21 @@ async function deliver(item: QueueItem): Promise<void> {
           ]
         })
         getDb().prepare('UPDATE queue SET message_id = ? WHERE id = ?').run(message.id, item.id)
+        requestMessageId = message.id
       })()
     notifyAutomation(item.chatId)
     notifyTranscriptChanged(item.chatId)
     const info = catalog.find((m) => m.id === model)
+    if (
+      item.images?.length &&
+      ((item.sourceChatId && !item.fromUser) || item.images.some((image) => image.forwarded))
+    ) {
+      validateForwardedImages(item.images)
+      if (info?.imageInput !== true)
+        throw new Error(
+          `Images were retained but not sent: ${model} ${info?.imageInput === false ? 'does not support image input' : 'has no verified image-input capability in the provider catalog'}. Choose a vision-capable model and retry, or remove the queued images to proceed without seeing them. No model was switched.`
+        )
+    }
     const budget = contextBudgetFor(config.contextLimit, info?.contextLimit ?? 128000)
     const chat = repo.getChat(item.chatId)
     const estimated = repo
@@ -453,17 +482,23 @@ async function deliver(item: QueueItem): Promise<void> {
     if (!guest && !hostVisiting && estimated > budget * 0.8)
       await compactChat(item.chatId, provider.id, model, controller.signal)
     if (controller.signal.aborted) throw new Error('Stopped.')
+    const requestMessage = repo.listMessages(item.chatId).find((m) => m.id === requestMessageId)
+    const previousMessages = history(item.chatId, budget, info?.outputLimit ?? 4096, guest, asHost)
+    const messages = withRequest(
+      // Machine handoffs select their attachments explicitly. Shared history
+      // must not re-add removed images or disclose unrelated old screenshots.
+      item.sourceChatId ? previousMessages.map(omitMessageImages) : previousMessages,
+      item.content + (requestMessage ? imageReferenceText(requestMessage) : ''),
+      guest?.username ?? (previous.bot_id && !bot ? 'Roxy' : undefined),
+      item.images
+    )
     const result = await runSessionTurn(
       {
         requestId: randomUUID(),
         sessionId: item.chatId,
         providerId: provider.id,
         model,
-        messages: withRequest(
-          history(item.chatId, budget, info?.outputLimit ?? 4096, guest, asHost),
-          item.content,
-          guest?.username ?? (previous.bot_id && !bot ? 'Roxy' : undefined)
-        ),
+        messages,
         agentId: config.agentId,
         reasoning: info?.reasoning,
         reasoningEffort: clampReasoningEffort(config.reasoningEffort, info?.reasoningEfforts),
@@ -569,10 +604,17 @@ async function deliver(item: QueueItem): Promise<void> {
       notifyTranscriptChanged(item.replyToChatId)
     }
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
+    const message = redactImageData(error instanceof Error ? error.message : String(error))
     getDb()
       .prepare(`UPDATE queue SET state = 'failed', error = ? WHERE id = ?`)
       .run(message, item.id)
+    if (item.images?.length && !fold.parts.length && repo.getChat(item.chatId))
+      repo.addMessage({
+        chatId: item.chatId,
+        role: 'assistant',
+        content: `Image request could not finish: ${message}\nThe images remain in this session and its queue for retry.`,
+        ...returnAuthor
+      })
     if (
       item.replyToChatId &&
       item.replyToChatId !== item.chatId &&
