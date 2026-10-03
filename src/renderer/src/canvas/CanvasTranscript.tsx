@@ -60,6 +60,8 @@ export function CanvasTranscript({
   const [clock, setClock] = useState(0)
   const prompts = useMemo(() => promptEntries(messages), [messages])
   const bots = useRoxyStore((s) => s.bots)
+  const chats = useRoxyStore((s) => s.chats)
+  const selectChat = useRoxyStore((s) => s.selectChat)
   const queue = useRoxyStore((s) => s.queue)
   const activityStartedAt = useRoxyStore((s) => (chatId ? s.activityStartedAt[chatId] : undefined))
   // The queue is fetched with the messages, so it is only trustworthy once
@@ -117,6 +119,7 @@ export function CanvasTranscript({
           botUsername: ownBot?.username,
           streamingBot: speaker,
           bots,
+          subagentIds: new Set(chats.filter((chat) => chat.kind === 'sub').map((chat) => chat.id)),
           queue,
           queueLoaded,
           botAvatar: botAvatarUrl,
@@ -139,6 +142,7 @@ export function CanvasTranscript({
       logo,
       cache,
       bots,
+      chats,
       queue,
       queueLoaded,
       ownBot?.username,
@@ -147,6 +151,10 @@ export function CanvasTranscript({
   )
 
   const onAction = (action: HitAction): void => {
+    if (action.type === 'session') {
+      void selectChat(action.id)
+      return
+    }
     if (action.type === 'cancel') {
       const [messageId, ...indices] = action.id.split('/')
       const parts =

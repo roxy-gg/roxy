@@ -473,16 +473,15 @@ async function main(): Promise<void> {
     'removeChat cascades to subagent sessions',
     !repo.listChats().some((c) => c.id === tmpParent.id || c.id === tmpSub.id)
   )
-  // prune drops a finished (queue-less) subagent session, but keeps a queued one
+  // Completed and queued child sessions remain readable until explicit deletion.
   const busySub = repo.createChat({ title: 'busy sub', kind: 'sub', parentId: chat.id })
   repo.enqueue(busySub.id, 'follow-up')
-  repo.pruneSubchats(chat.id)
   check(
-    'pruneSubchats drops a queue-less sub',
-    !repo.listSubchats(chat.id).some((c) => c.id === sub.id)
+    'a queue-less subagent session is retained',
+    repo.listSubchats(chat.id).some((c) => c.id === sub.id)
   )
   check(
-    'pruneSubchats keeps a queued sub',
+    'a queued subagent session is retained',
     repo.listSubchats(chat.id).some((c) => c.id === busySub.id)
   )
 
@@ -2702,7 +2701,7 @@ async function main(): Promise<void> {
       activeBackgroundSubChatIds().has('sub_1')
     )
 
-    // A second session's job is isolated; a null subChatId is never tracked for pruning.
+    // A second session's job is isolated; a null subChatId is not a workspace owner.
     const j2 = registerBackgroundJob({
       sessionId: s2,
       subChatId: null,
@@ -2714,7 +2713,7 @@ async function main(): Promise<void> {
       listRunningBackgroundJobs(s1).length === 1 && listRunningBackgroundJobs(s2).length === 1
     )
     check(
-      'null subChatId is not tracked for pruning',
+      'null subChatId is not tracked as an active child',
       activeBackgroundSubChatIds().size === 1 && activeBackgroundSubChatIds().has('sub_1')
     )
 
@@ -2726,10 +2725,13 @@ async function main(): Promise<void> {
       listRunningBackgroundJobs(s1).length === 1
     )
 
-    // Finishing removes it from the registry, freeing its sub session to be pruned.
+    // Finishing removes it from the live registry, not the transcript database.
     finishBackgroundJob(j1.jobId, 'error')
     check('finishBackgroundJob removes the job', listRunningBackgroundJobs(s1).length === 0)
-    check('a finished job frees its sub session', !activeBackgroundSubChatIds().has('sub_1'))
+    check(
+      'a finished job releases its live workspace claim',
+      !activeBackgroundSubChatIds().has('sub_1')
+    )
     check(
       'hasActiveBackgroundJobs false after the last job finishes',
       hasActiveBackgroundJobs(s1) === false

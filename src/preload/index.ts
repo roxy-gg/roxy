@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
 import { CHANNELS } from '../shared/ipc'
 import type {
+  AutomationDelta,
   RoxyApi,
   LlmDelta,
   TaskUpdate,
@@ -47,7 +48,7 @@ const roxy: RoxyApi = {
       return () => ipcRenderer.removeListener(CHANNELS.automationChanged, handler)
     },
     onDelta: (callback) => {
-      const handler = (_event: Electron.IpcRendererEvent, payload: RemoteDelta): void =>
+      const handler = (_event: Electron.IpcRendererEvent, payload: AutomationDelta): void =>
         callback(payload)
       ipcRenderer.on(CHANNELS.automationDelta, handler)
       return () => ipcRenderer.removeListener(CHANNELS.automationDelta, handler)
@@ -232,7 +233,6 @@ const roxy: RoxyApi = {
   subagents: {
     snapshot: (subChatId) => ipcRenderer.invoke(CHANNELS.subagentSnapshot, subChatId),
     listRunning: () => ipcRenderer.invoke(CHANNELS.subagentListRunning),
-    setViewed: (chatId) => ipcRenderer.invoke(CHANNELS.subagentSetViewed, chatId),
     cancel: (subChatId) => ipcRenderer.invoke(CHANNELS.subagentCancel, subChatId),
     onDelta: (callback) => {
       const handler = (_event: Electron.IpcRendererEvent, payload: SubagentDelta): void =>

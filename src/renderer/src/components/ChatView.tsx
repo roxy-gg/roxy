@@ -16,6 +16,7 @@ import { isVisibleQueueItem } from '@shared/queue'
 import { resolveSessionConfig } from '@shared/session-config'
 import { useRoxyStore } from '../lib/store'
 import { visibleMessages, visibleQueue } from '../lib/optimistic-messages'
+import { taskTranscript } from '../lib/task-transcript'
 import { useTranslation } from 'react-i18next'
 import { cn } from '../lib/cn'
 import { CanvasTranscript } from '../canvas/CanvasTranscript'
@@ -73,7 +74,7 @@ export function ChatView(): JSX.Element {
   const optimisticMessages = useRoxyStore((s) =>
     s.activeChatId ? s.optimisticMessages[s.activeChatId] : undefined
   )
-  const messages = useMemo(
+  const mergedMessages = useMemo(
     () => visibleMessages(storedMessages, optimisticMessages),
     [storedMessages, optimisticMessages]
   )
@@ -82,8 +83,17 @@ export function ChatView(): JSX.Element {
   )
   const messagesChatId = useRoxyStore((s) => s.messagesChatId)
   const messagesError = useRoxyStore((s) => s.messagesError)
-  const streaming = useRoxyStore((s) =>
+  const storedStreaming = useRoxyStore((s) =>
     s.activeChatId ? (s.streamingChats[s.activeChatId] ?? null) : null
+  )
+  const subagentPreviews = useRoxyStore((s) => s.subagentPreviews)
+  // Keep absent state undefined so the selector does not allocate an empty array.
+  const runningTasks = useRoxyStore((s) =>
+    s.activeChatId ? s.runningTasks[s.activeChatId] : undefined
+  )
+  const { messages, streaming } = useMemo(
+    () => taskTranscript(mergedMessages, storedStreaming, subagentPreviews, runningTasks),
+    [mergedMessages, storedStreaming, subagentPreviews, runningTasks]
   )
   const sending = useRoxyStore((s) =>
     s.activeChatId
@@ -113,14 +123,6 @@ export function ChatView(): JSX.Element {
   const providers = useRoxyStore((s) => s.providers)
   const copilotNeedsReauthentication = useRoxyStore((s) => s.copilotNeedsReauthentication)
   const refreshProviders = useRoxyStore((s) => s.refreshProviders)
-  // Subscribe to the STORED array, not a defaulted copy. A selector returning
-  // `?? []` builds a new array every call, so zustand's Object.is check never
-  // matches and the component re-renders forever ("getSnapshot should be
-  // cached" -> "Maximum update depth exceeded"). undefined is a stable value;
-  // the empty-array default belongs below, outside the subscription.
-  const runningTasks = useRoxyStore((s) =>
-    s.activeChatId ? s.runningTasks[s.activeChatId] : undefined
-  )
   const backgroundTaskCount = runningTasks?.length ?? 0
   // A subagent working in ITS OWN session. Tracked separately from `sending`
   // (which is per-chat local-send state): nobody "sent" this turn from the UI —
@@ -287,29 +289,24 @@ export function ChatView(): JSX.Element {
                   />
                 </button>
               )}
-              {backgroundTaskCount > 0 && activeChatId && (
-                // Detached tasks were cancellable in main from day one
-                // (`tasks:cancel`) but nothing ever called it — this badge counted
-                // them and offered no way out. Cancels them all: they're detached
-                // by definition, so "stop the thing I didn't ask for" is the whole
-                // interaction, and per-task control lives on the task card.
-                <button
-                  onClick={() => {
-                    for (const t of runningTasks ?? []) {
-                      void cancelBackgroundTask(activeChatId, t.jobId)
-                    }
-                  }}
-                  title={t('chat.cancelBackground', { count: backgroundTaskCount })}
-                  className="press-scale group flex shrink-0 items-center gap-1 sq sq-md rounded-md bg-accent/10 px-1.5 py-0.5 text-[11px] text-accent transition-colors hover:bg-accent/20"
-                >
-                  <Loader2 className="h-3 w-3 animate-spin group-hover:hidden" />
-                  <Square className="hidden h-2.5 w-2.5 fill-current group-hover:block" />
-                  <span className="tabular-nums">{backgroundTaskCount}</span>
-                </button>
-              )}
             </div>
           )}
           <div className="flex shrink-0 items-center gap-2">
+            {backgroundTaskCount > 0 && activeChatId && (
+              <button
+                onClick={() => {
+                  for (const task of runningTasks ?? []) {
+                    void cancelBackgroundTask(activeChatId, task.jobId)
+                  }
+                }}
+                title={t('chat.cancelBackground', { count: backgroundTaskCount })}
+                className="press-scale group flex shrink-0 items-center gap-1 sq sq-md rounded-md bg-accent/10 px-1.5 py-0.5 text-[11px] text-accent transition-colors hover:bg-accent/20"
+              >
+                <Loader2 className="h-3 w-3 animate-spin group-hover:hidden" />
+                <Square className="hidden h-2.5 w-2.5 fill-current group-hover:block" />
+                <span className="tabular-nums">{backgroundTaskCount}</span>
+              </button>
+            )}
             {activeBot && (
               <button
                 onClick={() => {
@@ -440,6 +437,69 @@ export function ChatView(): JSX.Element {
               </Queue>
             </div>
           </div>
+        )}
+
+        {backgroundTaskCount > 0 && activeChatId && (
+          <section
+            aria-label={t('chat.backgroundRunning', { count: backgroundTaskCount })}
+            className="shrink-0 px-4 pt-2"
+          >
+            <div className="mx-auto max-w-3xl rounded-lg border border-border bg-surface2 px-3 py-2">
+              <div className="mb-1 flex items-center gap-2 text-[11px] text-text-muted">
+                <Loader2 aria-hidden className="h-3 w-3 shrink-0 animate-spin text-accent" />
+                {t('chat.backgroundRunning', { count: backgroundTaskCount })}
+              </div>
+              <div className="max-h-28 overflow-y-auto">
+                {runningTasks?.map((task) => {
+                  const latest = task.subChatId
+                    ? subagentPreviews[task.subChatId]?.at(-1)
+                    : undefined
+                  const activity =
+                    latest?.type === 'tool'
+                      ? [latest.tool, latest.title].filter(Boolean).join(' ')
+                      : t(
+                          latest?.type === 'text'
+                            ? 'transcript.activityWriting'
+                            : 'transcript.activityThinking'
+                        )
+                  return (
+                    <div key={task.jobId} className="flex min-w-0 items-center gap-2">
+                      <button
+                        type="button"
+                        disabled={!task.subChatId}
+                        onClick={() => task.subChatId && void selectChat(task.subChatId)}
+                        title={task.description}
+                        className="flex min-w-0 flex-1 items-center gap-2 rounded px-1 py-1.5 text-left hover:bg-white/5 focus-visible:outline-2 focus-visible:outline-accent"
+                      >
+                        <Hammer aria-hidden className="h-3.5 w-3.5 shrink-0 text-accent" />
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-xs text-text">
+                            {task.description}
+                          </span>
+                          <span className="block truncate font-mono text-[10px] text-text-subtle">
+                            {activity}
+                          </span>
+                        </span>
+                        <ChevronRight
+                          aria-hidden
+                          className="h-3.5 w-3.5 shrink-0 text-text-subtle"
+                        />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void cancelBackgroundTask(activeChatId, task.jobId)}
+                        title={t('chat.cancelSubagent')}
+                        aria-label={t('chat.cancelSubagent')}
+                        className="press-scale flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-text-muted hover:bg-white/5 hover:text-text focus-visible:outline-2 focus-visible:outline-accent"
+                      >
+                        <Square aria-hidden className="h-2.5 w-2.5 fill-current" />
+                      </button>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          </section>
         )}
 
         {provider?.seedId === 'github-copilot' && (

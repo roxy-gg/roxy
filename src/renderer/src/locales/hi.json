@@ -98,7 +98,9 @@
     "queued": "कतारबद्ध",
     "runsAfterReply": "इस जवाब के बाद चलता है",
     "settings": "सेटिंग्स",
-    "working": "काम कर रहा है"
+    "working": "काम कर रहा है",
+    "backgroundRunning_one": "{{count}} subagent still running",
+    "backgroundRunning_other": "{{count}} subagents still running"
   },
   "codeHosts": {
     "connected": "कनेक्टेड",
@@ -789,7 +791,8 @@
     "unchanged_other": "{{count}} अपरिवर्तित पंक्तियाँ",
     "working": "काम कर रहा है",
     "writingAs": "{{name}} लिख रहा है…",
-    "you": "आप"
+    "you": "आप",
+    "openSubagent": "Open subagent session"
   },
   "usage": {
     "allProviders": "सभी प्रदाता, पिछले 30 दिन",

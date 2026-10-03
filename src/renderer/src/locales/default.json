@@ -83,6 +83,8 @@
     "copilotAuthenticate": "Authenticate on GitHub",
     "copilotReconnected": "GitHub Copilot is reconnected. You can retry your message when you are ready.",
     "backTo": "Back to {{title}}",
+    "backgroundRunning_one": "{{count}} subagent still running",
+    "backgroundRunning_other": "{{count}} subagents still running",
     "cancel": "cancel",
     "cancelBackground_one": "Cancel {{count}} background subagent",
     "cancelBackground_other": "Cancel {{count}} background subagents",
@@ -701,6 +703,7 @@
     "showReference": "Show reference"
   },
   "transcript": {
+    "openSubagent": "Open subagent session",
     "promptHistory": "Your messages",
     "promptJump": "Jump to message {{number}}: {{text}}",
     "promptPosition": "{{number}} / {{count}}",

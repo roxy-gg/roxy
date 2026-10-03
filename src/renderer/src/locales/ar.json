@@ -98,7 +98,9 @@
     "queued": "في قائمة الانتظار",
     "runsAfterReply": "يعمل بعد هذا الرد",
     "settings": "الإعدادات",
-    "working": "يعمل"
+    "working": "يعمل",
+    "backgroundRunning_one": "{{count}} subagent still running",
+    "backgroundRunning_other": "{{count}} subagents still running"
   },
   "codeHosts": {
     "connected": "متصل",
@@ -789,7 +791,8 @@
     "unchanged_other": "{{count}} سطرًا غير متغير",
     "working": "جاري العمل",
     "writingAs": "{{name}} يكتب…",
-    "you": "أنت"
+    "you": "أنت",
+    "openSubagent": "Open subagent session"
   },
   "usage": {
     "allProviders": "جميع المزودين، آخر 30 يومًا",

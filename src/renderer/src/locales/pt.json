@@ -98,7 +98,9 @@
     "queued": "Na fila",
     "runsAfterReply": "executa após esta resposta",
     "settings": "Configurações",
-    "working": "trabalhando"
+    "working": "trabalhando",
+    "backgroundRunning_one": "{{count}} subagent still running",
+    "backgroundRunning_other": "{{count}} subagents still running"
   },
   "codeHosts": {
     "connected": "Conectado",
@@ -789,7 +791,8 @@
     "unchanged_other": "{{count}} linhas inalteradas",
     "working": "trabalhando",
     "writingAs": "{{name}} está escrevendo…",
-    "you": "Você"
+    "you": "Você",
+    "openSubagent": "Open subagent session"
   },
   "usage": {
     "allProviders": "Todos os provedores, últimos 30 dias",

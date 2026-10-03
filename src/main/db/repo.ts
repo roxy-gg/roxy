@@ -1061,10 +1061,10 @@ export function removeChat(id: string): void {
 /**
  * Walk `parent_id` up to the top-level session that owns this chat.
  *
- * Subagent chats (kind='sub') are transient children of a real session, so any
+ * Subagent chats (kind='sub') are children of a real session, so any
  * resource they create — a background dev server, for one — must be owned by the
- * session the user actually sees, not by the sub chat that gets pruned after the
- * turn. Returns `chatId` unchanged when it has no parent or isn't in the DB (a
+ * parent session, not by a child with a separate resource lifecycle.
+ * Returns `chatId` unchanged when it has no parent or isn't in the DB (a
  * keyless/test caller), and bails out on a cycle rather than looping forever.
  */
 export function rootSessionId(chatId: string): string {
@@ -1087,23 +1087,6 @@ export function listSubchats(parentId: string): Chat[] {
     .prepare('SELECT * FROM chats WHERE parent_id = ? ORDER BY created_at ASC')
     .all(parentId) as ChatRow[]
   return rows.map(rowToChat)
-}
-
-/** Drop a chat's finished subagent sessions that have nothing queued — they're
- *  one-shot by nature and shouldn't pile up in the sidebar after a turn. */
-export function pruneSubchats(parentId: string, keepIds?: ReadonlySet<string>): void {
-  const db = getDb()
-  const subs = db
-    .prepare("SELECT id FROM chats WHERE parent_id = ? AND kind = 'sub'")
-    .all(parentId) as { id: string }[]
-  const queued = db.prepare('SELECT COUNT(*) AS n FROM queue WHERE chat_id = ?')
-  const del = db.prepare('DELETE FROM chats WHERE id = ?')
-  for (const s of subs) {
-    // Keep sub-sessions with a still-running background task (Phase 11) — pruning
-    // one out from under a detached subagent would orphan its work.
-    if (keepIds?.has(s.id)) continue
-    if ((queued.get(s.id) as { n: number }).n === 0) del.run(s.id)
-  }
 }
 
 /** Store a compaction summary for a chat; messages up to `throughAt` are folded in. */
@@ -1473,12 +1456,17 @@ export function updateQueueItem(
   const imagesJson = images && images.length ? JSON.stringify(images) : null
   const db = getDb()
   const previous = db
-    .prepare('SELECT content, images, message_id, state FROM queue WHERE id = ?')
+    .prepare(
+      `SELECT content, images, message_id, state,
+      (SELECT role FROM messages WHERE id = queue.message_id) AS message_role
+      FROM queue WHERE id = ?`
+    )
     .get(id) as
     | {
         content: string
         images: string | null
         message_id: string | null
+        message_role: string | null
         state: string
       }
     | undefined
@@ -1487,7 +1475,11 @@ export function updateQueueItem(
   // in place; detaching it leaves stale history and loses the user's authorship.
   // Failed turns keep their history and append a correction when edited.
   const changed = previous && (previous.content !== content || previous.images !== imagesJson)
-  const editMessage = changed && previous.state === 'pending' && previous.message_id
+  const editMessage =
+    changed &&
+    previous.state === 'pending' &&
+    previous.message_role === 'user' &&
+    previous.message_id
   db.transaction(() => {
     if (editMessage)
       db.prepare('UPDATE messages SET content = ?, parts = ? WHERE id = ?').run(

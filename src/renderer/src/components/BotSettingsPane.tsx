@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type MutableRefObject } from 'react'
+import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import { Pencil, Play, Plus, Trash2, X } from 'lucide-react'
 import type { Bot, BotJob, BotJobInput, BotSchedule } from '@shared/bots'
@@ -51,6 +52,7 @@ export function BotSettingsPane({
   const [busy, setBusy] = useState(false)
   const [saved, setSaved] = useState(false)
   const [confirmAction, setConfirmAction] = useState<'close' | 'save' | null>(null)
+  const confirmRef = useRef<HTMLDivElement>(null)
   const formRef = useRef<HTMLFormElement>(null)
   const [queuedJob, setQueuedJob] = useState<string | null>(null)
   const confirmDelete = useRoxyStore(
@@ -73,6 +75,33 @@ export function BotSettingsPane({
     },
     [closeRequest]
   )
+
+  useEffect(() => {
+    if (!confirmAction) return
+    const previousFocus = document.activeElement as HTMLElement | null
+    confirmRef.current?.querySelector('button')?.focus({ preventScroll: true })
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key !== 'Tab' || !confirmRef.current) return
+      const buttons = [
+        ...confirmRef.current.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')
+      ]
+      const index = buttons.indexOf(document.activeElement as HTMLButtonElement)
+      if (
+        !buttons.length ||
+        index === -1 ||
+        (event.shiftKey ? index === 0 : index === buttons.length - 1)
+      ) {
+        event.preventDefault()
+        const target = (event.shiftKey ? buttons.at(-1) : buttons[0]) ?? confirmRef.current
+        target.focus({ preventScroll: true })
+      }
+    }
+    document.addEventListener('keydown', onKey, true)
+    return () => {
+      document.removeEventListener('keydown', onKey, true)
+      if (previousFocus?.isConnected) previousFocus.focus({ preventScroll: true })
+    }
+  }, [confirmAction])
 
   useEffect(() => {
     if (confirmDelete) {
@@ -405,61 +434,64 @@ export function BotSettingsPane({
           </div>
         </div>
       </footer>
-      {confirmAction && (
-        <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div
-            role="alertdialog"
-            aria-modal="true"
-            aria-labelledby="bot-unsaved-title"
-            aria-describedby="bot-unsaved-description"
-            className="w-full rounded-xl border border-border bg-surface p-4 shadow-2xl"
-          >
-            <h3 id="bot-unsaved-title" className="text-sm font-semibold">
-              {t(confirmAction === 'close' ? 'bots.unsavedTitle' : 'bots.confirmSaveTitle')}
-            </h3>
-            <p id="bot-unsaved-description" className="mt-2 text-xs text-text-muted">
-              {t(
-                confirmAction === 'close'
-                  ? 'bots.unsavedDescription'
-                  : 'bots.confirmSaveDescription'
-              )}
-            </p>
-            {error && (
-              <p role="alert" className="mt-2 break-words text-xs text-danger">
-                {error}
+      {confirmAction &&
+        createPortal(
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+            <div
+              ref={confirmRef}
+              tabIndex={-1}
+              role="alertdialog"
+              aria-modal="true"
+              aria-labelledby="bot-unsaved-title"
+              aria-describedby="bot-unsaved-description"
+              className="max-h-full w-full min-w-0 max-w-md overflow-y-auto rounded-xl border border-border bg-surface p-5 shadow-2xl outline-none"
+            >
+              <h3 id="bot-unsaved-title" className="text-sm font-semibold">
+                {t(confirmAction === 'close' ? 'bots.unsavedTitle' : 'bots.confirmSaveTitle')}
+              </h3>
+              <p id="bot-unsaved-description" className="mt-2 text-xs text-text-muted">
+                {t(
+                  confirmAction === 'close'
+                    ? 'bots.unsavedDescription'
+                    : 'bots.confirmSaveDescription'
+                )}
               </p>
-            )}
-            <div className="mt-4 flex flex-wrap justify-end gap-2">
-              <Button
-                size="sm"
-                variant="ghost"
-                disabled={busy}
-                onClick={() => setConfirmAction(null)}
-                autoFocus
-              >
-                {t(confirmAction === 'close' ? 'bots.keepEditing' : 'common.cancel')}
-              </Button>
-              {confirmAction === 'close' && (
-                <Button size="sm" variant="danger" disabled={busy} onClick={onClose}>
-                  {t('bots.discardAndClose')}
-                </Button>
+              {error && (
+                <p role="alert" className="mt-2 break-words text-xs text-danger">
+                  {error}
+                </p>
               )}
-              <Button
-                size="sm"
-                disabled={busy || username.toLowerCase() === 'roxy'}
-                onClick={() => {
-                  if (!formRef.current?.checkValidity()) {
-                    setConfirmAction(null)
-                    requestAnimationFrame(() => formRef.current?.reportValidity())
-                  } else formRef.current.requestSubmit()
-                }}
-              >
-                {t(confirmAction === 'close' ? 'bots.saveAndClose' : 'bots.confirmSave')}
-              </Button>
+              <div className="mt-5 flex flex-col gap-2 min-[480px]:flex-row min-[480px]:flex-wrap min-[480px]:justify-end [&>button]:h-auto [&>button]:min-h-8 [&>button]:whitespace-normal [&>button]:py-1.5">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={busy}
+                  onClick={() => setConfirmAction(null)}
+                >
+                  {t(confirmAction === 'close' ? 'bots.keepEditing' : 'common.cancel')}
+                </Button>
+                {confirmAction === 'close' && (
+                  <Button size="sm" variant="danger" disabled={busy} onClick={onClose}>
+                    {t('bots.discardAndClose')}
+                  </Button>
+                )}
+                <Button
+                  size="sm"
+                  disabled={busy || username.toLowerCase() === 'roxy'}
+                  onClick={() => {
+                    if (!formRef.current?.checkValidity()) {
+                      setConfirmAction(null)
+                      requestAnimationFrame(() => formRef.current?.reportValidity())
+                    } else formRef.current.requestSubmit()
+                  }}
+                >
+                  {t(confirmAction === 'close' ? 'bots.saveAndClose' : 'bots.confirmSave')}
+                </Button>
+              </div>
             </div>
-          </div>
-        </div>
-      )}
+          </div>,
+          document.body
+        )}
     </aside>
   )
 }

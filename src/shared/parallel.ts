@@ -12,6 +12,8 @@
  * Everything here is pure (no Node/Electron/Buffer) so it runs in the harness,
  * the renderer, and the smoke:shared pure-Node harness alike.
  */
+import type { Message } from './types'
+import { previewText } from './context'
 
 /** Max subagents allowed to run at once in a single turn (bounded pool). */
 export const MAX_PARALLEL_SUBAGENTS = 4
@@ -227,6 +229,34 @@ export function renderTaskResult(
     `</${tag}>`,
     '</task>'
   ].join('\n')
+}
+
+/** Nudge for either the active parent loop or a queued continuation. */
+export const BACKGROUND_TASK_CONTINUATION =
+  'Background task results are available above. Continue the original user request using these results. Do not repeat the delegated work or ask the user to prompt you again. If the request is already complete, give only any necessary update.'
+
+/** Carry the required reports WITH the nudge so context trimming cannot separate them. */
+export function backgroundTaskRequest(
+  messages: readonly Message[],
+  request = BACKGROUND_TASK_CONTINUATION
+): string {
+  const reports = messages.flatMap((message) =>
+    message.parts.filter((part) => part.type === 'tool' && part.tool === 'task' && part.resultFor)
+  )
+  const cap = Math.max(128, Math.floor(16_000 / Math.max(1, reports.length)))
+  return [
+    ...reports.map((part) =>
+      part.type === 'tool'
+        ? renderTaskResult(
+            String(part.input?.subagent_type ?? 'subagent'),
+            part.state === 'error' ? 'error' : 'completed',
+            previewText(part.output ?? '(no output)', { maxChars: cap, maxLines: cap }),
+            previewText(String(part.input?.description ?? ''), { maxChars: 200 })
+          )
+        : ''
+    ),
+    request
+  ].join('\n\n')
 }
 
 /** The immediate result a background `task` returns so the parent keeps working. */

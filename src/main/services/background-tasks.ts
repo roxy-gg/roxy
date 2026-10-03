@@ -11,13 +11,12 @@
  *     explicit cancel (session delete, app quit, or a user click),
  *   - broadcasts every state change to all open windows via `task:update`, so the
  *     UI updates live even after the launching request has finished,
- *   - tells `pruneSubchats` which `sub` sessions to keep (a job still running must
- *     not have its session swept out from under it).
+ *   - identifies work still using a session's workspace during explicit deletion.
  *
  * opencode gates background subagents behind an experimental flag and threads
  * results back through its Effect runtime; we make them first-class and deliver
  * the report by persisting a task card onto the parent session (see agent.ts),
- * which the next turn then sees as structured tool history.
+ * which the active loop consumes or a queued continuation picks up automatically.
  */
 import { BrowserWindow } from 'electron'
 import { CHANNELS } from '../../shared/ipc'
@@ -86,8 +85,7 @@ export function registerBackgroundJob(input: RegisterInput): {
 
 /**
  * Mark a job finished, broadcast the terminal state, then drop it from the
- * registry (its result has already been delivered to the parent session, so the
- * `sub` session is free to be pruned on the next turn).
+ * registry. The result and the full child transcript remain in the database.
  */
 export function finishBackgroundJob(jobId: string, state: 'completed' | 'error'): void {
   const job = jobs.get(jobId)
@@ -95,7 +93,7 @@ export function finishBackgroundJob(jobId: string, state: 'completed' | 'error')
   job.state = state
   job.finishedAt = Date.now()
   // Always drop the job from the registry, even if the broadcast throws — a job
-  // left behind here would keep its `sub` session pinned against pruning forever.
+  // left behind here would falsely keep the session marked busy forever.
   try {
     broadcast(job)
   } finally {
@@ -104,15 +102,16 @@ export function finishBackgroundJob(jobId: string, state: 'completed' | 'error')
 }
 
 /** The running background jobs for a session, as broadcast-shaped updates. */
-export function listRunningBackgroundJobs(sessionId: string): TaskUpdate[] {
+export function listRunningBackgroundJobs(sessionId?: string): TaskUpdate[] {
   const out: TaskUpdate[] = []
   for (const job of jobs.values()) {
-    if (job.sessionId === sessionId && job.state === 'running') out.push(toUpdate(job))
+    if ((!sessionId || job.sessionId === sessionId) && job.state === 'running')
+      out.push(toUpdate(job))
   }
   return out
 }
 
-/** `sub` session ids with a still-running background job — must survive pruning. */
+/** Child sessions still using their parent's workspace. */
 export function activeBackgroundSubChatIds(): Set<string> {
   const ids = new Set<string>()
   for (const job of jobs.values()) {
