@@ -730,10 +730,12 @@ export interface RemoteStartInput {
  */
 export type RemoteDelta =
   | { sessionId: string; kind: 'event'; event: LlmEvent }
+  | { sessionId: string; kind: 'phase'; phase: 'starting' | 'running' }
   | {
       sessionId: string
       kind: 'turn'
       state: 'running' | 'idle'
+      phase?: 'starting' | 'running'
       botId?: string
       botUsername?: string
     }
@@ -790,6 +792,7 @@ export interface RoxyApi {
         sessionId: string
         parts: MessagePart[]
         activityStartedAt: number
+        phase?: 'starting' | 'running'
         botId?: string
         botUsername?: string
       }[]

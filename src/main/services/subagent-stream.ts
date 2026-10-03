@@ -32,6 +32,7 @@ import { CHANNELS } from '../../shared/ipc'
 import type { LlmChildEvent, SubagentDelta, SubagentRunView } from '../../shared/api'
 import type { MessagePart } from '../../shared/types'
 import { PartsFold } from '../../shared/parts'
+import { notifyTurnAvailable } from './turn-state'
 
 interface Run {
   subChatId: string
@@ -143,6 +144,7 @@ export function startSubagentRun(input: StartRunInput): {
       // during that reload must not hand back the now-superseded live parts.
       runs.delete(run.subChatId)
       broadcast({ subChatId: run.subChatId, kind: 'run', state })
+      notifyTurnAvailable()
     }
   }
 }

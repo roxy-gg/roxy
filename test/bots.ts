@@ -514,6 +514,7 @@ async function main(): Promise<void> {
   const mention = enqueuePrompt(session.id, 'Hola @reviewer, inspect this')
   assert.equal(mention.asBotId, undefined)
   wakeAutomation()
+  await new Promise(setImmediate)
   const routed = repo.listQueue(session.id).find((item) => item.id === mention.id)!
   assert.equal(routed.asBotId, undefined)
   assert.equal(repo.listQueue(bot.chatId).length, 0)
@@ -545,6 +546,7 @@ async function main(): Promise<void> {
     asBotId: helper.id
   })
   wakeAutomation()
+  await new Promise(setImmediate)
   assert.equal(
     repo.listQueue(session.id).find((item) => item.id === addressed.id)!.asBotId,
     helper.id
@@ -556,6 +558,7 @@ async function main(): Promise<void> {
     hops: 8
   })
   wakeAutomation()
+  await new Promise(setImmediate)
   const stopped = repo.listQueue(session.id).find((item) => item.id === exhausted.id)!
   assert.equal(stopped.state, 'failed')
   assert.match(stopped.error!, /provider/)

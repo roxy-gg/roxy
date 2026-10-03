@@ -231,6 +231,7 @@ export async function runBotTool(
           result = { deleted: id }
         } else if (action === 'send') {
           result = enqueuePrompt(id, text(input.prompt), undefined, {
+            resume: true,
             sourceChatId: source,
             replyToChatId: source,
             hops,
@@ -241,7 +242,6 @@ export async function runBotTool(
             replyToActor: author,
             ...author
           })
-          resumeQueue(id)
         } else if (action === 'stop') {
           stopTurn(id)
           result = { stopped: id }
@@ -257,11 +257,12 @@ export async function runBotTool(
         result = repo.listQueue(chatId)
       } else if (action === 'create') {
         result = enqueuePrompt(chatId, text(input.prompt), undefined, {
+          resume: true,
           sourceChatId: source,
+          ...author,
           hops,
           notBefore: input.not_before as number | undefined
         })
-        resumeQueue(chatId)
       } else {
         const row = getDb().prepare('SELECT chat_id, state FROM queue WHERE id = ?').get(id) as
           | { chat_id: string; state: string }
@@ -269,7 +270,7 @@ export async function runBotTool(
         if (!row) throw new Error('Queued message not found')
         if (action === 'read') result = repo.listQueue(row.chat_id).find((item) => item.id === id)
         else {
-          if (row.state === 'running')
+          if (row.state === 'running' || row.state === 'starting')
             throw new Error(
               'This message is running; stop its session before editing or deleting it'
             )

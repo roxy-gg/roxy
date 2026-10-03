@@ -11,7 +11,32 @@ export function queueOrigin(item: QueueItem): QueueOrigin {
 
 /** The composer queue contains only user prompts that have not started or need retrying. */
 export function isVisibleQueueItem(item: QueueItem): boolean {
-  return item.state !== 'running' && queueOrigin(item) === 'user'
+  return !isClaimedQueueItem(item) && queueOrigin(item) === 'user'
+}
+
+export function isClaimedQueueItem(item: Pick<QueueItem, 'state'>): boolean {
+  return item.state === 'starting' || item.state === 'running'
+}
+
+/** One admission policy for sends, drains and callers checking a blocked queue. */
+export function nextQueueItem(
+  items: readonly QueueItem[],
+  now = Date.now()
+): QueueItem | undefined {
+  if (items.some(isClaimedQueueItem)) return undefined
+  let item: QueueItem | undefined = items[0]
+  // BOTS.md: hidden failed/delayed automation may not lock out user work.
+  // It still blocks later automation, and user failures/delays retain FIFO.
+  if (
+    item &&
+    queueOrigin(item) !== 'user' &&
+    (item.state === 'failed' || (item.notBefore ?? 0) > now)
+  ) {
+    item = items.find((entry) => queueOrigin(entry) === 'user')
+  }
+  return item && (!item.state || item.state === 'pending') && (item.notBefore ?? 0) <= now
+    ? item
+    : undefined
 }
 
 /**

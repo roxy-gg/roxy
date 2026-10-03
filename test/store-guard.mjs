@@ -202,6 +202,40 @@ const deferred = () => {
   })
   return { promise, resolve }
 }
+
+console.log('store: queue reads cannot resurrect consumed work')
+const refreshQueueAction = src.match(/^  refreshQueue: async \([^)]*\) => \{\n[\s\S]*?\n  \},/m)
+if (!refreshQueueAction) throw new Error('Missing refreshQueue action')
+const queueState = { activeChatId: 'delivery-chat', optimisticQueue: {}, queue: [] }
+const staleQueue = deferred()
+let queueReads = 0
+const queueActions = new Function(
+  'api',
+  'get',
+  'set',
+  'queueLoads',
+  `${transformSync(`const actions = {${refreshQueueAction[0]}}`, { loader: 'ts' }).code}\nreturn actions`
+)(
+  { queue: { list: () => (++queueReads === 1 ? staleQueue.promise : Promise.resolve([])) } },
+  () => queueState,
+  (patch) => Object.assign(queueState, typeof patch === 'function' ? patch(queueState) : patch),
+  new Map()
+)
+const staleRead = queueActions.refreshQueue()
+await queueActions.refreshQueue()
+staleQueue.resolve([{ id: 'already-consumed', state: 'pending' }])
+await staleRead
+check(
+  'queue: late pending snapshot cannot replace a newer empty queue',
+  queueState.queue.length === 0
+)
+check(
+  'queue: admission does not invent optimistic waiting or append a stale add result',
+  !src
+    .slice(src.indexOf('async function enqueuePrompt('), src.indexOf('const streamPublishers'))
+    .includes("state: 'pending'")
+)
+
 const oldAccount = deferred()
 list = () => oldAccount.promise
 const oldRequest = state.ensureModels(copilot.id)
@@ -383,6 +417,7 @@ check('snapshot handler found', snapshotBody !== undefined)
 const runSnapshot = ({ turnRevision, partsRevision }) => {
   const state = {
     runningAutomation: {},
+    startingAutomation: {},
     automationSpeakers: {},
     activeChatId: null,
     sendingChats: {}

@@ -375,6 +375,15 @@
     "activeSummary": "Active: {{scheme}}://{{host}}:{{port}}"
   },
   "queue": {
+    "starting": "Starting: preparing this session and connecting to its model.",
+    "automatedRequest": "Automated request",
+    "deliveryIssues": "Delivery needs attention. Edit to retry or remove the failed request.",
+    "wait": {
+      "paused": "Paused after Stop. Send or edit a request to resume.",
+      "busy": "Waiting for this session's current work to finish.",
+      "capacity": "Waiting for an available delivery slot.",
+      "blocked": "Waiting behind an earlier request. Retry or remove failed requests to continue."
+    },
     "userRequest": "You",
     "toCollaborator": "to @{{username}}",
     "image": "Image",
