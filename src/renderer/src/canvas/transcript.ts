@@ -476,7 +476,7 @@ export function layoutParts(
       input.now,
       input.activityRandom
     )
-    const labels = activityLabels(builder.t, speakingAs, verb)
+    const labels = activityLabels(builder.t, verb)
     cursor += layoutThinking(
       builder,
       x,

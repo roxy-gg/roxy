@@ -816,7 +816,7 @@ check('one live turn keeps its activity row and start time across updates', () =
 
   const thinking = layoutTranscript(input, cache)
   assert.equal(startedAt(thinking), 1000)
-  assert.ok(JSON.stringify(thinking.blocks.at(-1)!.nodes).includes('@bot is thinking cosmic magic'))
+  assert.ok(JSON.stringify(thinking.blocks.at(-1)!.nodes).includes('thinking cosmic magic'))
 
   const writing = layoutTranscript(
     {
@@ -828,7 +828,7 @@ check('one live turn keeps its activity row and start time across updates', () =
   )
   assert.equal(startedAt(writing), 1000)
   assert.ok(writing.blocks.at(-1)!.animated)
-  assert.ok(JSON.stringify(writing.blocks.at(-1)!.nodes).includes('@bot is writing cosmic magic'))
+  assert.ok(JSON.stringify(writing.blocks.at(-1)!.nodes).includes('writing cosmic magic'))
 
   const elapsedX = (scene: Scene): number | undefined => {
     const elapsed = scene.blocks.at(-1)?.nodes.find((node) => node.kind === 'elapsed')
@@ -844,9 +844,7 @@ check('one live turn keeps its activity row and start time across updates', () =
     elapsedX(writing),
     'phrase lengths keep the timer position stable'
   )
-  assert.ok(
-    JSON.stringify(rotated.blocks.at(-1)!.nodes).includes('@bot is writing immortal crab thoughts')
-  )
+  assert.ok(JSON.stringify(rotated.blocks.at(-1)!.nodes).includes('writing immortal crab thoughts'))
 
   const usingTool = layoutTranscript(
     {
@@ -873,6 +871,28 @@ check('one live turn keeps its activity row and start time across updates', () =
 
   layoutTranscript({ ...input, streaming: null, now: 62_000 }, cache)
   assert.equal(state.activityPhrase, undefined)
+})
+check('activity labels omit the speaker while message headers keep attribution', () => {
+  for (const botUsername of ['roxy', 'bot']) {
+    for (const streaming of [
+      [],
+      [{ type: 'reasoning', text: 'Checking.' }],
+      [{ type: 'text', text: 'Writing.' }],
+      [{ type: 'tool', tool: 'bash', state: 'running', title: 'npm test' }]
+    ] satisfies MessagePart[][]) {
+      const scene = layoutTranscript(
+        { ...longInput([]), botUsername, streaming, activityRandom: () => 0, viewport: undefined },
+        new BlockCache()
+      )
+      const nodes = scene.blocks.at(-1)!.nodes
+      assert.ok(nodes.some((node) => node.kind === 'text' && node.text === `@${botUsername}`))
+      const label = nodes
+        .flatMap((node) => (node.kind === 'pulse' ? node.children : []))
+        .find((node) => node.kind === 'text')
+      assert.ok(label?.kind === 'text')
+      assert.equal(label.text, `${activityVerb(streaming)} cosmic magic`)
+    }
+  }
 })
 check('activity timer sits below the copy and narrow copy still ellipsizes', () => {
   const scene = layoutTranscript(
@@ -1080,9 +1100,8 @@ check('bot replies use a full-size Facehash and username in both transcript layo
   const liveHostNodes = JSON.stringify(liveHost.blocks.at(-1)!.nodes)
   assert.ok(!liveHostNodes.includes('@helper'), 'a streaming host is not the chat owner either')
   assert.ok(liveHostNodes.includes('__roxy__'))
-  // While a turn streams there is no name on the row yet, so the pending
-  // indicator is the only thing saying WHO the wait belongs to.
-  assert.ok(liveHostNodes.includes('@roxy is thinking '), 'a streaming host says who is thinking')
+  assert.ok(liveHostNodes.includes('@roxy'), 'the streaming header identifies the host')
+  assert.ok(!liveHostNodes.includes('@roxy is '), 'the activity label does not repeat the host')
   const liveGuestIndicator = JSON.stringify(
     layoutTranscript(
       {
@@ -1096,10 +1115,8 @@ check('bot replies use a full-size Facehash and username in both transcript layo
       new BlockCache()
     ).blocks.at(-1)!.nodes
   )
-  assert.ok(
-    liveGuestIndicator.includes('@helper is thinking '),
-    'and a streaming guest is named too, not left as a bare "thinking"'
-  )
+  assert.ok(liveGuestIndicator.includes('@helper'), 'the streaming header identifies the guest too')
+  assert.ok(!liveGuestIndicator.includes('@helper is '), 'the activity label stays name-free')
 
   const live = layoutTranscript(
     { ...longInput(longMessages), streaming: [], botUsername: 'helper' },
