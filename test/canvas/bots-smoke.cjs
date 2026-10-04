@@ -76,6 +76,38 @@ async function run() {
   await win.loadURL(process.env.BOTS_TEST_URL || 'http://localhost:3114/?bots')
   win.focus()
   await new Promise((resolve) => setTimeout(resolve, 2000))
+  await click('#startup')
+  for (let i = 0; i < 20; i++) {
+    if (
+      await evaluate(
+        `return window.__canvasTranscript?.scene()?.blocks.at(-1)?.id === '__streaming__'`
+      )
+    )
+      break
+    await wait()
+  }
+  assert.ok(
+    await evaluate(
+      `return document.querySelector('p[role="status"]')?.classList.contains('sr-only') && document.querySelector('p[role="status"]').textContent.includes('Preparing session')`
+    )
+  )
+  assert.ok(
+    await evaluate(
+      `return window.__canvasTranscript?.scene()?.blocks.at(-1)?.id === '__streaming__' && JSON.stringify(window.__canvasTranscript.scene().blocks.at(-1).nodes).includes('Preparing session and connecting to model...')`
+    )
+  )
+  assert.ok(
+    await evaluate(
+      `return ![...document.querySelectorAll('p:not(.sr-only)')].some(el => el.textContent.includes('Preparing session'))`
+    )
+  )
+  await click('#startup-ready')
+  assert.ok(
+    await evaluate(
+      `return !document.querySelector('p[role="status"]') && JSON.stringify(window.__canvasTranscript.scene().blocks.at(-1).nodes).includes('@roxy is thinking')`
+    )
+  )
+  await click('#startup-done')
   assert.ok(await text('New bot'))
   assert.ok(
     await evaluate(`

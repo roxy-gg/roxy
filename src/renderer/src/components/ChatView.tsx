@@ -151,7 +151,7 @@ export function ChatView(): JSX.Element {
   const cancelBackgroundTask = useRoxyStore((s) => s.cancelBackgroundTask)
   const cancelToolCall = useRoxyStore((s) => s.cancelToolCall)
 
-  const hasContent = messages.length > 0 || (streaming !== null && streaming.length > 0)
+  const hasContent = messages.length > 0 || streaming !== null || starting
   // Wait for history even when live tokens are available, so arrival paints the complete tail once.
   const loading = !messagesError && messagesChatId !== activeChatId
   const isEmpty = !hasContent && !loading
@@ -381,7 +381,8 @@ export function ChatView(): JSX.Element {
         ) : (
           <CanvasTranscript
             messages={messages}
-            streaming={streaming}
+            streaming={streaming ?? (starting ? [] : null)}
+            starting={starting}
             chatId={activeChatId}
             pinSignal={sentMessageSignal}
             onCancelSubagent={(subChatId) => void cancelSubagent(subChatId)}
@@ -410,7 +411,7 @@ export function ChatView(): JSX.Element {
         />
 
         {starting && (
-          <p role="status" className="mx-auto w-full max-w-3xl px-4 pt-2 text-xs text-text-subtle">
+          <p role="status" className="sr-only">
             {t('queue.starting')}
           </p>
         )}

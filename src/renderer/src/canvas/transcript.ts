@@ -48,6 +48,8 @@ export interface LayoutInput {
   messages: Message[]
   /** The live turn's parts, or null when nothing is streaming. */
   streaming: MessagePart[] | null
+  /** Automation setup before the first model event; shown in the assistant activity row. */
+  starting?: boolean
   /** Turn start or latest tool start, retained by the per-chat store across view switches. */
   activityStartedAt?: number
   width: number
@@ -476,13 +478,16 @@ export function layoutParts(
       input.now,
       input.activityRandom
     )
-    const labels = activityLabels(builder.t, speakingAs, verb)
+    const preparing = input.starting && parts.length === 0
+    const labels = preparing
+      ? [builder.t('queue.starting')]
+      : activityLabels(builder.t, speakingAs, verb)
     cursor += layoutThinking(
       builder,
       x,
       cursor,
       width,
-      labels[phrase.suffixIndex],
+      labels[preparing ? 0 : phrase.suffixIndex],
       labels,
       input.activityStartedAt ?? input.now
     )

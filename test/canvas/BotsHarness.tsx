@@ -445,6 +445,44 @@ export function BotsHarness(): JSX.Element {
     <HashRouter>
       <div className="bar">
         <button
+          id="startup"
+          onClick={() =>
+            useRoxyStore.setState({
+              startingAutomation: { 'project-chat': true },
+              runningAutomation: { 'project-chat': true },
+              automationSpeakers: { 'project-chat': { botUsername: 'roxy' } },
+              streamingChats: {}
+            })
+          }
+        >
+          Startup fixture
+        </button>
+        <button
+          id="startup-ready"
+          onClick={() =>
+            useRoxyStore.setState({
+              startingAutomation: { 'project-chat': false },
+              streamingChats: { 'project-chat': [] }
+            })
+          }
+        >
+          Running fixture
+        </button>
+        <button
+          id="startup-done"
+          onClick={() =>
+            useRoxyStore.setState({
+              startingAutomation: {},
+              runningAutomation: {},
+              automationSpeakers: {},
+              streamingChats: {}
+            })
+          }
+        >
+          Finished fixture
+        </button>
+
+        <button
           id="busy"
           onClick={() => useRoxyStore.setState({ sendingChats: { 'project-chat': true } })}
         >

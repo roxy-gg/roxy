@@ -377,7 +377,7 @@
     "activeSummary": "Active: {{scheme}}://{{host}}:{{port}}"
   },
   "queue": {
-    "starting": "Starting: preparing this session and connecting to its model.",
+    "starting": "Preparing session and connecting to model...",
     "automatedRequest": "Automated request",
     "deliveryIssues": "Delivery needs attention. Edit to retry or remove the failed request.",
     "wait": {

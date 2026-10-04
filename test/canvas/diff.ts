@@ -797,6 +797,40 @@ check('an empty streaming turn remains visible beside windowed history', () => {
   assert.ok(JSON.stringify(scene.blocks.at(-1)!.nodes).includes('braille'))
   assert.ok(JSON.stringify(scene.blocks.at(-1)!.nodes).includes('elapsed'))
 })
+check('automation startup stays in the assistant activity row until streaming begins', () => {
+  const state = view()
+  const cache = new BlockCache()
+  const input = {
+    ...longInput([], state),
+    streaming: [] as MessagePart[] | null,
+    starting: true,
+    streamingBot: { botUsername: 'roxy' },
+    viewport: undefined,
+    now: 1000,
+    activityStartedAt: 1000,
+    activityRandom: () => 0.8
+  }
+  const started = layoutTranscript(input, cache)
+  const nodes = JSON.stringify(started.blocks.at(-1)!.nodes)
+  assert.ok(nodes.includes('@roxy'))
+  assert.ok(nodes.includes(t('queue.starting')))
+  assert.ok(nodes.includes('braille'))
+  assert.ok(nodes.includes('elapsed'))
+
+  const running = layoutTranscript({ ...input, starting: false }, cache)
+  assert.ok(JSON.stringify(running.blocks.at(-1)!.nodes).includes('@roxy is thinking'))
+  assert.ok(!JSON.stringify(running.blocks.at(-1)!.nodes).includes(t('queue.starting')))
+
+  const writing = layoutTranscript(
+    { ...input, streaming: [{ type: 'text', text: 'Hello.' }] },
+    cache
+  )
+  assert.ok(JSON.stringify(writing.blocks.at(-1)!.nodes).includes('@roxy is writing'))
+  assert.ok(!JSON.stringify(writing.blocks.at(-1)!.nodes).includes(t('queue.starting')))
+
+  const stopped = layoutTranscript({ ...input, starting: false, streaming: null }, cache)
+  assert.equal(stopped.blocks.length, 0)
+})
 check('one live turn keeps its activity row and start time across updates', () => {
   const state = view()
   const cache = new BlockCache()

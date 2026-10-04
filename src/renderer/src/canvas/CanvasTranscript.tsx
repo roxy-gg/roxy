@@ -38,6 +38,7 @@ function loadLogo(): Promise<HTMLImageElement> {
 export interface CanvasTranscriptProps {
   messages: Message[]
   streaming: MessagePart[] | null
+  starting?: boolean
   onCancelSubagent: (subChatId: string) => void
   onCancelTool: (callId: string) => void
   onScrollStateChange?: (atBottom: boolean) => void
@@ -49,6 +50,7 @@ export function CanvasTranscript({
   messages,
   streaming,
   chatId,
+  starting = false,
   pinSignal,
   onCancelSubagent,
   onCancelTool,
@@ -112,6 +114,7 @@ export function CanvasTranscript({
           ...context,
           messages,
           streaming,
+          starting,
           activityStartedAt:
             activityStartedAt === undefined
               ? undefined
@@ -138,6 +141,7 @@ export function CanvasTranscript({
       messages,
       streaming,
       activityStartedAt,
+      starting,
       clock,
       logo,
       cache,
