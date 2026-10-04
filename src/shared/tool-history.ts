@@ -15,6 +15,7 @@ import type { ChatMessage } from './api'
 import type { Message, MessagePart } from './types'
 import { isHostSpeaker, type Bot } from './bots'
 import { previewText } from './context'
+import { imageReferenceText, messageImages } from './attachments'
 
 /** Cap a replayed tool result to what the live loop sent (agent.ts runLoop bounds big outputs). */
 export const REPLAY_OUTPUT_CAP = 8000
@@ -124,6 +125,12 @@ export function reconstructTurn(
   m: Message,
   self?: Pick<Bot, 'id' | 'username' | 'chatId'>
 ): ChatMessage[] {
+  const images = messageImages(m).map(({ dataUrl, mediaType, forwarded }) => ({
+    dataUrl,
+    mediaType,
+    ...(forwarded ? { forwarded } : {})
+  }))
+  const refs = imageReferenceText(m)
   // No `self` means the HOST is reading: her own rows are the unattributed ones,
   // plus any explicitly marked as hers (which is how she signs a reply inside a
   // bot's chat, where "unattributed" already belongs to that bot).
@@ -155,23 +162,32 @@ export function reconstructTurn(
       .join('\n')
     // Other participants' actions are background, never this actor's native
     // assistant/tool history. In particular a guest must not become the host.
-    return [{ role: 'user', content: `[@${speaker}]\n${content}` }]
+    return [
+      {
+        role: 'user',
+        content: `[@${speaker}]\n${content}${refs}`,
+        ...(images.length ? { images } : {})
+      }
+    ]
   }
   if (m.role === 'assistant') {
     const turns = reconstructAssistant(m.parts)
     for (const turn of turns)
       if (turn.role === 'assistant') turn.content = turn.content.replace(SPEAKER_MARKER, '')
+    if (images.length)
+      turns.push({
+        role: 'user',
+        content: `Images attached to the preceding handoff.${refs}`,
+        images
+      })
     return turns
   }
   const content = m.parts
     .map((p) => (p.type === 'text' ? p.text : ''))
     .join('')
     .trim()
-  const images = m.parts
-    .filter((p): p is Extract<MessagePart, { type: 'image' }> => p.type === 'image')
-    .map((p) => ({ dataUrl: p.dataUrl, mediaType: p.mediaType }))
   if (!content && images.length === 0) return []
-  return [{ role: 'user', content, ...(images.length ? { images } : {}) }]
+  return [{ role: 'user', content: content + refs, ...(images.length ? { images } : {}) }]
 }
 
 /**

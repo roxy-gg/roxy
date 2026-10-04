@@ -29,10 +29,15 @@
  */
 import { BrowserWindow } from 'electron'
 import { CHANNELS } from '../../shared/ipc'
-import type { LlmChildEvent, SubagentDelta, SubagentRunView } from '../../shared/api'
-import type { MessagePart } from '../../shared/types'
+import type {
+  LlmChildEvent,
+  SubagentDelta,
+  SubagentRunView,
+  SubagentSnapshot
+} from '../../shared/api'
 import { PartsFold } from '../../shared/parts'
 import { notifyTurnAvailable } from './turn-state'
+import type { Message } from '../../shared/types'
 
 interface Run {
   subChatId: string
@@ -60,20 +65,7 @@ interface Run {
 
 /** Sub chat id —> its in-flight run. Only ever holds RUNNING subagents. */
 const runs = new Map<string, Run>()
-
-/**
- * The sub session the user currently has open, if any.
- *
- * Sub sessions are pruned at the end of the parent turn so one-shot delegates
- * don't pile up in the sidebar. That sweep predates their transcripts being
- * watchable: now that you can open one and follow it live, pruning the very
- * session someone is reading deletes content out from under them. The renderer
- * reports what's on screen; the sweep spares it.
- *
- * Not a Set: exactly one session is on screen at a time, so a single value makes
- * a stale "still viewing" entry impossible.
- */
-let viewedSubChatId: string | null = null
+let sequence = 0
 
 /** Push a payload to every open window (out-of-band — no requestId to route by). */
 function broadcast(payload: SubagentDelta): void {
@@ -108,7 +100,7 @@ export interface StartRunInput {
  */
 export function startSubagentRun(input: StartRunInput): {
   emit: (event: LlmChildEvent) => void
-  finish: (state: 'completed' | 'error') => void
+  finish: (state: 'completed' | 'error', message?: Message) => void
 } {
   const run: Run = {
     subChatId: input.subChatId,
@@ -123,7 +115,7 @@ export function startSubagentRun(input: StartRunInput): {
     cancelled: false
   }
   runs.set(input.subChatId, run)
-  broadcast({ subChatId: run.subChatId, kind: 'run', state: 'running' })
+  broadcast({ subChatId: run.subChatId, kind: 'run', state: 'running', sequence: ++sequence })
 
   // Closed over rather than read off the map: `endSubagentRuns` can drop this
   // run (its session was deleted) while the loop is still emitting, and a stray
@@ -134,16 +126,16 @@ export function startSubagentRun(input: StartRunInput): {
       if (closed) return
       run.fold.apply(event)
       if (event.type === 'tool-start') run.activityStartedAt = Date.now()
-      broadcast({ subChatId: run.subChatId, kind: 'event', event })
+      broadcast({ subChatId: run.subChatId, kind: 'event', event, sequence: ++sequence })
     },
-    finish: (state) => {
+    finish: (state, message) => {
       if (closed) return
       closed = true
       // Drop the run BEFORE announcing the end: the renderer reloads the sub
       // session's persisted transcript on this frame, and a snapshot fetched
       // during that reload must not hand back the now-superseded live parts.
       runs.delete(run.subChatId)
-      broadcast({ subChatId: run.subChatId, kind: 'run', state })
+      broadcast({ subChatId: run.subChatId, kind: 'run', state, message, sequence: ++sequence })
       notifyTurnAvailable()
     }
   }
@@ -154,8 +146,9 @@ export function startSubagentRun(input: StartRunInput): {
  * mid-run. Null when nothing is running for that id — either it never was, or it
  * already finished and its persisted message is the truth.
  */
-export function subagentSnapshot(subChatId: string): MessagePart[] | null {
-  return runs.get(subChatId)?.fold.parts ?? null
+export function subagentSnapshot(subChatId: string): SubagentSnapshot | null {
+  const run = runs.get(subChatId)
+  return run ? { parts: run.fold.parts, sequence, activityStartedAt: run.activityStartedAt } : null
 }
 
 /**
@@ -209,7 +202,7 @@ export function listRunningSubagents(): SubagentRunView[] {
  * The run's *work* is stopped elsewhere (a background job by its controller, a
  * foreground one by the parent turn dying with it). This only clears the
  * registry, so a gone session can't pin an entry that keeps broadcasting to a
- * chat view nobody can open, or hold a sibling against pruning forever.
+ * chat view nobody can open, or falsely keep its parent marked busy.
  */
 export function endSubagentRuns(chatId: string): void {
   for (const run of [...runs.values()]) {
@@ -224,25 +217,11 @@ export function endSubagentRuns(chatId: string): void {
       // a cancel must never break the teardown loop
     }
     runs.delete(run.subChatId)
-    broadcast({ subChatId: run.subChatId, kind: 'run', state: 'error' })
+    broadcast({ subChatId: run.subChatId, kind: 'run', state: 'error', sequence: ++sequence })
   }
-  if (viewedSubChatId === chatId) viewedSubChatId = null
-}
-
-/** Renderer -> main: which chat is on screen (null when it isn't a sub session). */
-export function setViewedSubChat(chatId: string | null): void {
-  viewedSubChatId = chatId
-}
-
-/** Sub session ids that must survive a prune: anything running, plus what's on screen. */
-export function protectedSubChatIds(): Set<string> {
-  const ids = new Set(runs.keys())
-  if (viewedSubChatId) ids.add(viewedSubChatId)
-  return ids
 }
 
 /** Test-only: clear the registry between smoke cases. */
 export function _resetSubagentRuns(): void {
   runs.clear()
-  viewedSubChatId = null
 }

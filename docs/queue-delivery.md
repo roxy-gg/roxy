@@ -83,8 +83,12 @@ collaborator edits and cancellation coverage.
 - Restart is a database close/reopen plus worker startup, not an OS kill during
   a non-idempotent external tool action.
 - Worktree creation is real; long project setup scripts are not exercised.
-- No new attachment-forwarding tool schema: existing images survive delivery,
-  retry and reload. Image-forwarding work remains a separate workstream.
-- Integration overlaps: `automation.ts`, `bot-tools.ts`, `store.ts`, shared
-  queue/API types, ChatView and locale keys. Preserve these lifecycle guards when
-  integrating avatar, attachment and continuity changes from other worktrees.
+- Attachment-forwarding, avatar attribution, and subagent-continuity fixes from
+  main are integrated. Existing `image_refs` resolve before admission; their
+  copied images, capability checks, and safe tool acknowledgements are preserved.
+- Sequence-based stream recovery shares the unified transcript loader with queue
+  revision guards. Phase updates neither discard the snapshot prefix nor revive
+  stale starting state. Terminal events retain the fully persisted reply.
+- Merge regressions cover forwarded images on immediate project sends, deferred
+  bot/Roxy handoffs and explicit future delivery, alongside the upstream image
+  and subagent suites. No other worktrees were modified.

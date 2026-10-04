@@ -20,7 +20,9 @@ export function BotAvatar({
       intensity3d="none"
       interactive={false}
       showInitial={false}
-      className="shrink-0 rounded-full text-black"
+      className="shrink-0 text-black"
+      // No initials use container units, so size containment only breaks parent sizing.
+      style={{ borderRadius: size / 4, containerType: 'normal' }}
       aria-hidden
     />
   )
@@ -38,7 +40,7 @@ export function botAvatarUrl(username: string): string {
     '<svg ',
     '<svg x="20" y="30" width="60" height="40" '
   )
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100" color="black"><circle cx="50" cy="50" r="50" fill="${COLORS[hash % COLORS.length]}"/>${eyes}</svg>`
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100" color="black"><rect width="100" height="100" rx="25" fill="${COLORS[hash % COLORS.length]}"/>${eyes}</svg>`
   const url = `data:image/svg+xml,${encodeURIComponent(svg)}`
   avatarUrls.set(username, url)
   return url

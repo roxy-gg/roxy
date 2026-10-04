@@ -43,6 +43,15 @@ const capChildOutput = (text: string): string =>
     marker: CHILD_MARKER
   })
 
+/** Bound a detached delegate's transcript just like a foreground task's children. */
+export function taskPreview(parts: MessagePart[]): MessagePart[] {
+  return parts
+    .slice(0, MAX_CHILD_PARTS)
+    .map((part) =>
+      part.type === 'tool' && part.output ? { ...part, output: capChildOutput(part.output) } : part
+    )
+}
+
 /**
  * Fold one event into a parts list, returning a new list. `index` maps a tool
  * call id to its slot and is mutated in place (it's bookkeeping, not state React
@@ -178,6 +187,23 @@ export class PartsFold {
     this.parts = this.parts.map((p, i) => (i === idx ? { ...parent, children } : p))
     return this.parts
   }
+}
+
+/** Restore the missing prefix, then replay only events newer than the snapshot. */
+export function restorePartsSnapshot(
+  snapshot: { parts: MessagePart[]; sequence: number },
+  deltas: readonly (
+    | { sequence: number; kind: 'event'; event: LlmEvent }
+    | { sequence: number; kind: 'turn' | 'run' }
+  )[]
+): PartsFold | null {
+  const tail = deltas.filter((delta) => delta.sequence > snapshot.sequence)
+  // A newer run boundary owns the live state, even if the snapshot returns last.
+  if (tail.some((delta) => delta.kind !== 'event')) return null
+  const fold = new PartsFold()
+  fold.seed(snapshot.parts)
+  for (const delta of tail) if (delta.kind === 'event') fold.apply(delta.event)
+  return fold
 }
 
 /**

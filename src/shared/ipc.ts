@@ -180,8 +180,6 @@ export const CHANNELS = {
   subagentSnapshot: 'subagent:snapshot',
   /** renderer -> main: every subagent currently running (window (re)load) */
   subagentListRunning: 'subagent:listRunning',
-  /** renderer -> main: which chat is on screen, so a viewed sub session isn't pruned */
-  subagentSetViewed: 'subagent:setViewed',
   /**
    * renderer -> main: cancel ONE running subagent by its session id.
    *

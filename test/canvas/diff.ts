@@ -939,7 +939,7 @@ check('a dragged selection retains its source rows across viewport boundaries', 
   assert.ok(next.window!.end >= next.window!.scrollTop + 600)
 })
 
-check('bot replies use a round Facehash and username in both transcript layouts', () => {
+check('bot replies use a full-size Facehash and username in both transcript layouts', () => {
   const own = {
     ...FIXTURES[1],
     id: 'own-bot-reply',
@@ -978,21 +978,32 @@ check('bot replies use a round Facehash and username in both transcript layouts'
     id: 'cross-session-request',
     role: 'user' as const,
     botId: 'bot-1',
-    botUsername: 'helper',
+    botUsername: 'old-name',
     parts: [{ type: 'text' as const, text: 'Please review the diff.' }]
   }
-  for (const messages of [[fromAnotherSession], [...longMessages, fromAnotherSession]]) {
-    const scene = layoutTranscript(
-      {
-        ...longInput(messages),
-        bots: [bot],
-        botAvatar: (name) => `data:image/svg+xml,${name}`
-      },
-      new BlockCache()
-    )
-    const nodes = JSON.stringify(scene.blocks.at(-1)!.nodes)
-    assert.ok(nodes.includes('@helper'), 'a delegated request keeps its author')
-    assert.ok(!nodes.includes('__roxy__'), 'and is not drawn as the person reading it')
+  for (const roster of [[bot], []]) {
+    for (const messages of [[fromAnotherSession], [...longMessages, fromAnotherSession]]) {
+      const scene = layoutTranscript(
+        {
+          ...longInput(messages),
+          bots: roster,
+          botAvatar: (name) => `data:image/svg+xml,${name}`
+        },
+        new BlockCache()
+      )
+      const nodes = JSON.stringify(scene.blocks.at(-1)!.nodes)
+      const username = roster.length ? 'helper' : 'old-name'
+      assert.ok(
+        nodes.includes(`@${username}`),
+        'stable ID resolves renames, snapshots survive deletion'
+      )
+      assert.ok(
+        nodes.includes(`data:image/svg+xml,${username}`),
+        'a delegated user turn uses its bot avatar'
+      )
+      assert.ok(nodes.includes('"radius":7'), 'the bot avatar fills its rounded square')
+      assert.ok(!nodes.includes('"name":"user"'), 'bot-authored prompts are not human')
+    }
   }
   // An ordinary user turn is still the user's, with no bot name attached.
   const typedHere = {
@@ -1008,6 +1019,21 @@ check('bot replies use a round Facehash and username in both transcript layouts'
     ).includes('@helper'),
     'what the user typed here is not attributed to a bot'
   )
+
+  const humanMention = {
+    ...typedHere,
+    parts: [{ type: 'text' as const, text: '@helper please review this human-authored request.' }]
+  }
+  for (const messages of [[humanMention], [...longMessages, humanMention]]) {
+    const nodes = JSON.stringify(
+      layoutTranscript(
+        { ...longInput(messages), bots: [bot], botAvatar: (name) => `data:image/svg+xml,${name}` },
+        new BlockCache()
+      ).blocks.at(-1)!.nodes
+    )
+    assert.ok(nodes.includes('"name":"user"'), 'human mentions do not change authorship')
+    assert.ok(!nodes.includes('data:image/svg+xml,'))
+  }
 
   // The HOST answering inside a bot's chat: `botUsername` names the chat owner,
   // so an unsigned row is drawn as that bot. Roxy signs hers, and must come out
@@ -1032,8 +1058,7 @@ check('bot replies use a round Facehash and username in both transcript layouts'
     assert.ok(!nodes.includes('@helper'), 'the host is not drawn as the chat owner')
     assert.ok(nodes.includes('@roxy'), 'the host is named like any other speaker')
     assert.ok(nodes.includes('__roxy__'), 'it keeps the host avatar')
-    // The avatar shape is what separates host from guest: square for Roxy,
-    // round for a bot. Naming the host must not hand it the guest treatment.
+    // Naming the host must not hand it the generated guest avatar.
     assert.ok(
       !nodes.includes('data:image/svg+xml,roxy'),
       'the host keeps its own avatar, not a generated bot one'

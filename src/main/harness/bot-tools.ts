@@ -18,6 +18,7 @@ import { endSubagentRuns } from '../services/subagent-stream'
 import { killSessionBackground } from './tools'
 import { disposeSession } from '../services/browser'
 import { removeWorktreeForChat } from '../services/worktree'
+import { attachmentSafeJson, resolveImageRefs } from '../services/attachments'
 
 const text = (value: unknown): string => (typeof value === 'string' ? value : '')
 
@@ -41,6 +42,12 @@ export async function runBotTool(
     : source && bots.chatBot(source)
       ? { botUsername: HOST_USERNAME }
       : {}
+  // A finished sub-chat may be deleted before a queued peer answers. The durable
+  // parent conversation owns that handoff, but the delegate still has no self.
+  const conversation = ctx.delegationOwner?.sessionId ?? source
+  const handoffAuthor = ctx.delegationOwner
+    ? { botId: ctx.delegationOwner.botId, botUsername: ctx.delegationOwner.botUsername }
+    : author
   const running = source
     ? (getDb()
         .prepare(`SELECT hops FROM queue WHERE chat_id = ? AND state = 'running'`)
@@ -156,7 +163,7 @@ export async function runBotTool(
       //
       // The request belongs to whoever is asking — attributing it to the invited
       // bot made its own question appear above its answer, signed with its name.
-      const asker = author
+      const asker = handoffAuthor
       // Named explicitly in the transcript regardless of the caller's wording:
       // asking without an @-prefix still reaches the bot, but showing WHO was
       // called (not just what was asked) is what makes a delegation read as one
@@ -166,8 +173,8 @@ export async function runBotTool(
       const username = bot?.username ?? 'Roxy'
       const addressed = new RegExp(`^\\s*@${username}(?=$|[\\s,:])`, 'i').test(prompt)
       const content = addressed ? prompt : `@${username} ${prompt}`
-      result = enqueuePrompt(source, content, undefined, {
-        sourceChatId: source,
+      result = enqueuePrompt(conversation!, content, resolveImageRefs(source, input.image_refs), {
+        sourceChatId: conversation,
         hops,
         asBotId: bot?.id,
         recipientId: bot?.id ?? HOST_USERNAME,
@@ -230,18 +237,21 @@ export async function runBotTool(
           }
           result = { deleted: id }
         } else if (action === 'send') {
-          result = enqueuePrompt(id, text(input.prompt), undefined, {
-            resume: true,
-            sourceChatId: source,
-            replyToChatId: source,
-            hops,
-            continueReply: id !== source,
-            // The actor that delegated has to be the one the answer comes back
-            // to: resuming the session's owner instead handed the continuation
-            // to a bot that never asked for it, with its identity and config.
-            replyToActor: author,
-            ...author
-          })
+          result = enqueuePrompt(
+            id,
+            text(input.prompt),
+            resolveImageRefs(source, input.image_refs),
+            {
+              resume: true,
+              sourceChatId: source,
+              replyToChatId: conversation,
+              hops,
+              continueReply: id !== conversation,
+              // Resume the delegating actor in its durable parent conversation.
+              replyToActor: handoffAuthor,
+              ...handoffAuthor
+            }
+          )
         } else if (action === 'stop') {
           stopTurn(id)
           result = { stopped: id }
@@ -256,13 +266,18 @@ export async function runBotTool(
         if (!repo.getChat(chatId)) throw new Error('Session not found')
         result = repo.listQueue(chatId)
       } else if (action === 'create') {
-        result = enqueuePrompt(chatId, text(input.prompt), undefined, {
-          resume: true,
-          sourceChatId: source,
-          ...author,
-          hops,
-          notBefore: input.not_before as number | undefined
-        })
+        result = enqueuePrompt(
+          chatId,
+          text(input.prompt),
+          resolveImageRefs(source, input.image_refs),
+          {
+            resume: true,
+            sourceChatId: source,
+            ...(!self && source && bots.chatBot(chatId) ? { botUsername: HOST_USERNAME } : author),
+            hops,
+            notBefore: input.not_before as number | undefined
+          }
+        )
       } else {
         const row = getDb().prepare('SELECT chat_id, state FROM queue WHERE id = ?').get(id) as
           | { chat_id: string; state: string }
@@ -287,7 +302,11 @@ export async function runBotTool(
               (!Number.isSafeInteger(input.not_before) || Number(input.not_before) < 0)
             )
               throw new Error('Invalid not_before timestamp')
-            repo.updateQueueItem(id, prompt, old.images)
+            const images =
+              input.image_refs === undefined
+                ? old.images
+                : resolveImageRefs(source, input.image_refs)
+            repo.updateQueueItem(id, prompt, images)
             notifyTranscriptChanged(row.chat_id)
             resumeQueue(row.chat_id)
             if (input.not_before !== undefined)
@@ -304,5 +323,5 @@ export async function runBotTool(
     default:
       throw new Error('Unknown bot tool')
   }
-  return { ok: true, output: JSON.stringify(result, null, 2) }
+  return { ok: true, output: attachmentSafeJson(result) }
 }

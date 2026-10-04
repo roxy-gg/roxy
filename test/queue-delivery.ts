@@ -20,6 +20,7 @@ import {
   wakeAutomation
 } from '../src/main/services/automation'
 import { isVisibleQueueItem, nextQueueItem } from '../src/shared/queue'
+import { messageImages } from '../src/shared/attachments'
 
 app.setPath('userData', mkdtempSync(path.join(tmpdir(), 'roxy-delivery-')))
 process.env.ROXY_TRACK_DISABLE = '1'
@@ -48,6 +49,7 @@ globalThis.fetch = (async (url, init) => {
               id: 'fixture-model',
               name: 'Fixture',
               tool_call: true,
+              modalities: { input: ['text', 'image'] },
               limit: { context: 128000, output: 4096 }
             }
           }
@@ -233,12 +235,15 @@ async function main(): Promise<void> {
   await idle(bot.chatId)
 
   // Same-chat bot handoffs cannot start until the source turn is persisted/released.
+  const imageRefs = messageImages(
+    repo.listMessages(bot.chatId).find((m) => m.content === 'First prompt')!
+  ).map((image) => image.ref)
   for (const destination of [guest.id, 'roxy']) {
     const release = claimTurn(bot.chatId, new AbortController())!
     const before = requests.length
     const result = await runTool(
       'bot_invoke',
-      { bot: destination, prompt: 'Handoff fixture' },
+      { bot: destination, prompt: 'Handoff fixture', image_refs: imageRefs },
       context
     )
     assert.ok(result.ok, result.output)
@@ -256,6 +261,15 @@ async function main(): Promise<void> {
     await idle(bot.chatId)
     assert.equal(requests.length, before + 1)
     assert.ok(JSON.stringify(requests.at(-1)).includes('Caller finished'))
+    assert.equal(
+      (JSON.stringify(requests.at(-1)?.messages.at(-1)).match(/data:image\/png/g) ?? []).length,
+      3,
+      'handoff retains explicitly forwarded images after source release'
+    )
+    assert.ok(
+      !result.output.includes('data:image/'),
+      'tool acknowledgement never exposes image bytes'
+    )
   }
 
   // A returned session result overlaps an active user turn: no overwrite or concurrent start.
@@ -263,12 +277,21 @@ async function main(): Promise<void> {
   enqueuePrompt(bot.chatId, 'User before returned continuation', images)
   const sent = await runTool(
     'session_manage',
-    { action: 'send', id: project.id, prompt: 'Return fixture' },
+    { action: 'send', id: project.id, prompt: 'Return fixture', image_refs: imageRefs },
     context
   )
   assert.ok(sent.ok, sent.output)
   assert.equal(JSON.parse(sent.output).state, 'starting')
+  assert.deepEqual(
+    repo.listQueue(project.id)[0].images,
+    images.map((image) => ({ ...image, forwarded: true }))
+  )
   await idle(project.id)
+  assert.equal(
+    (JSON.stringify(requests.at(-1)?.messages.at(-1)).match(/data:image\/png/g) ?? []).length,
+    3,
+    'immediate project delivery carries all forwarded images'
+  )
   assert.ok(sessionBusy(bot.chatId))
   assert.equal(repo.listQueue(bot.chatId).length, 2)
   assert.equal(repo.listQueue(bot.chatId)[0].content, 'User before returned continuation')
@@ -358,6 +381,7 @@ async function main(): Promise<void> {
       action: 'create',
       session: project.id,
       prompt: 'Future machine work',
+      image_refs: imageRefs,
       not_before: Date.now() + 60000
     },
     context
@@ -375,6 +399,11 @@ async function main(): Promise<void> {
   )
   assert.ok(advanced.ok)
   await idle(project.id)
+  assert.equal(
+    (JSON.stringify(requests.at(-1)?.messages.at(-1)).match(/data:image\/png/g) ?? []).length,
+    3,
+    'delayed tool delivery retains forwarded images'
+  )
 
   // Future USER heads block later work, even ordinary idle sends, until due.
   const due = Date.now() + 60000

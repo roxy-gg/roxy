@@ -223,6 +223,8 @@ export type MessagePart =
       mediaType: string
       /** Original file name, when known. */
       name?: string
+      /** Copied through delegation; require verified vision support on replay. */
+      forwarded?: boolean
     }
   | {
       type: 'tool'
@@ -246,6 +248,8 @@ export type MessagePart =
        * on every other tool, and on task cards from before this existed.
        */
       subChatId?: string
+      /** An out-of-band task result attaches to this launching call in the UI. */
+      resultFor?: string
       /**
        * Whether this call could be cancelled while it was running — set from the
        * `tool-start` event (see LlmEvent), which resolves it from the tool
@@ -334,6 +338,7 @@ export interface QueueImage {
   dataUrl: string
   mediaType: string
   name?: string
+  forwarded?: boolean
 }
 
 /**
