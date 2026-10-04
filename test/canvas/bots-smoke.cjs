@@ -686,6 +686,86 @@ async function run() {
   await buttonText('Delete bot')
   for (let i = 0; i < 20 && !(await text('New bot')); i++) await wait()
   assert.ok(await text('New bot'), await evaluate('return document.body.textContent'))
+  // The expanded sidebar must wrap bots (including the new-bot button) as it narrows.
+  for (let i = 0; i < 10; i++) await click('button[title="New bot"]')
+  for (const [width, rows] of [
+    [220, 3],
+    [288, 2],
+    [480, 1]
+  ]) {
+    const layout = await evaluate(`
+      const sidebar = document.querySelector('aside:not([aria-label])');
+      sidebar.style.width = '${width}px';
+      const section = document.querySelector('button[title="New bot"]').parentElement;
+      const bounds = section.getBoundingClientRect();
+      const buttons = [...section.querySelectorAll('button')].map(el => el.getBoundingClientRect());
+      const tops = [...new Set(buttons.map(rect => rect.top))];
+      return {
+        rows: tops.length,
+        widths: buttons.map(rect => rect.width),
+        rowGaps: tops.slice(1).map((top, i) => top - tops[i]),
+        fits: buttons.every(rect => rect.left >= bounds.left + 4 && rect.right <= bounds.right - 4)
+          && section.scrollWidth <= section.clientWidth
+          && sidebar.scrollWidth <= sidebar.clientWidth
+          && document.documentElement.scrollWidth <= innerWidth,
+        addAtEnd: buttons.at(-1).top === tops.at(-1)
+      };
+    `)
+    assert.equal(layout.rows, rows, `${width}px sidebar wraps into ${rows} rows`)
+    assert.ok(
+      layout.fits &&
+        layout.addAtEnd &&
+        layout.widths.every((size) => size === 32) &&
+        layout.rowGaps.every((gap) => gap === 40),
+      `${width}px sidebar keeps 32px avatars, 8px gaps, and no horizontal overflow: ${JSON.stringify(layout)}`
+    )
+  }
+  await evaluate(`document.querySelector('aside:not([aria-label])').style.width = '220px'`)
+  await click('button[title="@bot-9"]')
+  assert.equal(
+    await evaluate(
+      `return document.querySelector('button[title="@bot-9"]').getAttribute('aria-pressed')`
+    ),
+    'true'
+  )
+  await evaluate(`document.querySelector('button[title="@bot-10"]').focus()`)
+  await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent', {
+    type: 'keyDown',
+    key: 'Enter',
+    code: 'Enter',
+    windowsVirtualKeyCode: 13
+  })
+  await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent', {
+    type: 'char',
+    text: '\r',
+    key: 'Enter',
+    code: 'Enter',
+    windowsVirtualKeyCode: 13
+  })
+  await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent', {
+    type: 'keyUp',
+    key: 'Enter',
+    code: 'Enter',
+    windowsVirtualKeyCode: 13
+  })
+  await wait()
+  assert.ok(
+    await evaluate(`return document.querySelector('button[title="@bot-10"]').getAttribute('aria-pressed') === 'true'
+      && document.querySelector('button[title="@bot-10"]').classList.contains('ring-2')`),
+    'a wrapped bot remains keyboard-selectable and visibly selected'
+  )
+  await key('F10', ['shift'])
+  assert.ok(
+    await evaluate(`return !!document.querySelector('[data-bot-menu]')`),
+    'wrapped bot opens its keyboard context menu'
+  )
+  await key('Escape')
+  assert.ok(
+    await evaluate(
+      `return !document.querySelector('[data-bot-menu]') && document.activeElement.title === '@bot-10'`
+    ),
+    'closing the wrapped bot menu restores focus'
+  )
   assert.ok(!errors.length, errors.join('\n'))
   console.log(
     'BOTS UI OK — creation, intro, avatar/canvas identity, left settings layout, bot/mention queue routing, failed retry, instructions, schedules and deletion'
