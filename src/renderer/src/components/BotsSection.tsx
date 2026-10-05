@@ -24,6 +24,31 @@ export function BotsSection({ rail = false }: { rail?: boolean }): JSX.Element {
     trigger: HTMLButtonElement
   } | null>(null)
   const menuRef = useRef<HTMLDivElement>(null)
+  /**
+   * Name tooltip for the icon under the cursor. The native `title` is slow and
+   * unreliable in Electron, and the avatars carry no text, so this one shows
+   * after a short dwell. It is portalled with fixed coordinates because the rail
+   * scrolls (`overflow-y-auto`) and would clip anything positioned inside it.
+   */
+  const [tip, setTip] = useState<{ id: string; x: number; y: number } | null>(null)
+  const tipTimer = useRef<number>(0)
+  const showTip = (id: string, el: HTMLElement): void => {
+    window.clearTimeout(tipTimer.current)
+    tipTimer.current = window.setTimeout(() => {
+      const rect = el.getBoundingClientRect()
+      setTip(
+        rail
+          ? { id, x: rect.right + 8, y: rect.top + rect.height / 2 }
+          : { id, x: Math.max(48, rect.left + rect.width / 2), y: rect.bottom + 6 }
+      )
+    }, 200)
+  }
+  const hideTip = (): void => {
+    window.clearTimeout(tipTimer.current)
+    setTip(null)
+  }
+  useEffect(() => () => window.clearTimeout(tipTimer.current), [])
+  const tipBot = bots.find((bot) => bot.id === tip?.id)
   const menuBot = bots.find((bot) => bot.id === menu?.botId)
   const closeMenu = (): void => {
     setMenu(null)
@@ -75,12 +100,21 @@ export function BotsSection({ rail = false }: { rail?: boolean }): JSX.Element {
         {bots.map((bot) => (
           <button
             key={bot.id}
-            title={`@${bot.username}`}
             aria-label={`@${bot.username}`}
             aria-pressed={active === bot.chatId}
-            onClick={() => void selectChat(bot.chatId)}
+            onMouseEnter={(e) => showTip(bot.id, e.currentTarget)}
+            onMouseLeave={hideTip}
+            onFocus={(e) => {
+              if (e.currentTarget.matches(':focus-visible')) showTip(bot.id, e.currentTarget)
+            }}
+            onBlur={hideTip}
+            onClick={() => {
+              hideTip()
+              void selectChat(bot.chatId)
+            }}
             onContextMenu={(e) => {
               e.preventDefault()
+              hideTip()
               const rect = e.currentTarget.getBoundingClientRect()
               setMenu({
                 botId: bot.id,
@@ -123,6 +157,22 @@ export function BotsSection({ rail = false }: { rail?: boolean }): JSX.Element {
           {!bots.length && !rail && t('bots.new')}
         </button>
       </div>
+      {tip &&
+        tipBot &&
+        createPortal(
+          <div
+            role="tooltip"
+            style={{
+              left: tip.x,
+              top: tip.y,
+              transform: rail ? 'translateY(-50%)' : 'translateX(-50%)'
+            }}
+            className="pointer-events-none fixed z-50 max-w-60 animate-fade-in truncate sq-frame sq-lg sq-fill-elevated sq-ring edge edge-strong edge-panel rounded-lg border border-border bg-elevated px-2 py-1 text-[11px] text-text shadow-float"
+          >
+            @{tipBot.username}
+          </div>,
+          document.body
+        )}
       {error && !deleting && (
         <p role="alert" className="break-words px-1 pb-2 text-xs text-danger">
           {error}
