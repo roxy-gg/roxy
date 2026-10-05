@@ -39,7 +39,7 @@ export function BotsSection({ rail = false }: { rail?: boolean }): JSX.Element {
       setTip(
         rail
           ? { id, x: rect.right + 8, y: rect.top + rect.height / 2 }
-          : { id, x: Math.max(48, rect.left + rect.width / 2), y: rect.bottom + 6 }
+          : { id, x: rect.left, y: rect.bottom + 6 }
       )
     }, 200)
   }
@@ -124,8 +124,11 @@ export function BotsSection({ rail = false }: { rail?: boolean }): JSX.Element {
               })
             }}
             onKeyDown={(e) => {
+              // Dismiss without moving focus (WCAG 1.4.13).
+              if (e.key === 'Escape') hideTip()
               if (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) {
                 e.preventDefault()
+                hideTip()
                 const rect = e.currentTarget.getBoundingClientRect()
                 setMenu({ botId: bot.id, x: rect.left, y: rect.bottom, trigger: e.currentTarget })
               }
@@ -165,7 +168,7 @@ export function BotsSection({ rail = false }: { rail?: boolean }): JSX.Element {
             style={{
               left: tip.x,
               top: tip.y,
-              transform: rail ? 'translateY(-50%)' : 'translateX(-50%)'
+              transform: rail ? 'translateY(-50%)' : undefined
             }}
             className="pointer-events-none fixed z-50 max-w-60 animate-fade-in truncate sq-frame sq-lg sq-fill-elevated sq-ring edge edge-strong edge-panel rounded-lg border border-border bg-elevated px-2 py-1 text-[11px] text-text shadow-float"
           >
