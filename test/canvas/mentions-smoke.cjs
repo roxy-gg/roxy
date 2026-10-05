@@ -299,7 +299,7 @@ async function run() {
     `),
     'the visible mirror wraps the same measured text as the native textarea'
   )
-  await click('button[title="@renamed"]')
+  await click('button[aria-label="@renamed"]')
   await type('prefix @RENAMED suffix')
   await evaluate(`
     const textarea = document.querySelector('textarea')
