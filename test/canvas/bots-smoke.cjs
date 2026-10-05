@@ -109,13 +109,13 @@ async function run() {
   )
   assert.ok(
     await evaluate(
-      `return [...document.querySelectorAll('button')].some((el) => el.title === '@bot' && el.querySelector('[data-facehash]'))`
+      `return [...document.querySelectorAll('button')].some((el) => el.getAttribute('aria-label') === '@bot' && el.querySelector('[data-facehash]'))`
     ),
     'the new bot is selected and carries a generated handle'
   )
   assert.ok(
     await evaluate(`
-      const avatar = document.querySelector('button[title="@bot"] [data-facehash]');
+      const avatar = document.querySelector('button[aria-label="@bot"] [data-facehash]');
       const bounds = avatar.getBoundingClientRect();
       const button = avatar.parentElement.getBoundingClientRect();
       const avatars = [...document.querySelectorAll('[data-facehash]')];
@@ -180,7 +180,7 @@ async function run() {
   await wait()
   assert.ok(
     await evaluate(
-      `return [...document.querySelectorAll('button')].some((el) => el.title === '@helper')`
+      `return [...document.querySelectorAll('button')].some((el) => el.getAttribute('aria-label') === '@helper')`
     ),
     'a rename from the conversation shows up in the sidebar'
   )
@@ -195,7 +195,7 @@ async function run() {
     await evaluate(`return !!document.querySelector('button[aria-label="Model: Reasoning"]')`),
     'a new bot inherits the last selected model'
   )
-  await click('button[title="@helper"]')
+  await click('button[aria-label="@helper"]')
   assert.ok(
     await evaluate(`return !!document.querySelector('button[aria-label="Thinking effort: Low"]')`),
     'switching back restores the first bot effort'
@@ -210,10 +210,10 @@ async function run() {
     ],
     'composer changes persist only on the active bot chat'
   )
-  await click('button[title="@bot"]')
+  await click('button[aria-label="@bot"]')
   await evaluate(`return window.__renameBot('bot', 'planner')`)
   await wait()
-  await rightClick('button[title="@helper"]')
+  await rightClick('button[aria-label="@helper"]')
   assert.deepEqual(
     await evaluate(
       `return [...document.querySelectorAll('[data-bot-menu] button')].map(button => button.textContent.trim())`
@@ -222,7 +222,7 @@ async function run() {
   )
   assert.equal(
     await evaluate(
-      `return document.querySelector('button[title="@planner"]').getAttribute('aria-pressed')`
+      `return document.querySelector('button[aria-label="@planner"]').getAttribute('aria-pressed')`
     ),
     'true',
     'right-click does not switch the active chat'
@@ -232,11 +232,11 @@ async function run() {
   await wait()
   assert.ok(
     await evaluate(
-      `return !document.querySelector('[data-bot-menu]') && document.activeElement.title === '@helper'`
+      `return !document.querySelector('[data-bot-menu]') && document.activeElement.getAttribute('aria-label') === '@helper'`
     ),
     'Escape dismisses the menu and returns focus'
   )
-  await rightClick('button[title="@helper"]')
+  await rightClick('button[aria-label="@helper"]')
   await evaluate(
     `document.querySelector('header').dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))`
   )
@@ -245,7 +245,7 @@ async function run() {
     await evaluate(`return !document.querySelector('[data-bot-menu]')`),
     'outside click dismisses the menu'
   )
-  await rightClick('button[title="@helper"]')
+  await rightClick('button[aria-label="@helper"]')
   await click('[data-bot-menu] button:first-child')
   assert.equal(
     await evaluate(`return document.querySelector('#bot-settings-pane input').value`),
@@ -318,7 +318,7 @@ async function run() {
     'settings remain usable beside the collapsed rail at mobile width'
   )
   await click('#bot-settings-pane button[title="Close"]')
-  await evaluate(`document.querySelector('button[title="@planner"]').focus()`)
+  await evaluate(`document.querySelector('button[aria-label="@planner"]').focus()`)
   win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'F10', modifiers: ['shift'] })
   win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'F10', modifiers: ['shift'] })
   await wait()
@@ -371,12 +371,12 @@ async function run() {
     'the confirm names the bot picked in the menu, not the active one'
   )
   assert.ok(
-    await evaluate(`return !!document.querySelector('button[title="@planner"]')`),
+    await evaluate(`return !!document.querySelector('button[aria-label="@planner"]')`),
     'opening delete does not delete a bot'
   )
   await buttonText('Cancel')
   assert.ok(!(await text('This cannot be undone.')))
-  await click('button[title="@helper"]')
+  await click('button[aria-label="@helper"]')
   await click('button[title="Bot settings"]')
   await evaluate(`window.__botChatCanvas = document.querySelector('canvas')`)
   win.setSize(1280, 840)
@@ -524,7 +524,7 @@ async function run() {
     'footer Save retains native form validation'
   )
   assert.ok(!(await text('Save bot settings?')), 'invalid Save does not open confirmation')
-  assert.ok(await evaluate(`return !!document.querySelector('button[title="@helper"]')`))
+  assert.ok(await evaluate(`return !!document.querySelector('button[aria-label="@helper"]')`))
   await type('#bot-profile-form input', 'helper')
   await type('#bot-profile-form textarea', 'Enter confirmation draft')
   await evaluate(`document.querySelector('#bot-profile-form').requestSubmit()`)
@@ -652,7 +652,7 @@ async function run() {
     `),
     'bot-authored project prompts use their avatar while human mentions keep the person icon'
   )
-  await click('button[title="@helper"]')
+  await click('button[aria-label="@helper"]')
   await click('button[title="Project session"]')
   assert.ok(
     await evaluate(`
@@ -670,17 +670,17 @@ async function run() {
   await type('textarea', '@helper Tell me what to do next.')
   await click('button[title="Send"]')
   assert.ok(await text('@helper Tell me what to do next.'))
-  await rightClick('button[title="@helper"]')
+  await rightClick('button[aria-label="@helper"]')
   await click('[data-bot-menu] button:last-child')
   assert.ok(await text('This cannot be undone.'))
   await buttonText('Delete bot')
   assert.ok(
     await evaluate(
-      `return !document.querySelector('button[title="@helper"]') && !!document.querySelector('button[title="@planner"]')`
+      `return !document.querySelector('button[aria-label="@helper"]') && !!document.querySelector('button[aria-label="@planner"]')`
     ),
     'delete only removes the clicked bot'
   )
-  await click('button[title="@planner"]')
+  await click('button[aria-label="@planner"]')
   await click('button[title="Bot settings"]')
   await buttonText('Delete bot')
   await buttonText('Delete bot')
@@ -721,14 +721,14 @@ async function run() {
     )
   }
   await evaluate(`document.querySelector('aside:not([aria-label])').style.width = '220px'`)
-  await click('button[title="@bot-9"]')
+  await click('button[aria-label="@bot-9"]')
   assert.equal(
     await evaluate(
-      `return document.querySelector('button[title="@bot-9"]').getAttribute('aria-pressed')`
+      `return document.querySelector('button[aria-label="@bot-9"]').getAttribute('aria-pressed')`
     ),
     'true'
   )
-  await evaluate(`document.querySelector('button[title="@bot-10"]').focus()`)
+  await evaluate(`document.querySelector('button[aria-label="@bot-10"]').focus()`)
   await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent', {
     type: 'keyDown',
     key: 'Enter',
@@ -750,8 +750,8 @@ async function run() {
   })
   await wait()
   assert.ok(
-    await evaluate(`return document.querySelector('button[title="@bot-10"]').getAttribute('aria-pressed') === 'true'
-      && document.querySelector('button[title="@bot-10"]').classList.contains('ring-2')`),
+    await evaluate(`return document.querySelector('button[aria-label="@bot-10"]').getAttribute('aria-pressed') === 'true'
+      && document.querySelector('button[aria-label="@bot-10"]').classList.contains('ring-2')`),
     'a wrapped bot remains keyboard-selectable and visibly selected'
   )
   await key('F10', ['shift'])
@@ -762,7 +762,7 @@ async function run() {
   await key('Escape')
   assert.ok(
     await evaluate(
-      `return !document.querySelector('[data-bot-menu]') && document.activeElement.title === '@bot-10'`
+      `return !document.querySelector('[data-bot-menu]') && document.activeElement.getAttribute('aria-label') === '@bot-10'`
     ),
     'closing the wrapped bot menu restores focus'
   )
