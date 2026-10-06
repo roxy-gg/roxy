@@ -147,7 +147,8 @@
     "removeImage": "移除图片",
     "send": "发送",
     "sendTo": "发送给 @{{username}}",
-    "sendToHint": "仅发送给此协作者。回车键仍会发送给 Roxy。",
+    "sendOnlyTo": "Send only to @{{username}}",
+    "sendToRoxy": "Send to Roxy",
     "stop": "停止 (Esc)"
   },
   "configBackup": {

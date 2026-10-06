@@ -147,7 +147,8 @@
     "removeImage": "Quitar la imagen",
     "send": "Enviar",
     "sendTo": "Enviar a @{{username}}",
-    "sendToHint": "Enviar solo a este colaborador. Intro sigue enviando a Roxy.",
+    "sendOnlyTo": "Send only to @{{username}}",
+    "sendToRoxy": "Send to Roxy",
     "stop": "Detener (Esc)"
   },
   "configBackup": {

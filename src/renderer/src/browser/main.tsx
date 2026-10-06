@@ -10,6 +10,7 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { BrowserChrome } from './BrowserChrome'
 import { AppContextMenu } from '../components/AppContextMenu'
+import { AppTooltip } from '../components/AppTooltip'
 import { primeTheme, startTheme } from '../lib/theme'
 import { startMotion } from '../lib/motion'
 
@@ -35,6 +36,7 @@ ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
     {/* The chrome is our React app, so it gets the themed menu; the PAGES
         below it are BrowserViews and get a native one from main. */}
     <AppContextMenu />
+    <AppTooltip />
     <BrowserChrome />
   </React.StrictMode>
 )

@@ -1,11 +1,13 @@
 import {
   useEffect,
+  useId,
   useLayoutEffect,
   useRef,
   useState,
   type ClipboardEvent,
   type DragEvent,
-  type KeyboardEvent
+  type KeyboardEvent,
+  type ReactNode
 } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ArrowUp, Plus, Square, X } from 'lucide-react'
@@ -16,10 +18,56 @@ import { ImagePreview } from './ImagePreview'
 import { restoreComposerDraft, updateComposerDraft } from '../lib/composerDrafts'
 import { useRoxyStore } from '../lib/store'
 import { BotAvatar } from './BotAvatar'
+import { TOOLTIP_SURFACE } from './AppTooltip'
 import { cn } from '../lib/cn'
 import roxy from '../assets/roxy.png'
 import { HOST_USERNAME } from '@shared/bots'
 import { MENTION, isKnownMention, mentionedBots } from '@shared/mentions'
+
+// Ctrl on Windows/Linux, Cmd on macOS. onKeyDown accepts either modifier, so
+// this only decides which one the tooltip names.
+const MOD_KEY = /mac/i.test(navigator.platform) ? '⌘' : 'Ctrl'
+
+/**
+ * Hover/focus tooltip that can hold keycaps, which a `title=` cannot.
+ * Render it inside a `group/tip relative` wrapper around the trigger.
+ *
+ * Its surface is `TOOLTIP_SURFACE`, shared with the app-wide `AppTooltip`, so
+ * the two can never drift apart and both follow the active theme.
+ */
+function ShortcutTip({ id, children }: { id: string; children: ReactNode }): JSX.Element {
+  return (
+    <div
+      id={id}
+      role="tooltip"
+      className={cn(
+        TOOLTIP_SURFACE,
+        'pointer-events-none absolute bottom-full right-0 z-50 mb-2 flex w-max flex-col gap-1.5 px-3 py-2 text-[11px] opacity-0 transition-opacity delay-300 group-focus-within/tip:opacity-100 group-hover/tip:opacity-100'
+      )}
+    >
+      {children}
+    </div>
+  )
+}
+
+/** One line of a shortcut tooltip: what it does, then its keycaps. */
+function TipRow({ label, keys }: { label: string; keys: string[] }): JSX.Element {
+  return (
+    <div className="flex items-center justify-between gap-6 whitespace-nowrap">
+      <span className="text-text-muted">{label}</span>
+      <span className="flex items-center gap-1">
+        {keys.map((key) => (
+          <kbd
+            key={key}
+            className="sq sq-md rounded-md bg-white/10 px-1.5 py-px font-sans text-[10px] font-medium text-text-muted"
+          >
+            {key}
+          </kbd>
+        ))}
+      </span>
+    </div>
+  )
+}
 
 export function Composer({
   chatId,
@@ -47,6 +95,9 @@ export function Composer({
   variant?: 'session' | 'bot'
 }): JSX.Element {
   const { t } = useTranslation()
+  const tipBaseId = useId()
+  const sendToTipId = `${tipBaseId}-send-to`
+  const sendTipId = `${tipBaseId}-send`
   const draft = useRoxyStore((s) => s.composerDrafts[chatId])
   const value = draft?.value ?? ''
   const images = draft?.images ?? []
@@ -244,6 +295,13 @@ export function Composer({
     if (event.key === 'Escape' && sending && onStop) {
       event.preventDefault()
       onStop()
+      return
+    }
+    // Ctrl/Cmd+Enter is the keyboard twin of the "Send to @bot" button. Without
+    // a resolved target it falls through to a plain Enter (send to Roxy).
+    if (event.key === 'Enter' && (event.ctrlKey || event.metaKey) && sendTarget) {
+      event.preventDefault()
+      void submit(sendTarget.id)
       return
     }
     if (event.key === 'Enter' && !event.shiftKey) {
@@ -516,24 +574,53 @@ export function Composer({
               )}
               <div className="flex items-center gap-1.5">
                 {sendTarget && (
-                  <button
-                    type="button"
-                    onClick={() => void submit(sendTarget.id)}
-                    disabled={!canSend || submitting}
-                    title={t('composer.sendToHint')}
-                    className="press-scale h-8 shrink-0 rounded-lg bg-accent/15 px-2.5 text-xs font-medium text-accent hover:bg-accent/25 disabled:opacity-30"
-                  >
-                    {t('composer.sendTo', { username: sendTarget.username })}
-                  </button>
+                  <div className="group/tip relative">
+                    <button
+                      type="button"
+                      onClick={() => void submit(sendTarget.id)}
+                      disabled={!canSend || submitting}
+                      aria-describedby={sendToTipId}
+                      className="press-scale h-8 shrink-0 sq sq-lg rounded-lg bg-accent/15 px-2.5 text-xs font-medium text-accent hover:bg-accent/25 disabled:opacity-30"
+                    >
+                      {t('composer.sendTo', { username: sendTarget.username })}
+                    </button>
+                    {/* Only its own shortcut: the plain-Enter route is on the main button. */}
+                    <ShortcutTip id={sendToTipId}>
+                      <TipRow
+                        label={t('composer.sendOnlyTo', { username: sendTarget.username })}
+                        keys={[MOD_KEY, '↵']}
+                      />
+                    </ShortcutTip>
+                  </div>
                 )}
-                <button
-                  onClick={() => void submit()}
-                  disabled={!canSend || submitting}
-                  title={sending ? t('composer.addToQueue') : t('composer.send')}
-                  className="press-scale flex h-8 w-8 shrink-0 items-center justify-center sq sq-lg rounded-lg bg-white text-black hover:bg-white/90 disabled:opacity-30"
-                >
-                  <ArrowUp className="h-4 w-4" />
-                </button>
+                <div className="group/tip relative">
+                  <button
+                    onClick={() => void submit()}
+                    disabled={!canSend || submitting}
+                    // With a send target the custom tooltip replaces the native
+                    // one; without it there is nothing to disambiguate.
+                    title={
+                      sendTarget
+                        ? undefined
+                        : sending
+                          ? t('composer.addToQueue')
+                          : t('composer.send')
+                    }
+                    aria-describedby={sendTarget ? sendTipId : undefined}
+                    className="press-scale flex h-8 w-8 shrink-0 items-center justify-center sq sq-lg rounded-lg bg-white text-black hover:bg-white/90 disabled:opacity-30"
+                  >
+                    <ArrowUp className="h-4 w-4" />
+                  </button>
+                  {sendTarget && (
+                    <ShortcutTip id={sendTipId}>
+                      <TipRow label={t('composer.sendToRoxy')} keys={['↵']} />
+                      <TipRow
+                        label={t('composer.sendOnlyTo', { username: sendTarget.username })}
+                        keys={[MOD_KEY, '↵']}
+                      />
+                    </ShortcutTip>
+                  )}
+                </div>
               </div>
             </div>
           )}
