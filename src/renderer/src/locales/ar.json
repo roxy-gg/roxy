@@ -147,7 +147,8 @@
     "removeImage": "إزالة الصورة",
     "send": "إرسال",
     "sendTo": "إرسال إلى @{{username}}",
-    "sendToHint": "أرسل إلى هذا المتعاون فقط. الإدخال لا يزال يرسل إلى Roxy.",
+    "sendOnlyTo": "Send only to @{{username}}",
+    "sendToRoxy": "Send to Roxy",
     "stop": "إيقاف (Esc)"
   },
   "configBackup": {

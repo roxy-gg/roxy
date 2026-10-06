@@ -9,6 +9,7 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import App from './App'
 import { AppContextMenu } from './components/AppContextMenu'
+import { AppTooltip } from './components/AppTooltip'
 import { installSquircle } from './lib/squircle'
 import { primeTheme, startTheme } from './lib/theme'
 import { startMotion } from './lib/motion'
@@ -33,6 +34,7 @@ ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
     {/* Right-click Cut/Copy/Paste, app-wide. Mounted beside the router rather
         than inside it so it covers every screen, including the splash. */}
     <AppContextMenu />
+    <AppTooltip />
     <App />
   </React.StrictMode>
 )

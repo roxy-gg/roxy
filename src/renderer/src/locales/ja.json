@@ -147,7 +147,8 @@
     "removeImage": "画像を削除",
     "send": "送信",
     "sendTo": "@{{username}}に送信",
-    "sendToHint": "この共同作業者にのみ送信します。Enterキーを押すとRoxyにも送信されます。",
+    "sendOnlyTo": "Send only to @{{username}}",
+    "sendToRoxy": "Send to Roxy",
     "stop": "停止 (Esc)"
   },
   "configBackup": {

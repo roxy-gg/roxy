@@ -147,7 +147,8 @@
     "removeImage": "छवि हटाएँ",
     "send": "भेजें",
     "sendTo": "@{{username}} को भेजें",
-    "sendToHint": "केवल इस सहयोगी को भेजें। दर्ज करने पर भी रॉक्सी को भेजा जाएगा।",
+    "sendOnlyTo": "Send only to @{{username}}",
+    "sendToRoxy": "Send to Roxy",
     "stop": "रोकें (Esc)"
   },
   "configBackup": {

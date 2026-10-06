@@ -147,7 +147,8 @@
     "removeImage": "Удалить изображение",
     "send": "Отправить",
     "sendTo": "Отправить @{{username}}",
-    "sendToHint": "Отправить только этому соавтору. Ввод по-прежнему отправляет Roxy.",
+    "sendOnlyTo": "Send only to @{{username}}",
+    "sendToRoxy": "Send to Roxy",
     "stop": "Остановить (Esc)"
   },
   "configBackup": {
