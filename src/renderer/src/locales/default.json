@@ -847,6 +847,7 @@
     "roxySpend7d": "Roxy, last 7 days",
     "blocked": "Limit reached",
     "reorder": "Drag to reorder limits",
+    "reorderActions": "Reorder {{limit}}. Use Up or Down arrows, or press Enter or Space for move actions.",
     "pillHint": "The compact indicator shows {{limit}}. Drag a limit to the top to show it instead."
   },
   "workstream": {

@@ -939,6 +939,7 @@
     "roxySpend7d": "Roxy, последние 7 дней",
     "blocked": "Лимит исчерпан",
     "pillHint": "The compact indicator shows {{limit}}. Drag a limit to the top to show it instead.",
-    "reorder": "Drag to reorder limits"
+    "reorder": "Drag to reorder limits",
+    "reorderActions": "Reorder {{limit}}. Use Up or Down arrows, or press Enter or Space for move actions."
   }
 }

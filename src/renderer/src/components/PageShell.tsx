@@ -1,4 +1,4 @@
-import { type ReactNode } from 'react'
+import { useEffect, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ArrowLeft } from 'lucide-react'
 
@@ -6,16 +6,35 @@ export function PageShell({
   title,
   subtitle,
   onBack,
+  onEscape,
   actions,
   children
 }: {
   title: string
   subtitle?: string
   onBack: () => void
+  onEscape?: () => boolean
   actions?: ReactNode
   children: ReactNode
 }): JSX.Element {
   const { t } = useTranslation()
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent): void => {
+      if (
+        event.key !== 'Escape' ||
+        event.defaultPrevented ||
+        event.repeat ||
+        event.isComposing ||
+        document.querySelector('dialog[open], [role="dialog"], [role="menu"]')
+      )
+        return
+      event.preventDefault()
+      if (!onEscape?.()) onBack()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onBack, onEscape])
+
   return (
     <div className="flex h-full w-full flex-col bg-bg">
       <header className="titlebar reserve-controls-left reserve-controls-right flex h-12 shrink-0 items-center gap-3 px-4">
