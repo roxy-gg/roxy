@@ -937,6 +937,8 @@
     "leftOf": "剩余 {{left}}",
     "billingExtra": "正在计费额外用量",
     "roxySpend7d": "Roxy，最近 7 天",
-    "blocked": "已达上限"
+    "blocked": "已达上限",
+    "pillHint": "The compact indicator shows {{limit}}. Drag a limit to the top to show it instead.",
+    "reorder": "Drag to reorder limits"
   }
 }

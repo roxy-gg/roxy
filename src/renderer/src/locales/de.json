@@ -937,6 +937,8 @@
     "leftOf": "{{left}} übrig",
     "billingExtra": "Zusätzliche Nutzung wird berechnet",
     "roxySpend7d": "Roxy, letzte 7 Tage",
-    "blocked": "Limit erreicht"
+    "blocked": "Limit erreicht",
+    "pillHint": "The compact indicator shows {{limit}}. Drag a limit to the top to show it instead.",
+    "reorder": "Drag to reorder limits"
   }
 }

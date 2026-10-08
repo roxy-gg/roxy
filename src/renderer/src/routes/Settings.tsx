@@ -67,6 +67,25 @@ export default function Settings(): JSX.Element {
     if (!addingAccount) addAccountRef.current?.focus()
   }, [addingAccount])
 
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent): void => {
+      if (
+        event.key !== 'Escape' ||
+        event.defaultPrevented ||
+        event.repeat ||
+        event.isComposing ||
+        resetting ||
+        document.querySelector('dialog[open], [role="menu"]')
+      )
+        return
+      event.preventDefault()
+      if (confirmingReset) setConfirmingReset(false)
+      else navigate('/')
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [navigate, confirmingReset, resetting])
+
   const reorderWithinProviders = (
     sourceId: string,
     targetId: string,

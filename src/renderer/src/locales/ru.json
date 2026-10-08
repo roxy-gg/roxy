@@ -937,6 +937,8 @@
     "leftOf": "Осталось {{left}}",
     "billingExtra": "Дополнительное использование оплачивается",
     "roxySpend7d": "Roxy, последние 7 дней",
-    "blocked": "Лимит исчерпан"
+    "blocked": "Лимит исчерпан",
+    "pillHint": "The compact indicator shows {{limit}}. Drag a limit to the top to show it instead.",
+    "reorder": "Drag to reorder limits"
   }
 }

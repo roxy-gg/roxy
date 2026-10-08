@@ -937,6 +937,8 @@
     "leftOf": "تبقّى {{left}}",
     "billingExtra": "تتم فوترة الاستخدام الإضافي",
     "roxySpend7d": "Roxy، آخر 7 أيام",
-    "blocked": "تم بلوغ الحد"
+    "blocked": "تم بلوغ الحد",
+    "pillHint": "The compact indicator shows {{limit}}. Drag a limit to the top to show it instead.",
+    "reorder": "Drag to reorder limits"
   }
 }

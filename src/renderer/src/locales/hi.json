@@ -937,6 +937,8 @@
     "leftOf": "{{left}} बाकी",
     "billingExtra": "अतिरिक्त उपयोग का बिल लग रहा है",
     "roxySpend7d": "Roxy, पिछले 7 दिन",
-    "blocked": "सीमा पूरी हो गई"
+    "blocked": "सीमा पूरी हो गई",
+    "pillHint": "The compact indicator shows {{limit}}. Drag a limit to the top to show it instead.",
+    "reorder": "Drag to reorder limits"
   }
 }

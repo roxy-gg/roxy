@@ -937,6 +937,8 @@
     "leftOf": "残り {{left}}",
     "billingExtra": "追加使用量を請求中",
     "roxySpend7d": "Roxy（過去7日間）",
-    "blocked": "上限に到達"
+    "blocked": "上限に到達",
+    "pillHint": "The compact indicator shows {{limit}}. Drag a limit to the top to show it instead.",
+    "reorder": "Drag to reorder limits"
   }
 }

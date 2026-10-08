@@ -16,7 +16,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { AlertCircle, ArrowRightLeft, Loader2, RotateCw } from 'lucide-react'
+import { AlertCircle, ArrowRightLeft, GripVertical, Loader2, RotateCw } from 'lucide-react'
 import type { ConnectedProvider } from '@shared/types'
 import type { ModelCost } from '@shared/api'
 import { upstreamFor } from '@shared/cliproxy'
@@ -66,7 +66,44 @@ function Meter({ value, className }: { value: number; className?: string }): JSX
   )
 }
 
-function BucketRow({ bucket, now }: { bucket: QuotaBucket; now: number }): JSX.Element {
+/**
+ * The user's preferred order of limits (bucket ids). The first limit of the
+ * session's own list is the one the pill shows; with nothing saved the list
+ * keeps its natural order, tightest first. Purely a UI preference, so it lives
+ * in localStorage like the sidebar's layout.
+ */
+const ORDER_KEY = 'roxy.quotaOrder'
+
+function loadOrder(): string[] {
+  try {
+    const raw: unknown = JSON.parse(localStorage.getItem(ORDER_KEY) ?? '[]')
+    return Array.isArray(raw) ? raw.filter((x): x is string => typeof x === 'string') : []
+  } catch {
+    return []
+  }
+}
+
+/** Stable sort by saved position; ids never seen keep their natural order, after the saved ones. */
+function applyOrder(buckets: QuotaBucket[], order: string[]): QuotaBucket[] {
+  const rank = (b: QuotaBucket): number => {
+    const i = order.indexOf(b.id)
+    return i === -1 ? order.length : i
+  }
+  return buckets
+    .map((b, i) => ({ b, i }))
+    .sort((x, y) => rank(x.b) - rank(y.b) || x.i - y.i)
+    .map((x) => x.b)
+}
+
+function BucketRow({
+  bucket,
+  now,
+  grip
+}: {
+  bucket: QuotaBucket
+  now: number
+  grip?: JSX.Element
+}): JSX.Element {
   const { t } = useTranslation()
   const reset =
     bucket.resetsAt === undefined
@@ -75,16 +112,125 @@ function BucketRow({ bucket, now }: { bucket: QuotaBucket; now: number }): JSX.E
         ? t('quota.resetReady')
         : t('quota.resetsIn', { time: formatDuration(bucket.resetsAt - now) })
   return (
-    <div className="py-1.5">
-      <div className="mb-1 flex items-baseline justify-between gap-3 text-xs">
-        <span className="truncate text-text">{bucket.label}</span>
-        <span className="shrink-0 tabular-nums text-text-muted">
-          {t('quota.left', { percent: bucket.remaining })}
-        </span>
+    <div className="flex items-center gap-1 py-1.5">
+      {grip}
+      <div className="min-w-0 flex-1">
+        <div className="mb-1 flex items-baseline justify-between gap-3 text-xs">
+          <span className="truncate text-text">{bucket.label}</span>
+          <span className="shrink-0 tabular-nums text-text-muted">
+            {t('quota.left', { percent: bucket.remaining })}
+          </span>
+        </div>
+        <Meter value={bucket.remaining} />
+        {reset && <div className="mt-1 text-[11px] text-text-subtle tabular-nums">{reset}</div>}
       </div>
-      <Meter value={bucket.remaining} />
-      {reset && <div className="mt-1 text-[11px] text-text-subtle tabular-nums">{reset}</div>}
     </div>
+  )
+}
+
+/**
+ * Limits as a drag-to-reorder list (native HTML5 DnD, same pattern as the
+ * account list in Settings). `onReorder` receives the ids in their new order.
+ * Rows can't be dragged when there is only one.
+ */
+function BucketList({
+  buckets,
+  now,
+  onReorder
+}: {
+  buckets: QuotaBucket[]
+  now: number
+  onReorder: (ids: string[]) => void
+}): JSX.Element {
+  const { t } = useTranslation()
+  const [dragId, setDragId] = useState<string | null>(null)
+  const [overId, setOverId] = useState<string | null>(null)
+  const [after, setAfter] = useState(false)
+  const sortable = buckets.length > 1
+
+  const reset = (): void => {
+    setDragId(null)
+    setOverId(null)
+  }
+
+  const drop = (targetId: string): void => {
+    if (dragId && dragId !== targetId) {
+      const ids = buckets.map((b) => b.id).filter((id) => id !== dragId)
+      ids.splice(ids.indexOf(targetId) + (after ? 1 : 0), 0, dragId)
+      if (ids.some((id, i) => id !== buckets[i].id)) onReorder(ids)
+    }
+    reset()
+  }
+
+  const move = (id: string, delta: -1 | 1): void => {
+    const ids = buckets.map((b) => b.id)
+    const from = ids.indexOf(id)
+    const to = from + delta
+    if (to < 0 || to >= ids.length) return
+    ids.splice(to, 0, ...ids.splice(from, 1))
+    onReorder(ids)
+  }
+
+  return (
+    <>
+      {buckets.map((b) => (
+        <div
+          key={b.id}
+          onDragEnter={() => dragId && dragId !== b.id && setOverId(b.id)}
+          onDragOver={(e) => {
+            if (!dragId) return
+            e.preventDefault()
+            if (dragId === b.id) return
+            const r = e.currentTarget.getBoundingClientRect()
+            setAfter(e.clientY - r.top > r.height / 2)
+            setOverId(b.id)
+          }}
+          onDrop={(e) => {
+            e.preventDefault()
+            drop(b.id)
+          }}
+          onDragEnd={reset}
+          className={cn(
+            'relative',
+            dragId === b.id && 'opacity-40',
+            overId === b.id &&
+              dragId !== b.id &&
+              (after
+                ? 'after:absolute after:inset-x-0 after:-bottom-px after:h-0.5 after:rounded-full after:bg-accent'
+                : 'before:absolute before:inset-x-0 before:-top-px before:h-0.5 before:rounded-full before:bg-accent')
+          )}
+        >
+          <BucketRow
+            bucket={b}
+            now={now}
+            grip={
+              sortable ? (
+                <span
+                  draggable
+                  tabIndex={0}
+                  role="button"
+                  title={t('quota.reorder')}
+                  aria-label={t('quota.reorder')}
+                  onDragStart={(e) => {
+                    setDragId(b.id)
+                    e.dataTransfer.effectAllowed = 'move'
+                    e.dataTransfer.setData('text/plain', b.id)
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return
+                    e.preventDefault()
+                    move(b.id, e.key === 'ArrowUp' ? -1 : 1)
+                  }}
+                  className="flex h-9 w-5 shrink-0 cursor-grab items-center justify-center text-text-subtle hover:text-text active:cursor-grabbing"
+                >
+                  <GripVertical className="h-3.5 w-3.5" aria-hidden="true" />
+                </span>
+              ) : undefined
+            }
+          />
+        </div>
+      ))}
+    </>
   )
 }
 
@@ -242,7 +388,17 @@ export function QuotaMeter({
   const [loading, setLoading] = useState<string | null>(null)
   const [switching, setSwitching] = useState(false)
   const [open, setOpen] = useState(false)
+  const [order, setOrder] = useState<string[]>(loadOrder)
   const ref = useRef<HTMLDivElement>(null)
+
+  /** Moves `ids` to the front of the saved order, keeping every other saved id behind them. */
+  const saveOrder = useCallback((ids: string[]) => {
+    setOrder((prev) => {
+      const next = [...ids, ...prev.filter((id) => !ids.includes(id))]
+      localStorage.setItem(ORDER_KEY, JSON.stringify(next))
+      return next
+    })
+  }, [])
 
   const load = useCallback(async (connectionId: string, force = false) => {
     const target = useRoxyStore.getState().providers.find((p) => p.id === connectionId)
@@ -310,7 +466,10 @@ export function QuotaMeter({
     q.upstream === 'copilot'
       ? copilotBucketsForModel(q, multiplierOf(connectionId, m))
       : bucketsForModel(q, m)
-  const tightest = activeQuota ? scoped(activeQuota, activeId, model ?? undefined)[0] : undefined
+  // The first limit in the user's order; with no saved order that is the tightest.
+  const tightest = activeQuota
+    ? applyOrder(scoped(activeQuota, activeId, model ?? undefined), order)[0]
+    : undefined
   const activeAccount = plan(provider.seedId)!.accountLabel
 
   // Popover: whichever account is being browsed.
@@ -320,10 +479,14 @@ export function QuotaMeter({
   const isActive = viewed.id === activeId
   // Another provider's catalog won't have this model; scope only within a family.
   const scopeModel = viewed.seedId === provider.seedId ? (model ?? undefined) : undefined
-  const applicable = fresh ? scoped(fresh, viewed.id, scopeModel) : []
+  const natural = fresh ? scoped(fresh, viewed.id, scopeModel) : []
+  const applicable = applyOrder(natural, order)
   const others = fresh
-    ? fresh.buckets.filter((b) =>
-        fresh.upstream === 'copilot' ? !applicable.includes(b) : !bucketAppliesTo(b, scopeModel)
+    ? applyOrder(
+        fresh.buckets.filter((b) =>
+          fresh.upstream === 'copilot' ? !natural.includes(b) : !bucketAppliesTo(b, scopeModel)
+        ),
+        order
       )
     : []
   const hasData = !!fresh && (fresh.buckets.length > 0 || !!fresh.premium)
@@ -440,17 +603,18 @@ export function QuotaMeter({
                     {t('quota.currentModel', { model: scopeModel })}
                   </div>
                 )}
-                {applicable.map((b) => (
-                  <BucketRow key={b.id} bucket={b} now={now} />
-                ))}
+                <BucketList buckets={applicable} now={now} onReorder={saveOrder} />
+                {applicable.length > 1 && (
+                  <div className="mt-0.5 text-[11px] text-text-subtle">
+                    {t('quota.pillHint', { limit: applicable[0].label })}
+                  </div>
+                )}
                 {others.length > 0 && (
                   <>
                     <div className="mb-0.5 mt-3 border-t border-border pt-2 text-[11px] text-text-subtle">
                       {t('quota.otherModels')}
                     </div>
-                    {others.map((b) => (
-                      <BucketRow key={b.id} bucket={b} now={now} />
-                    ))}
+                    <BucketList buckets={others} now={now} onReorder={saveOrder} />
                   </>
                 )}
               </>
