@@ -105,6 +105,7 @@ import { getDb } from '../db/database'
 import type { BotJobInput } from '../../shared/bots'
 import {
   automationSnapshot,
+  deliveryQueue,
   enqueuePrompt,
   notifyAutomation,
   notifyBots,
@@ -912,7 +913,7 @@ export function registerIpc(): void {
   // ---- queue ----
   // Each mutation re-mirrors the shared queue to any paired phone (remote is a
   // no-op when nothing is shared), so desktop-side edits stay in sync on both ends.
-  ipcMain.handle(CHANNELS.queueList, (_e, chatId: string) => repo.listQueue(chatId))
+  ipcMain.handle(CHANNELS.queueList, (_e, chatId: string) => deliveryQueue(chatId))
   ipcMain.handle(
     CHANNELS.queueAdd,
     (_e, chatId: string, content: string, images?: QueueImage[], options?: unknown) => {
@@ -965,6 +966,10 @@ export function registerIpc(): void {
     if (localTurnReleases.has(input.requestId))
       return { ok: false, error: 'Request ID is already in use.' }
     if (!repo.getChat(input.sessionId)) return { ok: false, error: 'Session not found.' }
+    // Low-level/legacy clients must not leapfrog durable requests. Ordinary
+    // composer sends use queue admission instead of this renderer-owned path.
+    if (repo.listQueue(input.sessionId).length)
+      return { ok: false, error: 'This session has queued work. Send through the queue instead.' }
     // Stop PAUSES this session's queue, and only enqueueing or editing a prompt
     // ever lifted that. Sending a message directly did not, so anything already
     // queued - a guest bot invited into this thread, a handoff from another

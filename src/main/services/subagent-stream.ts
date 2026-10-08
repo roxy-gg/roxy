@@ -36,6 +36,7 @@ import type {
   SubagentSnapshot
 } from '../../shared/api'
 import { PartsFold } from '../../shared/parts'
+import { notifyTurnAvailable } from './turn-state'
 import type { Message } from '../../shared/types'
 
 interface Run {
@@ -135,6 +136,7 @@ export function startSubagentRun(input: StartRunInput): {
       // during that reload must not hand back the now-superseded live parts.
       runs.delete(run.subChatId)
       broadcast({ subChatId: run.subChatId, kind: 'run', state, message, sequence: ++sequence })
+      notifyTurnAvailable()
     }
   }
 }

@@ -100,7 +100,7 @@ export function BotsSection({ rail = false }: { rail?: boolean }): JSX.Element {
           'flex gap-2',
           rail
             ? cn('max-h-64 flex-col items-center overflow-y-auto', bots.length > 0 && 'py-3')
-            : cn('items-center overflow-x-auto px-1 pt-3', bots.length > 0 && 'pb-3')
+            : cn('flex-wrap items-center px-1 pt-3', bots.length > 0 && 'pb-3')
         )}
       >
         {bots.map((bot) => (
@@ -184,7 +184,7 @@ export function BotsSection({ rail = false }: { rail?: boolean }): JSX.Element {
               }
             }}
             className={cn(
-              'press-scale relative shrink-0 rounded-full outline-none focus-visible:ring-2 focus-visible:ring-accent',
+              'press-scale relative shrink-0 rounded-lg p-0 outline-none focus-visible:ring-2 focus-visible:ring-accent',
               active === bot.chatId && 'ring-2 ring-accent ring-offset-2 ring-offset-surface',
               dragId === bot.id && 'opacity-40',
               dropTarget?.id === bot.id &&

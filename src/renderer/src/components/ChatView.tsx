@@ -101,6 +101,9 @@ export function ChatView(): JSX.Element {
       : false
   )
   const submit = useRoxyStore((s) => s.submit)
+  const starting = useRoxyStore((s) =>
+    s.activeChatId ? !!s.startingAutomation[s.activeChatId] : false
+  )
   const stop = useRoxyStore((s) => s.stop)
   const storedQueue = useRoxyStore((s) => s.queue)
   const optimisticQueue = useRoxyStore((s) =>
@@ -114,6 +117,9 @@ export function ChatView(): JSX.Element {
   // process, so showing its queue row too renders the same message twice.
   // Only user requests appear here; automated handoffs and schedules stay hidden.
   const queue = useMemo(() => allQueued.filter(isVisibleQueueItem), [allQueued])
+  const deliveryIssues = allQueued.filter(
+    (item) => !isVisibleQueueItem(item) && item.state === 'failed'
+  )
   const newSession = useRoxyStore((s) => s.newSession)
   const selectChat = useRoxyStore((s) => s.selectChat)
   const activeChatId = useRoxyStore((s) => s.activeChatId)
@@ -403,8 +409,30 @@ export function ChatView(): JSX.Element {
           className="pointer-events-none relative z-10 -mt-6 mr-2.5 h-6 shrink-0 bg-gradient-to-b from-transparent to-bg"
         />
 
-        {queue.length > 0 && (
+        {starting && (
+          <p role="status" className="mx-auto w-full max-w-3xl px-4 pt-2 text-xs text-text-subtle">
+            {t('queue.starting')}
+          </p>
+        )}
+        {deliveryIssues.length > 0 && (
           <div className="bg-bg px-4 pt-2">
+            <div className="mx-auto max-w-3xl">
+              <p className="mb-1 text-xs text-danger">{t('queue.deliveryIssues')}</p>
+              <QueueList>
+                {deliveryIssues.map((item, i) => (
+                  <QueuedMessage
+                    key={item.id}
+                    item={item}
+                    index={i}
+                    total={deliveryIssues.length}
+                  />
+                ))}
+              </QueueList>
+            </div>
+          </div>
+        )}
+        {queue.length > 0 && (
+          <div data-waiting-queue className="bg-bg px-4 pt-2">
             <div className="mx-auto max-w-3xl">
               <Queue>
                 <QueueSection defaultOpen>

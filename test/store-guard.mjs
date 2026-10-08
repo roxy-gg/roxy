@@ -202,6 +202,40 @@ const deferred = () => {
   })
   return { promise, resolve }
 }
+
+console.log('store: queue reads cannot resurrect consumed work')
+const refreshQueueAction = src.match(/^  refreshQueue: async \([^)]*\) => \{\n[\s\S]*?\n  \},/m)
+if (!refreshQueueAction) throw new Error('Missing refreshQueue action')
+const queueState = { activeChatId: 'delivery-chat', optimisticQueue: {}, queue: [] }
+const staleQueue = deferred()
+let queueReads = 0
+const queueActions = new Function(
+  'api',
+  'get',
+  'set',
+  'queueLoads',
+  `${transformSync(`const actions = {${refreshQueueAction[0]}}`, { loader: 'ts' }).code}\nreturn actions`
+)(
+  { queue: { list: () => (++queueReads === 1 ? staleQueue.promise : Promise.resolve([])) } },
+  () => queueState,
+  (patch) => Object.assign(queueState, typeof patch === 'function' ? patch(queueState) : patch),
+  new Map()
+)
+const staleRead = queueActions.refreshQueue()
+await queueActions.refreshQueue()
+staleQueue.resolve([{ id: 'already-consumed', state: 'pending' }])
+await staleRead
+check(
+  'queue: late pending snapshot cannot replace a newer empty queue',
+  queueState.queue.length === 0
+)
+check(
+  'queue: admission does not invent optimistic waiting or append a stale add result',
+  !src
+    .slice(src.indexOf('async function enqueuePrompt('), src.indexOf('const streamPublishers'))
+    .includes("state: 'pending'")
+)
+
 const oldAccount = deferred()
 list = () => oldAccount.promise
 const oldRequest = state.ensureModels(copilot.id)
@@ -425,9 +459,10 @@ const flushFrames = () => {
 console.log('store: reload snapshots preserve prefixes, live tails and speakers')
 const snapshotBody = src.match(/\.then\(\(running\) => \{\n([\s\S]*?)\n {8}\}\)\n {8}\.catch/)?.[1]
 check('snapshot handler found', snapshotBody !== undefined)
-const runSnapshot = (deltas) => {
+const runSnapshot = (deltas, phase) => {
   const state = {
     runningAutomation: {},
+    startingAutomation: {},
     automationSpeakers: {},
     activityStartedAt: {},
     activeChatId: null,
@@ -452,6 +487,7 @@ return apply(running)`
       {
         sessionId: 'chat-1',
         sequence: 5,
+        phase,
         activityStartedAt: 100,
         parts: [
           { type: 'text', text: 'prefix' },
@@ -559,6 +595,36 @@ check(
   'an unraced snapshot restores the speaker and the stream',
   clean.state.automationSpeakers['chat-1']?.botUsername === 'helper' && clean.turns.size === 1
 )
+const phaseRace = runSnapshot(
+  [
+    { sessionId: 'chat-1', sequence: 6, kind: 'phase', phase: 'running' },
+    {
+      sessionId: 'chat-1',
+      sequence: 7,
+      kind: 'event',
+      event: { type: 'text', delta: ' live tail' }
+    }
+  ],
+  'starting'
+)
+check(
+  'starting-to-running phase cannot discard a snapshot prefix or restore stale starting status',
+  phaseRace.turns.get('chat-1')?.parts[0].text === 'prefix' &&
+    phaseRace.turns.get('chat-1')?.parts.at(-1).text === ' live tail' &&
+    phaseRace.state.startingAutomation['chat-1'] === false
+)
+check(
+  'a starting snapshot restores preparation status',
+  runSnapshot([], 'starting').state.startingAutomation['chat-1'] === true
+)
+const oldPhase = runSnapshot(
+  [{ sessionId: 'chat-1', sequence: 4, kind: 'phase', phase: 'starting' }],
+  'running'
+)
+check(
+  'a phase already covered by the snapshot cannot override it',
+  oldPhase.state.startingAutomation['chat-1'] === false
+)
 
 console.log('store: subagent hydration and offscreen completion')
 const subagentCode = [
@@ -616,6 +682,7 @@ const subagentFns = new Function(
     const subagentTurns = new Map()
     const streamPublishers = new Map()
     const transcriptLoads = new Map()
+    const queueLoads = new Map()
     const remoteTurns = new Map()
     let automationSnapshotEvents = null
     let taskRevision = 0

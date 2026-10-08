@@ -66,16 +66,10 @@ export function updateActivityPhrase(
   }
 }
 
-export function activityLabels(
-  t: TFunction,
-  actor: string | undefined,
-  verb: ActivityVerb
-): string[] {
+export function activityLabels(t: TFunction, verb: ActivityVerb): string[] {
   const verbLabel = t(ACTIVITY_VERB_KEYS[verb])
   return ACTIVITY_SUFFIX_KEYS.map((key) =>
-    actor
-      ? t('transcript.activityStatusAs', { name: `@${actor}`, verb: verbLabel, suffix: t(key) })
-      : t('transcript.activityStatus', { verb: verbLabel, suffix: t(key) })
+    t('transcript.activityStatus', { verb: verbLabel, suffix: t(key) })
   )
 }
 

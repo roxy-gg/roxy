@@ -139,9 +139,9 @@ async function run() {
   await until(`return !!document.querySelector('[role="menu"]')`)
   assert.deepEqual(
     await evaluate(
-      `return [...document.querySelectorAll('[role="menu"] button')].map((b) => b.disabled)`
+      `return [...document.querySelectorAll('[role="menu"] button')].map((b) => b.textContent.trim())`
     ),
-    [false, false],
+    ['Edit settings', 'Delete bot'],
     'a single bot shows only settings and delete'
   )
   assert.equal(
@@ -150,6 +150,30 @@ async function run() {
     ),
     'false'
   )
+  // main wraps the strip onto several rows: a drop onto a bot on the second row must still land there.
+  await evaluate(`
+    contract.bots = ['a1','a2','a3','a4','a5','a6','a7','a8','a9','a10'].map((username) => ({ id: username, username, instructions: '', chatId: 'chat-' + username, createdAt: 3 }))
+    await contract.store.getState().refreshBots()
+  `)
+  await until(`return !!document.querySelector('button[aria-label="@a10"]')`)
+  const rows = await evaluate(
+    `return new Set([...document.querySelectorAll('aside button[draggable="true"]')].map((b) => Math.round(b.getBoundingClientRect().top))).size`
+  )
+  assert.ok(rows > 1, 'ten bots should wrap onto more than one row')
+  await evaluate(
+    `window.botDrag = new DataTransfer(); document.querySelector('button[aria-label="@a1"]').dispatchEvent(new DragEvent('dragstart', { bubbles: true, dataTransfer: botDrag }))`
+  )
+  await new Promise((resolve) => setTimeout(resolve, 60))
+  await evaluate(`
+    const target = document.querySelector('button[aria-label="@a10"]')
+    const rect = target.getBoundingClientRect()
+    target.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: botDrag, clientX: rect.right - 1, clientY: rect.bottom - 1 }))
+  `)
+  await new Promise((resolve) => setTimeout(resolve, 60))
+  await evaluate(
+    `document.querySelector('button[aria-label="@a10"]').dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: botDrag }))`
+  )
+  await until(`return contract.store.getState().bots.at(-1)?.id === 'a1'`)
   assert.deepEqual(errors, [])
   console.log(
     'BOT ORDER UI OK: drag, click isolation, keyboard focus, context-menu moves and persisted refresh'

@@ -1381,7 +1381,7 @@ interface QueueRow {
   reply_to_chat_id: string | null
   hops: number
   not_before: number
-  state: 'pending' | 'running' | 'failed'
+  state: 'pending' | 'starting' | 'running' | 'failed'
   error: string | null
   bot_id: string | null
   bot_username: string | null
@@ -1432,7 +1432,7 @@ export function removeQueueItem(id: string): void {
       .get(id) as
       | { state: string; chat_id: string; source_chat_id: string | null; message_id: string | null }
       | undefined
-    if (row?.state === 'running')
+    if (row?.state === 'running' || row?.state === 'starting')
       throw new Error('Stop the session before removing its running message')
     // Send to @bot persists its user bubble before delivery. Cancelling that
     // pending request must remove it from history too, not just stop delivery.
@@ -1441,7 +1441,7 @@ export function removeQueueItem(id: string): void {
         row.message_id,
         row.chat_id
       )
-    db.prepare(`DELETE FROM queue WHERE id = ? AND state != 'running'`).run(id)
+    db.prepare(`DELETE FROM queue WHERE id = ? AND state NOT IN ('starting', 'running')`).run(id)
   })()
 }
 
@@ -1470,7 +1470,8 @@ export function updateQueueItem(
         state: string
       }
     | undefined
-  if (previous?.state === 'running') throw new Error('This message is already running')
+  if (previous?.state === 'running' || previous?.state === 'starting')
+    throw new Error('This message is already running')
   // Pending collaborator prompts already have a user bubble. Edit that bubble
   // in place; detaching it leaves stale history and loses the user's authorship.
   // Failed turns keep their history and append a correction when edited.
@@ -1492,7 +1493,7 @@ export function updateQueueItem(
       )
     db.prepare(
       `UPDATE queue SET content = ?, images = ?, state = 'pending', error = NULL,
-    message_id = CASE WHEN ? THEN NULL ELSE message_id END WHERE id = ? AND state != 'running'`
+    message_id = CASE WHEN ? THEN NULL ELSE message_id END WHERE id = ? AND state NOT IN ('starting', 'running')`
     ).run(content, imagesJson, Number(!!changed && !editMessage), id)
   })()
   const row = getDb().prepare('SELECT * FROM queue WHERE id = ?').get(id) as QueueRow | undefined

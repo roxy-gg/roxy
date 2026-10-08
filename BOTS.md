@@ -79,10 +79,28 @@ Pausing affects future beats; already queued messages remain editable in the
 queue. Deleting a schedule cancels its not-yet-started pending deliveries.
 
 The main process owns queue consumption for desktop, phone, bots, and scheduled
-jobs. Failed requests remain in the queue with an error until edited/retried or
+jobs. Ordinary model sends from projects and private bots share this admission
+path. An eligible idle send is durably claimed and its prompt persisted before
+the queue is published: it appears as a normal message with starting activity,
+not a waiting queue card. `pending`, `starting`, `running`, and `failed` are
+distinct; claimed requests cannot be edited or removed. Starting includes
+provider/workspace preparation and waiting for the first model event.
+
+Turn release, queue mutations and subagent completion wake delivery without a
+renderer action. The periodic tick remains for scheduled/future work and as a
+safety net. Same-chat `bot_invoke` still waits for its caller to release the
+turn, including persistence of that caller's response. Returned session results
+append to history and any continuation joins FIFO; they never own or release
+the source's current turn. Pending collaborator bubbles are not model context
+until their own delivery starts.
+
+Failed requests remain in the queue with an error until edited/retried or
 removed. Hidden failed or delayed automation blocks later automated work, but
 user prompts can pass it in user-queue order. Visible failed user requests still
-block later work until retried or removed. Stop pauses draining. Interrupted deliveries
+block later work until retried or removed. Automated failures appear separately
+under delivery issues, with retry/remove actions. Waiting user rows explain
+pause, current session work, capacity, delay, or earlier-request blocking.
+Stop pauses draining. Interrupted starting/running deliveries
 are marked failed on startup rather than replaying potentially non-idempotent
 tool actions. There is no exactly-once guarantee for external side effects.
 
@@ -108,3 +126,10 @@ Run `npm run smoke:bots` for scheduling/mention unit checks and isolated Electro
 runtime tests covering migration, CRUD, queue ownership, failures, handoffs, and
 the real harness with a deterministic model transport. No live model credentials
 are used by these tests.
+
+`npm run smoke:delivery` adds lifecycle/race regressions with the periodic drain
+disabled, real SQLite, real tools, a temporary git worktree, and a deterministic
+provider. For integrated composer/IPC/reload checks, run the canvas Vite server
+on an available port and set `DELIVERY_UI_URL` to its `/delivery.html` URL before
+running the same command. This fixture uses the real preload, not the canvas
+mock bridge. See `docs/queue-delivery.md` for the audit and coverage boundaries.
