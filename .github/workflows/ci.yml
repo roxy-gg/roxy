@@ -154,6 +154,12 @@ jobs:
           ELECTRON_DISABLE_SANDBOX: '1'
         run: xvfb-run --auto-servernum npm run smoke:animation
 
+      - name: Bot strip ordering (real Chromium drag and keyboard)
+        if: runner.os == 'Linux'
+        env:
+          ELECTRON_DISABLE_SANDBOX: '1'
+        run: xvfb-run --auto-servernum npm run smoke:bot-order-ui
+
       - name: Multi-repo suite (composite worktrees, real git)
         run: npm run smoke:multirepo
 

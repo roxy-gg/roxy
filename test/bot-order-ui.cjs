@@ -1,4 +1,7 @@
-/** Real renderer drag regression. Start the canvas harness on ROXY_TEST_PORT (default 3100). */
+/**
+ * Real renderer drag regression for the sidebar bot strip. Starts its own canvas
+ * harness (port 3189) unless ROXY_TEST_URL points at one already running.
+ */
 const assert = require('node:assert/strict')
 const { app, BrowserWindow } = require('electron')
 const { mkdtempSync } = require('node:fs')
@@ -7,6 +10,7 @@ const path = require('node:path')
 app.setPath('userData', mkdtempSync(path.join(tmpdir(), 'roxy-bot-order-')))
 const errors = []
 let win
+let server
 const evaluate = (body) => win.webContents.executeJavaScript(`(async () => { ${body} })()`)
 async function until(body) {
   for (let i = 0; i < 100; i++) {
@@ -16,12 +20,24 @@ async function until(body) {
   throw new Error('Timed out: ' + body)
 }
 async function run() {
+  let url = process.env.ROXY_TEST_URL
+  if (!url) {
+    const { createServer } = await import('vite')
+    server = await createServer({
+      configFile: path.join(__dirname, 'canvas/vite.config.mjs'),
+      server: { port: 3189, strictPort: true }
+    })
+    await server.listen()
+    url = 'http://localhost:3189/'
+  }
   win = new BrowserWindow({ show: false, width: 1100, height: 780 })
   win.webContents.on('console-message', (_event, level, text) => {
     if (level >= 3) errors.push(text)
   })
 
-  await win.loadURL(`http://localhost:${process.env.ROXY_TEST_PORT || 3100}/?bots`)
+  const harnessUrl = new URL(url)
+  harnessUrl.searchParams.set('bots', '')
+  await win.loadURL(harnessUrl.href)
   await until(`return !!document.querySelector('button[title="New bot"]')`)
   const storeUrl =
     '/@fs/' + path.resolve(__dirname, '../src/renderer/src/lib/store.ts').replaceAll('\\', '/')
@@ -88,6 +104,52 @@ async function run() {
   await evaluate(`document.querySelector('[role="menu"] button:nth-child(2)').click()`)
   await until(`return contract.store.getState().bots[0]?.id === 'alpha'`)
   assert.equal(await evaluate(`return document.activeElement.getAttribute('aria-label')`), '@alpha')
+  assert.equal(
+    await evaluate(
+      `return document.querySelector('button[aria-label="@alpha"]').getAttribute('aria-description')`
+    ),
+    null
+  )
+  assert.equal(
+    await evaluate(
+      `const id = document.querySelector('button[aria-label="@alpha"]').getAttribute('aria-describedby'); return document.getElementById(id)?.textContent`
+    ),
+    'Drag to reorder bots. Use Shift + arrow keys or the context menu to move a bot.'
+  )
+  assert.deepEqual(
+    await evaluate(`
+      const dt = new DataTransfer()
+      document.querySelector('button[aria-label="@alpha"]').dispatchEvent(new DragEvent('dragstart', { bubbles: true, dataTransfer: dt }))
+      document.querySelector('button[aria-label="@alpha"]').dispatchEvent(new DragEvent('dragend', { bubbles: true, dataTransfer: dt }))
+      return [...dt.types]
+    `),
+    ['application/x-roxy-bot'],
+    'a dropped bot must not insert its id as composer text'
+  )
+  await evaluate(`
+    contract.bots = contract.bots.filter((bot) => bot.id === 'alpha')
+    await contract.store.getState().refreshBots()
+  `)
+  await until(`return !document.querySelector('button[aria-label="@beta"]')`)
+  await evaluate(`
+    const bot = document.querySelector('button[aria-label="@alpha"]')
+    const r = bot.getBoundingClientRect()
+    bot.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: r.left, clientY: r.bottom }))
+  `)
+  await until(`return !!document.querySelector('[role="menu"]')`)
+  assert.deepEqual(
+    await evaluate(
+      `return [...document.querySelectorAll('[role="menu"] button')].map((b) => b.disabled)`
+    ),
+    [false, false],
+    'a single bot shows only settings and delete'
+  )
+  assert.equal(
+    await evaluate(
+      `return document.querySelector('button[aria-label="@alpha"]').getAttribute('draggable')`
+    ),
+    'false'
+  )
   assert.deepEqual(errors, [])
   console.log(
     'BOT ORDER UI OK: drag, click isolation, keyboard focus, context-menu moves and persisted refresh'
@@ -97,11 +159,13 @@ const timeout = setTimeout(() => app.exit(1), 30000)
 app
   .whenReady()
   .then(run)
-  .then(() => {
+  .then(async () => {
     clearTimeout(timeout)
+    await server?.close()
     app.quit()
   })
-  .catch((error) => {
+  .catch(async (error) => {
     console.error(error.stack || error, errors)
+    await server?.close()
     app.exit(1)
   })

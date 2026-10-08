@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import { ArrowDown, ArrowUp, Plus, Settings, Trash2 } from 'lucide-react'
@@ -6,7 +6,14 @@ import { useRoxyStore } from '../lib/store'
 import { cn } from '../lib/cn'
 import { BotAvatar } from './BotAvatar'
 import { Button } from './ui'
-import { ContextMenuRow, ContextMenuSurface, CONTEXT_MENU_PAD, CONTEXT_ROW_H } from './ContextMenu'
+import {
+  ContextMenuRow,
+  ContextMenuSeparator,
+  ContextMenuSurface,
+  CONTEXT_MENU_PAD,
+  CONTEXT_ROW_H,
+  CONTEXT_SEPARATOR_H
+} from './ContextMenu'
 
 export function BotsSection({ rail = false }: { rail?: boolean }): JSX.Element {
   const { t } = useTranslation()
@@ -17,6 +24,7 @@ export function BotsSection({ rail = false }: { rail?: boolean }): JSX.Element {
   const createBot = useRoxyStore((s) => s.createBot)
   const removeBot = useRoxyStore((s) => s.removeBot)
   const reorderBots = useRoxyStore((s) => s.reorderBots)
+  const reorderHintId = useId()
   const setBotSettings = useRoxyStore((s) => s.setBotSettings)
   const [menu, setMenu] = useState<{
     botId: string
@@ -101,7 +109,7 @@ export function BotsSection({ rail = false }: { rail?: boolean }): JSX.Element {
             title={`@${bot.username}`}
             aria-label={`@${bot.username}`}
             aria-pressed={active === bot.chatId}
-            aria-description={bots.length > 1 ? t('bots.reorder') : undefined}
+            aria-describedby={bots.length > 1 ? reorderHintId : undefined}
             draggable={bots.length > 1}
             onMouseDown={() => {
               suppressClick.current = false
@@ -111,8 +119,8 @@ export function BotsSection({ rail = false }: { rail?: boolean }): JSX.Element {
               setMenu(null)
               setDragId(bot.id)
               e.dataTransfer.effectAllowed = 'move'
+              // No text/plain: the composer would insert it as prompt text on drop.
               e.dataTransfer.setData('application/x-roxy-bot', bot.id)
-              e.dataTransfer.setData('text/plain', bot.id)
             }}
             onDragEnd={endDrag}
             onDragOver={(e) => {
@@ -210,6 +218,11 @@ export function BotsSection({ rail = false }: { rail?: boolean }): JSX.Element {
           <Plus className="h-4 w-4" />
           {!bots.length && !rail && t('bots.new')}
         </button>
+        {bots.length > 1 && (
+          <span id={reorderHintId} className="sr-only">
+            {t('bots.reorder')}
+          </span>
+        )}
       </div>
       {error && !deleting && (
         <p role="alert" className="break-words px-1 pb-2 text-xs text-danger">
@@ -220,7 +233,9 @@ export function BotsSection({ rail = false }: { rail?: boolean }): JSX.Element {
         <ContextMenuSurface
           x={menu.x}
           y={menu.y}
-          height={4 * CONTEXT_ROW_H + CONTEXT_MENU_PAD}
+          height={
+            (bots.length > 1 ? 4 : 2) * CONTEXT_ROW_H + CONTEXT_SEPARATOR_H + CONTEXT_MENU_PAD
+          }
           onClose={closeMenu}
         >
           <div
@@ -259,26 +274,31 @@ export function BotsSection({ rail = false }: { rail?: boolean }): JSX.Element {
                 setBotSettings(menuBot.id)
               }}
             />
-            <ContextMenuRow
-              role="menuitem"
-              label={t('bots.moveEarlier')}
-              icon={ArrowUp}
-              disabled={bots[0]?.id === menuBot.id}
-              onSelect={() => {
-                move(menuBot.id, -1)
-                closeMenu()
-              }}
-            />
-            <ContextMenuRow
-              role="menuitem"
-              label={t('bots.moveLater')}
-              icon={ArrowDown}
-              disabled={bots[bots.length - 1]?.id === menuBot.id}
-              onSelect={() => {
-                move(menuBot.id, 1)
-                closeMenu()
-              }}
-            />
+            {bots.length > 1 && (
+              <>
+                <ContextMenuRow
+                  role="menuitem"
+                  label={t('bots.moveEarlier')}
+                  icon={ArrowUp}
+                  disabled={bots[0]?.id === menuBot.id}
+                  onSelect={() => {
+                    move(menuBot.id, -1)
+                    closeMenu()
+                  }}
+                />
+                <ContextMenuRow
+                  role="menuitem"
+                  label={t('bots.moveLater')}
+                  icon={ArrowDown}
+                  disabled={bots[bots.length - 1]?.id === menuBot.id}
+                  onSelect={() => {
+                    move(menuBot.id, 1)
+                    closeMenu()
+                  }}
+                />
+              </>
+            )}
+            <ContextMenuSeparator />
             <ContextMenuRow
               role="menuitem"
               label={t('bots.delete')}

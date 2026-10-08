@@ -69,6 +69,7 @@ const hooks = {
   },
   useMemo: (factory) => factory(),
   useCallback: (callback) => callback,
+  useId: () => 'test-id',
   useEffect: (effect) => current.effects.push(effect)
 }
 const windowEvents = new Map()
@@ -87,7 +88,14 @@ function load(path, extra = '') {
     '@shared/cliproxy': { upstreamFor: (seed) => ({ upstream: seed, accountLabel: seed }) },
     '../lib/store': { useRoxyStore: (selector) => selector(state) },
     '../lib/api': { api: {} },
-    './ContextMenu': { ContextMenuSurface: () => null, ContextMenuRow: () => null },
+    './ContextMenu': {
+      ContextMenuSurface: () => null,
+      ContextMenuRow: () => null,
+      ContextMenuSeparator: () => null,
+      CONTEXT_ROW_H: 30,
+      CONTEXT_SEPARATOR_H: 5,
+      CONTEXT_MENU_PAD: 8
+    },
     './BotAvatar': { BotAvatar: () => null },
     './ui': { Button: () => null },
     '../lib/cn': { cn: (...parts) => parts.filter(Boolean).join(' ') }
