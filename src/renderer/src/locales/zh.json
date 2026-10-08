@@ -64,7 +64,10 @@
     "unsavedDescription": "Your edits to this bot haven't been saved.",
     "unsavedTitle": "Save changes before closing?",
     "username": "用户名",
-    "usernameHint": "2-32个字母、数字、下划线或连字符。以字母开头。Roxy是保留字。"
+    "usernameHint": "2-32个字母、数字、下划线或连字符。以字母开头。Roxy是保留字。",
+    "moveEarlier": "Move earlier",
+    "moveLater": "Move later",
+    "reorder": "Drag to reorder bots. Use Shift + arrow keys or the context menu to move a bot."
   },
   "browserChrome": {
     "back": "后退",

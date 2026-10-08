@@ -1,6 +1,7 @@
 /** IPC channel names shared by the preload bridge and the main-process handlers. */
 export const CHANNELS = {
   botsList: 'bots:list',
+  botsReorder: 'bots:reorder',
   botsCreate: 'bots:create',
   botsUpdate: 'bots:update',
   botsRemove: 'bots:remove',

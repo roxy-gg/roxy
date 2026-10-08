@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
-import { Plus, Settings, Trash2 } from 'lucide-react'
+import { ArrowDown, ArrowUp, Plus, Settings, Trash2 } from 'lucide-react'
 import { useRoxyStore } from '../lib/store'
 import { cn } from '../lib/cn'
 import { BotAvatar } from './BotAvatar'
@@ -16,6 +16,7 @@ export function BotsSection({ rail = false }: { rail?: boolean }): JSX.Element {
   const selectChat = useRoxyStore((s) => s.selectChat)
   const createBot = useRoxyStore((s) => s.createBot)
   const removeBot = useRoxyStore((s) => s.removeBot)
+  const reorderBots = useRoxyStore((s) => s.reorderBots)
   const setBotSettings = useRoxyStore((s) => s.setBotSettings)
   const [menu, setMenu] = useState<{
     botId: string
@@ -34,6 +35,28 @@ export function BotsSection({ rail = false }: { rail?: boolean }): JSX.Element {
   }, [menu])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [dragId, setDragId] = useState<string | null>(null)
+  const [dropTarget, setDropTarget] = useState<{ id: string; after: boolean } | null>(null)
+  const suppressClick = useRef(false)
+
+  const persistOrder = (ids: string[]): void => {
+    if (ids.some((id, index) => id !== bots[index]?.id))
+      void reorderBots(ids).catch((e) => setError(e instanceof Error ? e.message : String(e)))
+  }
+
+  const move = (id: string, delta: -1 | 1): void => {
+    const ids = bots.map((bot) => bot.id)
+    const index = ids.indexOf(id)
+    const target = index + delta
+    if (index < 0 || target < 0 || target >= ids.length) return
+    ids.splice(target, 0, ...ids.splice(index, 1))
+    persistOrder(ids)
+  }
+
+  const endDrag = (): void => {
+    setDragId(null)
+    setDropTarget(null)
+  }
   /** Bot pending deletion — its own confirm dialog, separate from the edit pane. */
   const [deleting, setDeleting] = useState<string | null>(null)
   const deletingBot = bots.find((bot) => bot.id === deleting)
@@ -78,7 +101,52 @@ export function BotsSection({ rail = false }: { rail?: boolean }): JSX.Element {
             title={`@${bot.username}`}
             aria-label={`@${bot.username}`}
             aria-pressed={active === bot.chatId}
-            onClick={() => void selectChat(bot.chatId)}
+            aria-description={bots.length > 1 ? t('bots.reorder') : undefined}
+            draggable={bots.length > 1}
+            onMouseDown={() => {
+              suppressClick.current = false
+            }}
+            onDragStart={(e) => {
+              suppressClick.current = true
+              setMenu(null)
+              setDragId(bot.id)
+              e.dataTransfer.effectAllowed = 'move'
+              e.dataTransfer.setData('application/x-roxy-bot', bot.id)
+              e.dataTransfer.setData('text/plain', bot.id)
+            }}
+            onDragEnd={endDrag}
+            onDragOver={(e) => {
+              if (!dragId || dragId === bot.id) return
+              e.preventDefault()
+              e.dataTransfer.dropEffect = 'move'
+              const rect = e.currentTarget.getBoundingClientRect()
+              const rtl = getComputedStyle(e.currentTarget).direction === 'rtl'
+              const after = rail
+                ? e.clientY > rect.top + rect.height / 2
+                : e.clientX > rect.left + rect.width / 2 !== rtl
+              setDropTarget({ id: bot.id, after })
+            }}
+            onDragLeave={(e) => {
+              if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropTarget(null)
+            }}
+            onDrop={(e) => {
+              if (!dragId || !dropTarget || dropTarget.id !== bot.id) return
+              e.preventDefault()
+              const ids = bots.map((entry) => entry.id).filter((id) => id !== dragId)
+              const index = ids.indexOf(bot.id)
+              if (index >= 0 && bots.some((entry) => entry.id === dragId)) {
+                ids.splice(index + Number(dropTarget.after), 0, dragId)
+                persistOrder(ids)
+              }
+              endDrag()
+            }}
+            onClick={() => {
+              if (suppressClick.current) {
+                suppressClick.current = false
+                return
+              }
+              void selectChat(bot.chatId)
+            }}
             onContextMenu={(e) => {
               e.preventDefault()
               const rect = e.currentTarget.getBoundingClientRect()
@@ -90,6 +158,17 @@ export function BotsSection({ rail = false }: { rail?: boolean }): JSX.Element {
               })
             }}
             onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') suppressClick.current = false
+              if (
+                e.shiftKey &&
+                ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)
+              ) {
+                e.preventDefault()
+                const rtl = getComputedStyle(e.currentTarget).direction === 'rtl'
+                const earlier = e.key === 'ArrowUp' || e.key === (rtl ? 'ArrowRight' : 'ArrowLeft')
+                move(bot.id, earlier ? -1 : 1)
+                return
+              }
               if (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) {
                 e.preventDefault()
                 const rect = e.currentTarget.getBoundingClientRect()
@@ -98,7 +177,16 @@ export function BotsSection({ rail = false }: { rail?: boolean }): JSX.Element {
             }}
             className={cn(
               'press-scale relative shrink-0 rounded-full outline-none focus-visible:ring-2 focus-visible:ring-accent',
-              active === bot.chatId && 'ring-2 ring-accent ring-offset-2 ring-offset-surface'
+              active === bot.chatId && 'ring-2 ring-accent ring-offset-2 ring-offset-surface',
+              dragId === bot.id && 'opacity-40',
+              dropTarget?.id === bot.id &&
+                (rail
+                  ? dropTarget.after
+                    ? 'after:pointer-events-none after:absolute after:inset-x-0 after:-bottom-1 after:h-0.5 after:bg-accent'
+                    : 'before:pointer-events-none before:absolute before:inset-x-0 before:-top-1 before:h-0.5 before:bg-accent'
+                  : dropTarget.after
+                    ? 'after:pointer-events-none after:absolute after:inset-y-0 after:-end-1 after:w-0.5 after:bg-accent'
+                    : 'before:pointer-events-none before:absolute before:inset-y-0 before:-start-1 before:w-0.5 before:bg-accent')
             )}
           >
             <BotAvatar username={bot.username} />
@@ -132,14 +220,18 @@ export function BotsSection({ rail = false }: { rail?: boolean }): JSX.Element {
         <ContextMenuSurface
           x={menu.x}
           y={menu.y}
-          height={2 * CONTEXT_ROW_H + CONTEXT_MENU_PAD}
+          height={4 * CONTEXT_ROW_H + CONTEXT_MENU_PAD}
           onClose={closeMenu}
         >
           <div
             ref={menuRef}
             data-bot-menu={menuBot.id}
+            role="menu"
+            aria-label={`@${menuBot.username}`}
             onKeyDown={(e) => {
-              const buttons = [...e.currentTarget.querySelectorAll('button')]
+              const buttons = [
+                ...e.currentTarget.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')
+              ]
               const index = buttons.indexOf(document.activeElement as HTMLButtonElement)
               if (
                 e.key === 'ArrowDown' ||
@@ -159,6 +251,7 @@ export function BotsSection({ rail = false }: { rail?: boolean }): JSX.Element {
             }}
           >
             <ContextMenuRow
+              role="menuitem"
               label={t('bots.editSettings')}
               icon={Settings}
               onSelect={() => {
@@ -167,6 +260,27 @@ export function BotsSection({ rail = false }: { rail?: boolean }): JSX.Element {
               }}
             />
             <ContextMenuRow
+              role="menuitem"
+              label={t('bots.moveEarlier')}
+              icon={ArrowUp}
+              disabled={bots[0]?.id === menuBot.id}
+              onSelect={() => {
+                move(menuBot.id, -1)
+                closeMenu()
+              }}
+            />
+            <ContextMenuRow
+              role="menuitem"
+              label={t('bots.moveLater')}
+              icon={ArrowDown}
+              disabled={bots[bots.length - 1]?.id === menuBot.id}
+              onSelect={() => {
+                move(menuBot.id, 1)
+                closeMenu()
+              }}
+            />
+            <ContextMenuRow
+              role="menuitem"
               label={t('bots.delete')}
               icon={Trash2}
               danger

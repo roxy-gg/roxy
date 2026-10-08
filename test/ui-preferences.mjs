@@ -88,6 +88,8 @@ function load(path, extra = '') {
     '../lib/store': { useRoxyStore: (selector) => selector(state) },
     '../lib/api': { api: {} },
     './ContextMenu': { ContextMenuSurface: () => null, ContextMenuRow: () => null },
+    './BotAvatar': { BotAvatar: () => null },
+    './ui': { Button: () => null },
     '../lib/cn': { cn: (...parts) => parts.filter(Boolean).join(' ') }
   }
   new Function(
@@ -125,6 +127,58 @@ const quotaUI = load(
   '\nexport { BucketList, BucketRow, Meter, applyOrder, loadOrder }'
 )
 const pageUI = load('src/renderer/src/components/PageShell.tsx')
+const botsUI = load('src/renderer/src/components/BotsSection.tsx')
+globalThis.getComputedStyle = () => ({ direction: 'ltr' })
+state.bots = ['alpha', 'beta', 'gamma'].map((id) => ({ id, username: id, chatId: 'chat-' + id }))
+state.runningAutomation = {}
+const botMoves = []
+const botSelections = []
+state.reorderBots = async (ids) => botMoves.push(ids)
+state.selectChat = async (id) => botSelections.push(id)
+const botButton = (tree, id) =>
+  nodes(tree).find((node) => node.type === 'button' && node.props['aria-label'] === '@' + id)
+for (const rail of [false, true]) {
+  let strip = render(botsUI.BotsSection, { rail })
+  const alpha = botButton(strip.tree, 'alpha')
+  assert.equal(alpha.props.draggable, true)
+  alpha.props.onDragStart({ dataTransfer: { setData() {} } })
+  strip = render(botsUI.BotsSection, { rail }, strip.context)
+  const beta = botButton(strip.tree, 'beta')
+  beta.props.onDragOver({
+    preventDefault() {},
+    dataTransfer: {},
+    clientX: 75,
+    clientY: 75,
+    currentTarget: { getBoundingClientRect: () => ({ left: 0, top: 0, width: 100, height: 100 }) }
+  })
+  strip = render(botsUI.BotsSection, { rail }, strip.context)
+  botButton(strip.tree, 'beta').props.onDrop({ preventDefault() {} })
+  assert.deepEqual(botMoves.at(-1), ['beta', 'alpha', 'gamma'])
+  strip = render(botsUI.BotsSection, { rail }, strip.context)
+  botButton(strip.tree, 'alpha').props.onClick()
+  assert.equal(botSelections.length, 0, 'drop must not open a chat')
+  botButton(strip.tree, 'alpha').props.onKeyDown({ key: 'Enter' })
+  botButton(strip.tree, 'alpha').props.onMouseDown()
+  botButton(strip.tree, 'alpha').props.onClick()
+  assert.equal(botSelections.pop(), 'chat-alpha')
+  botButton(strip.tree, 'alpha').props.onKeyDown({
+    key: 'ArrowRight',
+    shiftKey: true,
+    preventDefault() {},
+    currentTarget: {}
+  })
+  assert.deepEqual(botMoves.at(-1), ['beta', 'alpha', 'gamma'])
+}
+globalThis.getComputedStyle = () => ({ direction: 'rtl' })
+const rtlStrip = render(botsUI.BotsSection, {})
+botButton(rtlStrip.tree, 'gamma').props.onKeyDown({
+  key: 'ArrowRight',
+  shiftKey: true,
+  preventDefault() {},
+  currentTarget: {}
+})
+assert.deepEqual(botMoves.at(-1), ['alpha', 'gamma', 'beta'])
+delete globalThis.getComputedStyle
 
 for (const raw of ['invalid', '[]', 'null', '{"claude":["five_hour",null,1,"five_hour"]}']) {
   storage.set(key, raw)
@@ -296,5 +350,5 @@ windowEvents.get('keydown')({ key: 'Escape', preventDefault() {} })
 assert.equal(consumed, 1)
 assert.equal(backs, 1)
 console.log(
-  'UI PREFERENCES OK: active-only reorder, other-model isolation, hint, alert color, pruning, upstream isolation, alignment, keyboard menu and Escape lifecycle'
+  'UI PREFERENCES OK: quota ordering, bot drag/keyboard/RTL/click isolation, alert color, storage, menus and Escape lifecycle'
 )

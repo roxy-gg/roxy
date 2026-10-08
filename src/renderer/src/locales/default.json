@@ -1,5 +1,8 @@
 {
   "bots": {
+    "reorder": "Drag to reorder bots. Use Shift + arrow keys or the context menu to move a bot.",
+    "moveEarlier": "Move earlier",
+    "moveLater": "Move later",
     "new": "New bot",
     "username": "Username",
     "usernameHint": "2–32 letters, numbers, underscores or hyphens. Start with a letter. Roxy is reserved.",

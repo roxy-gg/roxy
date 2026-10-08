@@ -783,6 +783,8 @@ export interface ConfigImportResult {
 export interface RoxyApi {
   bots: {
     list(): Promise<Bot[]>
+    /** Reorder the bot strip; unlisted bots retain their order after the supplied ids. */
+    reorder(ids: string[]): Promise<void>
     /** Omit the username to get a free one: a bot can be named in chat later. */
     create(username?: string): Promise<Bot>
     update(id: string, patch: { username?: string; instructions?: string }): Promise<Bot>

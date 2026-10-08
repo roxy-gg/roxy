@@ -64,7 +64,10 @@
     "unsavedDescription": "Your edits to this bot haven't been saved.",
     "unsavedTitle": "Save changes before closing?",
     "username": "Benutzername",
-    "usernameHint": "2–32 Buchstaben, Zahlen, Unterstriche oder Bindestriche. Muss mit einem Buchstaben beginnen. „Roxy“ ist reserviert."
+    "usernameHint": "2–32 Buchstaben, Zahlen, Unterstriche oder Bindestriche. Muss mit einem Buchstaben beginnen. „Roxy“ ist reserviert.",
+    "moveEarlier": "Move earlier",
+    "moveLater": "Move later",
+    "reorder": "Drag to reorder bots. Use Shift + arrow keys or the context menu to move a bot."
   },
   "browserChrome": {
     "back": "Zurück",

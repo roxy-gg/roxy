@@ -64,7 +64,10 @@
     "unsavedDescription": "Your edits to this bot haven't been saved.",
     "unsavedTitle": "Save changes before closing?",
     "username": "Имя пользователя",
-    "usernameHint": "2–32 буквы, цифры, подчеркивания или дефисы. Начинается с буквы. Имя Roxy зарезервировано."
+    "usernameHint": "2–32 буквы, цифры, подчеркивания или дефисы. Начинается с буквы. Имя Roxy зарезервировано.",
+    "moveEarlier": "Move earlier",
+    "moveLater": "Move later",
+    "reorder": "Drag to reorder bots. Use Shift + arrow keys or the context menu to move a bot."
   },
   "browserChrome": {
     "back": "Назад",

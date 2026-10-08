@@ -64,7 +64,10 @@
     "unsavedDescription": "Your edits to this bot haven't been saved.",
     "unsavedTitle": "Save changes before closing?",
     "username": "Nombre de usuario",
-    "usernameHint": "2–32 letras, números, guiones bajos o guiones. Empieza con una letra. Roxy está reservado."
+    "usernameHint": "2–32 letras, números, guiones bajos o guiones. Empieza con una letra. Roxy está reservado.",
+    "moveEarlier": "Move earlier",
+    "moveLater": "Move later",
+    "reorder": "Drag to reorder bots. Use Shift + arrow keys or the context menu to move a bot."
   },
   "browserChrome": {
     "back": "Atrás",

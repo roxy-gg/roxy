@@ -64,7 +64,10 @@
     "unsavedDescription": "Your edits to this bot haven't been saved.",
     "unsavedTitle": "Save changes before closing?",
     "username": "ユーザー名",
-    "usernameHint": "2～32文字の英数字、アンダースコア、ハイフン。文字で始めてください。Roxyは予約されています。"
+    "usernameHint": "2～32文字の英数字、アンダースコア、ハイフン。文字で始めてください。Roxyは予約されています。",
+    "moveEarlier": "Move earlier",
+    "moveLater": "Move later",
+    "reorder": "Drag to reorder bots. Use Shift + arrow keys or the context menu to move a bot."
   },
   "browserChrome": {
     "back": "戻る",

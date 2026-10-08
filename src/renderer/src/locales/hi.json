@@ -64,7 +64,10 @@
     "unsavedDescription": "Your edits to this bot haven't been saved.",
     "unsavedTitle": "Save changes before closing?",
     "username": "उपयोगकर्ता नाम",
-    "usernameHint": "2–32 अक्षर, संख्याएँ, अंडरस्कोर या हाइफ़न। अक्षर से शुरू करें। Roxy आरक्षित है।"
+    "usernameHint": "2–32 अक्षर, संख्याएँ, अंडरस्कोर या हाइफ़न। अक्षर से शुरू करें। Roxy आरक्षित है।",
+    "moveEarlier": "Move earlier",
+    "moveLater": "Move later",
+    "reorder": "Drag to reorder bots. Use Shift + arrow keys or the context menu to move a bot."
   },
   "browserChrome": {
     "back": "पीछे",

@@ -44,6 +44,11 @@ const notify = (): void => {
 Object.assign(window.roxy, {
   bots: {
     list: async () => [...bots],
+    reorder: async (ids: string[]) => {
+      const rank = new Map(ids.map((id, index) => [id, index]))
+      bots.sort((a, b) => (rank.get(a.id) ?? ids.length) - (rank.get(b.id) ?? ids.length))
+      notify()
+    },
     create: async (username?: string) => {
       // Lets the smoke prove a FAILED creation is reported. The button is the
       // only entry point now that the dialog is gone, so a silent failure
