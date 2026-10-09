@@ -39,9 +39,19 @@ async function run() {
   harnessUrl.searchParams.set('bots', '')
   await win.loadURL(harnessUrl.href)
   await until(`return !!document.querySelector('button[title="New bot"]')`)
-  const storeUrl =
-    '/@fs/' + path.resolve(__dirname, '../src/renderer/src/lib/store.ts').replaceAll('\\', '/')
+  // Must be the exact URL the harness imported: a different spelling of the same
+  // file is a second module instance with its own store, which the strip never sees.
+  // posix.join collapses the double slash a POSIX absolute path would otherwise add.
+  const storeUrl = path.posix.join(
+    '/@fs/',
+    path.resolve(__dirname, '../src/renderer/src/lib/store.ts').replaceAll('\\', '/')
+  )
   await evaluate(`
+    const loaded = performance
+      .getEntriesByType('resource')
+      .map((entry) => decodeURI(new URL(entry.name).pathname))
+    if (!loaded.includes(${JSON.stringify(storeUrl)}))
+      throw new Error('store URL differs from the harness: ' + loaded.filter((p) => p.endsWith('/store.ts')).join(', '))
     const { useRoxyStore: store } = await import(${JSON.stringify(storeUrl)})
     window.contract = { store, api: window.roxy, bots: [] }
   `)
