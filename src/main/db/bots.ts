@@ -8,7 +8,24 @@ const JOB_COLUMNS = `id, bot_id AS botId, name, prompt, schedule, enabled,
   next_run_at AS nextRunAt, last_run_at AS lastRunAt, remaining_runs AS remainingRuns, created_at AS createdAt`
 
 export function listBots(): Bot[] {
-  return getDb().prepare(`SELECT ${BOT_COLUMNS} FROM bots ORDER BY created_at, id`).all() as Bot[]
+  return getDb()
+    .prepare(`SELECT ${BOT_COLUMNS} FROM bots ORDER BY sort_order, created_at, id`)
+    .all() as Bot[]
+}
+
+export function reorderBots(orderedIds: string[]): void {
+  if (!Array.isArray(orderedIds) || orderedIds.some((id) => typeof id !== 'string'))
+    throw new Error('Bot order must be an array of ids')
+  const db = getDb()
+  db.transaction(() => {
+    const current = listBots().map((bot) => bot.id)
+    const valid = new Set(current)
+    const requested = [...new Set(orderedIds.filter((id) => valid.has(id)))]
+    const selected = new Set(requested)
+    const ids = [...requested, ...current.filter((id) => !selected.has(id))]
+    const update = db.prepare('UPDATE bots SET sort_order = ? WHERE id = ?')
+    ids.forEach((id, index) => update.run(index, id))
+  })()
 }
 
 export function getBot(id: string): Bot | undefined {
@@ -81,7 +98,7 @@ export function createBot(username = '', instructions = ''): Bot {
     }
     getDb()
       .prepare(
-        'INSERT INTO bots(id, username, instructions, chat_id, created_at) VALUES (?, ?, ?, ?, ?)'
+        'INSERT INTO bots(id, username, instructions, chat_id, created_at, sort_order) VALUES (?, ?, ?, ?, ?, (SELECT COALESCE(MAX(sort_order), -1) + 1 FROM bots))'
       )
       .run(bot.id, bot.username, bot.instructions, bot.chatId, bot.createdAt)
     return bot

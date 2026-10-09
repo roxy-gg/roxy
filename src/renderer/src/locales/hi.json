@@ -38,6 +38,8 @@
     "mentionLabel": "Mention a bot",
     "minutes": "अंतराल (मिनट)",
     "model": "मॉडल",
+    "moveEarlier": "Move earlier",
+    "moveLater": "Move later",
     "never": "कभी नहीं",
     "new": "नया बॉट",
     "nextRun": "अगला रन:",
@@ -47,6 +49,7 @@
     "prompt": "प्रॉम्प्ट",
     "remainingRuns": "रन सीमा (वैकल्पिक)",
     "removeTime": "समय हटाएँ",
+    "reorder": "Drag to reorder bots. Use Shift + arrow keys or the context menu to move a bot.",
     "runAt": "इस समय चलाएँ",
     "runQueued": "रन कतारबद्ध",
     "runsLeft_one": "{{count}} रन शेष",
@@ -79,6 +82,8 @@
   },
   "chat": {
     "backTo": "{{title}} पर वापस",
+    "backgroundRunning_one": "{{count}} subagent still running",
+    "backgroundRunning_other": "{{count}} subagents still running",
     "cancel": "रद्द करें",
     "cancelBackground_one": "{{count}} बैकग्राउंड सबएजेंट रद्द करें",
     "cancelBackground_other": "{{count}} बैकग्राउंड सबएजेंट रद्द करें",
@@ -98,9 +103,7 @@
     "queued": "कतारबद्ध",
     "runsAfterReply": "इस जवाब के बाद चलता है",
     "settings": "सेटिंग्स",
-    "working": "काम कर रहा है",
-    "backgroundRunning_one": "{{count}} subagent still running",
-    "backgroundRunning_other": "{{count}} subagents still running"
+    "working": "काम कर रहा है"
   },
   "codeHosts": {
     "connected": "कनेक्टेड",
@@ -441,12 +444,15 @@
     "overage": "इस महीने का अतिरिक्त उपयोग",
     "perMillion": "{{rate}}",
     "perPrompt": "{{rate}} प्रति प्रॉम्प्ट",
+    "pillHint": "The compact indicator shows {{limit}}. Drag a limit to the top to show it instead.",
     "pillTitle": "आपकी {{account}} सीमा का {{percent}}% बाकी - विवरण के लिए क्लिक करें",
     "plan": "{{plan}} प्लान",
     "premiumOf": "{{used}} / {{total}}",
     "premiumUnlimited": "इस प्लान पर असीमित उपयोग।",
     "premiumUsed": "प्रीमियम अनुरोध",
     "refresh": "रीफ़्रेश करें",
+    "reorder": "Drag to reorder limits",
+    "reorderActions": "Reorder {{limit}}. Use Up or Down arrows, or press Enter or Space for move actions.",
     "resetReady": "फिर से भर गया",
     "resetsIn": "{{time}} में रीसेट",
     "roxySpend7d": "Roxy, पिछले 7 दिन",
@@ -811,6 +817,7 @@
     "noOutput": "(कोई आउटपुट नहीं)",
     "openImage": "छवि खोलें",
     "openLink": "लिंक खोलें",
+    "openSubagent": "Open subagent session",
     "promptEmpty": "बिना टेक्स्ट का संदेश",
     "promptHistory": "आपके संदेश",
     "promptImages_one": "{{count}} छवि संलग्न",
@@ -832,8 +839,7 @@
     "unchanged_other": "{{count}} अपरिवर्तित पंक्तियाँ",
     "working": "काम कर रहा है",
     "writingAs": "{{name}} लिख रहा है…",
-    "you": "आप",
-    "openSubagent": "Open subagent session"
+    "you": "आप"
   },
   "usage": {
     "allProviders": "सभी प्रदाता, पिछले 30 दिन",

@@ -220,6 +220,7 @@ interface RoxyStore {
   bootstrap: () => Promise<void>
   refreshChats: () => Promise<void>
   refreshBots: () => Promise<void>
+  reorderBots: (ids: string[]) => Promise<void>
   refreshQueue: () => Promise<void>
   refreshProviders: () => Promise<void>
   /** Persist the connected provider order (optimistic). `ids` = full list, top-to-bottom. */
@@ -1378,6 +1379,25 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
 
   refreshBots: async () => {
     set({ bots: await api.bots.list() })
+  },
+
+  reorderBots: async (ids) => {
+    const ordered = [...new Set(ids)]
+    const selected = new Set(ordered)
+    set((s) => {
+      const byId = new Map(s.bots.map((bot) => [bot.id, bot]))
+      return {
+        bots: [
+          ...ordered.map((id) => byId.get(id)).filter((bot): bot is Bot => !!bot),
+          ...s.bots.filter((bot) => !selected.has(bot.id))
+        ]
+      }
+    })
+    try {
+      await api.bots.reorder(ordered)
+    } finally {
+      await get().refreshBots()
+    }
   },
 
   refreshQueue: async () => {

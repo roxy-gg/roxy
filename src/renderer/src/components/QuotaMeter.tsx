@@ -1,7 +1,9 @@
 /**
  * Subscription usage limits for the active session's provider: a titlebar pill
- * showing how much of the tightest limit is left for the session's model, and a
+ * showing how much of the preferred limit is left for the session's model, and a
  * popover listing every window/model allowance the upstream reports.
+ * The pill's color always reflects the tightest applicable limit, even when
+ * the user chooses to display a different window's percentage.
  *
  * Only shown for plan-billed connections - the sidecar subscriptions (ChatGPT,
  * Claude, Google) and GitHub Copilot. API-key providers get the spend pill.
@@ -16,7 +18,15 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { AlertCircle, ArrowRightLeft, Loader2, RotateCw } from 'lucide-react'
+import {
+  AlertCircle,
+  ArrowDown,
+  ArrowRightLeft,
+  ArrowUp,
+  GripVertical,
+  Loader2,
+  RotateCw
+} from 'lucide-react'
 import type { ConnectedProvider } from '@shared/types'
 import type { ModelCost } from '@shared/api'
 import { upstreamFor } from '@shared/cliproxy'
@@ -28,11 +38,13 @@ import {
   planSource,
   type ConnectionQuota,
   type PremiumUsage,
-  type QuotaBucket
+  type QuotaBucket,
+  type QuotaSource
 } from '@shared/quota'
 import { api } from '../lib/api'
 import { useRoxyStore } from '../lib/store'
 import { cn } from '../lib/cn'
+import { ContextMenuRow, ContextMenuSurface } from './ContextMenu'
 
 /** Background refresh. The main process caches for a minute, so this is cheap. */
 const POLL_MS = 5 * 60_000
@@ -55,18 +67,74 @@ function tone(remaining: number): string {
   return 'bg-accent'
 }
 
-function Meter({ value, className }: { value: number; className?: string }): JSX.Element {
+function Meter({
+  value,
+  status = value,
+  className
+}: {
+  value: number
+  status?: number
+  className?: string
+}): JSX.Element {
   return (
     <div className={cn('h-1.5 overflow-hidden rounded-full bg-white/10', className)}>
       <div
-        className={cn('h-full rounded-full transition-[width] duration-300', tone(value))}
+        className={cn('h-full rounded-full transition-[width] duration-300', tone(status))}
         style={{ width: `${value}%` }}
       />
     </div>
   )
 }
 
-function BucketRow({ bucket, now }: { bucket: QuotaBucket; now: number }): JSX.Element {
+/**
+ * Renderer-local ordering, shared across accounts and sessions within each
+ * upstream, never across providers. Only applicable limits of the active
+ * account can edit it. Without a preference the tightest limit comes first.
+ */
+const ORDER_KEY = 'roxy.quota.order.v1'
+type QuotaOrder = Partial<Record<QuotaSource, string[]>>
+
+function loadOrder(): QuotaOrder {
+  try {
+    const raw: unknown = JSON.parse(localStorage.getItem(ORDER_KEY) ?? '{}')
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {}
+    return Object.fromEntries(
+      (['claude', 'codex', 'antigravity', 'copilot'] as const).map((source) => {
+        const ids = (raw as Record<string, unknown>)[source]
+        return [
+          source,
+          Array.isArray(ids)
+            ? [...new Set(ids.filter((id): id is string => typeof id === 'string'))]
+            : []
+        ]
+      })
+    )
+  } catch {
+    return {}
+  }
+}
+
+/** Stable sort by saved position; ids never seen keep their natural order, after the saved ones. */
+function applyOrder(buckets: QuotaBucket[], order: string[]): QuotaBucket[] {
+  const rank = (b: QuotaBucket): number => {
+    const i = order.indexOf(b.id)
+    return i === -1 ? order.length : i
+  }
+  return buckets
+    .map((b, i) => ({ b, i }))
+    .sort((x, y) => rank(x.b) - rank(y.b) || x.i - y.i)
+    .map((x) => x.b)
+}
+
+function BucketRow({
+  bucket,
+  now,
+  grip
+}: {
+  bucket: QuotaBucket
+  now: number
+  grip?: JSX.Element
+}): JSX.Element {
   const { t } = useTranslation()
   const reset =
     bucket.resetsAt === undefined
@@ -75,16 +143,194 @@ function BucketRow({ bucket, now }: { bucket: QuotaBucket; now: number }): JSX.E
         ? t('quota.resetReady')
         : t('quota.resetsIn', { time: formatDuration(bucket.resetsAt - now) })
   return (
-    <div className="py-1.5">
-      <div className="mb-1 flex items-baseline justify-between gap-3 text-xs">
-        <span className="truncate text-text">{bucket.label}</span>
-        <span className="shrink-0 tabular-nums text-text-muted">
-          {t('quota.left', { percent: bucket.remaining })}
-        </span>
+    <div className="flex items-center gap-1 py-1.5">
+      {grip ?? <span aria-hidden="true" className="invisible h-9 w-5 shrink-0" />}
+      <div className="min-w-0 flex-1">
+        <div className="mb-1 flex items-baseline justify-between gap-3 text-xs">
+          <span className="truncate text-text">{bucket.label}</span>
+          <span className="shrink-0 tabular-nums text-text-muted">
+            {t('quota.left', { percent: bucket.remaining })}
+          </span>
+        </div>
+        <Meter value={bucket.remaining} />
+        {reset && <div className="mt-1 text-[11px] text-text-subtle tabular-nums">{reset}</div>}
       </div>
-      <Meter value={bucket.remaining} />
-      {reset && <div className="mt-1 text-[11px] text-text-subtle tabular-nums">{reset}</div>}
     </div>
+  )
+}
+
+/**
+ * Limits as a drag-to-reorder list (native HTML5 DnD, same pattern as the
+ * account list in Settings). `onReorder` receives the ids in their new order.
+ * Rows can't be dragged when there is only one.
+ */
+function BucketList({
+  buckets,
+  now,
+  onReorder
+}: {
+  buckets: QuotaBucket[]
+  now: number
+  onReorder?: (ids: string[]) => void
+}): JSX.Element {
+  const { t } = useTranslation()
+  const [dragId, setDragId] = useState<string | null>(null)
+  const [overId, setOverId] = useState<string | null>(null)
+  const [after, setAfter] = useState(false)
+  const [menu, setMenu] = useState<{ id: string; x: number; y: number } | null>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+  const triggers = useRef(new Map<string, HTMLButtonElement>())
+  const sortable = !!onReorder && buckets.length > 1
+
+  useEffect(() => {
+    if (menu) menuRef.current?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus()
+  }, [menu])
+
+  const closeMenu = (): void => {
+    if (menu) triggers.current.get(menu.id)?.focus()
+    setMenu(null)
+  }
+
+  const reset = (): void => {
+    setDragId(null)
+    setOverId(null)
+  }
+
+  const drop = (targetId: string): void => {
+    if (dragId && dragId !== targetId) {
+      const ids = buckets.map((b) => b.id).filter((id) => id !== dragId)
+      ids.splice(ids.indexOf(targetId) + (after ? 1 : 0), 0, dragId)
+      if (ids.some((id, i) => id !== buckets[i].id)) onReorder?.(ids)
+    }
+    reset()
+  }
+
+  const move = (id: string, delta: -1 | 1): void => {
+    const ids = buckets.map((b) => b.id)
+    const from = ids.indexOf(id)
+    const to = from + delta
+    if (to < 0 || to >= ids.length) return
+    ids.splice(to, 0, ...ids.splice(from, 1))
+    onReorder?.(ids)
+  }
+
+  return (
+    <>
+      {buckets.map((b) => (
+        <div
+          key={b.id}
+          onDragEnter={() => dragId && dragId !== b.id && setOverId(b.id)}
+          onDragOver={(e) => {
+            if (!dragId) return
+            e.preventDefault()
+            if (dragId === b.id) return
+            const r = e.currentTarget.getBoundingClientRect()
+            setAfter(e.clientY - r.top > r.height / 2)
+            setOverId(b.id)
+          }}
+          onDrop={(e) => {
+            e.preventDefault()
+            drop(b.id)
+          }}
+          onDragEnd={reset}
+          className={cn(
+            'relative',
+            dragId === b.id && 'opacity-40',
+            overId === b.id &&
+              dragId !== b.id &&
+              (after
+                ? 'after:absolute after:inset-x-0 after:-bottom-px after:h-0.5 after:rounded-full after:bg-accent'
+                : 'before:absolute before:inset-x-0 before:-top-px before:h-0.5 before:rounded-full before:bg-accent')
+          )}
+        >
+          <BucketRow
+            bucket={b}
+            now={now}
+            grip={
+              sortable ? (
+                <button
+                  type="button"
+                  ref={(node) => {
+                    if (node) triggers.current.set(b.id, node)
+                    else triggers.current.delete(b.id)
+                  }}
+                  draggable
+                  title={t('quota.reorder')}
+                  aria-label={t('quota.reorderActions', { limit: b.label })}
+                  aria-haspopup="menu"
+                  aria-expanded={menu?.id === b.id}
+                  onClick={(e) => {
+                    const rect = e.currentTarget.getBoundingClientRect()
+                    setMenu({ id: b.id, x: rect.left, y: rect.bottom })
+                  }}
+                  onDragStart={(e) => {
+                    setDragId(b.id)
+                    e.dataTransfer.effectAllowed = 'move'
+                    e.dataTransfer.setData('text/plain', b.id)
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return
+                    e.preventDefault()
+                    e.stopPropagation()
+                    move(b.id, e.key === 'ArrowUp' ? -1 : 1)
+                  }}
+                  className="flex h-9 w-5 shrink-0 cursor-grab items-center justify-center rounded text-text-subtle hover:text-text focus-visible:outline-2 focus-visible:outline-accent/60 active:cursor-grabbing"
+                >
+                  <GripVertical className="h-3.5 w-3.5" aria-hidden="true" />
+                </button>
+              ) : undefined
+            }
+          />
+        </div>
+      ))}
+      {menu && sortable && (
+        <ContextMenuSurface {...menu} height={68} onClose={closeMenu}>
+          <div
+            ref={menuRef}
+            role="menu"
+            aria-label={t('quota.reorder')}
+            onMouseDown={(e) => e.stopPropagation()}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape' || e.key === 'Tab') {
+                e.preventDefault()
+                e.stopPropagation()
+                closeMenu()
+              } else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+                e.preventDefault()
+                const items = Array.from(
+                  e.currentTarget.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')
+                )
+                const index = items.indexOf(document.activeElement as HTMLButtonElement)
+                items[
+                  (index + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length
+                ]?.focus()
+              }
+            }}
+          >
+            <ContextMenuRow
+              role="menuitem"
+              label={t('settings.providers.moveUp')}
+              icon={ArrowUp}
+              disabled={buckets[0]?.id === menu.id}
+              onSelect={() => {
+                move(menu.id, -1)
+                closeMenu()
+              }}
+            />
+            <ContextMenuRow
+              role="menuitem"
+              label={t('settings.providers.moveDown')}
+              icon={ArrowDown}
+              disabled={buckets[buckets.length - 1]?.id === menu.id}
+              onSelect={() => {
+                move(menu.id, 1)
+                closeMenu()
+              }}
+            />
+          </div>
+        </ContextMenuSurface>
+      )}
+    </>
   )
 }
 
@@ -242,6 +488,7 @@ export function QuotaMeter({
   const [loading, setLoading] = useState<string | null>(null)
   const [switching, setSwitching] = useState(false)
   const [open, setOpen] = useState(false)
+  const [order, setOrder] = useState<QuotaOrder>(loadOrder)
   const ref = useRef<HTMLDivElement>(null)
 
   const load = useCallback(async (connectionId: string, force = false) => {
@@ -286,7 +533,8 @@ export function QuotaMeter({
       if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
     }
     const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') setOpen(false)
+      if (e.key === 'Escape' && !e.defaultPrevented && !document.querySelector('[role="menu"]'))
+        setOpen(false)
     }
     document.addEventListener('mousedown', onClick)
     document.addEventListener('keydown', onKey)
@@ -310,7 +558,13 @@ export function QuotaMeter({
     q.upstream === 'copilot'
       ? copilotBucketsForModel(q, multiplierOf(connectionId, m))
       : bucketsForModel(q, m)
-  const tightest = activeQuota ? scoped(activeQuota, activeId, model ?? undefined)[0] : undefined
+  // The first limit in the user's order; with no saved order that is the tightest.
+  const activeLimits = activeQuota ? scoped(activeQuota, activeId, model ?? undefined) : []
+  const selected = applyOrder(
+    activeLimits,
+    activeQuota ? (order[activeQuota.upstream] ?? []) : []
+  )[0]
+  const tightest = activeLimits[0]
   const activeAccount = plan(provider.seedId)!.accountLabel
 
   // Popover: whichever account is being browsed.
@@ -320,12 +574,30 @@ export function QuotaMeter({
   const isActive = viewed.id === activeId
   // Another provider's catalog won't have this model; scope only within a family.
   const scopeModel = viewed.seedId === provider.seedId ? (model ?? undefined) : undefined
-  const applicable = fresh ? scoped(fresh, viewed.id, scopeModel) : []
+  const natural = fresh ? scoped(fresh, viewed.id, scopeModel) : []
+  const applicable = applyOrder(natural, fresh ? (order[fresh.upstream] ?? []) : [])
   const others = fresh
     ? fresh.buckets.filter((b) =>
-        fresh.upstream === 'copilot' ? !applicable.includes(b) : !bucketAppliesTo(b, scopeModel)
+        fresh.upstream === 'copilot' ? !natural.includes(b) : !bucketAppliesTo(b, scopeModel)
       )
     : []
+  const saveOrder = (ids: string[]): void => {
+    if (!isActive || !fresh) return
+    const known = new Set(fresh.buckets.map((b) => b.id))
+    const next = {
+      ...order,
+      [fresh.upstream]: [
+        ...ids,
+        ...(order[fresh.upstream] ?? []).filter((id) => known.has(id) && !ids.includes(id))
+      ]
+    }
+    setOrder(next)
+    try {
+      localStorage.setItem(ORDER_KEY, JSON.stringify(next))
+    } catch {
+      // A blocked/full storage must not prevent reordering in this window.
+    }
+  }
   const hasData = !!fresh && (fresh.buckets.length > 0 || !!fresh.premium)
   const viewedMultiplier = multiplierOf(viewed.id, scopeModel)
   const viewedTokenCost = scopeModel
@@ -335,8 +607,8 @@ export function QuotaMeter({
   const canSwitch = !isActive && viewed.seedId === provider.seedId && !!model
   const now = Date.now()
 
-  const pillTitle = tightest
-    ? t('quota.pillTitle', { percent: tightest.remaining, account: activeAccount })
+  const pillTitle = selected
+    ? t('quota.pillTitle', { percent: selected.remaining, account: activeAccount })
     : (activeQuota?.error ?? t('quota.title', { account: activeAccount }))
 
   const switchAccount = async (): Promise<void> => {
@@ -364,10 +636,10 @@ export function QuotaMeter({
             : 'border-border bg-surface text-text-muted hover:border-border-strong hover:[--sq-ring:var(--edge-strong)] hover:text-text'
         )}
       >
-        {tightest ? (
+        {selected ? (
           <>
-            <Meter value={tightest.remaining} className="w-4" />
-            <span>{tightest.remaining}%</span>
+            <Meter value={selected.remaining} status={tightest?.remaining} className="w-4" />
+            <span>{selected.remaining}%</span>
           </>
         ) : activeQuota?.error ? (
           <AlertCircle className="h-3.5 w-3.5" />
@@ -440,9 +712,17 @@ export function QuotaMeter({
                     {t('quota.currentModel', { model: scopeModel })}
                   </div>
                 )}
-                {applicable.map((b) => (
-                  <BucketRow key={b.id} bucket={b} now={now} />
-                ))}
+                <BucketList
+                  key={viewed.id}
+                  buckets={applicable}
+                  now={now}
+                  onReorder={isActive ? saveOrder : undefined}
+                />
+                {isActive && applicable.length > 1 && (
+                  <div className="mt-0.5 text-[11px] text-text-subtle">
+                    {t('quota.pillHint', { limit: applicable[0].label })}
+                  </div>
+                )}
                 {others.length > 0 && (
                   <>
                     <div className="mb-0.5 mt-3 border-t border-border pt-2 text-[11px] text-text-subtle">

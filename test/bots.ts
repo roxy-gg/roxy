@@ -235,6 +235,31 @@ async function main(): Promise<void> {
   assert.equal(unnamed.username, 'bot')
   assert.equal(unnamedToo.username, 'bot-2', 'generated handles do not collide')
   assert.equal(bots.getBot(unnamed.id)?.instructions, '', 'and it starts with no role')
+  assert.deepEqual(
+    bots.listBots().map((entry) => entry.id),
+    [bot.id, unnamed.id, unnamedToo.id]
+  )
+  bots.reorderBots([unnamedToo.id, bot.id, unnamed.id])
+  assert.deepEqual(
+    bots.listBots().map((entry) => entry.id),
+    [unnamedToo.id, bot.id, unnamed.id]
+  )
+  bots.reorderBots([unnamed.id, unnamed.id, 'deleted-bot'])
+  assert.deepEqual(
+    bots.listBots().map((entry) => entry.id),
+    [unnamed.id, unnamedToo.id, bot.id],
+    'deduplicate ids, ignore stale ids, preserve omitted bots'
+  )
+  const appended = bots.createBot('appended')
+  assert.equal(bots.listBots().at(-1)?.id, appended.id, 'new bots append after custom ordering')
+  repairSchema(getDb())
+  assert.deepEqual(
+    bots.listBots().map((entry) => entry.id),
+    [unnamed.id, unnamedToo.id, bot.id, appended.id],
+    'schema repair preserves custom ordering'
+  )
+  assert.throws(() => bots.reorderBots([1] as unknown as string[]), /array of ids/)
+  bots.removeBot(appended.id)
   bots.removeBot(unnamed.id)
   bots.removeBot(unnamedToo.id)
   bots.updateBot(bot.id, { instructions: 'Review PRs only when asked.' })
@@ -960,6 +985,10 @@ async function main(): Promise<void> {
       assert.equal(viaBridge.username, 'bridge-bot')
       const bridgeList = await win.webContents.executeJavaScript('window.roxy.bots.list()')
       assert.ok(bridgeList.some((entry: { id: string }) => entry.id === viaBridge.id))
+      await win.webContents.executeJavaScript(
+        `window.roxy.bots.reorder(${JSON.stringify([viaBridge.id])})`
+      )
+      assert.equal(bots.listBots()[0]?.id, viaBridge.id, 'bot reorder crosses preload and IPC')
       await win.webContents.executeJavaScript(
         `window.roxy.bots.update(${JSON.stringify(viaBridge.id)}, { instructions: 'Updated through IPC' })`
       )

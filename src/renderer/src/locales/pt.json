@@ -38,6 +38,8 @@
     "mentionLabel": "Mention a bot",
     "minutes": "Intervalo (minutos)",
     "model": "Modelo",
+    "moveEarlier": "Move earlier",
+    "moveLater": "Move later",
     "never": "Nunca",
     "new": "Novo bot",
     "nextRun": "Próxima execução:",
@@ -47,6 +49,7 @@
     "prompt": "Prompt",
     "remainingRuns": "Limite de execuções (opcional)",
     "removeTime": "Remover horário",
+    "reorder": "Drag to reorder bots. Use Shift + arrow keys or the context menu to move a bot.",
     "runAt": "Executar em",
     "runQueued": "Execução enfileirada",
     "runsLeft_one": "{{count}} execução restante",
@@ -79,6 +82,8 @@
   },
   "chat": {
     "backTo": "Voltar para {{title}}",
+    "backgroundRunning_one": "{{count}} subagent still running",
+    "backgroundRunning_other": "{{count}} subagents still running",
     "cancel": "cancelar",
     "cancelBackground_one": "Cancelar {{count}} subagente em segundo plano",
     "cancelBackground_other": "Cancelar {{count}} subagentes em segundo plano",
@@ -98,9 +103,7 @@
     "queued": "Na fila",
     "runsAfterReply": "executa após esta resposta",
     "settings": "Configurações",
-    "working": "trabalhando",
-    "backgroundRunning_one": "{{count}} subagent still running",
-    "backgroundRunning_other": "{{count}} subagents still running"
+    "working": "trabalhando"
   },
   "codeHosts": {
     "connected": "Conectado",
@@ -441,12 +444,15 @@
     "overage": "Uso extra este mês",
     "perMillion": "{{rate}}",
     "perPrompt": "{{rate}} por prompt",
+    "pillHint": "The compact indicator shows {{limit}}. Drag a limit to the top to show it instead.",
     "pillTitle": "{{percent}}% do seu limite de {{account}} restante – clique para ver detalhes",
     "plan": "Plano {{plan}}",
     "premiumOf": "{{used}} / {{total}}",
     "premiumUnlimited": "Uso ilimitado neste plano.",
     "premiumUsed": "Solicitações premium",
     "refresh": "Atualizar",
+    "reorder": "Drag to reorder limits",
+    "reorderActions": "Reorder {{limit}}. Use Up or Down arrows, or press Enter or Space for move actions.",
     "resetReady": "Recarregado",
     "resetsIn": "Reinicia em {{time}}",
     "roxySpend7d": "Roxy, últimos 7 dias",
@@ -811,6 +817,7 @@
     "noOutput": "(sem saída)",
     "openImage": "Abrir imagem",
     "openLink": "Abrir link",
+    "openSubagent": "Open subagent session",
     "promptEmpty": "Mensagem sem texto",
     "promptHistory": "Suas mensagens",
     "promptImages_one": "{{count}} imagem anexada",
@@ -832,8 +839,7 @@
     "unchanged_other": "{{count}} linhas inalteradas",
     "working": "trabalhando",
     "writingAs": "{{name}} está escrevendo…",
-    "you": "Você",
-    "openSubagent": "Open subagent session"
+    "you": "Você"
   },
   "usage": {
     "allProviders": "Todos os provedores, últimos 30 dias",

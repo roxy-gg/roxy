@@ -38,6 +38,8 @@
     "mentionLabel": "Mention a bot",
     "minutes": "Интервал (минуты)",
     "model": "Модель",
+    "moveEarlier": "Move earlier",
+    "moveLater": "Move later",
     "never": "Никогда",
     "new": "Новый бот",
     "nextRun": "Следующий запуск:",
@@ -47,6 +49,7 @@
     "prompt": "Запрос",
     "remainingRuns": "Лимит запусков (необязательно)",
     "removeTime": "Удалить время",
+    "reorder": "Drag to reorder bots. Use Shift + arrow keys or the context menu to move a bot.",
     "runAt": "Запустить в",
     "runQueued": "Запуск в очереди",
     "runsLeft_one": "Остался {{count}} запуск",
@@ -79,6 +82,8 @@
   },
   "chat": {
     "backTo": "Назад к {{title}}",
+    "backgroundRunning_one": "{{count}} subagent still running",
+    "backgroundRunning_other": "{{count}} subagents still running",
     "cancel": "отмена",
     "cancelBackground_one": "Отменить {{count}} фоновый подагент",
     "cancelBackground_other": "Отменить {{count}} фоновых подагентов",
@@ -98,9 +103,7 @@
     "queued": "В очереди",
     "runsAfterReply": "запускается после этого ответа",
     "settings": "Настройки",
-    "working": "работает",
-    "backgroundRunning_one": "{{count}} subagent still running",
-    "backgroundRunning_other": "{{count}} subagents still running"
+    "working": "работает"
   },
   "codeHosts": {
     "connected": "Подключено",
@@ -441,12 +444,15 @@
     "overage": "Дополнительное использование в этом месяце",
     "perMillion": "{{rate}}",
     "perPrompt": "{{rate}} за запрос",
+    "pillHint": "The compact indicator shows {{limit}}. Drag a limit to the top to show it instead.",
     "pillTitle": "Осталось {{percent}}% лимита {{account}} — нажмите для подробностей",
     "plan": "Тариф {{plan}}",
     "premiumOf": "{{used}} / {{total}}",
     "premiumUnlimited": "На этом тарифе использование не ограничено.",
     "premiumUsed": "Премиум-запросы",
     "refresh": "Обновить",
+    "reorder": "Drag to reorder limits",
+    "reorderActions": "Reorder {{limit}}. Use Up or Down arrows, or press Enter or Space for move actions.",
     "resetReady": "Восстановлено",
     "resetsIn": "Сброс через {{time}}",
     "roxySpend7d": "Roxy, последние 7 дней",
@@ -811,6 +817,7 @@
     "noOutput": "(нет вывода)",
     "openImage": "Открыть изображение",
     "openLink": "Открыть ссылку",
+    "openSubagent": "Open subagent session",
     "promptEmpty": "Сообщение без текста",
     "promptHistory": "Ваши сообщения",
     "promptImages_one": "{{count}} изображение прикреплено",
@@ -832,8 +839,7 @@
     "unchanged_other": "{{count}} неизменённых строк",
     "working": "работает",
     "writingAs": "{{name}} пишет…",
-    "you": "Вы",
-    "openSubagent": "Open subagent session"
+    "you": "Вы"
   },
   "usage": {
     "allProviders": "Все провайдеры, последние 30 дней",

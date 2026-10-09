@@ -358,7 +358,11 @@ export function ProviderAccount({
             onChange={(e) => setName(e.target.value)}
             onFocus={(e) => e.currentTarget.select()}
             onKeyDown={(e) => {
-              if (e.key === 'Escape' && !busy) finishEditing()
+              if (e.key === 'Escape') {
+                e.preventDefault()
+                e.stopPropagation()
+                if (!busy) finishEditing()
+              }
             }}
           />
           <Button type="submit" size="sm" disabled={busy || !name.trim()}>

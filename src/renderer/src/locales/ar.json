@@ -38,6 +38,8 @@
     "mentionLabel": "Mention a bot",
     "minutes": "الفاصل الزمني (بالدقائق)",
     "model": "النموذج",
+    "moveEarlier": "Move earlier",
+    "moveLater": "Move later",
     "never": "أبدًا",
     "new": "بوت جديد",
     "nextRun": "التشغيل التالي:",
@@ -47,6 +49,7 @@
     "prompt": "الموجه",
     "remainingRuns": "حد التشغيل (اختياري)",
     "removeTime": "إزالة الوقت",
+    "reorder": "Drag to reorder bots. Use Shift + arrow keys or the context menu to move a bot.",
     "runAt": "تشغيل في",
     "runQueued": "تم وضع التشغيل في قائمة الانتظار",
     "runsLeft_one": "{{count}} run left",
@@ -79,6 +82,8 @@
   },
   "chat": {
     "backTo": "العودة إلى {{title}}",
+    "backgroundRunning_one": "{{count}} subagent still running",
+    "backgroundRunning_other": "{{count}} subagents still running",
     "cancel": "إلغاء",
     "cancelBackground_one": "إلغاء {{count}} وكيل فرعي في الخلفية",
     "cancelBackground_other": "إلغاء {{count}} وكلاء فرعيين في الخلفية",
@@ -98,9 +103,7 @@
     "queued": "في قائمة الانتظار",
     "runsAfterReply": "يعمل بعد هذا الرد",
     "settings": "الإعدادات",
-    "working": "يعمل",
-    "backgroundRunning_one": "{{count}} subagent still running",
-    "backgroundRunning_other": "{{count}} subagents still running"
+    "working": "يعمل"
   },
   "codeHosts": {
     "connected": "متصل",
@@ -441,12 +444,15 @@
     "overage": "استخدام إضافي هذا الشهر",
     "perMillion": "{{rate}}",
     "perPrompt": "{{rate}} لكل موجّه",
+    "pillHint": "The compact indicator shows {{limit}}. Drag a limit to the top to show it instead.",
     "pillTitle": "تبقّى {{percent}}% من حد {{account}} - انقر للتفاصيل",
     "plan": "خطة {{plan}}",
     "premiumOf": "{{used}} / {{total}}",
     "premiumUnlimited": "استخدام غير محدود في هذه الخطة.",
     "premiumUsed": "الطلبات المميزة",
     "refresh": "تحديث",
+    "reorder": "Drag to reorder limits",
+    "reorderActions": "Reorder {{limit}}. Use Up or Down arrows, or press Enter or Space for move actions.",
     "resetReady": "تمت إعادة التعبئة",
     "resetsIn": "يُعاد التعيين خلال {{time}}",
     "roxySpend7d": "Roxy، آخر 7 أيام",
@@ -811,6 +817,7 @@
     "noOutput": "(لا يوجد إخراج)",
     "openImage": "فتح الصورة",
     "openLink": "فتح الرابط",
+    "openSubagent": "Open subagent session",
     "promptEmpty": "رسالة بدون نص",
     "promptHistory": "رسائلك",
     "promptImages_one": "تم إرفاق {{count}} صورة",
@@ -832,8 +839,7 @@
     "unchanged_other": "{{count}} سطرًا غير متغير",
     "working": "جاري العمل",
     "writingAs": "{{name}} يكتب…",
-    "you": "أنت",
-    "openSubagent": "Open subagent session"
+    "you": "أنت"
   },
   "usage": {
     "allProviders": "جميع المزودين، آخر 30 يومًا",

@@ -38,6 +38,8 @@
     "mentionLabel": "Mention a bot",
     "minutes": "间隔（分钟）",
     "model": "模型",
+    "moveEarlier": "Move earlier",
+    "moveLater": "Move later",
     "never": "从不",
     "new": "新建机器人",
     "nextRun": "下次运行：",
@@ -47,6 +49,7 @@
     "prompt": "提示",
     "remainingRuns": "运行限制（可选）",
     "removeTime": "移除时间",
+    "reorder": "Drag to reorder bots. Use Shift + arrow keys or the context menu to move a bot.",
     "runAt": "运行时间",
     "runQueued": "运行已排队",
     "runsLeft_one": "剩余 {{count}} 次运行",
@@ -79,6 +82,8 @@
   },
   "chat": {
     "backTo": "返回 {{title}}",
+    "backgroundRunning_one": "{{count}} subagent still running",
+    "backgroundRunning_other": "{{count}} subagents still running",
     "cancel": "取消",
     "cancelBackground_one": "取消 {{count}} 个后台子代理",
     "cancelBackground_other": "取消 {{count}} 个后台子代理",
@@ -98,9 +103,7 @@
     "queued": "已排队",
     "runsAfterReply": "此回复后运行",
     "settings": "设置",
-    "working": "正在工作",
-    "backgroundRunning_one": "{{count}} subagent still running",
-    "backgroundRunning_other": "{{count}} subagents still running"
+    "working": "正在工作"
   },
   "codeHosts": {
     "connected": "已连接",
@@ -441,12 +444,15 @@
     "overage": "本月额外用量",
     "perMillion": "{{rate}}",
     "perPrompt": "每次提示 {{rate}}",
+    "pillHint": "The compact indicator shows {{limit}}. Drag a limit to the top to show it instead.",
     "pillTitle": "你的 {{account}} 限额还剩 {{percent}}% - 点击查看详情",
     "plan": "{{plan}} 套餐",
     "premiumOf": "{{used}} / {{total}}",
     "premiumUnlimited": "此套餐不限用量。",
     "premiumUsed": "高级请求",
     "refresh": "刷新",
+    "reorder": "Drag to reorder limits",
+    "reorderActions": "Reorder {{limit}}. Use Up or Down arrows, or press Enter or Space for move actions.",
     "resetReady": "已恢复",
     "resetsIn": "{{time}} 后重置",
     "roxySpend7d": "Roxy，最近 7 天",
@@ -811,6 +817,7 @@
     "noOutput": "（无输出）",
     "openImage": "打开图片",
     "openLink": "打开链接",
+    "openSubagent": "Open subagent session",
     "promptEmpty": "无文本消息",
     "promptHistory": "您的消息",
     "promptImages_one": "附有 {{count}} 张图片",
@@ -832,8 +839,7 @@
     "unchanged_other": "{{count}} 行未更改",
     "working": "工作中",
     "writingAs": "{{name}} 正在书写…",
-    "you": "你",
-    "openSubagent": "Open subagent session"
+    "you": "你"
   },
   "usage": {
     "allProviders": "所有提供商，最近 30 天",

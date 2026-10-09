@@ -54,6 +54,9 @@ jobs:
       - name: Store guard (regression test over renderer source)
         run: npm run smoke:store
 
+      - name: Renderer usage preferences and Escape regression suite
+        run: npm run smoke:ui-preferences
+
       - name: Canvas diff and interaction model suite
         run: npm run smoke:diff
 
@@ -150,6 +153,12 @@ jobs:
         env:
           ELECTRON_DISABLE_SANDBOX: '1'
         run: xvfb-run --auto-servernum npm run smoke:animation
+
+      - name: Bot strip ordering (real Chromium drag and keyboard)
+        if: runner.os == 'Linux'
+        env:
+          ELECTRON_DISABLE_SANDBOX: '1'
+        run: xvfb-run --auto-servernum npm run smoke:bot-order-ui
 
       - name: Multi-repo suite (composite worktrees, real git)
         run: npm run smoke:multirepo
