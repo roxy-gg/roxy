@@ -697,6 +697,12 @@ export const MIGRATIONS: Migration[] = [
     db.exec(`UPDATE queue SET from_user = 1
       WHERE source_chat_id = chat_id
         AND message_id IN (SELECT id FROM messages WHERE role = 'user')`)
+  },
+
+  // ---- v30: user-defined bot strip order ----
+  (db) => {
+    botSchema(db)
+    addColumnIfMissing(db, 'bots', 'sort_order', 'INTEGER NOT NULL DEFAULT 0')
   }
 ]
 
@@ -727,6 +733,7 @@ export function repairSchema(db: Database): void {
   // Never overwrite a migrated label or lower a persisted account counter.
   db.transaction(() => repairProviderAccounts(db))()
   db.transaction(() => migrateLegacyLoops(db))()
+  addColumnIfMissing(db, 'bots', 'sort_order', 'INTEGER NOT NULL DEFAULT 0')
   // Columns added by later migrations: CREATE TABLE IF NOT EXISTS won't add
   // them to a table that already exists.
   addColumnIfMissing(db, 'chats', 'worktree_path', 'TEXT')

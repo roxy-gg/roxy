@@ -66,7 +66,7 @@ async function main(): Promise<void> {
   win.webContents.send = (channel: string, payload: AutomationDelta | SubagentDelta): void => {
     if (
       (channel === CHANNELS.automationDelta || channel === CHANNELS.subagentDelta) &&
-      payload.kind !== 'event' &&
+      (payload.kind === 'turn' || payload.kind === 'run') &&
       payload.state !== 'running'
     ) {
       try {

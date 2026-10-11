@@ -235,6 +235,31 @@ async function main(): Promise<void> {
   assert.equal(unnamed.username, 'bot')
   assert.equal(unnamedToo.username, 'bot-2', 'generated handles do not collide')
   assert.equal(bots.getBot(unnamed.id)?.instructions, '', 'and it starts with no role')
+  assert.deepEqual(
+    bots.listBots().map((entry) => entry.id),
+    [bot.id, unnamed.id, unnamedToo.id]
+  )
+  bots.reorderBots([unnamedToo.id, bot.id, unnamed.id])
+  assert.deepEqual(
+    bots.listBots().map((entry) => entry.id),
+    [unnamedToo.id, bot.id, unnamed.id]
+  )
+  bots.reorderBots([unnamed.id, unnamed.id, 'deleted-bot'])
+  assert.deepEqual(
+    bots.listBots().map((entry) => entry.id),
+    [unnamed.id, unnamedToo.id, bot.id],
+    'deduplicate ids, ignore stale ids, preserve omitted bots'
+  )
+  const appended = bots.createBot('appended')
+  assert.equal(bots.listBots().at(-1)?.id, appended.id, 'new bots append after custom ordering')
+  repairSchema(getDb())
+  assert.deepEqual(
+    bots.listBots().map((entry) => entry.id),
+    [unnamed.id, unnamedToo.id, bot.id, appended.id],
+    'schema repair preserves custom ordering'
+  )
+  assert.throws(() => bots.reorderBots([1] as unknown as string[]), /array of ids/)
+  bots.removeBot(appended.id)
   bots.removeBot(unnamed.id)
   bots.removeBot(unnamedToo.id)
   bots.updateBot(bot.id, { instructions: 'Review PRs only when asked.' })
@@ -514,6 +539,7 @@ async function main(): Promise<void> {
   const mention = enqueuePrompt(session.id, 'Hola @reviewer, inspect this')
   assert.equal(mention.asBotId, undefined)
   wakeAutomation()
+  await new Promise(setImmediate)
   const routed = repo.listQueue(session.id).find((item) => item.id === mention.id)!
   assert.equal(routed.asBotId, undefined)
   assert.equal(repo.listQueue(bot.chatId).length, 0)
@@ -545,6 +571,7 @@ async function main(): Promise<void> {
     asBotId: helper.id
   })
   wakeAutomation()
+  await new Promise(setImmediate)
   assert.equal(
     repo.listQueue(session.id).find((item) => item.id === addressed.id)!.asBotId,
     helper.id
@@ -556,6 +583,7 @@ async function main(): Promise<void> {
     hops: 8
   })
   wakeAutomation()
+  await new Promise(setImmediate)
   const stopped = repo.listQueue(session.id).find((item) => item.id === exhausted.id)!
   assert.equal(stopped.state, 'failed')
   assert.match(stopped.error!, /provider/)
@@ -957,6 +985,10 @@ async function main(): Promise<void> {
       assert.equal(viaBridge.username, 'bridge-bot')
       const bridgeList = await win.webContents.executeJavaScript('window.roxy.bots.list()')
       assert.ok(bridgeList.some((entry: { id: string }) => entry.id === viaBridge.id))
+      await win.webContents.executeJavaScript(
+        `window.roxy.bots.reorder(${JSON.stringify([viaBridge.id])})`
+      )
+      assert.equal(bots.listBots()[0]?.id, viaBridge.id, 'bot reorder crosses preload and IPC')
       await win.webContents.executeJavaScript(
         `window.roxy.bots.update(${JSON.stringify(viaBridge.id)}, { instructions: 'Updated through IPC' })`
       )
@@ -1688,6 +1720,40 @@ async function main(): Promise<void> {
     assert.equal(repo.listQueue(memorySession.id)[0].botId, memoryBot.id)
     assert.equal(repo.listQueue(memorySession.id)[0].botUsername, 'final-reviewer')
     for (const item of repo.listQueue(memorySession.id)) repo.removeQueueItem(item.id)
+    const queuedByBot = await runTool(
+      'queue_manage',
+      { action: 'create', session: memorySession.id, prompt: 'Bot-authored queued request' },
+      { cwd: sessionCwd(memoryBot.chatId), sessionId: memoryBot.chatId, botId: memoryBot.id }
+    )
+    assert.ok(queuedByBot.ok, queuedByBot.output)
+    const botPrompt = repo.listQueue(memorySession.id).at(-1)!
+    assert.equal(botPrompt.botId, memoryBot.id)
+    assert.equal(botPrompt.botUsername, 'final-reviewer')
+    closeDb()
+    assert.equal(
+      repo.listQueue(memorySession.id).at(-1)?.botId,
+      memoryBot.id,
+      'queued author survives reopening'
+    )
+    wakeAutomation()
+    await settle(memorySession.id)
+    const deliveredPrompt = repo
+      .listMessages(memorySession.id)
+      .find((message) => message.content === botPrompt.content)!
+    assert.ok(deliveredPrompt)
+    assert.equal(deliveredPrompt.role, 'user', 'cross-session delivery remains a prompt')
+    assert.equal(deliveredPrompt.botId, memoryBot.id)
+    assert.equal(deliveredPrompt.botUsername, 'final-reviewer')
+    closeDb()
+    assert.deepEqual(
+      repo.listMessages(memorySession.id).find((message) => message.id === deliveredPrompt.id),
+      deliveredPrompt,
+      'delivered attribution survives a database reload'
+    )
+    const humanPrompt = enqueuePrompt(memorySession.id, 'Human request mentioning @final-reviewer')
+    assert.equal(humanPrompt.botId, undefined)
+    assert.equal(humanPrompt.botUsername, undefined)
+    for (const item of repo.listQueue(memorySession.id)) repo.removeQueueItem(item.id)
     // Delegating from ANOTHER bot's chat: the work is the guest's, so the answer
     // has to come back to the guest. Resuming the chat's owner handed the
     // continuation to a bot that never asked for it, with its identity and config.
@@ -1702,6 +1768,12 @@ async function main(): Promise<void> {
     assert.equal(guestHandoff.botId, visitor.id, "the request is the guest's, not the owner's")
     wakeAutomation()
     await settle(memorySession.id)
+    const deliveredSend = repo
+      .listMessages(memorySession.id)
+      .find((message) => message.content === 'Guest follow-up')!
+    assert.equal(deliveredSend.role, 'user')
+    assert.equal(deliveredSend.botId, visitor.id)
+    assert.equal(deliveredSend.botUsername, visitor.username)
     const guestNudge = repo
       .listQueue(memoryBot.chatId)
       .find((q) => q.content.includes('answered above'))

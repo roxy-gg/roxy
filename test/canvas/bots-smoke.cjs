@@ -115,6 +115,21 @@ async function run() {
   )
   assert.ok(
     await evaluate(`
+      const avatar = document.querySelector('button[title="@bot"] [data-facehash]');
+      const bounds = avatar.getBoundingClientRect();
+      const button = avatar.parentElement.getBoundingClientRect();
+      const avatars = [...document.querySelectorAll('[data-facehash]')];
+      return bounds.width === 32 && bounds.height === 32
+        && button.width === bounds.width && button.height === bounds.height
+        && getComputedStyle(avatar.parentElement).padding === '0px'
+        && avatars.every(el => getComputedStyle(el).containerType === 'normal'
+          && parseFloat(getComputedStyle(el).borderRadius) === el.getBoundingClientRect().width / 4)
+        && document.querySelector('header [data-facehash]').parentElement.getBoundingClientRect().width >= 28;
+    `),
+    'avatar surfaces fill their buttons and do not collapse parent layout width'
+  )
+  assert.ok(
+    await evaluate(`
       const section = document.querySelector('button[title="New bot"]').parentElement;
       const styles = getComputedStyle(section);
       return styles.paddingTop === '12px' && styles.paddingBottom === '12px';
@@ -618,6 +633,34 @@ async function run() {
   await click('button[title="Bot settings"]')
   await click('button[title="Project session"]')
   assert.ok(await evaluate(`return !document.querySelector('#bot-settings-pane')`))
+  await click('#requests')
+  assert.ok(
+    await evaluate(`
+      const blocks = window.__canvasTranscript.scene().blocks;
+      const bot = blocks.find(block => block.copyText().includes('Implement the avatar fixes'));
+      const human = blocks.find(block => block.copyText().includes('Human request mentioning'));
+      const findImage = nodes => nodes.flatMap(node => node.kind === 'group' ? findImage(node.children) : node.kind === 'image' ? [node.src] : []);
+      const src = findImage(bot.nodes).find(src => src.startsWith('data:image/svg+xml,'));
+      const svg = src ? decodeURIComponent(src.split(',')[1]) : '';
+      return JSON.stringify(bot.nodes).includes('data:image/svg+xml,')
+        && svg.includes('<rect width="100" height="100" rx="25"')
+        && svg.includes('x="20" y="30" width="60" height="40"')
+        && !svg.includes('preserveAspectRatio="none"')
+        && !JSON.stringify(bot.nodes).includes('"name":"user"')
+        && JSON.stringify(human.nodes).includes('"name":"user"')
+        && !JSON.stringify(human.nodes).includes('data:image/svg+xml,');
+    `),
+    'bot-authored project prompts use their avatar while human mentions keep the person icon'
+  )
+  await click('button[title="@helper"]')
+  await click('button[title="Project session"]')
+  assert.ok(
+    await evaluate(`
+      const block = window.__canvasTranscript.scene().blocks.find(block => block.copyText().includes('Implement the avatar fixes'));
+      return JSON.stringify(block.nodes).includes('data:image/svg+xml,');
+    `),
+    'bot prompt avatars survive transcript reload'
+  )
   await type('textarea', '@he')
   assert.ok(await evaluate('return !!document.querySelector("[role=listbox] [role=option]")'))
   win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Tab' })
@@ -643,6 +686,86 @@ async function run() {
   await buttonText('Delete bot')
   for (let i = 0; i < 20 && !(await text('New bot')); i++) await wait()
   assert.ok(await text('New bot'), await evaluate('return document.body.textContent'))
+  // The expanded sidebar must wrap bots (including the new-bot button) as it narrows.
+  for (let i = 0; i < 10; i++) await click('button[title="New bot"]')
+  for (const [width, rows] of [
+    [220, 3],
+    [288, 2],
+    [480, 1]
+  ]) {
+    const layout = await evaluate(`
+      const sidebar = document.querySelector('aside:not([aria-label])');
+      sidebar.style.width = '${width}px';
+      const section = document.querySelector('button[title="New bot"]').parentElement;
+      const bounds = section.getBoundingClientRect();
+      const buttons = [...section.querySelectorAll('button')].map(el => el.getBoundingClientRect());
+      const tops = [...new Set(buttons.map(rect => rect.top))];
+      return {
+        rows: tops.length,
+        widths: buttons.map(rect => rect.width),
+        rowGaps: tops.slice(1).map((top, i) => top - tops[i]),
+        fits: buttons.every(rect => rect.left >= bounds.left + 4 && rect.right <= bounds.right - 4)
+          && section.scrollWidth <= section.clientWidth
+          && sidebar.scrollWidth <= sidebar.clientWidth
+          && document.documentElement.scrollWidth <= innerWidth,
+        addAtEnd: buttons.at(-1).top === tops.at(-1)
+      };
+    `)
+    assert.equal(layout.rows, rows, `${width}px sidebar wraps into ${rows} rows`)
+    assert.ok(
+      layout.fits &&
+        layout.addAtEnd &&
+        layout.widths.every((size) => size === 32) &&
+        layout.rowGaps.every((gap) => gap === 40),
+      `${width}px sidebar keeps 32px avatars, 8px gaps, and no horizontal overflow: ${JSON.stringify(layout)}`
+    )
+  }
+  await evaluate(`document.querySelector('aside:not([aria-label])').style.width = '220px'`)
+  await click('button[title="@bot-9"]')
+  assert.equal(
+    await evaluate(
+      `return document.querySelector('button[title="@bot-9"]').getAttribute('aria-pressed')`
+    ),
+    'true'
+  )
+  await evaluate(`document.querySelector('button[title="@bot-10"]').focus()`)
+  await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent', {
+    type: 'keyDown',
+    key: 'Enter',
+    code: 'Enter',
+    windowsVirtualKeyCode: 13
+  })
+  await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent', {
+    type: 'char',
+    text: '\r',
+    key: 'Enter',
+    code: 'Enter',
+    windowsVirtualKeyCode: 13
+  })
+  await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent', {
+    type: 'keyUp',
+    key: 'Enter',
+    code: 'Enter',
+    windowsVirtualKeyCode: 13
+  })
+  await wait()
+  assert.ok(
+    await evaluate(`return document.querySelector('button[title="@bot-10"]').getAttribute('aria-pressed') === 'true'
+      && document.querySelector('button[title="@bot-10"]').classList.contains('ring-2')`),
+    'a wrapped bot remains keyboard-selectable and visibly selected'
+  )
+  await key('F10', ['shift'])
+  assert.ok(
+    await evaluate(`return !!document.querySelector('[data-bot-menu]')`),
+    'wrapped bot opens its keyboard context menu'
+  )
+  await key('Escape')
+  assert.ok(
+    await evaluate(
+      `return !document.querySelector('[data-bot-menu]') && document.activeElement.title === '@bot-10'`
+    ),
+    'closing the wrapped bot menu restores focus'
+  )
   assert.ok(!errors.length, errors.join('\n'))
   console.log(
     'BOTS UI OK — creation, intro, avatar/canvas identity, left settings layout, bot/mention queue routing, failed retry, instructions, schedules and deletion'

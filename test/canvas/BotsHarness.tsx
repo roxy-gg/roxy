@@ -44,6 +44,11 @@ const notify = (): void => {
 Object.assign(window.roxy, {
   bots: {
     list: async () => [...bots],
+    reorder: async (ids: string[]) => {
+      const rank = new Map(ids.map((id, index) => [id, index]))
+      bots.sort((a, b) => (rank.get(a.id) ?? ids.length) - (rank.get(b.id) ?? ids.length))
+      notify()
+    },
     create: async (username?: string) => {
       // Lets the smoke prove a FAILED creation is reported. The button is the
       // only entry point now that the dialog is gone, so a silent failure
@@ -486,6 +491,81 @@ export function BotsHarness(): JSX.Element {
           }}
         >
           Bot response fixture
+        </button>
+        <button
+          id="image-handoff"
+          onClick={() => {
+            const state = useRoxyStore.getState()
+            if (!state.activeChatId) return
+            const parts = ['first.png', 'second.png'].map((name, index) => {
+              const canvas = document.createElement('canvas')
+              canvas.width = 640
+              canvas.height = 360
+              const ctx = canvas.getContext('2d')!
+              ctx.fillStyle = index ? '#163c38' : '#222b45'
+              ctx.fillRect(0, 0, 640, 360)
+              ctx.fillStyle = '#ffffff'
+              ctx.font = '28px sans-serif'
+              ctx.fillText(`Forwarded screenshot ${index + 1}`, 40, 80)
+              return {
+                type: 'image' as const,
+                dataUrl: canvas.toDataURL('image/png'),
+                mediaType: 'image/png',
+                name,
+                forwarded: true
+              }
+            })
+            messages = [
+              ...messages,
+              {
+                id: crypto.randomUUID(),
+                chatId: state.activeChatId,
+                role: 'user',
+                botUsername: 'image-sender',
+                content: 'Fix the issues shown in these two screenshots.',
+                parts: [
+                  { type: 'text', text: 'Fix the issues shown in these two screenshots.' },
+                  ...parts
+                ],
+                createdAt: Date.now()
+              }
+            ]
+            void state.selectChat(state.activeChatId)
+          }}
+        >
+          Image handoff fixture
+        </button>
+        <button
+          id="requests"
+          onClick={() => {
+            const state = useRoxyStore.getState()
+            const bot = state.bots[0]
+            if (!bot || !state.activeChatId) return
+            messages = [
+              ...messages,
+              {
+                id: crypto.randomUUID(),
+                chatId: state.activeChatId,
+                role: 'user',
+                botId: bot.id,
+                botUsername: bot.username,
+                content: 'Implement the avatar fixes in this project.',
+                parts: [{ type: 'text', text: 'Implement the avatar fixes in this project.' }],
+                createdAt: Date.now()
+              },
+              {
+                id: crypto.randomUUID(),
+                chatId: state.activeChatId,
+                role: 'user',
+                content: `Human request mentioning @${bot.username}.`,
+                parts: [{ type: 'text', text: `Human request mentioning @${bot.username}.` }],
+                createdAt: Date.now() + 1
+              }
+            ]
+            void state.selectChat(state.activeChatId)
+          }}
+        >
+          Bot and human requests fixture
         </button>
       </div>
       <div className="flex min-h-0 flex-1">

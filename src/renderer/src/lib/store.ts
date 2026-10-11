@@ -143,6 +143,7 @@ interface RoxyStore {
   setBotSettings: (botId: string | null, confirmDelete?: boolean) => void
   /** Main-owned queued turns, distinct from renderer-owned direct sends. */
   runningAutomation: Record<string, true>
+  startingAutomation: Record<string, boolean>
   automationSpeakers: Record<string, { botId?: string; botUsername?: string }>
   /**
    * The chat whose composer should take focus, because it was opened for
@@ -219,6 +220,7 @@ interface RoxyStore {
   bootstrap: () => Promise<void>
   refreshChats: () => Promise<void>
   refreshBots: () => Promise<void>
+  reorderBots: (ids: string[]) => Promise<void>
   refreshQueue: () => Promise<void>
   refreshProviders: () => Promise<void>
   /** Persist the connected provider order (optimistic). `ids` = full list, top-to-bottom. */
@@ -435,6 +437,7 @@ const subagentHydrations = new Map<string, SubagentDelta[]>()
 let taskRevision = 0
 const taskRevisions = new Map<string, number>()
 const transcriptLoads = new Map<string, number>()
+const queueLoads = new Map<string, number>()
 
 /** A persisted reply must exist locally before its live bubble is cleared. */
 function rememberMessage(message: Message): void {
@@ -461,6 +464,8 @@ async function loadTranscript(chatId: string): Promise<void> {
   if (useRoxyStore.getState().activeChatId !== chatId) return
   const revision = (transcriptLoads.get(chatId) ?? 0) + 1
   transcriptLoads.set(chatId, revision)
+  const queueRevision = (queueLoads.get(chatId) ?? 0) + 1
+  queueLoads.set(chatId, queueRevision)
   try {
     const acknowledged = new Set(
       (useRoxyStore.getState().optimisticQueue[chatId] ?? [])
@@ -484,7 +489,7 @@ async function loadTranscript(chatId: string): Promise<void> {
       if (!optimisticMessages[chatId].length) delete optimisticMessages[chatId]
       return {
         messages,
-        queue,
+        queue: queueLoads.get(chatId) === queueRevision ? queue : s.queue,
         messagesChatId: chatId,
         messagesError: false,
         optimisticQueue,
@@ -505,6 +510,12 @@ async function loadTranscript(chatId: string): Promise<void> {
 function applyAutomationDelta(payload: AutomationDelta): void {
   const id = payload.sessionId
   automationSnapshotEvents?.push(payload)
+  if (payload.kind === 'phase') {
+    useRoxyStore.setState((s) => ({
+      startingAutomation: { ...s.startingAutomation, [id]: payload.phase === 'starting' }
+    }))
+    return
+  }
   if (payload.kind === 'turn') {
     if (payload.message) rememberMessage(payload.message)
     useRoxyStore.setState((s) => {
@@ -512,7 +523,13 @@ function applyAutomationDelta(payload: AutomationDelta): void {
       if (payload.state === 'running')
         automationSpeakers[id] = { botId: payload.botId, botUsername: payload.botUsername }
       else delete automationSpeakers[id]
-      return { automationSpeakers }
+      return {
+        automationSpeakers,
+        startingAutomation: {
+          ...s.startingAutomation,
+          [id]: payload.state === 'running' && payload.phase === 'starting'
+        }
+      }
     })
   }
   // Reuse the remote fold and publisher; never keep a second live parts tree.
@@ -553,53 +570,24 @@ async function enqueuePrompt(
     fromUser?: boolean
   }
 ): Promise<void> {
-  const optimistic: QueueItem = {
-    id: `optimistic:${crypto.randomUUID()}`,
+  // Main atomically decides starting versus waiting. An optimistic pending
+  // row here invented a queue transition on EVERY idle send, and a late add
+  // response could resurrect work that had already drained.
+  const item = await api.queue.add(
     chatId,
-    content: text,
-    images: images?.map(({ dataUrl, mediaType, name }) => ({ dataUrl, mediaType, name })),
-    createdAt: Date.now(),
-    sourceChatId: options?.sourceChatId,
-    asBotId: options?.asBotId,
-    fromUser: options?.fromUser,
-    state: 'pending'
-  }
+    text,
+    images?.map(({ dataUrl, mediaType, name }) => ({ dataUrl, mediaType, name })),
+    options
+  )
   useRoxyStore.setState((s) => ({
-    optimisticQueue: {
-      ...s.optimisticQueue,
-      [chatId]: [...(s.optimisticQueue[chatId] ?? []), optimistic]
-    }
+    acceptedSends: { ...s.acceptedSends, [chatId]: (s.acceptedSends[chatId] ?? 0) + 1 },
+    sentMessageSignal:
+      item.state === 'starting' || item.state === 'running'
+        ? { ...s.sentMessageSignal, [chatId]: (s.sentMessageSignal[chatId] ?? 0) + 1 }
+        : s.sentMessageSignal
   }))
-  let item: QueueItem
-  try {
-    item = await api.queue.add(chatId, text, optimistic.images, options)
-  } catch (error) {
-    useRoxyStore.setState((s) => {
-      const optimisticQueue = { ...s.optimisticQueue }
-      optimisticQueue[chatId] = (optimisticQueue[chatId] ?? []).filter(
-        (entry) => entry.id !== optimistic.id
-      )
-      if (!optimisticQueue[chatId].length) delete optimisticQueue[chatId]
-      return { optimisticQueue }
-    })
-    throw error
-  }
-  // Swap the placeholder for the durable item without a missing frame.
-  useRoxyStore.setState((s) => ({
-    optimisticQueue: {
-      ...s.optimisticQueue,
-      [chatId]: (s.optimisticQueue[chatId] ?? []).map((entry) =>
-        entry.id === optimistic.id ? item : entry
-      )
-    },
-    queue:
-      s.activeChatId === chatId && !s.queue.some((entry) => entry.id === item.id)
-        ? [...s.queue, item]
-        : s.queue
-  }))
-  // Once add succeeds, a refresh/wake error must not restore the composer draft
-  // and invite a second copy of this already-durable request.
-  void useRoxyStore.getState().refreshQueue().catch(console.error)
+  // Once accepted, reconciliation failure must never restore the draft.
+  void loadTranscript(chatId)
   void api.automation.wake().catch(console.error)
 }
 
@@ -840,6 +828,7 @@ async function persistGlobalConfig(patch: SessionConfigPatch): Promise<AppSettin
  * so there's no gap between the live bubble and the saved message.
  */
 function applyRemoteDelta(payload: RemoteDelta): void {
+  if (payload.kind === 'phase') return
   const { sessionId } = payload
   const reflect = (parts: MessagePart[] | null): void => {
     // An off-screen turn still needs its old live bubble removed on completion.
@@ -1150,6 +1139,7 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
     set({ botSettings: { botId: bot.id, confirmDelete } })
   },
   runningAutomation: {},
+  startingAutomation: {},
   automationSpeakers: {},
   composerFocusChatId: null,
   queue: [],
@@ -1226,13 +1216,21 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
         .snapshot()
         .then((running) => {
           for (const run of running) {
+            const sessionDeltas = deltas.filter((delta) => delta.sessionId === run.sessionId)
             const fold = restorePartsSnapshot(
               run,
-              deltas.filter((delta) => delta.sessionId === run.sessionId)
+              sessionDeltas.filter((delta) => delta.kind !== 'phase')
             )
             if (!fold) continue
+            const phase = sessionDeltas
+              .filter((delta) => delta.kind === 'phase' && delta.sequence > run.sequence)
+              .at(-1)
             set((s) => ({
               runningAutomation: { ...s.runningAutomation, [run.sessionId]: true },
+              startingAutomation: {
+                ...s.startingAutomation,
+                [run.sessionId]: (phase?.kind === 'phase' ? phase.phase : run.phase) === 'starting'
+              },
               activityStartedAt: {
                 ...s.activityStartedAt,
                 [run.sessionId]: Math.max(
@@ -1383,15 +1381,36 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
     set({ bots: await api.bots.list() })
   },
 
+  reorderBots: async (ids) => {
+    const ordered = [...new Set(ids)]
+    const selected = new Set(ordered)
+    set((s) => {
+      const byId = new Map(s.bots.map((bot) => [bot.id, bot]))
+      return {
+        bots: [
+          ...ordered.map((id) => byId.get(id)).filter((bot): bot is Bot => !!bot),
+          ...s.bots.filter((bot) => !selected.has(bot.id))
+        ]
+      }
+    })
+    try {
+      await api.bots.reorder(ordered)
+    } finally {
+      await get().refreshBots()
+    }
+  },
+
   refreshQueue: async () => {
     const chatId = get().activeChatId
+    const revision = chatId ? (queueLoads.get(chatId) ?? 0) + 1 : 0
+    if (chatId) queueLoads.set(chatId, revision)
     const acknowledged = new Set(
       (chatId ? get().optimisticQueue[chatId] : undefined)
         ?.filter((item) => !item.id.startsWith('optimistic:'))
         .map((item) => item.id)
     )
     const queue = chatId ? await api.queue.list(chatId) : []
-    if (chatId && get().activeChatId === chatId) {
+    if (chatId && get().activeChatId === chatId && queueLoads.get(chatId) === revision) {
       set((s) => {
         const optimisticQueue = { ...s.optimisticQueue }
         optimisticQueue[chatId] = (optimisticQueue[chatId] ?? []).filter(
@@ -2175,6 +2194,17 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
   sendMessage: async (content, targetChatId, images) => {
     const chatId = targetChatId ?? get().activeChatId
     if (!chatId) return
+    // All real model sends use main's admission/persistence, including a send
+    // from an apparently idle project. Renderer busy flags are only a mirror.
+    // Keep local !commands and the disconnected demo on their existing path.
+    const configForSend = resolveSessionConfig(
+      get().chats.find((chat) => chat.id === chatId),
+      get().settings
+    )
+    if (!content.startsWith('!') && (configForSend.providerId || get().providers.length > 0)) {
+      await enqueuePrompt(chatId, content, images)
+      return
+    }
     if (isBotChat(chatId, get())) {
       await enqueuePrompt(chatId, content, images)
       return

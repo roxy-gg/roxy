@@ -54,6 +54,9 @@ jobs:
       - name: Store guard (regression test over renderer source)
         run: npm run smoke:store
 
+      - name: Renderer usage preferences and Escape regression suite
+        run: npm run smoke:ui-preferences
+
       - name: Canvas diff and interaction model suite
         run: npm run smoke:diff
 
@@ -123,6 +126,16 @@ jobs:
           SMOKE_TIMEOUT_MS: '300000'
         run: npm run smoke:app
 
+      - name: Background image persistence (Linux, via virtual display)
+        if: runner.os == 'Linux'
+        env:
+          ELECTRON_DISABLE_SANDBOX: '1'
+        run: xvfb-run --auto-servernum npm run smoke:background
+
+      - name: Background image persistence
+        if: runner.os != 'Linux'
+        run: npm run smoke:background
+
       - name: Subagent continuity suite (Linux, via virtual display)
         if: runner.os == 'Linux'
         env:
@@ -150,6 +163,18 @@ jobs:
         env:
           ELECTRON_DISABLE_SANDBOX: '1'
         run: xvfb-run --auto-servernum npm run smoke:animation
+
+      - name: Background effects and Appearance navigation
+        if: runner.os == 'Linux'
+        env:
+          ELECTRON_DISABLE_SANDBOX: '1'
+        run: xvfb-run --auto-servernum npm run smoke:background-ui
+
+      - name: Bot strip ordering (real Chromium drag and keyboard)
+        if: runner.os == 'Linux'
+        env:
+          ELECTRON_DISABLE_SANDBOX: '1'
+        run: xvfb-run --auto-servernum npm run smoke:bot-order-ui
 
       - name: Multi-repo suite (composite worktrees, real git)
         run: npm run smoke:multirepo

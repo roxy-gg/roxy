@@ -12,6 +12,7 @@ import {
   X
 } from 'lucide-react'
 import type { QueueItem as QueueItemType } from '@shared/types'
+import { isClaimedQueueItem, queueOrigin } from '@shared/queue'
 import { useRoxyStore } from '../lib/store'
 import { imageFilesFrom, readImageFile, type ComposerImage } from '../lib/images'
 import { ImagePreview } from './ImagePreview'
@@ -61,7 +62,8 @@ export function QueuedMessage({
   const [dragging, setDragging] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
-  const running = item.state === 'running'
+  const running = isClaimedQueueItem(item)
+  const automated = queueOrigin(item) !== 'user'
   const failed = item.state === 'failed'
   const recipient = item.asBotId ? bots.find((bot) => bot.id === item.asBotId) : undefined
   const textRef = useRef<HTMLTextAreaElement>(null)
@@ -272,7 +274,7 @@ export function QueuedMessage({
         <div className="mb-0.5 flex flex-wrap items-center gap-1.5 text-[10px] font-medium uppercase tracking-wide">
           <span className="inline-flex items-center gap-1 text-text-muted">
             <UserRound className="h-3 w-3" />
-            {t('queue.userRequest')}
+            {automated ? t('queue.automatedRequest') : t('queue.userRequest')}
           </span>
           {recipient && (
             <span className="normal-case tracking-normal text-text-subtle">
@@ -303,6 +305,9 @@ export function QueuedMessage({
             {item.error}
           </p>
         )}
+        {item.waitReason && item.waitReason !== 'delayed' && (
+          <p className="mt-1 text-[11px] text-text-subtle">{t(`queue.wait.${item.waitReason}`)}</p>
+        )}
         {item.notBefore != null && item.notBefore > Date.now() && (
           <p className="mt-1 text-[11px] text-text-subtle">
             {t('queue.notBefore', { time: new Date(item.notBefore).toLocaleString() })}
@@ -319,7 +324,7 @@ export function QueuedMessage({
         </QueueItemAction>
         <QueueItemAction
           onClick={() => moveQueued(item.id, 'up')}
-          disabled={running || pending || index === 0}
+          disabled={running || pending || automated || index === 0}
           title={t('queue.moveUp')}
           className="disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-text-subtle"
         >
@@ -327,7 +332,7 @@ export function QueuedMessage({
         </QueueItemAction>
         <QueueItemAction
           onClick={() => moveQueued(item.id, 'down')}
-          disabled={running || pending || index === total - 1}
+          disabled={running || pending || automated || index === total - 1}
           title={t('queue.moveDown')}
           className="disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-text-subtle"
         >

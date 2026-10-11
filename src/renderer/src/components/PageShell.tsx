@@ -1,4 +1,4 @@
-import { type ReactNode } from 'react'
+import { useEffect, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ArrowLeft } from 'lucide-react'
 import { SidebarFrame, SidebarNavItem } from './SidebarFrame'
@@ -8,6 +8,7 @@ export function PageShell({
   subtitle,
   sidebar,
   onBack,
+  onEscape,
   actions,
   children
 }: {
@@ -15,10 +16,28 @@ export function PageShell({
   subtitle?: string
   sidebar?: ReactNode
   onBack: () => void
+  onEscape?: () => boolean
   actions?: ReactNode
   children: ReactNode
 }): JSX.Element {
   const { t } = useTranslation()
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent): void => {
+      if (
+        event.key !== 'Escape' ||
+        event.defaultPrevented ||
+        event.repeat ||
+        event.isComposing ||
+        document.querySelector('dialog[open], [role="dialog"], [role="menu"]')
+      )
+        return
+      event.preventDefault()
+      if (!onEscape?.()) onBack()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onBack, onEscape])
+
   if (sidebar) {
     return (
       <div className="flex h-full w-full min-w-0 flex-col bg-bg sm:flex-row">

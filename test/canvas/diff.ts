@@ -816,7 +816,7 @@ check('one live turn keeps its activity row and start time across updates', () =
 
   const thinking = layoutTranscript(input, cache)
   assert.equal(startedAt(thinking), 1000)
-  assert.ok(JSON.stringify(thinking.blocks.at(-1)!.nodes).includes('@bot is thinking cosmic magic'))
+  assert.ok(JSON.stringify(thinking.blocks.at(-1)!.nodes).includes('thinking cosmic magic'))
 
   const writing = layoutTranscript(
     {
@@ -828,7 +828,7 @@ check('one live turn keeps its activity row and start time across updates', () =
   )
   assert.equal(startedAt(writing), 1000)
   assert.ok(writing.blocks.at(-1)!.animated)
-  assert.ok(JSON.stringify(writing.blocks.at(-1)!.nodes).includes('@bot is writing cosmic magic'))
+  assert.ok(JSON.stringify(writing.blocks.at(-1)!.nodes).includes('writing cosmic magic'))
 
   const elapsedX = (scene: Scene): number | undefined => {
     const elapsed = scene.blocks.at(-1)?.nodes.find((node) => node.kind === 'elapsed')
@@ -844,9 +844,7 @@ check('one live turn keeps its activity row and start time across updates', () =
     elapsedX(writing),
     'phrase lengths keep the timer position stable'
   )
-  assert.ok(
-    JSON.stringify(rotated.blocks.at(-1)!.nodes).includes('@bot is writing immortal crab thoughts')
-  )
+  assert.ok(JSON.stringify(rotated.blocks.at(-1)!.nodes).includes('writing immortal crab thoughts'))
 
   const usingTool = layoutTranscript(
     {
@@ -873,6 +871,28 @@ check('one live turn keeps its activity row and start time across updates', () =
 
   layoutTranscript({ ...input, streaming: null, now: 62_000 }, cache)
   assert.equal(state.activityPhrase, undefined)
+})
+check('activity labels omit the speaker while message headers keep attribution', () => {
+  for (const botUsername of ['roxy', 'bot']) {
+    for (const streaming of [
+      [],
+      [{ type: 'reasoning', text: 'Checking.' }],
+      [{ type: 'text', text: 'Writing.' }],
+      [{ type: 'tool', tool: 'bash', state: 'running', title: 'npm test' }]
+    ] satisfies MessagePart[][]) {
+      const scene = layoutTranscript(
+        { ...longInput([]), botUsername, streaming, activityRandom: () => 0, viewport: undefined },
+        new BlockCache()
+      )
+      const nodes = scene.blocks.at(-1)!.nodes
+      assert.ok(nodes.some((node) => node.kind === 'text' && node.text === `@${botUsername}`))
+      const label = nodes
+        .flatMap((node) => (node.kind === 'pulse' ? node.children : []))
+        .find((node) => node.kind === 'text')
+      assert.ok(label?.kind === 'text')
+      assert.equal(label.text, `${activityVerb(streaming)} cosmic magic`)
+    }
+  }
 })
 check('activity timer sits below the copy and narrow copy still ellipsizes', () => {
   const scene = layoutTranscript(
@@ -939,7 +959,7 @@ check('a dragged selection retains its source rows across viewport boundaries', 
   assert.ok(next.window!.end >= next.window!.scrollTop + 600)
 })
 
-check('bot replies use a round Facehash and username in both transcript layouts', () => {
+check('bot replies use a full-size Facehash and username in both transcript layouts', () => {
   const own = {
     ...FIXTURES[1],
     id: 'own-bot-reply',
@@ -978,21 +998,32 @@ check('bot replies use a round Facehash and username in both transcript layouts'
     id: 'cross-session-request',
     role: 'user' as const,
     botId: 'bot-1',
-    botUsername: 'helper',
+    botUsername: 'old-name',
     parts: [{ type: 'text' as const, text: 'Please review the diff.' }]
   }
-  for (const messages of [[fromAnotherSession], [...longMessages, fromAnotherSession]]) {
-    const scene = layoutTranscript(
-      {
-        ...longInput(messages),
-        bots: [bot],
-        botAvatar: (name) => `data:image/svg+xml,${name}`
-      },
-      new BlockCache()
-    )
-    const nodes = JSON.stringify(scene.blocks.at(-1)!.nodes)
-    assert.ok(nodes.includes('@helper'), 'a delegated request keeps its author')
-    assert.ok(!nodes.includes('__roxy__'), 'and is not drawn as the person reading it')
+  for (const roster of [[bot], []]) {
+    for (const messages of [[fromAnotherSession], [...longMessages, fromAnotherSession]]) {
+      const scene = layoutTranscript(
+        {
+          ...longInput(messages),
+          bots: roster,
+          botAvatar: (name) => `data:image/svg+xml,${name}`
+        },
+        new BlockCache()
+      )
+      const nodes = JSON.stringify(scene.blocks.at(-1)!.nodes)
+      const username = roster.length ? 'helper' : 'old-name'
+      assert.ok(
+        nodes.includes(`@${username}`),
+        'stable ID resolves renames, snapshots survive deletion'
+      )
+      assert.ok(
+        nodes.includes(`data:image/svg+xml,${username}`),
+        'a delegated user turn uses its bot avatar'
+      )
+      assert.ok(nodes.includes('"radius":7'), 'the bot avatar fills its rounded square')
+      assert.ok(!nodes.includes('"name":"user"'), 'bot-authored prompts are not human')
+    }
   }
   // An ordinary user turn is still the user's, with no bot name attached.
   const typedHere = {
@@ -1008,6 +1039,21 @@ check('bot replies use a round Facehash and username in both transcript layouts'
     ).includes('@helper'),
     'what the user typed here is not attributed to a bot'
   )
+
+  const humanMention = {
+    ...typedHere,
+    parts: [{ type: 'text' as const, text: '@helper please review this human-authored request.' }]
+  }
+  for (const messages of [[humanMention], [...longMessages, humanMention]]) {
+    const nodes = JSON.stringify(
+      layoutTranscript(
+        { ...longInput(messages), bots: [bot], botAvatar: (name) => `data:image/svg+xml,${name}` },
+        new BlockCache()
+      ).blocks.at(-1)!.nodes
+    )
+    assert.ok(nodes.includes('"name":"user"'), 'human mentions do not change authorship')
+    assert.ok(!nodes.includes('data:image/svg+xml,'))
+  }
 
   // The HOST answering inside a bot's chat: `botUsername` names the chat owner,
   // so an unsigned row is drawn as that bot. Roxy signs hers, and must come out
@@ -1032,8 +1078,7 @@ check('bot replies use a round Facehash and username in both transcript layouts'
     assert.ok(!nodes.includes('@helper'), 'the host is not drawn as the chat owner')
     assert.ok(nodes.includes('@roxy'), 'the host is named like any other speaker')
     assert.ok(nodes.includes('__roxy__'), 'it keeps the host avatar')
-    // The avatar shape is what separates host from guest: square for Roxy,
-    // round for a bot. Naming the host must not hand it the guest treatment.
+    // Naming the host must not hand it the generated guest avatar.
     assert.ok(
       !nodes.includes('data:image/svg+xml,roxy'),
       'the host keeps its own avatar, not a generated bot one'
@@ -1055,9 +1100,8 @@ check('bot replies use a round Facehash and username in both transcript layouts'
   const liveHostNodes = JSON.stringify(liveHost.blocks.at(-1)!.nodes)
   assert.ok(!liveHostNodes.includes('@helper'), 'a streaming host is not the chat owner either')
   assert.ok(liveHostNodes.includes('__roxy__'))
-  // While a turn streams there is no name on the row yet, so the pending
-  // indicator is the only thing saying WHO the wait belongs to.
-  assert.ok(liveHostNodes.includes('@roxy is thinking '), 'a streaming host says who is thinking')
+  assert.ok(liveHostNodes.includes('@roxy'), 'the streaming header identifies the host')
+  assert.ok(!liveHostNodes.includes('@roxy is '), 'the activity label does not repeat the host')
   const liveGuestIndicator = JSON.stringify(
     layoutTranscript(
       {
@@ -1071,10 +1115,8 @@ check('bot replies use a round Facehash and username in both transcript layouts'
       new BlockCache()
     ).blocks.at(-1)!.nodes
   )
-  assert.ok(
-    liveGuestIndicator.includes('@helper is thinking '),
-    'and a streaming guest is named too, not left as a bare "thinking"'
-  )
+  assert.ok(liveGuestIndicator.includes('@helper'), 'the streaming header identifies the guest too')
+  assert.ok(!liveGuestIndicator.includes('@helper is '), 'the activity label stays name-free')
 
   const live = layoutTranscript(
     { ...longInput(longMessages), streaming: [], botUsername: 'helper' },

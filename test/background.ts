@@ -121,6 +121,52 @@ async function run(): Promise<void> {
     await service.resetBackground()
     await fs.writeFile(path.join(directory, 'chat-background.json'), 'null')
     assert.deepEqual(await service.getBackground(), { settings: DEFAULT_BACKGROUND, image: null })
+    await Promise.all([
+      service.updateBackground({ effect: 'halftone' }),
+      service.updateBackground({ glass: false })
+    ])
+    assert.deepEqual(
+      (await service.getBackground()).settings,
+      {
+        ...DEFAULT_BACKGROUND,
+        effect: 'halftone',
+        glass: false
+      },
+      'independent concurrent settings do not overwrite one another'
+    )
+
+    const imageFile = path.join(directory, 'valid.png')
+    await fs.writeFile(imageFile, data)
+    const delayedImport = service.importBackground(imageFile)
+    await service.removeBackground()
+    await delayedImport
+    assert.equal((await service.getBackground()).image, null, 'remove cancels older imports')
+    const resetImport = service.importBackground(imageFile)
+    await service.resetBackground()
+    await resetImport
+    assert.deepEqual(await service.getBackground(), { settings: DEFAULT_BACKGROUND, image: null })
+    const file = path.join(directory, 'chat-background.json')
+    await assert.rejects(
+      fs.access(file),
+      { code: 'ENOENT' },
+      'cancelled import cannot recreate reset storage'
+    )
+    // A directory at the destination forces rename to fail after the image temp file was written.
+    await fs.mkdir(file)
+    assert.deepEqual(await service.importBackground(imageFile), { ok: false, error: 'saveFailed' })
+    await assert.rejects(
+      fs.access(`${file}.tmp`),
+      { code: 'ENOENT' },
+      'failed save removes image temp file'
+    )
+    await fs.rm(file, { recursive: true })
+    await fs.writeFile(`${file}.tmp`, JSON.stringify(imported.state))
+    await service.resetBackground()
+    await assert.rejects(
+      fs.access(`${file}.tmp`),
+      { code: 'ENOENT' },
+      'reset removes stale temp file'
+    )
     console.log(
       'BACKGROUND OK: defaults, validation, six effects, quantization, import, resize, metadata stripping, persistence, removal and reset'
     )

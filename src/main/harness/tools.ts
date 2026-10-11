@@ -9,6 +9,7 @@ import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { glob } from 'tinyglobby'
 import type { ToolDiff, ToolResult, SessionTask } from '../../shared/types'
+import { MAX_IMAGE_BYTES } from '../../shared/attachments'
 import type { WebFetchFormat } from '../../shared/web'
 import {
   BROWSER_UA,
@@ -140,7 +141,6 @@ async function untilAborted<T>(
 
 const MAX_OUTPUT = 100_000
 const MAX_DIFF_SIDE = 100_000
-const MAX_IMAGE_BYTES = 3_000_000
 const MAX_BG_OUTPUT = 200_000
 const FG_TIMEOUT_MAX = 600_000
 /**

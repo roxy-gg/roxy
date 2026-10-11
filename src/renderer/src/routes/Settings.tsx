@@ -136,7 +136,16 @@ export default function Settings(): JSX.Element {
   const language = normalizeLanguage(settings?.language)
 
   return (
-    <PageShell title={t('settings.title')} onBack={() => navigate('/')}>
+    <PageShell
+      title={t('settings.title')}
+      onBack={() => navigate('/')}
+      onEscape={() => {
+        if (resetting) return true
+        if (!confirmingReset) return false
+        setConfirmingReset(false)
+        return true
+      }}
+    >
       {addingAccount && (
         <AddAccount
           onClose={() => {

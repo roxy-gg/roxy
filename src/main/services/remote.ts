@@ -23,6 +23,7 @@ import type { Message } from '../../shared/types'
 import { PartsFold } from '../../shared/parts'
 import * as repo from '../db/repo'
 import { enqueuePrompt } from './automation'
+import { isVisibleQueueItem } from '../../shared/queue'
 import { stopTurn } from './turn-state'
 import { track, trackFeature } from './track'
 import { sessionCwd } from './workspace'
@@ -207,7 +208,10 @@ function sendQueue(sessionId: string): void {
   sendFrame({
     t: 'queue',
     sessionId,
-    items: repo.listQueue(sessionId).map((q) => ({ id: q.id, text: q.content }))
+    items: repo
+      .listQueue(sessionId)
+      .filter(isVisibleQueueItem)
+      .map((q) => ({ id: q.id, text: q.content }))
   })
 }
 

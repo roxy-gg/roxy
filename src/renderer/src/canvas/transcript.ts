@@ -254,7 +254,7 @@ export function layoutMessageHeader(
 
   // Avatar.
   const avatarY = top + 2
-  if (isUser) {
+  if (isUser && !botUsername) {
     builder.rect(
       x + SPACE.messagePadX,
       avatarY,
@@ -273,7 +273,7 @@ export function layoutMessageHeader(
       w: SPACE.avatar,
       h: SPACE.avatar,
       src: botUsername === HOST_USERNAME ? '__roxy__' : (botAvatarSrc ?? '__roxy__'),
-      radius: !botUsername || botUsername === HOST_USERNAME ? SPACE.radiusLg : SPACE.avatar / 2,
+      radius: !botUsername || botUsername === HOST_USERNAME ? SPACE.radiusLg : SPACE.avatar / 4,
       border: palette.border
     })
   }
@@ -476,7 +476,7 @@ export function layoutParts(
       input.now,
       input.activityRandom
     )
-    const labels = activityLabels(builder.t, speakingAs, verb)
+    const labels = activityLabels(builder.t, verb)
     cursor += layoutThinking(
       builder,
       x,

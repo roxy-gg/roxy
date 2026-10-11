@@ -262,6 +262,37 @@ async function run() {
     'blur(18px) saturate(1.2)',
     'fallback retains glass'
   )
+  await evaluate(`location.hash='slow'`)
+  await click('[aria-labelledby="background-effect-label"] button:nth-child(2)')
+  await click('#background-glass')
+  await until(
+    `window.roxy.background.get().then(s => s.settings.effect === 'dither' && !s.settings.glass)`
+  )
+  assert.equal(
+    await evaluate(
+      `return document.querySelector('[aria-labelledby="background-effect-label"] button:nth-child(2)').getAttribute('aria-pressed')`
+    ),
+    'true',
+    'rapid independent edits retain the selected effect'
+  )
+  await setInput('#background-emptyOpacity', '47')
+  await evaluate(
+    `document.querySelector('#background-emptyOpacity').dispatchEvent(new PointerEvent('pointerup', {bubbles:true}))`
+  )
+  await setInput('#background-emptyOpacity', '58')
+  await wait(400)
+  assert.equal(
+    await evaluate(`return document.querySelector('#background-emptyOpacity').value`),
+    '58',
+    'older acknowledgement does not reset a newer drag'
+  )
+  await evaluate(
+    `document.querySelector('#background-emptyOpacity').dispatchEvent(new PointerEvent('pointerup', {bubbles:true}))`
+  )
+  await until(`window.roxy.background.get().then(s => s.settings.emptyOpacity === 58)`)
+  await evaluate(`location.hash=''`)
+  await click('[aria-labelledby="background-effect-label"] button:nth-child(1)')
+  await click('#background-glass')
   win.setSize(390, 844)
   await wait()
   assert.ok(

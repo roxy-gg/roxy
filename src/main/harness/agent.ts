@@ -20,6 +20,7 @@ import type {
 } from '../../shared/types'
 import type { Bot, BotJob } from '../../shared/bots'
 import { isInterruptibleTool } from '../../shared/tools'
+import { MAX_FORWARDED_IMAGES } from '../../shared/attachments'
 import { PartsFold, partsToContent, taskPreview } from '../../shared/parts'
 import {
   getAgent,
@@ -55,7 +56,8 @@ import { HOST_USERNAME, isHostSpeaker } from '../../shared/bots'
 import { botActivity, chatBot, getBot, listBots, listJobs } from '../db/bots'
 import { runTool, type ToolContext } from './tools'
 import { boundToolOutput } from '../services/tool-output-store'
-import { modelCost } from '../services/models'
+import { listModels, modelCost } from '../services/models'
+import { omitMessageImages } from '../services/attachments'
 import {
   applyResponsesEvent,
   isChatUnsupported,
@@ -651,6 +653,7 @@ function buildSystemMessage(
       )
     : []
   const shared = [
+    'When delegating a task that depends on user screenshots, include the relevant image_refs in session_manage send, bot_invoke (including roxy), or queue_manage create. Use refs shown beside the attached images in this chat, or read this session for older refs. Forward only images relevant to the assignment, not unrelated private history. A description, path, or markdown URL does not attach an image. Delivery checks the recipient model; do not claim it saw images if delivery fails, and never switch models without user authorization.',
     'Bots are local Roxy collaborators, not GitHub users and not temporary task subagents.',
     'Interpret the whole request, not the presence or position of an @mention. All project user messages reach Roxy first; private bot chats belong to their bot. Your assigned identity stays authoritative. Only bot_invoke hands off a turn.',
     'For direct address to another known bot (for example, "Hola @reviewer"), silently call bot_invoke with the greeting or request and relevant context, then end your turn. Do not answer on their behalf or add an announcement before or after the call.',
@@ -914,7 +917,14 @@ const BASE_SCHEMAS = [
       project: str('Project path from project_list. Required to create; optional filter for list.'),
       title: str('Session title.'),
       description: str('Session description.'),
-      prompt: str('Prompt to send.')
+      prompt: str('Prompt to send.'),
+      image_refs: {
+        type: 'array',
+        items: { type: 'string' },
+        maxItems: MAX_FORWARDED_IMAGES,
+        description:
+          'For send: relevant image refs from messages in THIS chat, e.g. image:<message-id>:<part-index>. Copies actual images into the destination queue. Read this session for refs. Omit for text-only; delivery requires verified destination image support.'
+      }
     },
     ['action']
   ),
@@ -938,7 +948,14 @@ const BASE_SCHEMAS = [
       bot: str('Bot ID or exact username from bot_manage list, or roxy for the host.'),
       prompt: str(
         'Self-contained task, actionable findings and relevant context for the recipient.'
-      )
+      ),
+      image_refs: {
+        type: 'array',
+        items: { type: 'string' },
+        maxItems: MAX_FORWARDED_IMAGES,
+        description:
+          'Relevant image refs from THIS chat to attach to the handoff, including bot: roxy. Include user screenshots needed for the task. Delivery requires verified recipient image support.'
+      }
     },
     ['bot', 'prompt']
   ),
@@ -983,6 +1000,13 @@ const BASE_SCHEMAS = [
       id: str('Queue item ID.'),
       session: str('Target chat ID; defaults to this session.'),
       prompt: str('Prompt content.'),
+      image_refs: {
+        type: 'array',
+        items: { type: 'string' },
+        maxItems: MAX_FORWARDED_IMAGES,
+        description:
+          'For create/update: image refs from THIS chat to copy into the queue. Omit on update to keep images; [] removes them. Delivery requires verified destination image support.'
+      },
       not_before: {
         type: 'integer',
         description: 'Do not deliver before this epoch millisecond timestamp.'
@@ -1287,7 +1311,6 @@ export async function runAgentTurn(opts: RunTurnOptions): Promise<void> {
   const {
     providerId,
     model,
-    messages,
     cwd,
     chatId,
     agentId,
@@ -1297,6 +1320,19 @@ export async function runAgentTurn(opts: RunTurnOptions): Promise<void> {
     reasoningEffort,
     contextLimit
   } = opts
+  let messages = opts.messages
+  if (messages.some((message) => message.images?.some((image) => image.forwarded))) {
+    const info = (await listModels(providerId)).find((entry) => entry.id === model)
+    if (info?.imageInput !== true)
+      messages = messages.map((message) =>
+        message.images?.some((image) => image.forwarded)
+          ? {
+              ...omitMessageImages(message),
+              images: message.images.filter((image) => !image.forwarded)
+            }
+          : message
+      )
+  }
   const copilotSession =
     repo.getProviderSeedId(providerId) === 'github-copilot'
       ? repo.getCopilotSessionKey(providerId)

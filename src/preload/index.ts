@@ -27,6 +27,7 @@ import type { BackgroundState } from '../shared/background'
 const roxy: RoxyApi = {
   bots: {
     list: () => ipcRenderer.invoke(CHANNELS.botsList),
+    reorder: (ids) => ipcRenderer.invoke(CHANNELS.botsReorder, ids),
     create: (username) => ipcRenderer.invoke(CHANNELS.botsCreate, username),
     update: (id, patch) => ipcRenderer.invoke(CHANNELS.botsUpdate, id, patch),
     remove: (id) => ipcRenderer.invoke(CHANNELS.botsRemove, id),
