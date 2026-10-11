@@ -2,6 +2,8 @@ import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import { CHANNELS } from '../../shared/ipc'
 import type { Language } from '../../shared/i18n'
 import { DEFAULT_MOTION, type MotionPreference } from '../../shared/motion'
+import type { BackgroundResult, BackgroundSettings } from '../../shared/background'
+import * as background from '../services/background'
 import type { SessionConfigPatch } from '../../shared/session-config'
 import type { ClipboardAction } from '../../shared/context-menu'
 import { clipboardHasContent, runClipboardAction } from '../services/context-menu'
@@ -268,6 +270,8 @@ export function registerIpc(): void {
     }
     repo.resetAll()
     await browserProxy.reset()
+    await background.resetBackground()
+    broadcastBackground({ ok: true, state: await background.getBackground() })
     invalidateCopilotModels()
     invalidateCopilotToken()
     for (const window of BrowserWindow.getAllWindows())
@@ -537,6 +541,33 @@ export function registerIpc(): void {
     }
     return resolved
   }
+
+  const broadcastBackground = (result: BackgroundResult): BackgroundResult => {
+    if (result.ok)
+      for (const win of BrowserWindow.getAllWindows()) {
+        if (!win.isDestroyed()) win.webContents.send(CHANNELS.backgroundChanged, result.state)
+      }
+    return result
+  }
+  ipcMain.handle(CHANNELS.backgroundGet, () => background.getBackground())
+  ipcMain.handle(CHANNELS.backgroundChoose, async (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    const options: Electron.OpenDialogOptions = {
+      properties: ['openFile'],
+      filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif'] }]
+    }
+    const chosen = win
+      ? await dialog.showOpenDialog(win, options)
+      : await dialog.showOpenDialog(options)
+    if (chosen.canceled || !chosen.filePaths[0]) return null
+    return broadcastBackground(await background.importBackground(chosen.filePaths[0]))
+  })
+  ipcMain.handle(CHANNELS.backgroundRemove, async () =>
+    broadcastBackground(await background.removeBackground())
+  )
+  ipcMain.handle(CHANNELS.backgroundUpdate, async (_e, settings: Partial<BackgroundSettings>) =>
+    broadcastBackground(await background.updateBackground(settings))
+  )
 
   ipcMain.handle(CHANNELS.themesList, () => themeList())
   ipcMain.handle(CHANNELS.themesRefresh, () => {

@@ -97,6 +97,7 @@ function load(path, extra = '') {
       CONTEXT_MENU_PAD: 8
     },
     './BotAvatar': { BotAvatar: () => null },
+    './SidebarFrame': { SidebarFrame: () => null, SidebarNavItem: () => null },
     './ui': { Button: () => null },
     '../lib/cn': { cn: (...parts) => parts.filter(Boolean).join(' ') }
   }

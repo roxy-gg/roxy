@@ -1,0 +1,76 @@
+.chat-wallpaper {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  pointer-events: none;
+  user-select: none;
+}
+.chat-wallpaper img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+}
+.chat-wallpaper[data-effect='haze'] img {
+  filter: blur(12px) saturate(0.85);
+  transform: scale(1.05);
+}
+.chat-wallpaper-haze {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, transparent, var(--color-bg));
+}
+[data-wallpaper] .composer-gutter {
+  background: transparent;
+}
+/* Blur lives on a clipped decorative sibling, never the popover-owning panel. */
+[data-glass] .composer-panel {
+  isolation: isolate;
+  /* Non-portalled composer menus must stay above the transcript's z-20 rail. */
+  z-index: 30;
+  --sq-fill: transparent;
+  background-color: transparent;
+}
+[data-glass] .composer-panel::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  border-radius: inherit;
+  background: color-mix(in srgb, var(--color-surface-2) 78%, transparent);
+  backdrop-filter: blur(18px) saturate(1.2);
+}
+[data-squircle] [data-glass] .composer-panel::before {
+  /* Registered squircle properties do not inherit into pseudo-elements. */
+  --sq-r: inherit;
+  -webkit-mask-image: paint(squircle-mask);
+  mask-image: paint(squircle-mask);
+}
+.background-preview-panel {
+  background: var(--color-surface-2);
+}
+[data-glass] .background-preview-panel {
+  background: color-mix(in srgb, var(--color-surface-2) 78%, transparent);
+  backdrop-filter: blur(18px) saturate(1.2);
+}
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+  .chat-wallpaper {
+    display: none;
+  }
+  .chat-background-host {
+    background: var(--color-bg);
+  }
+  [data-glass] .composer-panel::before,
+  [data-glass] .background-preview-panel {
+    background: var(--color-surface-2);
+    backdrop-filter: none;
+  }
+}
+@supports not (backdrop-filter: blur(1px)) {
+  [data-glass] .composer-panel::before,
+  [data-glass] .background-preview-panel {
+    background: var(--color-surface-2);
+  }
+}

@@ -42,11 +42,9 @@ import { BotsSection } from './BotsSection'
 import { RemoteWorkspaceDialog } from './RemoteWorkspaceDialog'
 import { BrailleSpinner } from './ThinkingIndicator'
 import { UpdateCard } from './UpdateCard'
+import { SidebarFrame, SidebarNavItem } from './SidebarFrame'
 import roxy from '../assets/roxy.png'
 
-const MIN_WIDTH = 220
-const MAX_WIDTH = 480
-const DEFAULT_WIDTH = 288
 /**
  * How often to re-read git + PR state for EVERY session.
  *
@@ -57,10 +55,8 @@ const DEFAULT_WIDTH = 288
  * git for a number that cannot have moved.
  */
 const SWEEP_MS = 30_000
-const WIDTH_KEY = 'roxy.sidebar.width'
 const RAIL_COLLAPSED_KEY = 'roxy.sidebar.collapsed'
 const COLLAPSED_PROJECTS_KEY = 'roxy.sidebar.projects.v1'
-const clampWidth = (n: number): number => Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, n))
 
 const storedCollapsedProjects = (): Set<string> => {
   try {
@@ -181,10 +177,6 @@ export function Sidebar(): JSX.Element {
   const projectOrder = useRoxyStore((s) => s.projectOrder)
   const [collapsed, setCollapsed] = useState<Set<string>>(storedCollapsedProjects)
   const [expandedSubs, setExpandedSubs] = useState<Set<string>>(new Set())
-  const [width, setWidth] = useState<number>(() => {
-    const v = Number(localStorage.getItem(WIDTH_KEY))
-    return Number.isFinite(v) && v >= MIN_WIDTH && v <= MAX_WIDTH ? v : DEFAULT_WIDTH
-  })
   const [railed, setRailed] = useState<boolean>(
     () => localStorage.getItem(RAIL_COLLAPSED_KEY) === '1'
   )
@@ -200,9 +192,6 @@ export function Sidebar(): JSX.Element {
         ? 'amber'
         : null
 
-  useEffect(() => {
-    localStorage.setItem(WIDTH_KEY, String(width))
-  }, [width])
   useEffect(() => {
     localStorage.setItem(RAIL_COLLAPSED_KEY, railed ? '1' : '0')
   }, [railed])
@@ -333,24 +322,6 @@ export function Sidebar(): JSX.Element {
       cancelRef.current = true
       e.currentTarget.blur()
     }
-  }
-
-  // Drag the right edge to resize; the window listeners live only during a drag.
-  const startResize = (e: ReactMouseEvent): void => {
-    e.preventDefault()
-    const startX = e.clientX
-    const startW = width
-    const onMove = (ev: MouseEvent): void => setWidth(clampWidth(startW + ev.clientX - startX))
-    const onUp = (): void => {
-      window.removeEventListener('mousemove', onMove)
-      window.removeEventListener('mouseup', onUp)
-      document.body.style.cursor = ''
-      document.body.style.userSelect = ''
-    }
-    document.body.style.cursor = 'col-resize'
-    document.body.style.userSelect = 'none'
-    window.addEventListener('mousemove', onMove)
-    window.addEventListener('mouseup', onUp)
   }
 
   // A project = a workspace folder; main sessions group under it.
@@ -571,7 +542,7 @@ export function Sidebar(): JSX.Element {
           </button>
           <button
             onClick={() => navigate('/themes')}
-            title={t('sidebar.themes')}
+            title={t('appearance.title')}
             className="press-scale flex h-8 w-8 items-center justify-center sq sq-lg rounded-lg text-text-muted hover:bg-white/5 hover:text-text"
           >
             <Palette className="h-4 w-4" />
@@ -590,10 +561,7 @@ export function Sidebar(): JSX.Element {
   }
 
   return (
-    <aside
-      style={{ width }}
-      className="relative flex h-full shrink-0 flex-col border-r border-border bg-surface"
-    >
+    <SidebarFrame>
       <div className="titlebar reserve-controls-left flex items-center gap-2 px-4 py-3.5">
         <div className="sidebar-brand flex items-center gap-2.5">
           <img
@@ -1036,15 +1004,7 @@ export function Sidebar(): JSX.Element {
       <CustomizeNav onOpenRemote={() => setRemoteOpen(true)} remoteDot={remoteDot} />
 
       <UpdateCard />
-
-      {/* Drag the right edge to resize; double-click to reset to the default width. */}
-      <div
-        onMouseDown={startResize}
-        onDoubleClick={() => setWidth(DEFAULT_WIDTH)}
-        title={t('sidebar.resizeHandle')}
-        className="absolute inset-y-0 right-0 z-20 w-1 cursor-col-resize transition-colors hover:bg-accent/50"
-      />
-    </aside>
+    </SidebarFrame>
   )
 }
 
@@ -1166,17 +1126,13 @@ function CustomizeNav({
       onClick: () => navigate('/mcp'),
       count: counts.mcp
     },
-    { label: t('sidebar.themes'), icon: Palette, onClick: () => navigate('/themes') }
+    { label: t('appearance.title'), icon: Palette, onClick: () => navigate('/themes') }
   ]
   return (
     <div className="border-t border-border px-3 py-2">
       <div className="flex flex-col gap-0.5">
         {items.map((it) => (
-          <button
-            key={it.label}
-            onClick={it.onClick}
-            className="press-scale flex items-center gap-2.5 sq sq-lg rounded-lg px-2 py-1.5 text-sm text-text-muted hover:bg-white/5 hover:text-text"
-          >
+          <SidebarNavItem key={it.label} onClick={it.onClick}>
             <it.icon className="h-4 w-4 shrink-0 opacity-80" />
             <span className="flex-1 text-left">{it.label}</span>
             {it.dot ? (
@@ -1207,7 +1163,7 @@ function CustomizeNav({
                 </span>
               )
             )}
-          </button>
+          </SidebarNavItem>
         ))}
       </div>
     </div>

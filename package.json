@@ -1,6 +1,6 @@
 {
   "name": "roxy",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "description": "Roxy — an open-source AI coding agent for engineers.",
   "main": "./out/main/index.js",
   "author": "Roxy (https://github.com/roxy-gg/roxy)",
@@ -58,6 +58,8 @@
     "smoke:i18n": "esbuild test/i18n.ts --bundle --platform=node --format=cjs --outfile=test/.out/i18n.cjs && node test/.out/i18n.cjs",
     "i18n:translate": "node script/i18n-translate.mjs",
     "canvas": "vite --config test/canvas/vite.config.mjs",
+    "smoke:background": "esbuild test/background.ts --bundle --platform=node --format=cjs --packages=external --outfile=test/.out/background.cjs && electron test/.out/background.cjs",
+    "smoke:background-ui": "electron test/canvas/background-smoke.cjs",
     "smoke:canvas": "electron test/canvas/smoke.cjs && electron test/canvas/mentions-smoke.cjs && electron test/canvas/subagents-smoke.cjs",
     "smoke:animation": "electron test/canvas/animation.cjs",
     "perf:canvas": "electron test/canvas/performance.cjs",
@@ -86,6 +88,7 @@
     "qrcode.react": "^4.2.0",
     "react-i18next": "^16.6.6",
     "react-router-dom": "^7.18.0",
+    "sharp": "^0.35.2",
     "shiki": "^4.4.3",
     "tailwind-merge": "^3.6.0",
     "tinyglobby": "^0.2.17",
@@ -111,7 +114,6 @@
     "prettier": "^3.4.2",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "sharp": "^0.35.2",
     "tailwindcss": "^4.0.0",
     "typescript": "^5.7.2",
     "vite": "^5.4.11"

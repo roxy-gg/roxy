@@ -664,9 +664,67 @@
     "emptyProject": "<code>.roxy/skills/&lt;name&gt;/SKILL.md</code> — inside a project (also reads <code>.claude/skills</code> and <code>.agents/skills</code>)",
     "emptyFooter": "When a task matches, Roxy calls the <code>skill</code> tool to pull that skill’s full instructions into context."
   },
+  "appearance": {
+    "title": "Appearance",
+    "description": "Background images, colors, and fonts.",
+    "background": "Background",
+    "themes": "Color Theme",
+    "themeDescription": "Choose the colors and fonts for Roxy. Apply a theme or duplicate one to make it yours. Your background image stays the same."
+  },
+  "background": {
+    "title": "Chat background",
+    "description": "Your image, your theme. Add a background to your chats; colors and glass follow the theme you choose. The image stays on this device and is never sent with messages.",
+    "preview": "Live preview",
+    "emptyPreview": "Empty chat",
+    "sessionPreview": "Conversation",
+    "noImage": "A little more you. Start with an image.",
+    "sampleReply": "Your theme keeps the conversation in focus.",
+    "samplePrompt": "What would you like to build?",
+    "formats": "PNG, JPEG, WebP or GIF, up to 25 MB. Saved as a still image.",
+    "choose": "Choose image",
+    "change": "Change image",
+    "remove": "Remove",
+    "effect": "Image effect",
+    "processing": "Preparing effect...",
+    "showOn": "Show background on",
+    "emptyOnly": "Empty chats only",
+    "allSessions": "All conversations",
+    "emptyOpacity": "Empty chat visibility",
+    "emptyOpacityHint": "Image strength before the first message.",
+    "sessionOpacity": "Conversation visibility",
+    "sessionOpacityHint": "Keep this lower for easier reading.",
+    "percent": "{{value}}%",
+    "glass": "Glass composer",
+    "glassHint": "A softly blurred surface, tinted by your current theme.",
+    "autoSave": "Changes save automatically. Works with every theme.",
+    "reset": "Reset effects",
+    "effectFailed": "The effect could not be prepared. Showing the original image; try another effect.",
+    "effects": {
+      "none": "None",
+      "dither": "Dither",
+      "ascii": "ASCII",
+      "halftone": "Halftone",
+      "scanlines": "Scanlines",
+      "haze": "Haze"
+    },
+    "hints": {
+      "none": "Your original image, without a filter.",
+      "dither": "Rebuilds the image with an ordered, reduced-color texture.",
+      "ascii": "Turns the artwork into a field of colored characters.",
+      "halftone": "Recreates light and shade with colored dots.",
+      "scanlines": "Adds a subtle retro screen texture.",
+      "haze": "Softens the image and fades it into your theme."
+    },
+    "errors": {
+      "invalidImage": "Choose a valid PNG, JPEG, WebP or GIF under 40 megapixels.",
+      "tooLarge": "This image is too large. Choose one under 25 MB.",
+      "readFailed": "Could not read the background image. Try choosing it again.",
+      "saveFailed": "Could not save the background. Your previous settings have been kept."
+    }
+  },
   "themes": {
     "title": "Themes",
-    "subtitle": "A theme is a small JSON file that re-points the app’s design tokens — surfaces, text, accents, and the fonts for the UI and for code. Pick one below, or duplicate it to make your own. Themes are read from your themes folder, so they can be edited in any editor, checked into dotfiles, and shared as a file.",
+    "subtitle": "Choose your colors, add a background, and make Roxy yours. Pick a theme below or duplicate one to customize it. Your background stays with you when you switch themes.",
     "builtIn": "Built in",
     "yourThemes": "Your themes",
     "openFolder": "Open folder",
