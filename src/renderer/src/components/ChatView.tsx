@@ -13,6 +13,9 @@ import {
 } from 'lucide-react'
 import type { Chat } from '@shared/types'
 import { isVisibleQueueItem } from '@shared/queue'
+import { backgroundOpacity } from '@shared/background'
+import { useBackground } from '../lib/background'
+import { ChatBackground } from './ChatBackground'
 import { resolveSessionConfig } from '@shared/session-config'
 import { useRoxyStore } from '../lib/store'
 import { visibleMessages, visibleQueue } from '../lib/optimistic-messages'
@@ -70,6 +73,7 @@ import roxy from '../assets/roxy.png'
 
 export function ChatView(): JSX.Element {
   const { t } = useTranslation()
+  const background = useBackground()
   const storedMessages = useRoxyStore((s) => s.messages)
   const optimisticMessages = useRoxyStore((s) =>
     s.activeChatId ? s.optimisticMessages[s.activeChatId] : undefined
@@ -149,6 +153,11 @@ export function ChatView(): JSX.Element {
   // Wait for history even when live tokens are available, so arrival paints the complete tail once.
   const loading = !messagesError && messagesChatId !== activeChatId
   const isEmpty = !hasContent && !loading
+  const wallpaper =
+    !!background.rendered &&
+    !loading &&
+    !messagesError &&
+    backgroundOpacity(background.settings, isEmpty) > 0
   const botSettings = useRoxyStore((s) => s.botSettings)
   const setBotSettings = useRoxyStore((s) => s.setBotSettings)
   const botCloseRequest = useRef<(() => void) | null>(null)
@@ -183,7 +192,8 @@ export function ChatView(): JSX.Element {
   // No workspace open — prompt to open a folder to start a session.
   if (!activeChat) {
     return (
-      <div className="flex h-full min-w-0 flex-1 flex-col bg-bg">
+      <div className="chat-background-host relative isolate flex h-full min-w-0 flex-1 flex-col bg-bg">
+        <ChatBackground empty />
         <div className="titlebar reserve-controls-right h-12 shrink-0" />
         <div className="flex flex-1 flex-col items-center justify-center px-6 text-center">
           <img
@@ -211,7 +221,13 @@ export function ChatView(): JSX.Element {
           closeRequest={botCloseRequest}
         />
       )}
-      <div key="conversation" className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <div
+        key="conversation"
+        className="chat-background-host relative isolate flex min-h-0 min-w-0 flex-1 flex-col"
+        data-wallpaper={wallpaper || undefined}
+        data-glass={(wallpaper && background.settings.glass) || undefined}
+      >
+        {wallpaper && <ChatBackground empty={isEmpty} />}
         <header className="titlebar reserve-controls-right flex h-12 shrink-0 items-center justify-between gap-3 px-4">
           {activeBot ? (
             <div className="flex min-w-0 items-center gap-2">
@@ -374,6 +390,7 @@ export function ChatView(): JSX.Element {
           </div>
         ) : (
           <CanvasTranscript
+            transparent={wallpaper}
             messages={messages}
             streaming={streaming}
             chatId={activeChatId}
@@ -400,11 +417,14 @@ export function ChatView(): JSX.Element {
           thumb exactly when you drag it to the end. */}
         <div
           aria-hidden
-          className="pointer-events-none relative z-10 -mt-6 mr-2.5 h-6 shrink-0 bg-gradient-to-b from-transparent to-bg"
+          className={cn(
+            'pointer-events-none relative z-10 -mt-6 mr-2.5 h-6 shrink-0',
+            !wallpaper && 'bg-gradient-to-b from-transparent to-bg'
+          )}
         />
 
         {queue.length > 0 && (
-          <div className="bg-bg px-4 pt-2">
+          <div className={cn('px-4 pt-2', !wallpaper && 'bg-bg')}>
             <div className="mx-auto max-w-3xl">
               <Queue>
                 <QueueSection defaultOpen>

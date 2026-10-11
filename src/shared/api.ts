@@ -3,6 +3,7 @@
  * Implemented in src/preload/index.ts, handled in src/main/ipc/*.
  */
 import type { Language } from './i18n'
+import type { BackgroundResult, BackgroundSettings, BackgroundState } from './background'
 import type { Bot, BotJob, BotJobInput } from './bots'
 import type { MotionPreference } from './motion'
 import type {
@@ -908,6 +909,14 @@ export interface RoxyApi {
      * skills by default (or workspace when a cwd is given).
      */
     install(source: string, cwd?: string): Promise<SkillInstallResult>
+  }
+  background: {
+    get(): Promise<BackgroundState>
+    /** Native picker; cancellation returns null without changing anything. */
+    choose(): Promise<BackgroundResult | null>
+    remove(): Promise<BackgroundResult>
+    update(settings: Partial<BackgroundSettings>): Promise<BackgroundResult>
+    onChanged(callback: (state: BackgroundState) => void): () => void
   }
   themes: {
     /** Built-in themes followed by user themes found on disk. */

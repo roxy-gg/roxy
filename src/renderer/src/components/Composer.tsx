@@ -306,7 +306,7 @@ export function Composer({
   const canSend = !!value.trim() || images.length > 0
 
   return (
-    <div className="bg-bg px-4 pb-1.5 pt-2">
+    <div className="composer-gutter bg-bg px-4 pb-1.5 pt-2">
       <div
         onDragOver={(e) => {
           if (e.dataTransfer.types.includes('Files')) {
@@ -336,7 +336,7 @@ export function Composer({
         //
         // On focus the hairline brightens rather than changing hue: the box is
         // already the focus of the screen, so a colored ring on it is noise.
-        className={`relative mx-auto max-w-3xl sq-frame sq-2xl sq-ring sq-fill-surface-2 edge edge-panel shadow-raised rounded-2xl border bg-surface-2 transition ${
+        className={`composer-panel relative mx-auto max-w-3xl sq-frame sq-2xl sq-ring sq-fill-surface-2 edge edge-panel shadow-raised rounded-2xl border bg-surface-2 transition ${
           dragging
             ? 'border-accent [--sq-ring:var(--color-accent)] inset-ring-1 inset-ring-accent/40'
             : 'border-border focus-within:border-border-strong focus-within:[--sq-ring:var(--edge-strong)]'

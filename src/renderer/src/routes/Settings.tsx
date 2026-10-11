@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useTranslation, Trans } from 'react-i18next'
-import { ChevronDown, Globe, Plus, Trash2 } from 'lucide-react'
+import { ChevronDown, ChevronRight, Globe, Palette, Plus, Trash2 } from 'lucide-react'
 import type { AppVersions } from '@shared/types'
 import type { UpdateInfo } from '@shared/api'
 import { resolveSeed } from '@shared/providers'
@@ -154,6 +154,20 @@ export default function Settings(): JSX.Element {
       )}
       <ActivitySection />
       <MotionSettings onChange={setMotion} />
+      <button
+        type="button"
+        onClick={() => navigate('/themes')}
+        className="mb-8 flex w-full items-center gap-3 rounded-xl border border-border bg-surface p-4 text-left hover:border-border-strong focus-visible:outline-accent"
+      >
+        <Palette aria-hidden="true" className="h-4 w-4 shrink-0 text-text-muted" />
+        <span className="min-w-0 flex-1">
+          <span className="block text-sm font-medium text-text">{t('appearance.title')}</span>
+          <span className="mt-0.5 block text-xs text-text-muted">
+            {t('appearance.description')}
+          </span>
+        </span>
+        <ChevronRight aria-hidden="true" className="h-4 w-4 shrink-0 text-text-subtle" />
+      </button>
 
       <section className="mb-8">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
