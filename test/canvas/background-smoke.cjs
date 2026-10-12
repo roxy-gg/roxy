@@ -51,6 +51,10 @@ async function run() {
     if (level >= 3) errors.push(message)
   })
   await win.loadURL(`${url}?background`)
+  await win.webContents.debugger.attach('1.3')
+  await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', {
+    features: [{ name: 'prefers-reduced-transparency', value: 'no-preference' }]
+  })
   await until(
     `!!document.querySelector('.composer-panel') && !document.querySelector('#wallpaper-settings button:has(.lucide-image-plus)').disabled`
   )
@@ -62,6 +66,13 @@ async function run() {
       `return getComputedStyle(document.querySelector('[data-wallpaper] .chat-wallpaper')).opacity`
     ),
     '0.3'
+  )
+  assert.equal(
+    await evaluate(
+      `return getComputedStyle(document.querySelector('[data-wallpaper] .chat-wallpaper')).display`
+    ),
+    'block',
+    'a chosen wallpaper remains visible on Windows'
   )
   assert.equal(
     await evaluate(
@@ -198,7 +209,6 @@ async function run() {
     false
   )
   await click('#background-glass')
-  await win.webContents.debugger.attach('1.3')
   for (const name of ['prefers-reduced-transparency', 'prefers-contrast']) {
     await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', {
       features: [{ name, value: name === 'prefers-contrast' ? 'more' : 'reduce' }]
@@ -207,7 +217,7 @@ async function run() {
       await evaluate(
         `return getComputedStyle(document.querySelector('[data-wallpaper] .chat-wallpaper')).display`
       ),
-      'none'
+      name === 'prefers-contrast' ? 'none' : 'block'
     )
     assert.equal(
       await evaluate(
@@ -216,7 +226,9 @@ async function run() {
       'none'
     )
   }
-  await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [] })
+  await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', {
+    features: [{ name: 'prefers-reduced-transparency', value: 'no-preference' }]
+  })
   await evaluate(`location.hash = 'cancel'`)
   await click('#wallpaper-settings button:has(.lucide-image-plus)')
   assert.equal(

@@ -56,9 +56,6 @@
   backdrop-filter: blur(18px) saturate(1.2);
 }
 @media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
-  .chat-wallpaper {
-    display: none;
-  }
   .chat-background-host {
     background: var(--color-bg);
   }
@@ -66,6 +63,11 @@
   [data-glass] .background-preview-panel {
     background: var(--color-surface-2);
     backdrop-filter: none;
+  }
+}
+@media (prefers-contrast: more) {
+  .chat-wallpaper {
+    display: none;
   }
 }
 @supports not (backdrop-filter: blur(1px)) {
