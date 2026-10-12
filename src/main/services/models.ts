@@ -13,6 +13,7 @@ import {
   listConnectedProviders
 } from '../db/repo'
 import { isCliProxyProvider } from '../../shared/cliproxy'
+import { copilotTokenCost } from '../../shared/quota'
 import { listConnectionModels } from './cliproxy'
 import { copilotEndpoint, withCopilotRetry } from './llm'
 
@@ -24,6 +25,7 @@ interface ModelsDevModel {
   name?: string
   reasoning?: boolean
   tool_call?: boolean
+  modalities?: { input?: string[] }
   release_date?: string
   limit?: { context?: number; output?: number }
   /** USD per 1M tokens — models.dev already returns this; we no longer drop it. */
@@ -43,10 +45,16 @@ interface CopilotModel {
   is_chat_default?: boolean
   policy?: { state?: string }
   supported_endpoints?: string[]
+  billing?: { is_premium?: boolean; multiplier?: number; token_prices?: unknown }
   capabilities?: {
     type?: string
     limits?: { max_context_window_tokens?: number; max_output_tokens?: number }
-    supports?: { tool_calls?: boolean; thinking?: boolean; reasoning_effort?: string[] }
+    supports?: {
+      tool_calls?: boolean
+      thinking?: boolean
+      reasoning_effort?: string[]
+      vision?: boolean
+    }
   }
 }
 
@@ -114,11 +122,19 @@ async function listCopilotModels(connectionId: string): Promise<ModelInfo[]> {
         .map((m): ModelInfo => {
           const supports = m.capabilities?.supports
           const efforts = REASONING_EFFORTS.filter((e) => supports?.reasoning_effort?.includes(e))
+          const multiplier = m.billing?.multiplier
+          // Usage-based plans price every token; this is what the account is billed.
+          const cost = copilotTokenCost(m.billing)
           return {
+            ...(typeof multiplier === 'number' && Number.isFinite(multiplier) && multiplier >= 0
+              ? { premiumMultiplier: multiplier }
+              : {}),
+            ...(cost ? { cost } : {}),
             id: m.id,
             name: m.name || m.id,
             reasoning: supports?.thinking === true || Boolean(supports?.reasoning_effort?.length),
             toolCall: supports?.tool_calls === true,
+            imageInput: typeof supports?.vision === 'boolean' ? supports.vision : undefined,
             ...(efforts.length ? { reasoningEfforts: efforts } : {}),
             contextLimit: m.capabilities?.limits?.max_context_window_tokens,
             outputLimit: m.capabilities?.limits?.max_output_tokens
@@ -169,6 +185,7 @@ interface RoxyModel {
   name?: string
   context_length?: number
   supported_parameters?: string[]
+  architecture?: { input_modalities?: string[] }
   reasoning?: {
     mandatory?: boolean
     default_enabled?: boolean
@@ -269,6 +286,7 @@ function toModelInfo(body: { data?: RoxyModel[] }): ModelInfo[] {
         name: m.name || m.id,
         reasoning,
         toolCall: (m.supported_parameters ?? []).includes('tools'),
+        imageInput: m.architecture?.input_modalities?.includes('image'),
         ...(reasoning ? { reasoningEfforts: roxyEfforts(m) } : {}),
         contextLimit: m.context_length ?? m.top_provider?.context_length,
         outputLimit: m.top_provider?.max_completion_tokens,
@@ -387,12 +405,16 @@ async function discoverModels(providerId: string): Promise<ModelInfo[]> {
       signal: AbortSignal.timeout(10_000)
     })
     if (!response.ok) throw new Error('Provider catalog unavailable')
-    const body = (await response.json()) as { data?: { id?: string; name?: string }[] }
+    const body = (await response.json()) as { data?: RoxyModel[] }
     return (Array.isArray(body.data) ? body.data : [])
-      .filter(
-        (m): m is { id: string; name?: string } => typeof m?.id === 'string' && m.id.length > 0
-      )
-      .map((m) => ({ id: m.id, name: m.name || m.id, reasoning: false, toolCall: true }))
+      .filter((m) => typeof m?.id === 'string' && m.id.length > 0)
+      .map((m) => ({
+        id: m.id,
+        name: m.name || m.id,
+        reasoning: false,
+        toolCall: true,
+        imageInput: m.architecture?.input_modalities?.includes('image')
+      }))
   }
   const data = await getCatalog()
   const models = data[seedId]?.models
@@ -403,6 +425,7 @@ async function discoverModels(providerId: string): Promise<ModelInfo[]> {
       name: m.name || m.id,
       reasoning: Boolean(m.reasoning),
       toolCall: Boolean(m.tool_call),
+      imageInput: m.modalities?.input?.includes('image'),
       contextLimit: m.limit?.context,
       outputLimit: m.limit?.output,
       cost: toModelCost(m.cost),
@@ -411,11 +434,12 @@ async function discoverModels(providerId: string): Promise<ModelInfo[]> {
     .sort((a, b) =>
       a.release < b.release ? 1 : a.release > b.release ? -1 : a.name.localeCompare(b.name)
     )
-    .map(({ id, name, reasoning, toolCall, contextLimit, outputLimit, cost }) => ({
+    .map(({ id, name, reasoning, toolCall, imageInput, contextLimit, outputLimit, cost }) => ({
       id,
       name,
       reasoning,
       toolCall,
+      imageInput,
       contextLimit,
       outputLimit,
       ...(cost ? { cost } : {})
@@ -435,6 +459,11 @@ export function modelCost(providerId: string, modelId: string): ModelCost | unde
   const seedId = getProviderSeedId(providerId)
   if (seedId === 'roxy') {
     return roxyCaches.get(providerId)?.data.find((m) => m.id === modelId)?.cost
+  }
+  // Copilot's own per-token rates for this account, not models.dev's list price.
+  if (seedId === 'github-copilot') {
+    const own = copilotCaches.get(providerId)?.data.find((m) => m.id === modelId)?.cost
+    if (own) return own
   }
   if (!cache) return undefined
   const models = cache.data[seedId]?.models

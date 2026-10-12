@@ -8,9 +8,11 @@ import {
   ImagePlus,
   Loader2,
   Pencil,
+  UserRound,
   X
 } from 'lucide-react'
 import type { QueueItem as QueueItemType } from '@shared/types'
+import { isClaimedQueueItem, queueOrigin } from '@shared/queue'
 import { useRoxyStore } from '../lib/store'
 import { imageFilesFrom, readImageFile, type ComposerImage } from '../lib/images'
 import { ImagePreview } from './ImagePreview'
@@ -35,24 +37,24 @@ function toComposerImages(item: QueueItemType): ComposerImage[] {
 }
 
 /**
- * One row of the pending queue. Read-only by default (content + image
- * thumbnails + reorder/remove/edit actions); the pencil flips it into an inline
- * editor that preserves the item's queue position and lets you rewrite the text
- * and add/remove attached images before saving.
+ * One user-authored prompt in the composer queue, including requests to collaborators.
  */
 export function QueuedMessage({
   item,
   index,
-  total
+  total,
+  pending = false
 }: {
   item: QueueItemType
   index: number
   total: number
+  pending?: boolean
 }): JSX.Element {
   const { t } = useTranslation()
   const editQueued = useRoxyStore((s) => s.editQueued)
   const removeQueued = useRoxyStore((s) => s.removeQueued)
   const moveQueued = useRoxyStore((s) => s.moveQueued)
+  const bots = useRoxyStore((s) => s.bots)
 
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState('')
@@ -60,13 +62,15 @@ export function QueuedMessage({
   const [dragging, setDragging] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
-  const running = item.state === 'running'
+  const running = isClaimedQueueItem(item)
+  const automated = queueOrigin(item) !== 'user'
   const failed = item.state === 'failed'
+  const recipient = item.asBotId ? bots.find((bot) => bot.id === item.asBotId) : undefined
   const textRef = useRef<HTMLTextAreaElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
 
   const startEditing = (): void => {
-    if (running) return
+    if (running || pending) return
     setError('')
     setDraft(item.content)
     setDraftImages(toComposerImages(item))
@@ -267,11 +271,22 @@ export function QueuedMessage({
         <QueueItemIndicator />
       )}
       <div className="min-w-0 flex-1">
-        {(running || failed) && (
-          <p className={failed ? 'text-[11px] text-danger' : 'text-[11px] text-accent'}>
-            {failed ? t('queue.failed') : t('queue.running')}
-          </p>
-        )}
+        <div className="mb-0.5 flex flex-wrap items-center gap-1.5 text-[10px] font-medium uppercase tracking-wide">
+          <span className="inline-flex items-center gap-1 text-text-muted">
+            <UserRound className="h-3 w-3" />
+            {automated ? t('queue.automatedRequest') : t('queue.userRequest')}
+          </span>
+          {recipient && (
+            <span className="normal-case tracking-normal text-text-subtle">
+              {t('queue.toCollaborator', { username: recipient.username })}
+            </span>
+          )}
+          {(running || failed) && (
+            <span className={failed ? 'text-danger' : 'text-accent'}>
+              {failed ? t('queue.failed') : t('queue.running')}
+            </span>
+          )}
+        </div>
         {item.content && <QueueItemContent>{item.content}</QueueItemContent>}
         {item.images && item.images.length > 0 && (
           <QueueItemAttachment>
@@ -290,6 +305,9 @@ export function QueuedMessage({
             {item.error}
           </p>
         )}
+        {item.waitReason && item.waitReason !== 'delayed' && (
+          <p className="mt-1 text-[11px] text-text-subtle">{t(`queue.wait.${item.waitReason}`)}</p>
+        )}
         {item.notBefore != null && item.notBefore > Date.now() && (
           <p className="mt-1 text-[11px] text-text-subtle">
             {t('queue.notBefore', { time: new Date(item.notBefore).toLocaleString() })}
@@ -299,14 +317,14 @@ export function QueuedMessage({
       <QueueItemActions>
         <QueueItemAction
           onClick={startEditing}
-          disabled={running}
+          disabled={running || pending}
           title={failed ? t('queue.editRetry') : t('queue.editMessage')}
         >
           <Pencil className="h-3.5 w-3.5" />
         </QueueItemAction>
         <QueueItemAction
           onClick={() => moveQueued(item.id, 'up')}
-          disabled={running || index === 0}
+          disabled={running || pending || automated || index === 0}
           title={t('queue.moveUp')}
           className="disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-text-subtle"
         >
@@ -314,14 +332,14 @@ export function QueuedMessage({
         </QueueItemAction>
         <QueueItemAction
           onClick={() => moveQueued(item.id, 'down')}
-          disabled={running || index === total - 1}
+          disabled={running || pending || automated || index === total - 1}
           title={t('queue.moveDown')}
           className="disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-text-subtle"
         >
           <ChevronDown className="h-3.5 w-3.5" />
         </QueueItemAction>
         <QueueItemAction
-          disabled={running}
+          disabled={running || pending}
           onClick={() => removeQueued(item.id)}
           title={t('queue.removeFromQueue')}
         >

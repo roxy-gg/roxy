@@ -313,12 +313,20 @@ export function ThinkingPicker(): JSX.Element | null {
         onClick={() => setOpen(!open)}
         className={triggerClass}
         title={t('inference.thinkingTitle')}
+        aria-label={`${t('inference.thinkingTitle')}: ${currentLabel}`}
+        aria-haspopup="listbox"
+        aria-expanded={open}
       >
         <Brain className="h-3.5 w-3.5 shrink-0 text-accent" />
         <span>{currentLabel}</span>
       </button>
       {open && (
-        <div className={popoverClass} style={anchor}>
+        <div
+          className={popoverClass}
+          style={anchor}
+          role="listbox"
+          aria-label={t('inference.thinkingTitle')}
+        >
           <div className="shrink-0 border-b border-border px-3 py-2 text-[11px] font-medium text-text-subtle">
             {t('inference.thinkingHeader')}
           </div>
@@ -329,6 +337,8 @@ export function ThinkingPicker(): JSX.Element | null {
                 <button
                   key={e.value}
                   type="button"
+                  role="option"
+                  aria-selected={selected}
                   onClick={() => {
                     void setReasoningEffort(e.value)
                     setOpen(false)
@@ -526,11 +536,8 @@ export function ContextPicker(): JSX.Element | null {
 /**
  * Thinking effort + context budget for a BOT, as plain form fields.
  *
- * A bot's composer deliberately doesn't carry these pickers (see `Composer`):
- * a bot also runs on a schedule, with no renderer open and nobody to touch a
- * footer control, so presenting them as per-turn choices is a lie. They are
- * standing configuration, so they live in the bot's settings pane next to its
- * username and schedules.
+ * Model and effort are also available from the bot composer. Both locations
+ * edit the same standing chat configuration used by direct and scheduled runs.
  *
  * It still writes through the same session actions: the pane only renders for
  * the bot whose chat is open, so "the active session" IS this bot's chat.

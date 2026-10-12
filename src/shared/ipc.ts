@@ -1,6 +1,7 @@
 /** IPC channel names shared by the preload bridge and the main-process handlers. */
 export const CHANNELS = {
   botsList: 'bots:list',
+  botsReorder: 'bots:reorder',
   botsCreate: 'bots:create',
   botsUpdate: 'bots:update',
   botsRemove: 'bots:remove',
@@ -100,6 +101,12 @@ export const CHANNELS = {
    * custom properties. `themesResolve` returns the properties to set on the
    * root element, which is what actually restyles the UI.
    */
+  backgroundGet: 'background:get',
+  backgroundChoose: 'background:choose',
+  backgroundRemove: 'background:remove',
+  backgroundUpdate: 'background:update',
+  backgroundChanged: 'background:changed',
+
   themesList: 'themes:list',
   themesRefresh: 'themes:refresh',
   themesRead: 'themes:read',
@@ -128,6 +135,8 @@ export const CHANNELS = {
   cliproxyLogin: 'cliproxy:login',
   cliproxySignOut: 'cliproxy:signOut',
   cliproxyStop: 'cliproxy:stop',
+  /** remaining subscription allowance for one connection */
+  cliproxyQuota: 'cliproxy:quota',
   /** install from a user-picked archive (blocked networks / air-gapped) */
   cliproxyInstallFile: 'cliproxy:installFile',
   /** main -> renderer: sidecar install/run status changed */
@@ -194,8 +203,6 @@ export const CHANNELS = {
   subagentSnapshot: 'subagent:snapshot',
   /** renderer -> main: every subagent currently running (window (re)load) */
   subagentListRunning: 'subagent:listRunning',
-  /** renderer -> main: which chat is on screen, so a viewed sub session isn't pruned */
-  subagentSetViewed: 'subagent:setViewed',
   /**
    * renderer -> main: cancel ONE running subagent by its session id.
    *

@@ -276,7 +276,7 @@ const extract = (pattern, name) => {
 const decisionCode = transformSync(
   [
     extract(
-      /^function applyAutomationDelta\(payload: RemoteDelta\): void \{[\s\S]*?\n\}\n/m,
+      /^function applyAutomationDelta\(payload: AutomationDelta\): void \{[\s\S]*?\n\}\n/m,
       'applyAutomationDelta'
     ),
     extract(/^async function notifyIfSessionIdle\([\s\S]*?\n\}\n/m, 'notifyIfSessionIdle')
@@ -322,11 +322,11 @@ function decisions({ queue = [], settings = { notifyOnComplete: true }, stopChat
     'notifyTurnComplete',
     'console',
     `
-    let automationRevision = 0;
-    const automationRevisions = new Map();
-    const automationTurnRevisions = new Map();
+    let automationSnapshotEvents = null;
+        const automationTurnRevisions = new Map();
     const applyRemoteDelta = () => {};
-    const mirrorAutomationChat = async () => {};
+    const rememberMessage = () => {};
+    const loadTranscript = async () => {};
     ${decisionCode}
     return { applyAutomationDelta, notifyIfSessionIdle };
   `

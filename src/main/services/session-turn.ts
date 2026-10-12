@@ -3,8 +3,8 @@
  * so the local (renderer-driven) path and the remote (phone-driven) path run the
  * *exact same* code with no drift.
  *
- * It resolves the session's workspace, runs one agent turn, prunes the turn's
- * one-shot subagents, and maps errors/aborts to a stable `LlmResult`. Emitting
+ * It resolves the session's workspace, runs one agent turn, and maps
+ * errors/aborts to a stable `LlmResult`. Emitting
  * events and persisting messages are the caller's job: the local path streams to
  * the renderer (which persists), while the remote host also fans out to the phone
  * and persists on the desktop's behalf.
@@ -12,8 +12,6 @@
 import type { LlmEvent, LlmResult, LlmStartInput } from '../../shared/api'
 import * as repo from '../db/repo'
 import { runAgentTurn } from '../harness'
-import { activeBackgroundSubChatIds } from './background-tasks'
-import { protectedSubChatIds } from './subagent-stream'
 import { setLabel as setBrowserLabel } from './browser'
 import { sessionCwd } from './workspace'
 import { materializePendingWorktree } from './worktree'
@@ -40,16 +38,6 @@ function safeSessionCwd(sessionId: string): string {
       return ''
     }
   }
-}
-
-/**
- * Sub sessions that must survive the end-of-turn prune: any with a detached
- * background job still running, any still streaming, and the one on screen.
- */
-function keepSubchats(): Set<string> {
-  const keep = protectedSubChatIds()
-  for (const id of activeBackgroundSubChatIds()) keep.add(id)
-  return keep
 }
 
 /**
@@ -173,15 +161,18 @@ async function runTurn(
   // mid-upgrade); if any of it throws, the right outcome is a session that runs
   // in its project folder, not a chat that refuses to answer.
   try {
-    const materialized = await materializePendingWorktree(input.sessionId)
+    if (signal.aborted) return { ok: false, error: 'Stopped.' }
+    const materialized = await materializePendingWorktree(input.sessionId, signal)
     // A session that materialized its own git worktree is running as a
     // workstream - isolated branch, isolated tree. Counted only on success, so
     // the number means "sessions that got one", not "sessions that asked".
     if (materialized.ok) trackFeature(input.sessionId, 'worktree')
-    if (materialized.error) emit({ type: 'text', delta: `_${materialized.error}_\n\n` })
+    if (materialized.error && !signal.aborted)
+      emit({ type: 'text', delta: `_${materialized.error}_\n\n` })
   } catch (e) {
     console.warn('[worktree] materialize failed; running in the project folder:', e)
   }
+  if (signal.aborted) return { ok: false, error: 'Stopped.' }
   // Where this session's tools run — its worktree when it has one, else the
   // project folder. The single resolver; never read workspace_path directly.
   const cwd = safeSessionCwd(input.sessionId)
@@ -205,12 +196,8 @@ async function runTurn(
       emit
     })
     if (signal.aborted) return { ok: false, error: 'Stopped.' }
-    // The turn's subagents are one-shot — drop any with nothing queued so they
-    // don't linger in the sidebar after the work is done. Spared: sub sessions
-    // with a still-running background task (Phase 11), one still streaming, and
-    // whichever one the user currently has open (pruning a transcript out from
-    // under someone reading it is the one thing this sweep must never do).
-    repo.pruneSubchats(input.sessionId, keepSubchats())
+    // Finishing work is not deleting history. Child transcripts remain readable
+    // until the user explicitly deletes them or their parent session.
     return { ok: true }
   } catch (e) {
     if (signal.aborted) return { ok: false, error: 'Stopped.' }

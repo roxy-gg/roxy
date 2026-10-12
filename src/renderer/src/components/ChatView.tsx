@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
   Check,
   ChevronRight,
@@ -12,8 +12,14 @@ import {
   Square
 } from 'lucide-react'
 import type { Chat } from '@shared/types'
+import { isVisibleQueueItem } from '@shared/queue'
+import { backgroundOpacity } from '@shared/background'
+import { useBackground } from '../lib/background'
+import { ChatBackground } from './ChatBackground'
 import { resolveSessionConfig } from '@shared/session-config'
 import { useRoxyStore } from '../lib/store'
+import { visibleMessages, visibleQueue } from '../lib/optimistic-messages'
+import { taskTranscript } from '../lib/task-transcript'
 import { useTranslation } from 'react-i18next'
 import { cn } from '../lib/cn'
 import { CanvasTranscript } from '../canvas/CanvasTranscript'
@@ -25,6 +31,9 @@ import { SessionInfo } from './SessionInfo'
 import { WorkstreamStrip } from './WorkstreamStrip'
 import { QueuedMessage } from './QueuedMessage'
 import { UsageMeter } from './UsageMeter'
+import { QuotaMeter } from './QuotaMeter'
+import { upstreamFor } from '@shared/cliproxy'
+import { planSource } from '@shared/quota'
 import {
   Queue,
   QueueList,
@@ -64,11 +73,31 @@ import roxy from '../assets/roxy.png'
 
 export function ChatView(): JSX.Element {
   const { t } = useTranslation()
-  const messages = useRoxyStore((s) => s.messages)
+  const background = useBackground()
+  const storedMessages = useRoxyStore((s) => s.messages)
+  const optimisticMessages = useRoxyStore((s) =>
+    s.activeChatId ? s.optimisticMessages[s.activeChatId] : undefined
+  )
+  const mergedMessages = useMemo(
+    () => visibleMessages(storedMessages, optimisticMessages),
+    [storedMessages, optimisticMessages]
+  )
+  const sentMessageSignal = useRoxyStore((s) =>
+    s.activeChatId ? (s.sentMessageSignal[s.activeChatId] ?? 0) : 0
+  )
   const messagesChatId = useRoxyStore((s) => s.messagesChatId)
   const messagesError = useRoxyStore((s) => s.messagesError)
-  const streaming = useRoxyStore((s) =>
+  const storedStreaming = useRoxyStore((s) =>
     s.activeChatId ? (s.streamingChats[s.activeChatId] ?? null) : null
+  )
+  const subagentPreviews = useRoxyStore((s) => s.subagentPreviews)
+  // Keep absent state undefined so the selector does not allocate an empty array.
+  const runningTasks = useRoxyStore((s) =>
+    s.activeChatId ? s.runningTasks[s.activeChatId] : undefined
+  )
+  const { messages, streaming } = useMemo(
+    () => taskTranscript(mergedMessages, storedStreaming, subagentPreviews, runningTasks),
+    [mergedMessages, storedStreaming, subagentPreviews, runningTasks]
   )
   const sending = useRoxyStore((s) =>
     s.activeChatId
@@ -76,23 +105,24 @@ export function ChatView(): JSX.Element {
       : false
   )
   const submit = useRoxyStore((s) => s.submit)
+  const starting = useRoxyStore((s) =>
+    s.activeChatId ? !!s.startingAutomation[s.activeChatId] : false
+  )
   const stop = useRoxyStore((s) => s.stop)
-  const allQueued = useRoxyStore((s) => s.queue)
+  const storedQueue = useRoxyStore((s) => s.queue)
+  const optimisticQueue = useRoxyStore((s) =>
+    s.activeChatId ? s.optimisticQueue[s.activeChatId] : undefined
+  )
+  const allQueued = useMemo(
+    () => visibleQueue(storedQueue, optimisticQueue),
+    [storedQueue, optimisticQueue]
+  )
   // A running item's prompt is already persisted to the transcript by the main
   // process, so showing its queue row too renders the same message twice.
-  // Failed items stay listed: they're the retry/edit affordance.
-  //
-  // This panel is YOUR outbox: prompts you typed and haven't sent yet. A
-  // machine-generated item (`sourceChatId` is set - bot_invoke inviting a bot to
-  // answer here, or another session handing work over) belongs to a turn already
-  // in flight, not to you, so listing it as an editable draft read as a bug. It
-  // still appears once it FAILS, the one moment you can act on it.
-  const queue = useMemo(
-    () =>
-      allQueued.filter(
-        (item) => item.state !== 'running' && (!item.sourceChatId || item.state === 'failed')
-      ),
-    [allQueued]
+  // Only user requests appear here; automated handoffs and schedules stay hidden.
+  const queue = useMemo(() => allQueued.filter(isVisibleQueueItem), [allQueued])
+  const deliveryIssues = allQueued.filter(
+    (item) => !isVisibleQueueItem(item) && item.state === 'failed'
   )
   const newSession = useRoxyStore((s) => s.newSession)
   const selectChat = useRoxyStore((s) => s.selectChat)
@@ -103,14 +133,6 @@ export function ChatView(): JSX.Element {
   const providers = useRoxyStore((s) => s.providers)
   const copilotNeedsReauthentication = useRoxyStore((s) => s.copilotNeedsReauthentication)
   const refreshProviders = useRoxyStore((s) => s.refreshProviders)
-  // Subscribe to the STORED array, not a defaulted copy. A selector returning
-  // `?? []` builds a new array every call, so zustand's Object.is check never
-  // matches and the component re-renders forever ("getSnapshot should be
-  // cached" -> "Maximum update depth exceeded"). undefined is a stable value;
-  // the empty-array default belongs below, outside the subscription.
-  const runningTasks = useRoxyStore((s) =>
-    s.activeChatId ? s.runningTasks[s.activeChatId] : undefined
-  )
   const backgroundTaskCount = runningTasks?.length ?? 0
   // A subagent working in ITS OWN session. Tracked separately from `sending`
   // (which is per-chat local-send state): nobody "sent" this turn from the UI —
@@ -137,8 +159,14 @@ export function ChatView(): JSX.Element {
   // Wait for history even when live tokens are available, so arrival paints the complete tail once.
   const loading = !messagesError && messagesChatId !== activeChatId
   const isEmpty = !hasContent && !loading
+  const wallpaper =
+    !!background.rendered &&
+    !loading &&
+    !messagesError &&
+    backgroundOpacity(background.settings, isEmpty) > 0
   const botSettings = useRoxyStore((s) => s.botSettings)
   const setBotSettings = useRoxyStore((s) => s.setBotSettings)
+  const botCloseRequest = useRef<(() => void) | null>(null)
   const [infoOpen, setInfoOpen] = useState(false)
 
   // The keyed canvas owns bottom-first arrival and resize anchoring. Queue changes must not re-pin it.
@@ -146,7 +174,11 @@ export function ChatView(): JSX.Element {
     setInfoOpen(false)
   }, [activeChatId])
   const activeChat = chats.find((c) => c.id === activeChatId)
-  const selectedProvider = settings ? resolveSessionConfig(activeChat, settings).providerId : null
+  const queueHasUserRequests = queue.some(
+    (item) => !item.scheduleId && (item.fromUser || !item.sourceChatId)
+  )
+  const sessionConfig = settings ? resolveSessionConfig(activeChat, settings) : null
+  const selectedProvider = sessionConfig?.providerId ?? null
   const provider = selectedProvider
     ? providers.find((p) => p.id === selectedProvider)
     : providers[0]
@@ -166,7 +198,8 @@ export function ChatView(): JSX.Element {
   // No workspace open — prompt to open a folder to start a session.
   if (!activeChat) {
     return (
-      <div className="flex h-full min-w-0 flex-1 flex-col bg-bg">
+      <div className="chat-background-host relative isolate flex h-full min-w-0 flex-1 flex-col bg-bg">
+        <ChatBackground empty />
         <div className="titlebar reserve-controls-right h-12 shrink-0" />
         <div className="flex flex-1 flex-col items-center justify-center px-6 text-center">
           <img
@@ -187,9 +220,20 @@ export function ChatView(): JSX.Element {
   return (
     <div className="@container/chat relative flex h-full min-w-0 flex-1 bg-bg">
       {botPaneOpen && activeBot && (
-        <BotSettingsPane key={activeBot.id} bot={activeBot} onClose={() => setBotSettings(null)} />
+        <BotSettingsPane
+          key={activeBot.id}
+          bot={activeBot}
+          onClose={() => setBotSettings(null)}
+          closeRequest={botCloseRequest}
+        />
       )}
-      <div key="conversation" className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <div
+        key="conversation"
+        className="chat-background-host relative isolate flex min-h-0 min-w-0 flex-1 flex-col"
+        data-wallpaper={wallpaper || undefined}
+        data-glass={(wallpaper && background.settings.glass) || undefined}
+      >
+        {wallpaper && <ChatBackground empty={isEmpty} />}
         <header className="titlebar reserve-controls-right flex h-12 shrink-0 items-center justify-between gap-3 px-4">
           {activeBot ? (
             <div className="flex min-w-0 items-center gap-2">
@@ -267,32 +311,30 @@ export function ChatView(): JSX.Element {
                   />
                 </button>
               )}
-              {backgroundTaskCount > 0 && activeChatId && (
-                // Detached tasks were cancellable in main from day one
-                // (`tasks:cancel`) but nothing ever called it — this badge counted
-                // them and offered no way out. Cancels them all: they're detached
-                // by definition, so "stop the thing I didn't ask for" is the whole
-                // interaction, and per-task control lives on the task card.
-                <button
-                  onClick={() => {
-                    for (const t of runningTasks ?? []) {
-                      void cancelBackgroundTask(activeChatId, t.jobId)
-                    }
-                  }}
-                  title={t('chat.cancelBackground', { count: backgroundTaskCount })}
-                  className="press-scale group flex shrink-0 items-center gap-1 sq sq-md rounded-md bg-accent/10 px-1.5 py-0.5 text-[11px] text-accent transition-colors hover:bg-accent/20"
-                >
-                  <Loader2 className="h-3 w-3 animate-spin group-hover:hidden" />
-                  <Square className="hidden h-2.5 w-2.5 fill-current group-hover:block" />
-                  <span className="tabular-nums">{backgroundTaskCount}</span>
-                </button>
-              )}
             </div>
           )}
           <div className="flex shrink-0 items-center gap-2">
+            {backgroundTaskCount > 0 && activeChatId && (
+              <button
+                onClick={() => {
+                  for (const task of runningTasks ?? []) {
+                    void cancelBackgroundTask(activeChatId, task.jobId)
+                  }
+                }}
+                title={t('chat.cancelBackground', { count: backgroundTaskCount })}
+                className="press-scale group flex shrink-0 items-center gap-1 sq sq-md rounded-md bg-accent/10 px-1.5 py-0.5 text-[11px] text-accent transition-colors hover:bg-accent/20"
+              >
+                <Loader2 className="h-3 w-3 animate-spin group-hover:hidden" />
+                <Square className="hidden h-2.5 w-2.5 fill-current group-hover:block" />
+                <span className="tabular-nums">{backgroundTaskCount}</span>
+              </button>
+            )}
             {activeBot && (
               <button
-                onClick={() => setBotSettings(botPaneOpen ? null : activeBot.id)}
+                onClick={() => {
+                  if (botPaneOpen) botCloseRequest.current?.()
+                  else setBotSettings(activeBot.id)
+                }}
                 title={t('bots.settings')}
                 aria-expanded={botPaneOpen}
                 aria-controls={botPaneOpen ? 'bot-settings-pane' : undefined}
@@ -306,7 +348,14 @@ export function ChatView(): JSX.Element {
                 <Settings className="h-3.5 w-3.5" /> {t('bots.settings')}
               </button>
             )}
-            <UsageMeter />
+            {/* Plan-billed (subscriptions, Copilot): remaining allowance. Per-token: recent spend. */}
+            {activeChat && provider && selectedProvider ? (
+              planSource(provider.seedId, upstreamFor) ? (
+                <QuotaMeter provider={provider} model={sessionConfig?.model} />
+              ) : (
+                <UsageMeter provider={provider} />
+              )
+            ) : null}
           </div>
         </header>
 
@@ -347,9 +396,11 @@ export function ChatView(): JSX.Element {
           </div>
         ) : (
           <CanvasTranscript
+            transparent={wallpaper}
             messages={messages}
             streaming={streaming}
             chatId={activeChatId}
+            pinSignal={sentMessageSignal}
             onCancelSubagent={(subChatId) => void cancelSubagent(subChatId)}
             onCancelTool={(callId) => void cancelToolCall(callId)}
           />
@@ -372,11 +423,36 @@ export function ChatView(): JSX.Element {
           thumb exactly when you drag it to the end. */}
         <div
           aria-hidden
-          className="pointer-events-none relative z-10 -mt-6 mr-2.5 h-6 shrink-0 bg-gradient-to-b from-transparent to-bg"
+          className={cn(
+            'pointer-events-none relative z-10 -mt-6 mr-2.5 h-6 shrink-0',
+            !wallpaper && 'bg-gradient-to-b from-transparent to-bg'
+          )}
         />
 
+        {starting && (
+          <p role="status" className="mx-auto w-full max-w-3xl px-4 pt-2 text-xs text-text-subtle">
+            {t('queue.starting')}
+          </p>
+        )}
+        {deliveryIssues.length > 0 && (
+          <div className={cn('px-4 pt-2', !wallpaper && 'bg-bg')}>
+            <div className="mx-auto max-w-3xl">
+              <p className="mb-1 text-xs text-danger">{t('queue.deliveryIssues')}</p>
+              <QueueList>
+                {deliveryIssues.map((item, i) => (
+                  <QueuedMessage
+                    key={item.id}
+                    item={item}
+                    index={i}
+                    total={deliveryIssues.length}
+                  />
+                ))}
+              </QueueList>
+            </div>
+          </div>
+        )}
         {queue.length > 0 && (
-          <div className="bg-bg px-4 pt-2">
+          <div data-waiting-queue className={cn('px-4 pt-2', !wallpaper && 'bg-bg')}>
             <div className="mx-auto max-w-3xl">
               <Queue>
                 <QueueSection defaultOpen>
@@ -386,7 +462,7 @@ export function ChatView(): JSX.Element {
                       count={queue.length}
                       icon={<ListTree className="h-3.5 w-3.5 text-text-subtle" />}
                     />
-                    {sending && (
+                    {sending && queueHasUserRequests && (
                       <span className="ml-auto text-[10px] text-text-subtle">
                         {t('chat.runsAfterReply')}
                       </span>
@@ -395,7 +471,13 @@ export function ChatView(): JSX.Element {
                   <QueueSectionContent>
                     <QueueList>
                       {queue.map((item, i) => (
-                        <QueuedMessage key={item.id} item={item} index={i} total={queue.length} />
+                        <QueuedMessage
+                          key={item.id}
+                          item={item}
+                          index={i}
+                          total={queue.length}
+                          pending={!!optimisticQueue?.some((entry) => entry.id === item.id)}
+                        />
                       ))}
                     </QueueList>
                   </QueueSectionContent>
@@ -403,6 +485,69 @@ export function ChatView(): JSX.Element {
               </Queue>
             </div>
           </div>
+        )}
+
+        {backgroundTaskCount > 0 && activeChatId && (
+          <section
+            aria-label={t('chat.backgroundRunning', { count: backgroundTaskCount })}
+            className="shrink-0 px-4 pt-2"
+          >
+            <div className="mx-auto max-w-3xl rounded-lg border border-border bg-surface2 px-3 py-2">
+              <div className="mb-1 flex items-center gap-2 text-[11px] text-text-muted">
+                <Loader2 aria-hidden className="h-3 w-3 shrink-0 animate-spin text-accent" />
+                {t('chat.backgroundRunning', { count: backgroundTaskCount })}
+              </div>
+              <div className="max-h-28 overflow-y-auto">
+                {runningTasks?.map((task) => {
+                  const latest = task.subChatId
+                    ? subagentPreviews[task.subChatId]?.at(-1)
+                    : undefined
+                  const activity =
+                    latest?.type === 'tool'
+                      ? [latest.tool, latest.title].filter(Boolean).join(' ')
+                      : t(
+                          latest?.type === 'text'
+                            ? 'transcript.activityWriting'
+                            : 'transcript.activityThinking'
+                        )
+                  return (
+                    <div key={task.jobId} className="flex min-w-0 items-center gap-2">
+                      <button
+                        type="button"
+                        disabled={!task.subChatId}
+                        onClick={() => task.subChatId && void selectChat(task.subChatId)}
+                        title={task.description}
+                        className="flex min-w-0 flex-1 items-center gap-2 rounded px-1 py-1.5 text-left hover:bg-white/5 focus-visible:outline-2 focus-visible:outline-accent"
+                      >
+                        <Hammer aria-hidden className="h-3.5 w-3.5 shrink-0 text-accent" />
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-xs text-text">
+                            {task.description}
+                          </span>
+                          <span className="block truncate font-mono text-[10px] text-text-subtle">
+                            {activity}
+                          </span>
+                        </span>
+                        <ChevronRight
+                          aria-hidden
+                          className="h-3.5 w-3.5 shrink-0 text-text-subtle"
+                        />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void cancelBackgroundTask(activeChatId, task.jobId)}
+                        title={t('chat.cancelSubagent')}
+                        aria-label={t('chat.cancelSubagent')}
+                        className="press-scale flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-text-muted hover:bg-white/5 hover:text-text focus-visible:outline-2 focus-visible:outline-accent"
+                      >
+                        <Square aria-hidden className="h-2.5 w-2.5 fill-current" />
+                      </button>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          </section>
         )}
 
         {provider?.seedId === 'github-copilot' && (

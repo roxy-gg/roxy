@@ -90,6 +90,7 @@ function botSchema(db: Database): void {
   addColumnIfMissing(db, 'queue', 'recipient_id', 'TEXT')
   addColumnIfMissing(db, 'queue', 'reply_to_bot_id', 'TEXT')
   addColumnIfMissing(db, 'queue', 'reply_to_bot_username', 'TEXT')
+  addColumnIfMissing(db, 'queue', 'from_user', 'INTEGER NOT NULL DEFAULT 0')
 }
 
 /** Idempotently finish the old loops-to-bots data migration on repaired databases. */
@@ -682,6 +683,26 @@ export const MIGRATIONS: Migration[] = [
   (db) => {
     addColumnIfMissing(db, 'queue', 'reply_to_bot_id', 'TEXT')
     addColumnIfMissing(db, 'queue', 'reply_to_bot_username', 'TEXT')
+  },
+
+  // ---- v29: queue UI origin is explicit ----
+  // A user-directed collaborator prompt has a source chat just like a machine
+  // handoff. Persist the distinction so retries and reloads never infer it from
+  // mutable execution state such as whether a transcript message was created.
+  (db) => {
+    // Version-skipped databases reach this backfill before schema repair runs.
+    addColumnIfMissing(db, 'queue', 'source_chat_id', 'TEXT')
+    addColumnIfMissing(db, 'queue', 'message_id', 'TEXT')
+    addColumnIfMissing(db, 'queue', 'from_user', 'INTEGER NOT NULL DEFAULT 0')
+    db.exec(`UPDATE queue SET from_user = 1
+      WHERE source_chat_id = chat_id
+        AND message_id IN (SELECT id FROM messages WHERE role = 'user')`)
+  },
+
+  // ---- v30: user-defined bot strip order ----
+  (db) => {
+    botSchema(db)
+    addColumnIfMissing(db, 'bots', 'sort_order', 'INTEGER NOT NULL DEFAULT 0')
   }
 ]
 
@@ -712,6 +733,7 @@ export function repairSchema(db: Database): void {
   // Never overwrite a migrated label or lower a persisted account counter.
   db.transaction(() => repairProviderAccounts(db))()
   db.transaction(() => migrateLegacyLoops(db))()
+  addColumnIfMissing(db, 'bots', 'sort_order', 'INTEGER NOT NULL DEFAULT 0')
   // Columns added by later migrations: CREATE TABLE IF NOT EXISTS won't add
   // them to a table that already exists.
   addColumnIfMissing(db, 'chats', 'worktree_path', 'TEXT')

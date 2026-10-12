@@ -6,6 +6,9 @@
 - `npm run smoke:diff` runs the pure geometry, diff, text-selection, and viewport-windowing checks.
 - `npm run canvas`, then `npx electron test/canvas/bots-smoke.cjs` checks the production bot UI against an in-memory IPC bridge. Open `http://localhost:3114/?bots` for interactive creation, settings, schedules, mention autocomplete, queue retries, and attributed canvas replies. No real model calls or scheduled jobs run in this harness.
 - `npm run perf:canvas` records switch-to-first-paint times and a Chromium CPU profile for fresh main/agent history snapshots. It fails if a switch exceeds 500 ms or if the initial viewport materializes more than 500 text rows.
+- `npm run smoke:background` checks local image import, dimensions, metadata stripping, validation and persistence with temporary user data.
+- `npm run smoke:background-ui` checks all six effects, theme-derived glass, canvas alpha, accessibility preferences and narrow layouts. It starts port 3100 unless `CANVAS_TEST_URL` points to an existing harness server (or a built `file://.../index.html`). Open `?background` for interactive controls beside the real chat UI; its image and IPC bridge are test fixtures.
+- Open `?appearance` for the real Appearance page with in-memory theme actions. `smoke:background-ui` also verifies the Background/Color Theme menu, draft retention, theme switching, keyboard activation and narrow layouts.
 
 Set `CANVAS_PERF_SCALE=10` for 2,000 messages / a 3,000-step agent turn. The switch measurement starts after the fixture's structured clone (standing in for a completed history load), so it measures renderer latency rather than database or IPC latency. Results and CPU profiles go under ignored `test/.out/`.
 

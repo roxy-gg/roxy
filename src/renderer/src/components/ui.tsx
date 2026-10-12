@@ -190,8 +190,8 @@ export function Switch({
     >
       <span
         className={cn(
-          'h-4 w-4 rounded-full bg-white shadow-sm transition-transform duration-200 ease-drawer',
-          checked ? 'translate-x-4' : 'translate-x-0'
+          'h-4 w-4 rounded-full shadow-sm transition-[translate,background-color] duration-200 ease-drawer',
+          checked ? 'translate-x-4 bg-on-accent' : 'translate-x-0 bg-white'
         )}
       />
     </button>

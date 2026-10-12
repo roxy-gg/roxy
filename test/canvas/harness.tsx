@@ -18,6 +18,14 @@ const BotsHarness = lazy(() =>
   import('./BotsHarness').then((module) => ({ default: module.BotsHarness }))
 )
 
+const BackgroundHarness = lazy(() =>
+  import('./BackgroundHarness').then((module) => ({ default: module.BackgroundHarness }))
+)
+
+const AppearanceHarness = lazy(() =>
+  import('./AppearanceHarness').then((module) => ({ default: module.AppearanceHarness }))
+)
+
 document.documentElement.dataset.platform = 'win32'
 const stopMotion = startMotion()
 import.meta.hot?.dispose(stopMotion)
@@ -182,7 +190,15 @@ function CopilotHarness(): JSX.Element {
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    {new URLSearchParams(location.search).has('bots') ? (
+    {new URLSearchParams(location.search).has('appearance') ? (
+      <Suspense>
+        <AppearanceHarness />
+      </Suspense>
+    ) : new URLSearchParams(location.search).has('background') ? (
+      <Suspense>
+        <BackgroundHarness />
+      </Suspense>
+    ) : new URLSearchParams(location.search).has('bots') ? (
       <Suspense>
         <BotsHarness />
       </Suspense>

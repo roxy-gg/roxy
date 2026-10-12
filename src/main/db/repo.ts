@@ -7,6 +7,7 @@ import { DEFAULT_BRANCH_PREFIX, normalizeBranchPrefix } from '../../shared/branc
 import { DEFAULT_LANGUAGE, normalizeLanguage } from '../../shared/i18n'
 import type { Language } from '../../shared/i18n'
 import { DEFAULT_MOTION, normalizeMotion, type MotionPreference } from '../../shared/motion'
+import { isVisibleQueueItem } from '../../shared/queue'
 import type {
   AddMessageInput,
   AppSettings,
@@ -1069,10 +1070,10 @@ export function removeChat(id: string): void {
 /**
  * Walk `parent_id` up to the top-level session that owns this chat.
  *
- * Subagent chats (kind='sub') are transient children of a real session, so any
+ * Subagent chats (kind='sub') are children of a real session, so any
  * resource they create — a background dev server, for one — must be owned by the
- * session the user actually sees, not by the sub chat that gets pruned after the
- * turn. Returns `chatId` unchanged when it has no parent or isn't in the DB (a
+ * parent session, not by a child with a separate resource lifecycle.
+ * Returns `chatId` unchanged when it has no parent or isn't in the DB (a
  * keyless/test caller), and bails out on a cycle rather than looping forever.
  */
 export function rootSessionId(chatId: string): string {
@@ -1095,23 +1096,6 @@ export function listSubchats(parentId: string): Chat[] {
     .prepare('SELECT * FROM chats WHERE parent_id = ? ORDER BY created_at ASC')
     .all(parentId) as ChatRow[]
   return rows.map(rowToChat)
-}
-
-/** Drop a chat's finished subagent sessions that have nothing queued — they're
- *  one-shot by nature and shouldn't pile up in the sidebar after a turn. */
-export function pruneSubchats(parentId: string, keepIds?: ReadonlySet<string>): void {
-  const db = getDb()
-  const subs = db
-    .prepare("SELECT id FROM chats WHERE parent_id = ? AND kind = 'sub'")
-    .all(parentId) as { id: string }[]
-  const queued = db.prepare('SELECT COUNT(*) AS n FROM queue WHERE chat_id = ?')
-  const del = db.prepare('DELETE FROM chats WHERE id = ?')
-  for (const s of subs) {
-    // Keep sub-sessions with a still-running background task (Phase 11) — pruning
-    // one out from under a detached subagent would orphan its work.
-    if (keepIds?.has(s.id)) continue
-    if ((queued.get(s.id) as { n: number }).n === 0) del.run(s.id)
-  }
 }
 
 /** Store a compaction summary for a chat; messages up to `throughAt` are folded in. */
@@ -1320,7 +1304,7 @@ export function listMessages(chatId: string): Message[] {
 }
 
 export function addMessage(input: AddMessageInput): Message {
-  const id = randomUUID()
+  const id = input.id ?? randomUUID()
   const now = Date.now()
   const parts: MessagePart[] = input.parts ?? [{ type: 'text', text: input.content }]
   const partsJson = JSON.stringify(parts)
@@ -1406,11 +1390,13 @@ interface QueueRow {
   reply_to_chat_id: string | null
   hops: number
   not_before: number
-  state: 'pending' | 'running' | 'failed'
+  state: 'pending' | 'starting' | 'running' | 'failed'
   error: string | null
   bot_id: string | null
   bot_username: string | null
   as_bot_id: string | null
+  schedule_id: string | null
+  from_user: number
 }
 
 export function listQueue(chatId: string): QueueItem[] {
@@ -1431,7 +1417,9 @@ export function listQueue(chatId: string): QueueItem[] {
     error: r.error ?? undefined,
     botId: r.bot_id ?? undefined,
     botUsername: r.bot_username ?? undefined,
-    asBotId: r.source_chat_id ? (r.as_bot_id ?? undefined) : undefined
+    asBotId: r.source_chat_id ? (r.as_bot_id ?? undefined) : undefined,
+    fromUser: !!r.from_user,
+    scheduleId: r.schedule_id ?? undefined
   }))
 }
 
@@ -1446,12 +1434,24 @@ export function enqueue(chatId: string, content: string, images?: QueueImage[]):
 }
 
 export function removeQueueItem(id: string): void {
-  const row = getDb().prepare('SELECT state FROM queue WHERE id = ?').get(id) as
-    | { state: string }
-    | undefined
-  if (row?.state === 'running')
-    throw new Error('Stop the session before removing its running message')
-  getDb().prepare(`DELETE FROM queue WHERE id = ? AND state != 'running'`).run(id)
+  const db = getDb()
+  db.transaction(() => {
+    const row = db
+      .prepare('SELECT state, chat_id, source_chat_id, message_id FROM queue WHERE id = ?')
+      .get(id) as
+      | { state: string; chat_id: string; source_chat_id: string | null; message_id: string | null }
+      | undefined
+    if (row?.state === 'running' || row?.state === 'starting')
+      throw new Error('Stop the session before removing its running message')
+    // Send to @bot persists its user bubble before delivery. Cancelling that
+    // pending request must remove it from history too, not just stop delivery.
+    if (row?.state === 'pending' && row.source_chat_id === row.chat_id && row.message_id)
+      db.prepare("DELETE FROM messages WHERE id = ? AND chat_id = ? AND role = 'user'").run(
+        row.message_id,
+        row.chat_id
+      )
+    db.prepare(`DELETE FROM queue WHERE id = ? AND state NOT IN ('starting', 'running')`).run(id)
+  })()
 }
 
 /** Edit a queued item's text + images in place, keeping its `created_at` (so its
@@ -1463,26 +1463,48 @@ export function updateQueueItem(
 ): QueueItem | undefined {
   if (!content.trim() && !images?.length) throw new Error('A prompt is required')
   const imagesJson = images && images.length ? JSON.stringify(images) : null
-  const previous = getDb()
-    .prepare('SELECT content, images, message_id, state FROM queue WHERE id = ?')
+  const db = getDb()
+  const previous = db
+    .prepare(
+      `SELECT content, images, message_id, state,
+      (SELECT role FROM messages WHERE id = queue.message_id) AS message_role
+      FROM queue WHERE id = ?`
+    )
     .get(id) as
     | {
         content: string
         images: string | null
         message_id: string | null
+        message_role: string | null
         state: string
       }
     | undefined
-  if (previous?.state === 'running') throw new Error('This message is already running')
-  // Retrying an unchanged request reuses its user bubble. Editing its content
-  // creates a new user turn, so the model receives the correction, not stale text.
+  if (previous?.state === 'running' || previous?.state === 'starting')
+    throw new Error('This message is already running')
+  // Pending collaborator prompts already have a user bubble. Edit that bubble
+  // in place; detaching it leaves stale history and loses the user's authorship.
+  // Failed turns keep their history and append a correction when edited.
   const changed = previous && (previous.content !== content || previous.images !== imagesJson)
-  getDb()
-    .prepare(
+  const editMessage =
+    changed &&
+    previous.state === 'pending' &&
+    previous.message_role === 'user' &&
+    previous.message_id
+  db.transaction(() => {
+    if (editMessage)
+      db.prepare('UPDATE messages SET content = ?, parts = ? WHERE id = ?').run(
+        content,
+        JSON.stringify([
+          { type: 'text', text: content },
+          ...(images ?? []).map((image) => ({ type: 'image', ...image }))
+        ]),
+        editMessage
+      )
+    db.prepare(
       `UPDATE queue SET content = ?, images = ?, state = 'pending', error = NULL,
-    message_id = CASE WHEN ? THEN NULL ELSE message_id END WHERE id = ? AND state != 'running'`
-    )
-    .run(content, imagesJson, Number(!!changed), id)
+    message_id = CASE WHEN ? THEN NULL ELSE message_id END WHERE id = ? AND state NOT IN ('starting', 'running')`
+    ).run(content, imagesJson, Number(!!changed && !editMessage), id)
+  })()
   const row = getDb().prepare('SELECT * FROM queue WHERE id = ?').get(id) as QueueRow | undefined
   if (!row) return undefined
   return listQueue(row.chat_id).find((item) => item.id === id)
@@ -1491,17 +1513,15 @@ export function updateQueueItem(
 /** Reorder a chat's queue to match `orderedIds` (front = runs next). Assigns
  *  small strictly-increasing sort keys (1,2,3…) — far below any real `Date.now()`
  *  so newly-enqueued items still append after. No-op unless the full set of the
- *  chat's queue ids is passed. */
+ *  chat's queue ids is passed, or if a running/automated row would change slots. */
 export function reorderQueue(chatId: string, orderedIds: string[]): void {
   const db = getDb()
-  if (db.prepare(`SELECT 1 FROM queue WHERE chat_id = ? AND state = 'running'`).get(chatId)) return
-  const existing = db.prepare('SELECT id FROM queue WHERE chat_id = ?').all(chatId) as {
-    id: string
-  }[]
+  const existing = listQueue(chatId)
   if (existing.length < 2) return
   const valid = new Set(existing.map((r) => r.id))
   const ids = orderedIds.filter((id) => valid.has(id))
   if (ids.length !== existing.length || new Set(ids).size !== ids.length) return
+  if (existing.some((row, index) => !isVisibleQueueItem(row) && ids[index] !== row.id)) return
   const update = db.prepare('UPDATE queue SET created_at = ? WHERE id = ?')
   db.transaction(() => ids.forEach((id, i) => update.run(i + 1, id)))()
 }

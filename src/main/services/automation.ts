@@ -1,7 +1,7 @@
 /** Main-process queue owner. Claims are durable; renderer windows only mirror turns. */
 import { BrowserWindow } from 'electron'
 import { randomUUID } from 'node:crypto'
-import type { QueueImage, QueueItem, MessagePart } from '../../shared/types'
+import type { QueueImage, QueueItem, Message, MessagePart } from '../../shared/types'
 import type { ChatMessage, RemoteDelta } from '../../shared/api'
 import { CHANNELS } from '../../shared/ipc'
 import { PartsFold, partsToContent } from '../../shared/parts'
@@ -13,8 +13,12 @@ import {
   contextBudgetFor,
   clampReasoningEffort
 } from '../../shared/session-config'
-import { pickDefaultModel } from '../../shared/models'
+import { pickDefaultModel, resolveProviderModel } from '../../shared/models'
 import { HOST_USERNAME, isHostSpeaker } from '../../shared/bots'
+import { nextQueueItem } from '../../shared/queue'
+import { imageReferenceText, redactImageData } from '../../shared/attachments'
+import { omitMessageImages, validateForwardedImages } from './attachments'
+import { backgroundTaskRequest } from '../../shared/parallel'
 import * as repo from '../db/repo'
 import * as bots from '../db/bots'
 import { getDb } from '../db/database'
@@ -22,7 +26,7 @@ import { listModels } from './models'
 import { compactChat } from './compaction'
 import { subagentSnapshot } from './subagent-stream'
 import { runSessionTurn } from './session-turn'
-import { claimTurn, sessionBusy, queuePaused, resumeQueue } from './turn-state'
+import { claimTurn, sessionBusy, queuePaused, resumeQueue, onTurnAvailable } from './turn-state'
 import {
   relayLocalTurnStart,
   relayLocalTurnEvent,
@@ -32,6 +36,18 @@ import {
 } from './remote'
 
 let timer: ReturnType<typeof setInterval> | null = null
+let unsubscribeTurns: (() => void) | undefined
+let wakePending = false
+
+/** Coalesce wakeups without depending on a renderer or the periodic safety tick. */
+export function requestAutomationWake(): void {
+  if (!timer || wakePending) return
+  wakePending = true
+  setImmediate(() => {
+    wakePending = false
+    if (timer) wakeAutomation()
+  })
+}
 const live = new Map<string, PartsFold>()
 const activityStartedAt = new Map<string, number>()
 /**
@@ -40,6 +56,7 @@ const activityStartedAt = new Map<string, number>()
  * has no bot row - and staying unnamed there would read as that chat's bot.
  */
 const speakers = new Map<string, { botId?: string; botUsername: string }>()
+let sequence = 0
 
 /**
  * How far a request may be handed on before it needs a human again.
@@ -51,6 +68,7 @@ const speakers = new Map<string, { botId?: string; botUsername: string }>()
 const MAX_HOPS = 8
 
 export function notifyAutomation(chatId: string): void {
+  requestAutomationWake()
   for (const win of BrowserWindow.getAllWindows()) {
     try {
       if (!win.isDestroyed()) win.webContents.send(CHANNELS.automationChanged, chatId)
@@ -72,9 +90,10 @@ export function notifyBots(): void {
 }
 
 function emit(delta: RemoteDelta): void {
+  const payload = { ...delta, sequence: ++sequence }
   for (const win of BrowserWindow.getAllWindows()) {
     try {
-      if (!win.isDestroyed()) win.webContents.send(CHANNELS.automationDelta, delta)
+      if (!win.isDestroyed()) win.webContents.send(CHANNELS.automationDelta, payload)
     } catch {
       /* window teardown */
     }
@@ -84,14 +103,18 @@ function emit(delta: RemoteDelta): void {
 export function automationSnapshot(): {
   sessionId: string
   parts: MessagePart[]
+  sequence: number
   activityStartedAt: number
+  phase: 'starting' | 'running'
   botId?: string
   botUsername?: string
 }[] {
   return [...live].map(([sessionId, fold]) => ({
     sessionId,
     parts: fold.parts,
+    sequence,
     activityStartedAt: activityStartedAt.get(sessionId) ?? Date.now(),
+    phase: fold.parts.length ? 'running' : 'starting',
     ...speakers.get(sessionId)
   }))
 }
@@ -104,8 +127,11 @@ export function enqueuePrompt(
     sourceChatId?: string
     replyToChatId?: string
     notBefore?: number
+    scheduleId?: string
     hops?: number
     continueReply?: boolean
+    /** Explicit tool send/create resumes Stop only after admission succeeds. */
+    resume?: boolean
     /** Set when the prompt is machine-generated on a bot's behalf, so the
      *  transcript attributes it to that bot instead of to the user. */
     botId?: string
@@ -121,6 +147,8 @@ export function enqueuePrompt(
      * drain does not re-attribute it as an assistant handoff row.
      */
     fromUser?: boolean
+    /** Reuse an already-persisted result rather than inserting a synthetic prompt. */
+    messageId?: string
   } = {}
 ): QueueItem {
   if (!repo.getChat(chatId)) throw new Error('Session not found')
@@ -149,7 +177,7 @@ export function enqueuePrompt(
   if (count.n >= 100) throw new Error('This session already has 100 queued messages')
   const trimmed = content.trim()
   const item = getDb().transaction(() => {
-    let messageId: string | null = null
+    let messageId: string | null = options.messageId ?? null
     if (options.fromUser && options.sourceChatId) {
       const message = repo.addMessage({
         chatId,
@@ -165,13 +193,14 @@ export function enqueuePrompt(
     const item = repo.enqueue(chatId, trimmed, images)
     getDb()
       .prepare(
-        'UPDATE queue SET source_chat_id = ?, reply_to_chat_id = ?, hops = ?, not_before = ?, continue_reply = ?, bot_id = ?, bot_username = ?, as_bot_id = ?, recipient_id = ?, reply_to_bot_id = ?, reply_to_bot_username = ?, message_id = COALESCE(?, message_id) WHERE id = ?'
+        'UPDATE queue SET source_chat_id = ?, reply_to_chat_id = ?, hops = ?, not_before = ?, schedule_id = ?, continue_reply = ?, bot_id = ?, bot_username = ?, as_bot_id = ?, recipient_id = ?, reply_to_bot_id = ?, reply_to_bot_username = ?, from_user = ?, message_id = COALESCE(?, message_id) WHERE id = ?'
       )
       .run(
         options.sourceChatId ?? null,
         options.replyToChatId ?? null,
         options.hops ?? 0,
         options.notBefore ?? 0,
+        options.scheduleId ?? null,
         Number(!!options.continueReply),
         options.botId ?? null,
         options.botUsername ?? null,
@@ -179,19 +208,18 @@ export function enqueuePrompt(
         recipientId ?? null,
         options.replyToActor?.botId ?? null,
         options.replyToActor?.botUsername ?? null,
+        Number(!!options.fromUser),
         messageId,
         item.id
       )
     return item
   })()
-  if (!options.sourceChatId) resumeQueue(chatId)
+  if (!options.sourceChatId || options.fromUser || options.resume) resumeQueue(chatId)
+  // Claim eligible sends before observers see a waiting row. Same-chat
+  // handoffs remain pending until the caller releases its turn.
+  if (timer && !getDb().inTransaction) drainChat(chatId)
   notifyAutomation(chatId)
   if (options.fromUser && options.sourceChatId) notifyTranscriptChanged(chatId)
-  // Drain on the next event-loop pass, after callers have persisted their own tool result.
-  if (timer)
-    setImmediate(() => {
-      if (timer) wakeAutomation()
-    })
   return repo.listQueue(chatId).find((entry) => entry.id === item.id)!
 }
 
@@ -200,16 +228,55 @@ export function startAutomation(): void {
   // Never replay uncertain tool side effects automatically after a crash.
   getDb()
     .prepare(
-      `UPDATE queue SET state = 'failed', error = 'Interrupted by app shutdown. Edit this message to retry.' WHERE state = 'running'`
+      `UPDATE queue SET state = 'failed', error = 'Interrupted by app shutdown. Edit this message to retry.' WHERE state IN ('starting', 'running')`
     )
     .run()
   timer = setInterval(wakeAutomation, 1000)
+  unsubscribeTurns = onTurnAvailable(requestAutomationWake)
   wakeAutomation()
 }
 
 export function stopAutomation(): void {
   if (timer) clearInterval(timer)
   timer = null
+  unsubscribeTurns?.()
+  unsubscribeTurns = undefined
+}
+
+/** Explain an actual wait, including reservations with no model tokens yet. */
+export function deliveryQueue(chatId: string): QueueItem[] {
+  const items = repo.listQueue(chatId)
+  const eligible = nextQueueItem(items)
+  return items.map((item) => ({
+    ...item,
+    ...(item.state === 'pending'
+      ? {
+          waitReason: queuePaused(chatId)
+            ? ('paused' as const)
+            : sessionBusy(chatId) || subagentSnapshot(chatId) !== null
+              ? ('busy' as const)
+              : (item.notBefore ?? 0) > Date.now()
+                ? ('delayed' as const)
+                : eligible?.id !== item.id
+                  ? ('blocked' as const)
+                  : live.size >= 4
+                    ? ('capacity' as const)
+                    : undefined
+        }
+      : {})
+  }))
+}
+
+function drainChat(chatId: string): void {
+  if (
+    live.size >= 4 ||
+    sessionBusy(chatId) ||
+    queuePaused(chatId) ||
+    subagentSnapshot(chatId) !== null
+  )
+    return
+  const item = nextQueueItem(repo.listQueue(chatId))
+  if (item) void deliver(item).catch((error) => console.error('[bots] delivery failed', error))
 }
 
 export function wakeAutomation(): void {
@@ -221,11 +288,7 @@ export function wakeAutomation(): void {
       .prepare(`SELECT DISTINCT chat_id FROM queue WHERE state = 'pending'`)
       .all() as { chat_id: string }[]
     for (const { chat_id: chatId } of rows) {
-      if (live.size >= 4) break
-      if (sessionBusy(chatId) || queuePaused(chatId) || subagentSnapshot(chatId) !== null) continue
-      const item = repo.listQueue(chatId)[0]
-      if (!item || item.state !== 'pending' || (item.notBefore ?? 0) > Date.now()) continue
-      void deliver(item).catch((error) => console.error('[bots] delivery failed', error))
+      drainChat(chatId)
     }
   } catch (error) {
     console.error('[bots] scheduler failed', error)
@@ -246,13 +309,29 @@ function history(
   budget: number,
   outputReserve: number,
   speaker?: ReturnType<typeof bots.getBot>,
-  asHost = false
+  asHost = false,
+  suppliedReports: ReadonlySet<string> = new Set()
 ): ChatMessage[] {
   const since = repo.getChat(chatId)?.contextSummaryAt ?? 0
   const self = asHost ? undefined : (speaker ?? bots.chatBot(chatId))
+  const waiting = new Set(
+    (
+      getDb()
+        .prepare(
+          "SELECT message_id FROM queue WHERE chat_id = ? AND state = 'pending' AND message_id IS NOT NULL"
+        )
+        .all(chatId) as { message_id: string }[]
+    ).map((row) => row.message_id)
+  )
   const groups = repo
     .listMessages(chatId)
-    .filter((m) => (m.role === 'user' || m.role === 'assistant') && m.createdAt > since)
+    .filter(
+      (m) =>
+        (m.role === 'user' || m.role === 'assistant') &&
+        m.createdAt > since &&
+        !waiting.has(m.id) &&
+        !suppliedReports.has(m.id)
+    )
     .map((m) => reconstructTurn(m, self))
     .filter((g) => g.length)
   const pruned = pruneToolMessages(groups.flat(), { keepRecentTokens: KEEP_RECENT_TOKENS })
@@ -291,17 +370,37 @@ function history(
  * and no request. Even without trimming, a generic continue asks the guest to
  * continue the host's behavior instead of accepting its own assignment.
  */
-function withRequest(messages: ChatMessage[], request: string, assignee?: string): ChatMessage[] {
+function withRequest(
+  messages: ChatMessage[],
+  request: string,
+  assignee?: string,
+  images?: QueueImage[]
+): ChatMessage[] {
   const text = request.trim()
-  if (!text) return messages
-  if (!assignee && messages.some((m) => m.content.includes(text))) return messages
+  if (!text && !images?.length) return messages
+  if (
+    !assignee &&
+    !images?.length &&
+    messages.at(-1)?.role === 'user' &&
+    messages.at(-1)?.content === text
+  )
+    return messages
   // A handoff is a NEW request to its recipient, including work returned to
   // Roxy. Never leave it continuing the previous participant's tool history.
   const restated = {
     role: 'user' as const,
+    ...(images?.length ? { images } : {}),
     content: assignee
       ? `This turn is assigned to you, @${assignee}. The preceding assistant messages include other participants' work, not actions you performed. Carry out the following request yourself and answer here. Do not wait for or invoke @${assignee}: that is you.\n\n${text}`
       : text
+  }
+  if (images?.length) {
+    const attached = new Set(images.map((image) => image.dataUrl))
+    messages = messages.map((message) =>
+      message.images?.length
+        ? { ...message, images: message.images.filter((image) => !attached.has(image.dataUrl)) }
+        : message
+    )
   }
   // Replace the placeholder rather than trail it: they say the same thing, and
   // the real request is the better last word.
@@ -314,12 +413,24 @@ async function deliver(item: QueueItem): Promise<void> {
   const controller = new AbortController()
   const release = claimTurn(item.chatId, controller)
   if (!release) return
-  const claimed = getDb()
-    .prepare(`UPDATE queue SET state = 'running', error = NULL WHERE id = ? AND state = 'pending'`)
-    .run(item.id)
-  if (!claimed.changes) {
+  try {
+    const claimed = getDb()
+      .prepare(
+        `UPDATE queue SET state = 'starting', error = NULL WHERE id = ? AND state = 'pending'`
+      )
+      .run(item.id)
+    if (!claimed.changes) {
+      release()
+      return
+    }
+  } catch (error) {
     release()
-    return
+    // A persistent DB/claim error must not spin on the release wake forever.
+    getDb()
+      .prepare("UPDATE queue SET state = 'failed', error = ? WHERE id = ?")
+      .run(error instanceof Error ? error.message : String(error), item.id)
+    notifyAutomation(item.chatId)
+    throw error
   }
   const fold = new PartsFold()
   live.set(item.chatId, fold)
@@ -331,8 +442,11 @@ async function deliver(item: QueueItem): Promise<void> {
   // How a reply copied to the CALLER's transcript is signed. Same reason, one
   // transcript over: unsigned there means "the bot that owns that chat".
   let returnAuthor: { botId?: string; botUsername?: string } = {}
-  const relay = relayLocalTurnStart(item.chatId)
+  let started = false
+  let savedMessage: Message | undefined
+  let relay: ReturnType<typeof relayLocalTurnStart> = null
   try {
+    relay = relayLocalTurnStart(item.chatId)
     // Read persisted handoff metadata before choosing the speaker and config.
     const previous = getDb()
       .prepare(
@@ -376,7 +490,32 @@ async function deliver(item: QueueItem): Promise<void> {
         : undefined
     if (speaker) speakers.set(item.chatId, speaker)
     returnAuthor = speaker ?? {}
-    emit({ sessionId: item.chatId, kind: 'turn', state: 'running', ...speaker })
+    emit({ sessionId: item.chatId, kind: 'turn', state: 'running', phase: 'starting', ...speaker })
+    let requestMessageId = previous.message_id
+    if (!requestMessageId)
+      getDb().transaction(() => {
+        const message = repo.addMessage({
+          chatId: item.chatId,
+          // A prompt this session's own agent wrote (asking a guest bot for help)
+          // is not something the user said — attributing it to the user made the
+          // request show up as "You", and attributing it to the guest made the
+          // guest appear to ask itself.
+          role: !item.fromUser && item.sourceChatId === item.chatId ? 'assistant' : 'user',
+          ...(previous.bot_id ? { botId: previous.bot_id } : {}),
+          ...(previous.bot_username ? { botUsername: previous.bot_username } : {}),
+          content: item.content,
+          parts: [
+            { type: 'text', text: item.content },
+            ...(item.images ?? []).map((image) => ({ type: 'image' as const, ...image }))
+          ]
+        })
+        getDb().prepare('UPDATE queue SET message_id = ? WHERE id = ?').run(message.id, item.id)
+        requestMessageId = message.id
+      })()
+    notifyAutomation(item.chatId)
+    notifyTranscriptChanged(item.chatId)
+    // Admission is synchronous; setup yields only after the prompt is durable.
+    await Promise.resolve()
     // A host invited into a bot's private chat runs on the app defaults, which
     // include the CURRENT global mode. `resolveSessionConfig` deliberately never
     // inherits a global `agentId` (a session owns its mode for its whole life),
@@ -395,34 +534,24 @@ async function deliver(item: QueueItem): Promise<void> {
         `Connect the provider selected for ${owner}, then edit the queued message to retry.`
       )
     const catalog = await listModels(provider.id).catch(() => [])
+    const selected = config.providerId === provider.id ? config.model : null
     const model =
-      (config.providerId === provider.id ? config.model : null) ||
-      provider.defaultModel ||
-      pickDefaultModel(catalog)
+      provider.seedId === 'github-copilot'
+        ? resolveProviderModel(provider, catalog, selected)
+        : selected || provider.defaultModel || pickDefaultModel(catalog)
     if (!model) throw new Error(`Select a model for ${owner}, then retry.`)
     if (controller.signal.aborted) throw new Error('Stopped.')
-    if (!previous.message_id)
-      getDb().transaction(() => {
-        const message = repo.addMessage({
-          chatId: item.chatId,
-          // A prompt this session's own agent wrote (asking a guest bot for help)
-          // is not something the user said — attributing it to the user made the
-          // request show up as "You", and attributing it to the guest made the
-          // guest appear to ask itself.
-          role: item.sourceChatId === item.chatId ? 'assistant' : 'user',
-          ...(previous.bot_id ? { botId: previous.bot_id } : {}),
-          ...(previous.bot_username ? { botUsername: previous.bot_username } : {}),
-          content: item.content,
-          parts: [
-            { type: 'text', text: item.content },
-            ...(item.images ?? []).map((image) => ({ type: 'image' as const, ...image }))
-          ]
-        })
-        getDb().prepare('UPDATE queue SET message_id = ? WHERE id = ?').run(message.id, item.id)
-      })()
-    notifyAutomation(item.chatId)
-    notifyTranscriptChanged(item.chatId)
     const info = catalog.find((m) => m.id === model)
+    if (
+      item.images?.length &&
+      ((item.sourceChatId && !item.fromUser) || item.images.some((image) => image.forwarded))
+    ) {
+      validateForwardedImages(item.images)
+      if (info?.imageInput !== true)
+        throw new Error(
+          `Images were retained but not sent: ${model} ${info?.imageInput === false ? 'does not support image input' : 'has no verified image-input capability in the provider catalog'}. Choose a vision-capable model and retry, or remove the queued images to proceed without seeing them. No model was switched.`
+        )
+    }
     const budget = contextBudgetFor(config.contextLimit, info?.contextLimit ?? 128000)
     const chat = repo.getChat(item.chatId)
     const estimated = repo
@@ -435,17 +564,50 @@ async function deliver(item: QueueItem): Promise<void> {
     if (!guest && !hostVisiting && estimated > budget * 0.8)
       await compactChat(item.chatId, provider.id, model, controller.signal)
     if (controller.signal.aborted) throw new Error('Stopped.')
+    // message_id anchors the first pending report. Later sibling reports are
+    // coalesced into this continuation even if compaction covered their rows.
+    const transcript = repo.listMessages(item.chatId)
+    const firstReport = transcript.findIndex(
+      (message) =>
+        message.id === previous.message_id &&
+        message.parts.some((part) => part.type === 'tool' && part.resultFor)
+    )
+    const reports =
+      firstReport < 0
+        ? []
+        : transcript
+            .slice(firstReport)
+            .filter(
+              (message) =>
+                message.botId === (previous.bot_id ?? undefined) &&
+                (!!message.botId || message.botUsername === (previous.bot_username ?? undefined)) &&
+                message.parts.some((part) => part.type === 'tool' && part.resultFor)
+            )
+    const requestMessage = transcript.find((m) => m.id === requestMessageId)
+    const previousMessages = history(
+      item.chatId,
+      budget,
+      info?.outputLimit ?? 4096,
+      guest,
+      asHost,
+      new Set(reports.map((message) => message.id))
+    )
+    const messages = withRequest(
+      // Machine handoffs select their attachments explicitly. Shared history
+      // must not re-add removed images or disclose unrelated old screenshots.
+      item.sourceChatId ? previousMessages.map(omitMessageImages) : previousMessages,
+      (reports.length ? backgroundTaskRequest(reports, item.content) : item.content) +
+        (requestMessage ? imageReferenceText(requestMessage) : ''),
+      guest?.username ?? (previous.bot_id && !bot ? 'Roxy' : undefined),
+      item.images
+    )
     const result = await runSessionTurn(
       {
         requestId: randomUUID(),
         sessionId: item.chatId,
         providerId: provider.id,
         model,
-        messages: withRequest(
-          history(item.chatId, budget, info?.outputLimit ?? 4096, guest, asHost),
-          item.content,
-          guest?.username ?? (previous.bot_id && !bot ? 'Roxy' : undefined)
-        ),
+        messages,
         agentId: config.agentId,
         reasoning: info?.reasoning,
         reasoningEffort: clampReasoningEffort(config.reasoningEffort, info?.reasoningEfforts),
@@ -454,6 +616,11 @@ async function deliver(item: QueueItem): Promise<void> {
         asHost
       },
       (event) => {
+        if (!started) {
+          started = true
+          getDb().prepare("UPDATE queue SET state = 'running' WHERE id = ?").run(item.id)
+          emit({ sessionId: item.chatId, kind: 'phase', phase: 'running' })
+        }
         fold.apply(event)
         if (
           event.type === 'tool-start' ||
@@ -477,16 +644,17 @@ async function deliver(item: QueueItem): Promise<void> {
         ? { botUsername: HOST_USERNAME }
         : {}
     returnAuthor = author
-    getDb().transaction(() => {
+    savedMessage = getDb().transaction(() => {
       if (!repo.getChat(item.chatId)) return
-      if (parts.length)
-        repo.addMessage({
-          chatId: item.chatId,
-          role: 'assistant',
-          content: partsToContent(parts),
-          parts,
-          ...author
-        })
+      const message = parts.length
+        ? repo.addMessage({
+            chatId: item.chatId,
+            role: 'assistant',
+            content: partsToContent(parts),
+            parts,
+            ...author
+          })
+        : undefined
       if (!result.ok) throw new Error(result.error ?? 'Model request failed')
       if (
         item.replyToChatId &&
@@ -544,6 +712,7 @@ async function deliver(item: QueueItem): Promise<void> {
         }
       }
       getDb().prepare('DELETE FROM queue WHERE id = ?').run(item.id)
+      return message
     })()
     if (bot) notifyBots()
     if (item.replyToChatId) {
@@ -551,10 +720,17 @@ async function deliver(item: QueueItem): Promise<void> {
       notifyTranscriptChanged(item.replyToChatId)
     }
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
+    const message = redactImageData(error instanceof Error ? error.message : String(error))
     getDb()
       .prepare(`UPDATE queue SET state = 'failed', error = ? WHERE id = ?`)
       .run(message, item.id)
+    if (item.images?.length && !fold.parts.length && repo.getChat(item.chatId))
+      repo.addMessage({
+        chatId: item.chatId,
+        role: 'assistant',
+        content: `Image request could not finish: ${message}\nThe images remain in this session and its queue for retry.`,
+        ...returnAuthor
+      })
     if (
       item.replyToChatId &&
       item.replyToChatId !== item.chatId &&
@@ -570,7 +746,7 @@ async function deliver(item: QueueItem): Promise<void> {
       notifyTranscriptChanged(item.replyToChatId)
     }
     if (fold.parts.length && repo.getChat(item.chatId)) {
-      repo.addMessage({
+      savedMessage = repo.addMessage({
         chatId: item.chatId,
         role: 'assistant',
         content: partsToContent(fold.parts),
@@ -590,6 +766,6 @@ async function deliver(item: QueueItem): Promise<void> {
     if (relay) relayLocalTurnEnd(relay)
     notifyTranscriptChanged(item.chatId)
     notifyAutomation(item.chatId)
-    emit({ sessionId: item.chatId, kind: 'turn', state: 'idle' })
+    emit({ sessionId: item.chatId, kind: 'turn', state: 'idle', message: savedMessage })
   }
 }

@@ -37,6 +37,31 @@ const buttonText = async (value) => {
   )
   await wait()
 }
+const compactConfirmation = async (stacked = false) => {
+  assert.ok(
+    await evaluate(`
+      const dialog = document.querySelector('[aria-labelledby="bot-unsaved-title"]');
+      const rect = dialog.getBoundingClientRect();
+      const buttons = [...dialog.querySelectorAll('button')].map(el => el.getBoundingClientRect());
+      return Math.abs(rect.width - Math.min(448, innerWidth - 32)) < 1
+        && Math.abs(rect.left + rect.width / 2 - innerWidth / 2) < 1
+        && Math.abs(rect.top + rect.height / 2 - innerHeight / 2) < 1
+        && rect.top >= 16 && rect.bottom <= innerHeight - 16
+        && dialog.scrollWidth <= dialog.clientWidth
+        && buttons.every(button => button.left >= rect.left + 20 && button.right <= rect.right - 20
+          && button.top >= rect.top && button.bottom <= rect.bottom)
+        && (${stacked}
+          ? buttons.every((button, i) => !i || button.top >= buttons[i - 1].bottom + 7)
+          : buttons.every(button => Math.abs(button.top - buttons[0].top) < 1));
+    `),
+    `confirmation is compact, viewport-centered and ${stacked ? 'stacked' : 'grouped'} without overflow`
+  )
+}
+const key = async (keyCode, modifiers = []) => {
+  win.webContents.sendInputEvent({ type: 'keyDown', keyCode, modifiers })
+  win.webContents.sendInputEvent({ type: 'keyUp', keyCode, modifiers })
+  await wait()
+}
 async function run() {
   win = new BrowserWindow({
     width: 1280,
@@ -90,6 +115,21 @@ async function run() {
   )
   assert.ok(
     await evaluate(`
+      const avatar = document.querySelector('button[title="@bot"] [data-facehash]');
+      const bounds = avatar.getBoundingClientRect();
+      const button = avatar.parentElement.getBoundingClientRect();
+      const avatars = [...document.querySelectorAll('[data-facehash]')];
+      return bounds.width === 32 && bounds.height === 32
+        && button.width === bounds.width && button.height === bounds.height
+        && getComputedStyle(avatar.parentElement).padding === '0px'
+        && avatars.every(el => getComputedStyle(el).containerType === 'normal'
+          && parseFloat(getComputedStyle(el).borderRadius) === el.getBoundingClientRect().width / 4)
+        && document.querySelector('header [data-facehash]').parentElement.getBoundingClientRect().width >= 28;
+    `),
+    'avatar surfaces fill their buttons and do not collapse parent layout width'
+  )
+  assert.ok(
+    await evaluate(`
       const section = document.querySelector('button[title="New bot"]').parentElement;
       const styles = getComputedStyle(section);
       return styles.paddingTop === '12px' && styles.paddingBottom === '12px';
@@ -102,6 +142,38 @@ async function run() {
   assert.ok(
     await evaluate(`return document.activeElement === document.querySelector('textarea')`),
     'the composer is focused, ready for the first instruction'
+  )
+  // Bot composer edits standing chat inference config without opening settings.
+  assert.ok(
+    await evaluate(`return !!document.querySelector('button[aria-label="Model: Reasoning"]')`)
+  )
+  assert.ok(
+    await evaluate(`return !!document.querySelector('button[aria-label="Thinking effort: High"]')`)
+  )
+  await click('button[aria-label="Thinking effort: High"]')
+  assert.deepEqual(
+    await evaluate(
+      `return [...document.querySelectorAll('[role="listbox"][aria-label="Thinking effort"] [role="option"]')].map(el => el.textContent.trim())`
+    ),
+    ['Low', 'HighDefault'],
+    'only supported effort levels are offered'
+  )
+  await click('[role="listbox"][aria-label="Thinking effort"] [role="option"]:first-child')
+  assert.ok(
+    await evaluate(`return !!document.querySelector('button[aria-label="Thinking effort: Low"]')`)
+  )
+  await click('button[aria-label="Model: Reasoning"]')
+  await type('[data-model-picker-menu] input', 'Fast')
+  await click('[data-model-picker-menu] span[title="Fast"]')
+  assert.ok(await evaluate(`return !!document.querySelector('button[aria-label="Model: Fast"]')`))
+  assert.ok(
+    await evaluate(`return !document.querySelector('button[aria-label^="Thinking effort:"]')`),
+    'non-reasoning models hide effort'
+  )
+  await click('button[aria-label="Model: Fast"]')
+  await click('[data-model-picker-menu] span[title="Reasoning"]')
+  assert.ok(
+    await evaluate(`return !!document.querySelector('button[aria-label="Thinking effort: Low"]')`)
   )
   // Renamed in conversation, exactly as the bot itself would with bot_manage.
   await evaluate(`return window.__renameBot('bot', 'helper')`)
@@ -119,6 +191,26 @@ async function run() {
   assert.ok(await text('Bot limit reached'), 'a failed creation reports why')
   await click('button[title="New bot"]')
   assert.ok(!(await text('Bot limit reached')), 'and the next attempt clears it')
+  assert.ok(
+    await evaluate(`return !!document.querySelector('button[aria-label="Model: Reasoning"]')`),
+    'a new bot inherits the last selected model'
+  )
+  await click('button[title="@helper"]')
+  assert.ok(
+    await evaluate(`return !!document.querySelector('button[aria-label="Thinking effort: Low"]')`),
+    'switching back restores the first bot effort'
+  )
+  assert.deepEqual(
+    await evaluate(
+      `return window.roxy.chats.list().then(chats => chats.filter(chat => chat.kind === 'bot').map(chat => [chat.model, chat.reasoningEffort]))`
+    ),
+    [
+      ['reasoning', 'low'],
+      [null, null]
+    ],
+    'composer changes persist only on the active bot chat'
+  )
+  await click('button[title="@bot"]')
   await evaluate(`return window.__renameBot('bot', 'planner')`)
   await wait()
   await rightClick('button[title="@helper"]')
@@ -316,27 +408,129 @@ async function run() {
     'Delete is bottom-left and the profile Save is bottom-right'
   )
   await click('button[form="bot-profile-form"]')
-  assert.ok(await text('Saved'))
-  // Saving is the end of an edit, so the pane confirms and closes itself.
-  for (
-    let i = 0;
-    i < 20 && (await evaluate(`return !!document.querySelector('#bot-settings-pane')`));
-    i++
+  assert.ok(await text('Save bot settings?'), 'footer Save opens a save-specific confirmation')
+  await compactConfirmation()
+  assert.ok(!(await text('Discard and close')), 'ordinary Save does not offer discard-and-close')
+  await buttonText('Cancel')
+  assert.equal(
+    await evaluate('return document.querySelector("#bot-profile-form textarea").value'),
+    'Be a helpful daily planner.',
+    'canceling Save keeps the profile draft'
   )
-    await wait()
+  await click('button[form="bot-profile-form"]')
+  await evaluate(
+    `window.__updateBot = window.roxy.bots.update;
+      window.roxy.bots.update = () => new Promise((resolve, reject) => { window.__rejectBotUpdate = reject })`
+  )
+  await buttonText('Save changes')
+  await key('Tab')
   assert.ok(
-    await evaluate(`return !document.querySelector('#bot-settings-pane')`),
-    'a saved profile closes the pane'
+    await evaluate(
+      `return document.activeElement === document.querySelector('[aria-labelledby="bot-unsaved-title"]')`
+    ),
+    'focus stays inside the confirmation while all actions are disabled'
+  )
+  await key('Escape')
+  assert.ok(await text('Save bot settings?'), 'Escape cannot dismiss an in-flight save')
+  await evaluate(`window.__rejectBotUpdate(new Error('Test profile write failure'))`)
+  await wait()
+  await key('Tab')
+  assert.equal(await evaluate(`return document.activeElement.textContent.trim()`), 'Cancel')
+  assert.ok(
+    await evaluate(
+      `return document.querySelector('[role=alertdialog]')?.textContent.includes('Test profile write failure')`
+    ),
+    'failed Save keeps the confirmation and shows the error'
+  )
+  assert.equal(
+    await evaluate('return document.querySelector("#bot-profile-form textarea").value'),
+    'Be a helpful daily planner.',
+    'failed Save preserves the draft'
+  )
+  await evaluate(`window.roxy.bots.update = window.__updateBot`)
+  await buttonText('Save changes')
+  assert.ok(await text('Saved'))
+  await wait()
+  assert.ok(
+    await evaluate(`return !!document.querySelector('#bot-settings-pane')`),
+    'ordinary Save leaves settings open'
+  )
+  assert.ok(!(await text('Save bot settings?')), 'successful Save dismisses the confirmation')
+  await type('#bot-profile-form textarea', 'Save after closing prompt')
+  await evaluate(`window.__botConfirmTrigger = document.activeElement`)
+  await click('#bot-settings-pane button[title="Close"]')
+  assert.ok(await text('Save changes before closing?'), 'X prompts for unsaved edits')
+  assert.ok(await text('Discard and close'), 'close prompt offers discard')
+  assert.equal(await evaluate(`return document.activeElement.textContent.trim()`), 'Keep editing')
+  await key('Tab', ['shift'])
+  assert.equal(await evaluate(`return document.activeElement.textContent.trim()`), 'Save and close')
+  await key('Tab')
+  assert.equal(await evaluate(`return document.activeElement.textContent.trim()`), 'Keep editing')
+  await key('Tab')
+  assert.equal(
+    await evaluate(`return document.activeElement.textContent.trim()`),
+    'Discard and close'
+  )
+  await key('Tab')
+  assert.equal(await evaluate(`return document.activeElement.textContent.trim()`), 'Save and close')
+  for (const [width, height] of [
+    [1440, 900],
+    [800, 840],
+    [390, 840],
+    [320, 460]
+  ]) {
+    win.setSize(width, height)
+    await wait()
+    await compactConfirmation(width < 480)
+  }
+  win.setSize(1280, 840)
+  await wait()
+  await compactConfirmation()
+  await key('Escape')
+  assert.ok(
+    await evaluate(`return !document.querySelector('[aria-labelledby="bot-unsaved-title"]')
+      && document.activeElement === window.__botConfirmTrigger`),
+    'Escape only dismisses the confirmation and restores focus'
+  )
+  await key('Escape')
+  assert.ok(await text('Save changes before closing?'), 'Escape protects unsaved edits')
+  await buttonText('Keep editing')
+  assert.ok(
+    await evaluate(`return document.activeElement === window.__botConfirmTrigger`),
+    'keep editing restores focus to the editor'
+  )
+  assert.equal(
+    await evaluate('return document.querySelector("#bot-profile-form textarea").value'),
+    'Save after closing prompt',
+    'keep editing retains draft'
   )
   await click('button[title="Bot settings"]')
+  assert.ok(await text('Save changes before closing?'), 'header toggle uses close confirmation')
+  await buttonText('Save and close')
+  assert.ok(
+    !(await evaluate(`return !!document.querySelector('#bot-settings-pane')`)),
+    'save and close closes settings'
+  )
+  await click('button[title="Bot settings"]')
+  assert.equal(
+    await evaluate('return document.querySelector("#bot-profile-form textarea").value'),
+    'Save after closing prompt',
+    'save and close persisted the edit'
+  )
   await type('#bot-profile-form input', 'x')
   await click('button[form="bot-profile-form"]')
   assert.ok(
     await evaluate(`return !document.querySelector('#bot-profile-form input').validity.valid`),
     'footer Save retains native form validation'
   )
+  assert.ok(!(await text('Save bot settings?')), 'invalid Save does not open confirmation')
   assert.ok(await evaluate(`return !!document.querySelector('button[title="@helper"]')`))
   await type('#bot-profile-form input', 'helper')
+  await type('#bot-profile-form textarea', 'Enter confirmation draft')
+  await evaluate(`document.querySelector('#bot-profile-form').requestSubmit()`)
+  await wait()
+  assert.ok(await text('Save bot settings?'), 'form submission also requires Save confirmation')
+  await buttonText('Cancel')
   await buttonText('Add schedule')
   await type('aside section form input', 'Daily check-in')
   await type('aside section form textarea', 'Plan the day.')
@@ -346,7 +540,7 @@ async function run() {
     await win.webContents.executeJavaScript(
       `window.roxy.bots.list().then(bots => bots.find(b => b.username === 'helper').instructions)`
     ),
-    'Be a helpful daily planner.',
+    'Save after closing prompt',
     'schedule Save does not submit the profile form'
   )
   assert.ok(await text('Every 60 minutes'))
@@ -417,7 +611,17 @@ async function run() {
   await click('button[title="Delete schedule"]')
   assert.ok(await text('No schedules yet.'))
   await click('aside[aria-label="Bot settings"] button[title="Close"]')
+  assert.ok(
+    await text('Save changes before closing?'),
+    'X protects the unsaved schedule-era profile edit'
+  )
+  await buttonText('Discard and close')
   await click('button[title="Bot settings"]')
+  assert.equal(
+    await evaluate(`return document.querySelector('#bot-profile-form textarea').value`),
+    'Save after closing prompt',
+    'discard and close does not persist the profile draft'
+  )
   await evaluate(`document.querySelector('#bot-settings-pane textarea').focus()`)
   win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Escape' })
   win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Escape' })
@@ -429,6 +633,34 @@ async function run() {
   await click('button[title="Bot settings"]')
   await click('button[title="Project session"]')
   assert.ok(await evaluate(`return !document.querySelector('#bot-settings-pane')`))
+  await click('#requests')
+  assert.ok(
+    await evaluate(`
+      const blocks = window.__canvasTranscript.scene().blocks;
+      const bot = blocks.find(block => block.copyText().includes('Implement the avatar fixes'));
+      const human = blocks.find(block => block.copyText().includes('Human request mentioning'));
+      const findImage = nodes => nodes.flatMap(node => node.kind === 'group' ? findImage(node.children) : node.kind === 'image' ? [node.src] : []);
+      const src = findImage(bot.nodes).find(src => src.startsWith('data:image/svg+xml,'));
+      const svg = src ? decodeURIComponent(src.split(',')[1]) : '';
+      return JSON.stringify(bot.nodes).includes('data:image/svg+xml,')
+        && svg.includes('<rect width="100" height="100" rx="25"')
+        && svg.includes('x="20" y="30" width="60" height="40"')
+        && !svg.includes('preserveAspectRatio="none"')
+        && !JSON.stringify(bot.nodes).includes('"name":"user"')
+        && JSON.stringify(human.nodes).includes('"name":"user"')
+        && !JSON.stringify(human.nodes).includes('data:image/svg+xml,');
+    `),
+    'bot-authored project prompts use their avatar while human mentions keep the person icon'
+  )
+  await click('button[title="@helper"]')
+  await click('button[title="Project session"]')
+  assert.ok(
+    await evaluate(`
+      const block = window.__canvasTranscript.scene().blocks.find(block => block.copyText().includes('Implement the avatar fixes'));
+      return JSON.stringify(block.nodes).includes('data:image/svg+xml,');
+    `),
+    'bot prompt avatars survive transcript reload'
+  )
   await type('textarea', '@he')
   assert.ok(await evaluate('return !!document.querySelector("[role=listbox] [role=option]")'))
   win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Tab' })
@@ -454,6 +686,86 @@ async function run() {
   await buttonText('Delete bot')
   for (let i = 0; i < 20 && !(await text('New bot')); i++) await wait()
   assert.ok(await text('New bot'), await evaluate('return document.body.textContent'))
+  // The expanded sidebar must wrap bots (including the new-bot button) as it narrows.
+  for (let i = 0; i < 10; i++) await click('button[title="New bot"]')
+  for (const [width, rows] of [
+    [220, 3],
+    [288, 2],
+    [480, 1]
+  ]) {
+    const layout = await evaluate(`
+      const sidebar = document.querySelector('aside:not([aria-label])');
+      sidebar.style.width = '${width}px';
+      const section = document.querySelector('button[title="New bot"]').parentElement;
+      const bounds = section.getBoundingClientRect();
+      const buttons = [...section.querySelectorAll('button')].map(el => el.getBoundingClientRect());
+      const tops = [...new Set(buttons.map(rect => rect.top))];
+      return {
+        rows: tops.length,
+        widths: buttons.map(rect => rect.width),
+        rowGaps: tops.slice(1).map((top, i) => top - tops[i]),
+        fits: buttons.every(rect => rect.left >= bounds.left + 4 && rect.right <= bounds.right - 4)
+          && section.scrollWidth <= section.clientWidth
+          && sidebar.scrollWidth <= sidebar.clientWidth
+          && document.documentElement.scrollWidth <= innerWidth,
+        addAtEnd: buttons.at(-1).top === tops.at(-1)
+      };
+    `)
+    assert.equal(layout.rows, rows, `${width}px sidebar wraps into ${rows} rows`)
+    assert.ok(
+      layout.fits &&
+        layout.addAtEnd &&
+        layout.widths.every((size) => size === 32) &&
+        layout.rowGaps.every((gap) => gap === 40),
+      `${width}px sidebar keeps 32px avatars, 8px gaps, and no horizontal overflow: ${JSON.stringify(layout)}`
+    )
+  }
+  await evaluate(`document.querySelector('aside:not([aria-label])').style.width = '220px'`)
+  await click('button[title="@bot-9"]')
+  assert.equal(
+    await evaluate(
+      `return document.querySelector('button[title="@bot-9"]').getAttribute('aria-pressed')`
+    ),
+    'true'
+  )
+  await evaluate(`document.querySelector('button[title="@bot-10"]').focus()`)
+  await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent', {
+    type: 'keyDown',
+    key: 'Enter',
+    code: 'Enter',
+    windowsVirtualKeyCode: 13
+  })
+  await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent', {
+    type: 'char',
+    text: '\r',
+    key: 'Enter',
+    code: 'Enter',
+    windowsVirtualKeyCode: 13
+  })
+  await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent', {
+    type: 'keyUp',
+    key: 'Enter',
+    code: 'Enter',
+    windowsVirtualKeyCode: 13
+  })
+  await wait()
+  assert.ok(
+    await evaluate(`return document.querySelector('button[title="@bot-10"]').getAttribute('aria-pressed') === 'true'
+      && document.querySelector('button[title="@bot-10"]').classList.contains('ring-2')`),
+    'a wrapped bot remains keyboard-selectable and visibly selected'
+  )
+  await key('F10', ['shift'])
+  assert.ok(
+    await evaluate(`return !!document.querySelector('[data-bot-menu]')`),
+    'wrapped bot opens its keyboard context menu'
+  )
+  await key('Escape')
+  assert.ok(
+    await evaluate(
+      `return !document.querySelector('[data-bot-menu]') && document.activeElement.title === '@bot-10'`
+    ),
+    'closing the wrapped bot menu restores focus'
+  )
   assert.ok(!errors.length, errors.join('\n'))
   console.log(
     'BOTS UI OK — creation, intro, avatar/canvas identity, left settings layout, bot/mention queue routing, failed retry, instructions, schedules and deletion'

@@ -52,6 +52,12 @@ import { promisify } from 'node:util'
 import { app, BrowserWindow, net as electronNet } from 'electron'
 import * as repo from '../db/repo'
 import type { ConnectedProvider } from '../../shared/types'
+import {
+  parseQuota,
+  quotaErrorMessage,
+  quotaRequests,
+  type ConnectionQuota
+} from '../../shared/quota'
 import { CHANNELS } from '../../shared/ipc'
 import {
   CLIPROXY_VERSION,
@@ -855,6 +861,8 @@ interface AuthFileEntry {
   status?: string
   updated_at?: string
   runtime_only?: boolean
+  /** Runtime handle `api-call` needs; the filename is not accepted there. */
+  auth_index?: string | number
 }
 
 /**
@@ -1055,6 +1063,98 @@ export async function listConnectionModels(
     seen.add(id)
     return [{ id, ...(m.display_name ? { name: m.display_name } : {}) }]
   })
+}
+
+// ---- Quota -------------------------------------------------------------------
+
+/** Upstream usage endpoints are rate limited; the pill refreshes far more often. */
+const QUOTA_TTL_MS = 60_000
+const quotaCache = new Map<string, { at: number; value: Promise<ConnectionQuota> }>()
+
+interface ApiCallResponse {
+  status_code?: number
+  body?: string
+}
+
+/** The ChatGPT workspace the token was minted for; usage is per workspace. */
+function codexAccountId(meta: Record<string, unknown>): string | undefined {
+  if (typeof meta.account_id === 'string' && meta.account_id) return meta.account_id
+  const token = meta.id_token
+  if (typeof token !== 'string') return undefined
+  try {
+    const claims = JSON.parse(Buffer.from(token.split('.')[1] ?? '', 'base64url').toString('utf8'))
+    const auth = claims?.['https://api.openai.com/auth']
+    const id = auth?.chatgpt_account_id ?? claims?.chatgpt_account_id
+    return typeof id === 'string' && id ? id : undefined
+  } catch {
+    return undefined
+  }
+}
+
+async function fetchConnectionQuota(connectionId: string): Promise<ConnectionQuota> {
+  const row = connectionFor(connectionId)
+  const upstream = specFor(row.seedId).upstream
+  const base = { connectionId, upstream, fetchedAt: Date.now() }
+  const file = row.proxyAuthFile
+  if (!file) return { ...base, buckets: [], error: 'Account is not bound. Reconnect it.' }
+  if (!row.enabled) return { ...base, buckets: [], error: 'This connection is disabled.' }
+  // Only reached for a connection the active chat uses, so the sidecar is needed anyway.
+  if (!isLive()) await ensureRunning()
+  const body = await management<{ files?: (AuthFileEntry | string)[] }>('/auth-files')
+  const entry = (body.files ?? []).find(
+    (f): f is AuthFileEntry => typeof f === 'object' && f.name === file
+  )
+  const authIndex = entry?.auth_index != null ? String(entry.auth_index).trim() : ''
+  if (!authIndex) return { ...base, buckets: [], error: 'Account is not loaded by the proxy.' }
+  const accountId =
+    upstream === 'codex'
+      ? codexAccountId(await readAuthMetadata(file).catch(() => ({})))
+      : undefined
+
+  let error = 'No usage data returned.'
+  for (const req of quotaRequests(upstream, { accountId })) {
+    let res: ApiCallResponse
+    try {
+      res = await management<ApiCallResponse>('/api-call', {
+        method: 'POST',
+        body: JSON.stringify({ auth_index: authIndex, ...req })
+      })
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e)
+      continue
+    }
+    const status = res.status_code ?? 0
+    if (status < 200 || status >= 300) {
+      error = quotaErrorMessage(status, res.body ?? '')
+      // An auth failure won't improve on the next fallback URL.
+      if (status === 401 || status === 403) break
+      continue
+    }
+    const parsed = parseQuota(upstream, res.body ?? '')
+    if (parsed.buckets.length) return { ...base, ...parsed }
+  }
+  return { ...base, buckets: [], error }
+}
+
+/**
+ * Remaining subscription allowance for one connection. Cached briefly and
+ * de-duplicated, so every open chat asking at once costs one upstream call.
+ */
+export function connectionQuota(connectionId: string, force = false): Promise<ConnectionQuota> {
+  const hit = quotaCache.get(connectionId)
+  if (hit && !force && Date.now() - hit.at < QUOTA_TTL_MS) return hit.value
+  const value = fetchConnectionQuota(connectionId)
+  quotaCache.set(connectionId, { at: Date.now(), value })
+  // Failures are not cached for the full TTL: a transient error should clear on the next ask.
+  value.then(
+    (q) => {
+      if (q.error && quotaCache.get(connectionId)?.value === value) quotaCache.delete(connectionId)
+    },
+    () => {
+      if (quotaCache.get(connectionId)?.value === value) quotaCache.delete(connectionId)
+    }
+  )
+  return value
 }
 
 /** Removes precisely one binding, including when the sidecar cannot start. */

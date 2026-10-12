@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
 import { CHANNELS } from '../shared/ipc'
 import type {
+  AutomationDelta,
   RoxyApi,
   LlmDelta,
   TaskUpdate,
@@ -17,6 +18,7 @@ import type {
 import type { CliProxyState } from '../shared/cliproxy'
 import type { ResolvedTheme } from '../shared/theme'
 import type { MotionPreference } from '../shared/motion'
+import type { BackgroundState } from '../shared/background'
 
 /**
  * The typed bridge exposed to the renderer as `window.roxy`. Every method maps
@@ -25,6 +27,7 @@ import type { MotionPreference } from '../shared/motion'
 const roxy: RoxyApi = {
   bots: {
     list: () => ipcRenderer.invoke(CHANNELS.botsList),
+    reorder: (ids) => ipcRenderer.invoke(CHANNELS.botsReorder, ids),
     create: (username) => ipcRenderer.invoke(CHANNELS.botsCreate, username),
     update: (id, patch) => ipcRenderer.invoke(CHANNELS.botsUpdate, id, patch),
     remove: (id) => ipcRenderer.invoke(CHANNELS.botsRemove, id),
@@ -47,7 +50,7 @@ const roxy: RoxyApi = {
       return () => ipcRenderer.removeListener(CHANNELS.automationChanged, handler)
     },
     onDelta: (callback) => {
-      const handler = (_event: Electron.IpcRendererEvent, payload: RemoteDelta): void =>
+      const handler = (_event: Electron.IpcRendererEvent, payload: AutomationDelta): void =>
         callback(payload)
       ipcRenderer.on(CHANNELS.automationDelta, handler)
       return () => ipcRenderer.removeListener(CHANNELS.automationDelta, handler)
@@ -137,6 +140,18 @@ const roxy: RoxyApi = {
     remove: (name, cwd) => ipcRenderer.invoke(CHANNELS.skillsRemove, name, cwd),
     install: (source, cwd) => ipcRenderer.invoke(CHANNELS.skillsInstall, source, cwd)
   },
+  background: {
+    get: () => ipcRenderer.invoke(CHANNELS.backgroundGet),
+    choose: () => ipcRenderer.invoke(CHANNELS.backgroundChoose),
+    remove: () => ipcRenderer.invoke(CHANNELS.backgroundRemove),
+    update: (settings) => ipcRenderer.invoke(CHANNELS.backgroundUpdate, settings),
+    onChanged: (callback) => {
+      const handler = (_event: Electron.IpcRendererEvent, state: BackgroundState): void =>
+        callback(state)
+      ipcRenderer.on(CHANNELS.backgroundChanged, handler)
+      return () => ipcRenderer.removeListener(CHANNELS.backgroundChanged, handler)
+    }
+  },
   themes: {
     list: () => ipcRenderer.invoke(CHANNELS.themesList),
     refresh: () => ipcRenderer.invoke(CHANNELS.themesRefresh),
@@ -185,6 +200,7 @@ const roxy: RoxyApi = {
       ipcRenderer.invoke(CHANNELS.cliproxyLogin, providerId, connectionId),
     signOut: (providerId, file) => ipcRenderer.invoke(CHANNELS.cliproxySignOut, providerId, file),
     stop: () => ipcRenderer.invoke(CHANNELS.cliproxyStop),
+    quota: (connectionId, force) => ipcRenderer.invoke(CHANNELS.cliproxyQuota, connectionId, force),
     installFromFile: () => ipcRenderer.invoke(CHANNELS.cliproxyInstallFile),
     onState: (callback) => {
       const handler = (_event: Electron.IpcRendererEvent, state: CliProxyState): void =>
@@ -243,7 +259,6 @@ const roxy: RoxyApi = {
   subagents: {
     snapshot: (subChatId) => ipcRenderer.invoke(CHANNELS.subagentSnapshot, subChatId),
     listRunning: () => ipcRenderer.invoke(CHANNELS.subagentListRunning),
-    setViewed: (chatId) => ipcRenderer.invoke(CHANNELS.subagentSetViewed, chatId),
     cancel: (subChatId) => ipcRenderer.invoke(CHANNELS.subagentCancel, subChatId),
     onDelta: (callback) => {
       const handler = (_event: Electron.IpcRendererEvent, payload: SubagentDelta): void =>

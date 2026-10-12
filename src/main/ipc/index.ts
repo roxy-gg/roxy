@@ -2,6 +2,8 @@ import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import { CHANNELS } from '../../shared/ipc'
 import type { Language } from '../../shared/i18n'
 import { DEFAULT_MOTION, type MotionPreference } from '../../shared/motion'
+import type { BackgroundResult, BackgroundSettings } from '../../shared/background'
+import * as background from '../services/background'
 import type { SessionConfigPatch } from '../../shared/session-config'
 import type { ClipboardAction } from '../../shared/context-menu'
 import { clipboardHasContent, runClipboardAction } from '../services/context-menu'
@@ -35,6 +37,7 @@ import * as notifications from '../services/notifications'
 import * as repo from '../db/repo'
 import * as copilot from '../services/copilot'
 import * as cliproxy from '../services/cliproxy'
+import { copilotQuota } from '../services/copilot-quota'
 import * as browser from '../services/browser'
 import * as browserProxy from '../services/browser-proxy'
 import * as cookies from '../services/cookies'
@@ -71,7 +74,6 @@ import {
 import {
   endSubagentRuns,
   listRunningSubagents,
-  setViewedSubChat,
   subagentSnapshot,
   cancelSubagentRun,
   cancelSubagentRunsFor
@@ -106,6 +108,7 @@ import { getDb } from '../db/database'
 import type { BotJobInput } from '../../shared/bots'
 import {
   automationSnapshot,
+  deliveryQueue,
   enqueuePrompt,
   notifyAutomation,
   notifyBots,
@@ -271,6 +274,8 @@ export function registerIpc(): void {
     }
     repo.resetAll()
     await browserProxy.reset()
+    await background.resetBackground()
+    broadcastBackground({ ok: true, state: await background.getBackground() })
     invalidateCopilotModels()
     invalidateCopilotToken()
     for (const window of BrowserWindow.getAllWindows())
@@ -540,6 +545,7 @@ export function registerIpc(): void {
     // above the page, so CSS cannot reach them -- they have to be repainted
     // here or they keep the old theme's colors in the corner of the window.
     applyWindowChromeAll(resolved)
+    browser.applyThemeToErrorPages(resolved)
     for (const win of BrowserWindow.getAllWindows()) {
       try {
         if (!win.isDestroyed()) win.webContents.send(CHANNELS.themesChanged, resolved)
@@ -549,6 +555,33 @@ export function registerIpc(): void {
     }
     return resolved
   }
+
+  const broadcastBackground = (result: BackgroundResult): BackgroundResult => {
+    if (result.ok)
+      for (const win of BrowserWindow.getAllWindows()) {
+        if (!win.isDestroyed()) win.webContents.send(CHANNELS.backgroundChanged, result.state)
+      }
+    return result
+  }
+  ipcMain.handle(CHANNELS.backgroundGet, () => background.getBackground())
+  ipcMain.handle(CHANNELS.backgroundChoose, async (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    const options: Electron.OpenDialogOptions = {
+      properties: ['openFile'],
+      filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif'] }]
+    }
+    const chosen = win
+      ? await dialog.showOpenDialog(win, options)
+      : await dialog.showOpenDialog(options)
+    if (chosen.canceled || !chosen.filePaths[0]) return null
+    return broadcastBackground(await background.importBackground(chosen.filePaths[0]))
+  })
+  ipcMain.handle(CHANNELS.backgroundRemove, async () =>
+    broadcastBackground(await background.removeBackground())
+  )
+  ipcMain.handle(CHANNELS.backgroundUpdate, async (_e, settings: Partial<BackgroundSettings>) =>
+    broadcastBackground(await background.updateBackground(settings))
+  )
 
   ipcMain.handle(CHANNELS.themesList, () => themeList())
   ipcMain.handle(CHANNELS.themesRefresh, () => {
@@ -733,6 +766,14 @@ export function registerIpc(): void {
     return cliproxy.status()
   })
   ipcMain.handle(CHANNELS.cliproxyStop, () => cliproxy.stop())
+  // One quota channel for every plan-based provider; the renderer needn't know
+  // whether an account is served by the sidecar or by GitHub directly.
+  ipcMain.handle(CHANNELS.cliproxyQuota, (_e, connectionId: string, force?: boolean) => {
+    const id = String(connectionId)
+    return repo.getProviderSeedId(id) === 'github-copilot'
+      ? copilotQuota(id, force === true)
+      : cliproxy.connectionQuota(id, force === true)
+  })
   ipcMain.handle(CHANNELS.cliproxyInstallFile, async (event) => {
     const win = BrowserWindow.fromWebContents(event.sender)
     const filters = [
@@ -830,6 +871,10 @@ export function registerIpc(): void {
 
   // ---- bots ----
   ipcMain.handle(CHANNELS.botsList, () => bots.listBots())
+  ipcMain.handle(CHANNELS.botsReorder, (_e, ids: string[]) => {
+    bots.reorderBots(ids)
+    notifyBots()
+  })
   ipcMain.handle(CHANNELS.botsCreate, (_e, username?: string) => {
     const bot = bots.createBot(username)
     notifyBots()
@@ -874,7 +919,7 @@ export function registerIpc(): void {
     if (!job) throw new Error('Schedule not found')
     const bot = bots.getBot(job.botId)
     if (!bot) throw new Error('Bot not found')
-    const item = enqueuePrompt(bot.chatId, job.prompt)
+    const item = enqueuePrompt(bot.chatId, job.prompt, undefined, { scheduleId: job.id })
     wakeAutomation()
     return item
   })
@@ -913,7 +958,7 @@ export function registerIpc(): void {
   // ---- queue ----
   // Each mutation re-mirrors the shared queue to any paired phone (remote is a
   // no-op when nothing is shared), so desktop-side edits stay in sync on both ends.
-  ipcMain.handle(CHANNELS.queueList, (_e, chatId: string) => repo.listQueue(chatId))
+  ipcMain.handle(CHANNELS.queueList, (_e, chatId: string) => deliveryQueue(chatId))
   ipcMain.handle(
     CHANNELS.queueAdd,
     (_e, chatId: string, content: string, images?: QueueImage[], options?: unknown) => {
@@ -931,7 +976,10 @@ export function registerIpc(): void {
       | undefined
     repo.removeQueueItem(id)
     remote.notifyQueueChanged()
-    if (item) notifyAutomation(item.chat_id)
+    if (item) {
+      notifyAutomation(item.chat_id)
+      remote.notifyTranscriptChanged(item.chat_id)
+    }
   })
   ipcMain.handle(CHANNELS.queueReorder, (_e, chatId: string, ids: string[]) => {
     repo.reorderQueue(chatId, ids)
@@ -944,6 +992,7 @@ export function registerIpc(): void {
     if (item) {
       resumeQueue(item.chatId)
       notifyAutomation(item.chatId)
+      remote.notifyTranscriptChanged(item.chatId)
     }
     return item
   })
@@ -962,6 +1011,10 @@ export function registerIpc(): void {
     if (localTurnReleases.has(input.requestId))
       return { ok: false, error: 'Request ID is already in use.' }
     if (!repo.getChat(input.sessionId)) return { ok: false, error: 'Session not found.' }
+    // Low-level/legacy clients must not leapfrog durable requests. Ordinary
+    // composer sends use queue admission instead of this renderer-owned path.
+    if (repo.listQueue(input.sessionId).length)
+      return { ok: false, error: 'This session has queued work. Send through the queue instead.' }
     // Stop PAUSES this session's queue, and only enqueueing or editing a prompt
     // ever lifted that. Sending a message directly did not, so anything already
     // queued - a guest bot invited into this thread, a handoff from another
@@ -1067,7 +1120,7 @@ export function registerIpc(): void {
   })
 
   // ---- background subagent tasks (Phase 11) ----
-  ipcMain.handle(CHANNELS.tasksListRunning, (_e, sessionId: string) =>
+  ipcMain.handle(CHANNELS.tasksListRunning, (_e, sessionId?: string) =>
     listRunningBackgroundJobs(sessionId)
   )
   ipcMain.handle(CHANNELS.tasksCancel, (_e, jobId: string) => cancelBackgroundJob(jobId))
@@ -1080,9 +1133,6 @@ export function registerIpc(): void {
   // prompt with no reply.
   ipcMain.handle(CHANNELS.subagentSnapshot, (_e, subChatId: string) => subagentSnapshot(subChatId))
   ipcMain.handle(CHANNELS.subagentListRunning, () => listRunningSubagents())
-  ipcMain.handle(CHANNELS.subagentSetViewed, (_e, chatId: string | null) =>
-    setViewedSubChat(chatId)
-  )
   // Cancel one delegate without stopping the turn that launched it. The run
   // tears itself down through its own exit path (see cancelSubagentRun), so
   // there's nothing to clean up here.

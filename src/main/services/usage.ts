@@ -16,6 +16,9 @@ import { listMessages } from '../db/repo'
 import { messageTokens } from '../../shared/context'
 import { aggregateUsage, usageCost } from '../../shared/cost'
 import { modelCost } from './models'
+import { isSeedProviderId, resolveSeed } from '../../shared/providers'
+import { planSource } from '../../shared/quota'
+import { upstreamFor } from '../../shared/cliproxy'
 import type { UsageStats, TokenUsage } from '../../shared/types'
 
 const DAY_MS = 24 * 60 * 60 * 1000
@@ -27,11 +30,38 @@ function startOfToday(now: number): number {
   return d.getTime()
 }
 
-/** Human names for connected providers, keyed by id (for the tab labels). */
-function providerNames(): Record<string, string> {
+/**
+ * Human names for every provider id that has usage rows, so no raw id ever
+ * reaches the UI. Rows outlive their connection: a pre-accounts install keyed
+ * rows by the seed id (`roxy`, `github-copilot`), and a disconnected account
+ * leaves its UUID behind. Connected accounts get their brand in front (see
+ * `accountDisplayName`).
+ */
+function providerNames(ids: Iterable<string>): Record<string, string> {
   const names: Record<string, string> = {}
-  for (const p of repo.listConnectedProviders()) names[p.id] = p.name
+  for (const p of repo.listConnectedProviders()) names[p.id] = accountDisplayName(p.seedId, p.name)
+  for (const id of ids) {
+    if (names[id]) continue
+    names[id] = isSeedProviderId(id) ? brandOf(id) : 'Disconnected account'
+  }
   return names
+}
+
+/** The short product name: "ChatGPT", not "ChatGPT / Codex (subscription)". */
+function brandOf(seedId: string): string {
+  return planSource(seedId, upstreamFor)?.accountLabel ?? resolveSeed(seedId).name
+}
+
+/**
+ * "ChatGPT 3" stays as is, since it already names the product. A renamed or
+ * generic label gets the brand in front ("Google · Personal",
+ * "Roxy.gg Inference · API Key").
+ */
+function accountDisplayName(seedId: string, name: string): string {
+  const brand = brandOf(seedId)
+  const label = name.trim()
+  if (!label) return brand
+  return label.toLowerCase().startsWith(brand.toLowerCase()) ? label : `${brand} · ${label}`
 }
 
 /**
@@ -88,5 +118,6 @@ export function getUsageStats(): UsageStats {
   const now = Date.now()
   const since = now - 30 * DAY_MS
   const records = repo.listUsageSince(since)
-  return aggregateUsage(records, providerNames(), now, startOfToday(now))
+  const names = providerNames(new Set(records.map((r) => r.providerId)))
+  return aggregateUsage(records, names, now, startOfToday(now))
 }

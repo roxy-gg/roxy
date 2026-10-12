@@ -217,6 +217,7 @@ void app
       const [modelsA, modelsB] = await Promise.all([listModels(a.id), listModels(b.id)])
       assert.equal(modelsA[0]?.id, 'model-a')
       assert.equal(modelsB[0]?.id, 'model-b')
+      assert.equal(modelsB[0]?.imageInput, undefined, 'missing modality metadata stays unknown')
       assert.equal((await openaiEndpoint(a.id)).url, 'http://local-a.test/v1/chat/completions')
       assert.equal((await openaiEndpoint(b.id)).url, 'http://local-b.test/v1/chat/completions')
       repo.disconnectProvider(a.id)
@@ -255,12 +256,23 @@ void app
         assert.ok(token === 'Bearer team-a' || token === 'Bearer team-b')
         const account = token!.slice(7)
         return Response.json({
-          data: [{ id: account, supported_parameters: ['tools'], pricing: { prompt: '0.000001' } }]
+          data: [
+            {
+              id: account,
+              supported_parameters: ['tools'],
+              architecture: {
+                input_modalities: account === 'team-a' ? ['text', 'image'] : ['text']
+              },
+              pricing: { prompt: '0.000001' }
+            }
+          ]
         })
       }
       const [catalogA, catalogB] = await Promise.all([listModels(teamA.id), listModels(teamB.id)])
       assert.equal(catalogA[0]?.id, 'team-a')
       assert.equal(catalogB[0]?.id, 'team-b')
+      assert.equal(catalogA[0]?.imageInput, true)
+      assert.equal(catalogB[0]?.imageInput, false)
       assert.equal(modelCost(teamA.id, 'team-a')?.input, 1)
       assert.equal(modelCost(teamA.id, 'team-b'), undefined)
       repo.connectProvider({ id: 'roxy', connectionId: teamA.id, apiKey: 'expired' })
@@ -330,6 +342,25 @@ void app
       globalThis.fetch = async () => Response.json({ login: 'missing-id' })
       await assert.rejects(accountIdentity('github-a'), /invalid account identity/)
       const copilot = repo.storeCopilotCredential({ accessToken: 'before-reconnect' })
+      globalThis.fetch = async (url) => {
+        if (String(url).endsWith('/copilot_internal/v2/token'))
+          return Response.json({
+            token: 'image-catalog-session',
+            expires_at: Date.now() / 1000 + 3600
+          })
+        assert.ok(String(url).endsWith('/models'))
+        return Response.json({
+          data: [true, false, undefined].map((vision, index) => ({
+            id: `image-${index}`,
+            model_picker_enabled: true,
+            capabilities: { type: 'chat', supports: { vision, tool_calls: true } }
+          }))
+        })
+      }
+      assert.deepEqual(
+        (await listModels(copilot.id)).map((m) => m.imageInput),
+        [true, false, undefined]
+      )
       globalThis.fetch = async (url) => {
         if (String(url).endsWith('/copilot_internal/v2/token')) {
           return Response.json({ token: 'old-session', expires_at: Date.now() / 1000 + 3600 })

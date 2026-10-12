@@ -88,6 +88,7 @@ export function ProxyPanel({ compact = false }: { compact?: boolean }): JSX.Elem
   const toggle = async (value: boolean): Promise<void> => {
     if (value && (!host.trim() || !port)) {
       setEnabled(true)
+      setNote(null)
       return
     }
     setEnabled(value)
@@ -132,113 +133,131 @@ export function ProxyPanel({ compact = false }: { compact?: boolean }): JSX.Elem
             {t('proxy.title')}
           </div>
           <p className="mt-1 text-xs text-text-muted">{t('proxy.description')}</p>
+          {/* The form (and its status line) is hidden while disabled, so a
+              disable confirmation or error would otherwise never be seen. */}
+          {!enabled && note && (
+            <p
+              className={cn('mt-2 text-xs', note.kind === 'error' ? 'text-danger' : 'text-success')}
+            >
+              {note.kind === 'ok' && <Check className="mr-1 inline h-3.5 w-3.5" />}
+              {note.text}
+            </p>
+          )}
         </div>
         <Switch checked={enabled} onChange={(value) => void toggle(value)} disabled={busy} />
       </div>
 
-      <div
-        className={cn('grid gap-3 border-t border-border', compact ? 'p-4' : 'p-4 sm:grid-cols-6')}
-      >
-        <Field label={t('proxy.protocol')} className={compact ? '' : 'sm:col-span-2'}>
-          <select
-            value={scheme}
-            onChange={(e) => setScheme(e.target.value as BrowserProxyScheme)}
-            className="h-9 w-full sq sq-lg sq-ring rounded-lg border border-border bg-surface-2 px-3 text-sm uppercase text-text outline-none focus:border-accent/70"
-          >
-            <option value="http">HTTP</option>
-            <option value="https">HTTPS</option>
-            <option value="socks4">SOCKS4</option>
-            <option value="socks5">SOCKS5</option>
-          </select>
-        </Field>
-        <Field label={t('proxy.host')} className={compact ? '' : 'sm:col-span-3'}>
-          <Input
-            value={host}
-            onChange={(e) => setHost(e.target.value)}
-            placeholder={t('proxy.hostPlaceholder')}
-            spellCheck={false}
-          />
-        </Field>
-        <Field label={t('proxy.port')} className={compact ? '' : 'sm:col-span-1'}>
-          <Input
-            value={port}
-            onChange={(e) => setPort(e.target.value.replace(/\D/g, '').slice(0, 5))}
-            placeholder="8080"
-            inputMode="numeric"
-          />
-        </Field>
-        <Field label={t('proxy.username')} className={compact ? '' : 'sm:col-span-3'}>
-          <Input
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-            placeholder={t('proxy.optional')}
-            disabled={authUnsupported}
-            autoComplete="off"
-          />
-        </Field>
-        <Field label={t('proxy.password')} className={compact ? '' : 'sm:col-span-3'}>
-          <Input
-            type="password"
-            value={password}
-            onChange={(e) => {
-              setPassword(e.target.value)
-              setClearPassword(false)
-            }}
-            placeholder={passwordPlaceholder || t('proxy.optional')}
-            disabled={authUnsupported}
-            autoComplete="new-password"
-          />
-        </Field>
+      {enabled && (
+        <div
+          className={cn(
+            'grid gap-3 border-t border-border',
+            compact ? 'p-4' : 'p-4 sm:grid-cols-6'
+          )}
+        >
+          <Field label={t('proxy.protocol')} className={compact ? '' : 'sm:col-span-2'}>
+            <select
+              value={scheme}
+              onChange={(e) => setScheme(e.target.value as BrowserProxyScheme)}
+              className="h-9 w-full sq sq-lg sq-ring rounded-lg border border-border bg-surface-2 px-3 text-sm uppercase text-text outline-none focus:border-accent/70"
+            >
+              <option value="http">HTTP</option>
+              <option value="https">HTTPS</option>
+              <option value="socks4">SOCKS4</option>
+              <option value="socks5">SOCKS5</option>
+            </select>
+          </Field>
+          <Field label={t('proxy.host')} className={compact ? '' : 'sm:col-span-3'}>
+            <Input
+              value={host}
+              onChange={(e) => setHost(e.target.value)}
+              placeholder={t('proxy.hostPlaceholder')}
+              spellCheck={false}
+            />
+          </Field>
+          <Field label={t('proxy.port')} className={compact ? '' : 'sm:col-span-1'}>
+            <Input
+              value={port}
+              onChange={(e) => setPort(e.target.value.replace(/\D/g, '').slice(0, 5))}
+              placeholder="8080"
+              inputMode="numeric"
+            />
+          </Field>
+          <Field label={t('proxy.username')} className={compact ? '' : 'sm:col-span-3'}>
+            <Input
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              placeholder={t('proxy.optional')}
+              disabled={authUnsupported}
+              autoComplete="off"
+            />
+          </Field>
+          <Field label={t('proxy.password')} className={compact ? '' : 'sm:col-span-3'}>
+            <Input
+              type="password"
+              value={password}
+              onChange={(e) => {
+                setPassword(e.target.value)
+                setClearPassword(false)
+              }}
+              placeholder={passwordPlaceholder || t('proxy.optional')}
+              disabled={authUnsupported}
+              autoComplete="new-password"
+            />
+          </Field>
 
-        {authUnsupported && (
-          <p className={cn('text-xs text-text-subtle', compact ? '' : 'sm:col-span-6')}>
-            {t('proxy.socksAuth')}
-          </p>
-        )}
-        {saved.hasPassword && !authUnsupported && (
-          <label
+          {authUnsupported && (
+            <p className={cn('text-xs text-text-subtle', compact ? '' : 'sm:col-span-6')}>
+              {t('proxy.socksAuth')}
+            </p>
+          )}
+          {saved.hasPassword && !authUnsupported && (
+            <label
+              className={cn(
+                'flex items-center gap-2 text-xs text-text-muted',
+                compact ? '' : 'sm:col-span-6'
+              )}
+            >
+              <input
+                type="checkbox"
+                checked={clearPassword}
+                onChange={(e) => {
+                  setClearPassword(e.target.checked)
+                  if (e.target.checked) setPassword('')
+                }}
+              />
+              {t('proxy.clearPassword')}
+            </label>
+          )}
+
+          <div
             className={cn(
-              'flex items-center gap-2 text-xs text-text-muted',
+              'flex items-center justify-between gap-3',
               compact ? '' : 'sm:col-span-6'
             )}
           >
-            <input
-              type="checkbox"
-              checked={clearPassword}
-              onChange={(e) => {
-                setClearPassword(e.target.checked)
-                if (e.target.checked) setPassword('')
-              }}
-            />
-            {t('proxy.clearPassword')}
-          </label>
-        )}
-
-        <div
-          className={cn('flex items-center justify-between gap-3', compact ? '' : 'sm:col-span-6')}
-        >
-          <div
-            className={cn(
-              'min-h-4 text-xs',
-              note?.kind === 'error' ? 'text-danger' : note ? 'text-success' : 'text-text-subtle'
-            )}
-          >
-            {note?.kind === 'ok' && <Check className="mr-1 inline h-3.5 w-3.5" />}
-            {note?.text ??
-              (saved.enabled
-                ? t('proxy.activeSummary', {
-                    scheme: saved.scheme,
-                    host: saved.host,
-                    port: saved.port
-                  })
-                : t('proxy.direct'))}
+            <div
+              className={cn(
+                'min-h-4 text-xs',
+                note?.kind === 'error' ? 'text-danger' : note ? 'text-success' : 'text-text-subtle'
+              )}
+            >
+              {note?.kind === 'ok' && <Check className="mr-1 inline h-3.5 w-3.5" />}
+              {note?.text ??
+                (saved.enabled
+                  ? t('proxy.activeSummary', {
+                      scheme: saved.scheme,
+                      host: saved.host,
+                      port: saved.port
+                    })
+                  : t('proxy.direct'))}
+            </div>
+            <Button onClick={() => void save()} disabled={busy} className="shrink-0">
+              {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+              {t('common.save')}
+            </Button>
           </div>
-          <Button onClick={() => void save()} disabled={busy} className="shrink-0">
-            {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
-            {t('common.save')}
-          </Button>
         </div>
-      </div>
+      )}
     </div>
   )
 }

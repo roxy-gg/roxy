@@ -85,6 +85,7 @@ type Press = {
 /** Shared viewport/input host for the transcript and standalone canvas components. */
 export function CanvasSurface({
   sceneKey,
+  transparent = false,
   buildScene,
   onAction,
   pinSignal = 0,
@@ -93,6 +94,7 @@ export function CanvasSurface({
   prompts = NO_PROMPTS
 }: {
   sceneKey: string
+  transparent?: boolean
   buildScene: (context: CanvasLayoutContext) => Scene
   onAction?: (action: HitAction) => void
   pinSignal?: number
@@ -108,6 +110,11 @@ export function CanvasSurface({
   const [theme, setTheme] = useState<CanvasTheme>(readTheme)
   const [size, setSize] = useState({ width: 0, height: 0 })
   const [status, setStatus] = useState('')
+  const transparentRef = useRef(transparent)
+  useLayoutEffect(() => {
+    transparentRef.current = transparent
+    requestPaint()
+  }, [transparent])
   const [activePromptId, setActivePromptId] = useState<string | null>(null)
   const activePromptRef = useRef<string | null>(null)
   const promptAnchors = useRef<PromptAnchor[]>([])
@@ -373,6 +380,7 @@ export function CanvasSurface({
         viewportHeight: size.height,
         now: performance.now(),
         reducedMotion: reducedMotion.current,
+        transparent: transparentRef.current,
         hovered: hovered.current,
         selection: selection.current,
         images: view.current.images

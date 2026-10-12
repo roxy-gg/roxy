@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type ClipboardEvent,
@@ -38,10 +39,8 @@ export function Composer({
    * - Build/Plan is a *code* mode (Plan narrows tools to read-only over a repo).
    *   A bot has no workstream - it already hides the workstream strip below -
    *   so the choice would name something that does not exist here.
-   * - Model, effort and context budget are standing config for a bot, not a
-   *   per-turn decision: its scheduled runs happen with no window open, so a
-   *   footer picker there promises control nobody is present to exercise. They
-   *   move to the bot's settings pane (`BotInferenceFields`).
+   * - Model and effort edit the bot chat's standing inference config, including
+   *   scheduled runs. Context budget remains in Bot settings.
    *
    * The meter stays - it describes the conversation you are actually looking at.
    */
@@ -88,6 +87,10 @@ export function Composer({
   const [submitting, setSubmitting] = useState(false)
   const submittingRef = useRef(false)
   const [error, setError] = useState('')
+  const syncMirrorScroll = (): void => {
+    if (ref.current && mirror.current) mirror.current.scrollTop = ref.current.scrollTop
+  }
+  useLayoutEffect(syncMirrorScroll, [value])
   /** Explicit pick when several known @bots appear; cleared when no longer mentioned. */
   const [pickedSendId, setPickedSendId] = useState<string | null>(null)
   // A mention can start anywhere, as long as the "@" opens a word (start of
@@ -172,6 +175,7 @@ export function Composer({
     setError('')
     submittingRef.current = true
     setSubmitting(true)
+    const acceptedBefore = useRoxyStore.getState().acceptedSends[chatId] ?? 0
     try {
       if (toBotId) {
         await useRoxyStore
@@ -181,15 +185,19 @@ export function Composer({
         await onSend(text, snapshotImages.length ? snapshotImages : undefined)
       }
     } catch (e) {
-      useRoxyStore.setState((state) => ({
-        composerDrafts: restoreComposerDraft(
-          state.composerDrafts,
-          state.chats,
-          chatId,
-          text,
-          snapshotImages
-        )
-      }))
+      // Later turn failures are not send failures: the user message may already
+      // be durable. Restoring it would make retry submit a duplicate.
+      if ((useRoxyStore.getState().acceptedSends[chatId] ?? 0) === acceptedBefore) {
+        useRoxyStore.setState((state) => ({
+          composerDrafts: restoreComposerDraft(
+            state.composerDrafts,
+            state.chats,
+            chatId,
+            text,
+            snapshotImages
+          )
+        }))
+      }
       setError(e instanceof Error ? e.message : String(e))
     } finally {
       submittingRef.current = false
@@ -298,7 +306,7 @@ export function Composer({
   const canSend = !!value.trim() || images.length > 0
 
   return (
-    <div className="bg-bg px-4 pb-1.5 pt-2">
+    <div className="composer-gutter bg-bg px-4 pb-1.5 pt-2">
       <div
         onDragOver={(e) => {
           if (e.dataTransfer.types.includes('Files')) {
@@ -310,8 +318,8 @@ export function Composer({
           if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragging(false)
         }}
         onDrop={onDrop}
-        // `sq-frame`, not `sq`: the controls row below renders five popovers
-        // (model, mode, effort, context, usage) that open UPWARD, well outside
+        // `sq-frame`, not `sq`: the controls row below renders popovers
+        // (model, mode, effort, context, usage) that open upward, well outside
         // this box. `.sq` masks, and a mask clips descendants, so it would erase
         // all five. `sq-frame` paints the fill instead of clipping.
         //
@@ -328,7 +336,7 @@ export function Composer({
         //
         // On focus the hairline brightens rather than changing hue: the box is
         // already the focus of the screen, so a colored ring on it is noise.
-        className={`relative mx-auto max-w-3xl sq-frame sq-2xl sq-ring sq-fill-surface-2 edge edge-panel shadow-raised rounded-2xl border bg-surface-2 transition ${
+        className={`composer-panel relative mx-auto max-w-3xl sq-frame sq-2xl sq-ring sq-fill-surface-2 edge edge-panel shadow-raised rounded-2xl border bg-surface-2 transition ${
           dragging
             ? 'border-accent [--sq-ring:var(--color-accent)] inset-ring-1 inset-ring-accent/40'
             : 'border-border focus-within:border-border-strong focus-within:[--sq-ring:var(--edge-strong)]'
@@ -401,7 +409,7 @@ export function Composer({
           <div
             ref={mirror}
             aria-hidden
-            className="pointer-events-none absolute inset-0 max-h-[168px] overflow-hidden whitespace-pre-wrap break-words px-4 pt-3 text-sm text-transparent"
+            className="pointer-events-none absolute inset-0 max-h-[168px] overflow-hidden whitespace-pre-wrap break-words px-4 pt-3 text-sm text-transparent [scrollbar-gutter:stable]"
           >
             {value ? highlighted : <span className="text-text-subtle">{placeholder}</span>}
           </div>
@@ -421,18 +429,37 @@ export function Composer({
             onBlur={() => setFocused(false)}
             onSelect={(e) => setCaret(e.currentTarget.selectionStart)}
             onChange={(e) => {
-              setValue(e.target.value)
+              const nextValue = e.target.value
+              const caretAtEnd =
+                e.target.selectionStart === nextValue.length &&
+                e.target.selectionEnd === nextValue.length
+              setValue(nextValue)
               setError('')
               setCaret(e.target.selectionStart)
               setMentionIndex(0)
               setMentionDismissed(false)
+              requestAnimationFrame(() => {
+                // Controlled field sizing does not reliably keep a wrapped end
+                // caret visible once the textarea reaches its height cap.
+                if (
+                  caretAtEnd &&
+                  ref.current &&
+                  document.activeElement === ref.current &&
+                  ref.current.value === nextValue &&
+                  ref.current.selectionStart === nextValue.length &&
+                  ref.current.selectionEnd === nextValue.length
+                ) {
+                  ref.current.scrollTop = ref.current.scrollHeight
+                }
+                syncMirrorScroll()
+              })
             }}
             onKeyDown={onKeyDown}
             onPaste={onPaste}
-            onScroll={(e) => {
-              if (mirror.current) mirror.current.scrollTop = e.currentTarget.scrollTop
+            onScroll={() => {
+              syncMirrorScroll()
             }}
-            className="relative block max-h-[168px] w-full resize-none overflow-y-auto bg-transparent px-4 pt-3 text-sm text-transparent caret-text outline-none [field-sizing:content]"
+            className="relative block max-h-[168px] w-full resize-none overflow-y-auto bg-transparent px-4 pt-3 text-sm text-transparent caret-text outline-none [field-sizing:content] [scrollbar-gutter:stable]"
           />
         </div>
         <div className="flex items-center justify-between gap-2 px-2.5 pb-2 pt-1.5">
@@ -441,7 +468,7 @@ export function Composer({
               five bare labels just scatter across the row) and px-1.5 on every
               control, which against the row's px-2.5 puts each label's first
               glyph exactly on the textarea's px-4 text column. */}
-          <div className="flex items-center gap-1">
+          <div className="flex min-w-0 flex-wrap items-center gap-1">
             <button
               type="button"
               onClick={() => fileRef.current?.click()}
@@ -450,14 +477,10 @@ export function Composer({
             >
               <Plus className="h-3.5 w-3.5" />
             </button>
-            {variant === 'session' && (
-              <>
-                <ModelPicker />
-                <AgentPicker />
-                <ThinkingPicker />
-                <ContextPicker />
-              </>
-            )}
+            <ModelPicker />
+            {variant === 'session' && <AgentPicker />}
+            <ThinkingPicker />
+            {variant === 'session' && <ContextPicker />}
             <ContextMeter />
           </div>
           {showStop ? (

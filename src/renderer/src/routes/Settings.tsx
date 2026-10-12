@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useTranslation, Trans } from 'react-i18next'
-import { Globe, Plus, Trash2 } from 'lucide-react'
+import { ChevronDown, ChevronRight, Globe, Palette, Plus, Trash2 } from 'lucide-react'
 import type { AppVersions } from '@shared/types'
 import type { UpdateInfo } from '@shared/api'
 import { resolveSeed } from '@shared/providers'
@@ -55,6 +55,8 @@ export default function Settings(): JSX.Element {
   const [versions, setVersions] = useState<AppVersions | null>(null)
   const [update, setUpdate] = useState<UpdateInfo | null>(null)
   const [confirmingReset, setConfirmingReset] = useState(false)
+  const [cookiesOpen, setCookiesOpen] = useState(false)
+  const cookiesPanelId = useId()
   const [resetting, setResetting] = useState(false)
   const [dragProviderId, setDragProviderId] = useState<string | null>(null)
   const [dragOverProviderId, setDragOverProviderId] = useState<string | null>(null)
@@ -135,7 +137,16 @@ export default function Settings(): JSX.Element {
   const language = normalizeLanguage(settings?.language)
 
   return (
-    <PageShell title={t('settings.title')} onBack={() => navigate('/')}>
+    <PageShell
+      title={t('settings.title')}
+      onBack={() => navigate('/')}
+      onEscape={() => {
+        if (resetting) return true
+        if (!confirmingReset) return false
+        setConfirmingReset(false)
+        return true
+      }}
+    >
       {addingAccount && (
         <AddAccount
           onClose={() => {
@@ -153,6 +164,20 @@ export default function Settings(): JSX.Element {
       )}
       <ActivitySection />
       <MotionSettings onChange={setMotion} />
+      <button
+        type="button"
+        onClick={() => navigate('/themes')}
+        className="mb-8 flex w-full items-center gap-3 rounded-xl border border-border bg-surface p-4 text-left hover:border-border-strong focus-visible:outline-accent"
+      >
+        <Palette aria-hidden="true" className="h-4 w-4 shrink-0 text-text-muted" />
+        <span className="min-w-0 flex-1">
+          <span className="block text-sm font-medium text-text">{t('appearance.title')}</span>
+          <span className="mt-0.5 block text-xs text-text-muted">
+            {t('appearance.description')}
+          </span>
+        </span>
+        <ChevronRight aria-hidden="true" className="h-4 w-4 shrink-0 text-text-subtle" />
+      </button>
 
       <section className="mb-8">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
@@ -360,15 +385,41 @@ export default function Settings(): JSX.Element {
         </div>
 
         <div className="mt-3 overflow-hidden sq sq-xl sq-ring rounded-xl border border-border bg-surface">
-          <div className="border-b border-border p-4">
-            <div className="text-sm font-medium text-text">
-              {t('settings.browser.cookiesTitle')}
+          <div
+            className={cn(
+              'flex items-start justify-between gap-4 p-4',
+              cookiesOpen && 'border-b border-border'
+            )}
+          >
+            <div className="min-w-0">
+              <div className="text-sm font-medium text-text">
+                {t('settings.browser.cookiesTitle')}
+              </div>
+              <p className="mt-0.5 text-xs text-text-muted">
+                {t('settings.browser.cookiesDescription')}
+              </p>
             </div>
-            <p className="mt-0.5 text-xs text-text-muted">
-              {t('settings.browser.cookiesDescription')}
-            </p>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="w-8 shrink-0 px-0"
+              aria-expanded={cookiesOpen}
+              aria-controls={cookiesPanelId}
+              title={
+                cookiesOpen
+                  ? t('settings.browser.cookiesCollapse')
+                  : t('settings.browser.cookiesExpand')
+              }
+              onClick={() => setCookiesOpen((v) => !v)}
+            >
+              <ChevronDown
+                className={cn('h-4 w-4 transition-transform', cookiesOpen && 'rotate-180')}
+              />
+            </Button>
           </div>
-          <CookiePanel className="max-h-[420px]" />
+          <div id={cookiesPanelId} hidden={!cookiesOpen}>
+            {cookiesOpen && <CookiePanel className="max-h-[420px]" />}
+          </div>
         </div>
 
         <div className="mt-3 overflow-hidden sq sq-xl sq-ring rounded-xl border border-border bg-surface">

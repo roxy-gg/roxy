@@ -10,7 +10,7 @@ import {
   type BloomInput
 } from './dither-kit/dither-paint'
 import type { AreaVariant } from './dither-kit/chart-context'
-import { PALETTE, rgb, type DitherColor } from './dither-kit/palette'
+import { rgb, seedOfColor, type DitherColor } from './dither-kit/palette'
 import { useMotion } from '../lib/motion'
 
 export type DitherDirection = 'top' | 'bottom' | 'left' | 'right'
@@ -92,7 +92,7 @@ export function DitherGradient({
     const starCanvas = starsRef.current
     if (!host || !crisp) return
 
-    const seed = PALETTE[from]
+    const seed = seedOfColor(from)
     let raf = 0
     let cols = 0
     let rows = 0

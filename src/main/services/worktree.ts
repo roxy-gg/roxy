@@ -113,10 +113,14 @@ export interface MaterializeResult {
  *
  * Called on the turn path, so it returns quickly when there's nothing to do
  * (the overwhelmingly common case: no pending intent). The intent is cleared
- * whatever happens — on success it's fulfilled, and on failure retrying it every
- * single turn would just stall each one behind another doomed git call.
+ * on success or failure. A stopped turn preserves the intent if checkout has
+ * not begun, so the next turn can try again instead of running in place.
  */
-export async function materializePendingWorktree(chatId: string): Promise<MaterializeResult> {
+export async function materializePendingWorktree(
+  chatId: string,
+  signal?: AbortSignal
+): Promise<MaterializeResult> {
+  if (signal?.aborted) return { ok: false }
   const chat = repo.getChat(chatId)
   if (!chat) return { ok: false }
   const intent = chat.worktreePending
@@ -138,7 +142,9 @@ export async function materializePendingWorktree(chatId: string): Promise<Materi
     return { ok: false }
   }
 
-  const result = await createForWorkspace(workspace, intent, chat.title)
+  const result = await createForWorkspace(workspace, intent, chat.title, signal)
+  // Cancellation before checkout preserves the intent for the next turn.
+  if (signal?.aborted && !result.worktreePath) return { ok: false }
   // Clear the intent either way: fulfilled, or failed and falling back.
   repo.setChatWorktreePending(chatId, null)
   if (!result.ok || !result.worktreePath) return result
@@ -152,6 +158,14 @@ export async function materializePendingWorktree(chatId: string): Promise<Materi
   // Give the session its own dev port before the setup script runs, so an
   // install that builds against a port sees the right one. Allocation failure
   // (range exhausted) is not fatal — the session just has no reserved port.
+  if (signal?.aborted) {
+    emitSessionsUpdated({
+      reason: 'worktree',
+      sessionIds: [chatId],
+      statusKey: result.worktreePath
+    })
+    return result
+  }
   const devPort = await ensureDevPort(chatId)
 
   // The session just moved: it has a worktree, a branch and a port it did not
@@ -167,6 +181,7 @@ export async function materializePendingWorktree(chatId: string): Promise<Materi
   })
 
   // Fire-and-forget: installs take minutes, and the turn starts now.
+  if (signal?.aborted) return result
   runSetupScript({
     chatId,
     projectRoot: workspace,
@@ -181,12 +196,15 @@ export async function materializePendingWorktree(chatId: string): Promise<Materi
 async function createForWorkspace(
   workspace: string,
   intent: WorktreeIntent,
-  title: string
+  title: string,
+  signal?: AbortSignal
 ): Promise<MaterializeResult> {
-  if (!(await git.isGitAvailable())) {
+  if (signal?.aborted) return { ok: false }
+  if (!(await git.isGitAvailable(signal))) {
     return { ok: false, error: 'Git isn’t installed, so this session runs in the project folder.' }
   }
 
+  if (signal?.aborted) return { ok: false }
   // How the project is shaped decides everything below. `single` covers a
   // folder that IS a repo and a folder INSIDE one, which is every project that
   // worked before this feature existed.
@@ -195,10 +213,11 @@ async function createForWorkspace(
     return { ok: false, error: 'This folder isn’t a git repository, so the session runs in place.' }
   }
   if (layout === 'multi') {
-    return createComposite(workspace, roots, intent, title)
+    return createComposite(workspace, roots, intent, title, signal)
   }
 
-  const root = (await git.repoRoot(workspace)) ?? roots[0]
+  const root = (await git.repoRoot(workspace, signal)) ?? roots[0]
+  if (signal?.aborted) return { ok: false }
   if (!root) {
     return { ok: false, error: 'This folder isn’t a git repository, so the session runs in place.' }
   }
@@ -207,15 +226,15 @@ async function createForWorkspace(
     if (intent.mode === 'new') {
       // Name the branch after the session, so `roxy/legacy-ogre-apprentice`
       // shows up in `git branch` and on the PR instead of `roxy/6fdc60b8`.
-      const branch = intent.branch?.trim() || (await git.branchNameForTitle(root, title))
+      const branch = intent.branch?.trim() || (await git.branchNameForTitle(root, title, signal))
       // A fork asked to start from the commit its source was sitting on. It's
       // advisory: a ref that no longer resolves (the source worktree was
       // deleted in between) falls through to the usual origin/<default> base
       // rather than failing the fork's first turn.
       const baseRef = intent.baseRef?.trim()
-        ? ((await git.resolveCommit(root, intent.baseRef.trim())) ?? undefined)
+        ? ((await git.resolveCommit(root, intent.baseRef.trim(), signal)) ?? undefined)
         : undefined
-      const r = await git.createWorktree({ repoRoot: root, branch, baseRef })
+      const r = await git.createWorktree({ repoRoot: root, branch, baseRef }, signal)
       if (!r.ok || !r.worktree)
         return { ok: false, error: r.error ?? 'Could not create the worktree.' }
       return { ok: true, worktreePath: r.worktree.path, branch: r.worktree.branch ?? branch }
@@ -226,7 +245,7 @@ async function createForWorkspace(
     // elsewhere, which is what git itself refuses to do.
     const branch = intent.branch?.trim()
     if (!branch) return { ok: false, error: 'No branch was given for the worktree.' }
-    const r = await git.attachWorktree({ repoRoot: root, branch })
+    const r = await git.attachWorktree({ repoRoot: root, branch }, signal)
     if (!r.ok || !r.worktree)
       return { ok: false, error: r.error ?? 'Could not check out the branch.' }
     return { ok: true, worktreePath: r.worktree.path, branch: r.worktree.branch ?? branch }
@@ -259,7 +278,8 @@ async function createComposite(
   workspace: string,
   roots: string[],
   intent: WorktreeIntent,
-  title: string
+  title: string,
+  signal?: AbortSignal
 ): Promise<MaterializeResult> {
   try {
     // `attach`/`fromBranch` name one branch; `new` derives one free everywhere.
@@ -267,7 +287,9 @@ async function createComposite(
     if (intent.mode !== 'new' && !requested) {
       return { ok: false, error: 'No branch was given for the worktree.' }
     }
-    const branch = requested || (await git.branchNameForTitle(roots, title))
+    if (signal?.aborted) return { ok: false }
+    const branch = requested || (await git.branchNameForTitle(roots, title, signal))
+    if (signal?.aborted) return { ok: false }
 
     // Named for the PROJECT, not for any one repo — the composite holds them all.
     const compositeRoot = await git.reserveWorktreePath(git.worktreePathFor(workspace, branch))
@@ -280,31 +302,39 @@ async function createComposite(
     // win is small and the failure modes (partial trees, interleaved errors)
     // are much worse.
     for (const link of planned) {
+      if (signal?.aborted) break
       // `new` CREATES the branch (even when the name was given explicitly);
       // fromBranch/attach check out one that already exists. Mixing these up
       // would make a new workstream fail in every repo that has never seen the
       // name — which is all of them.
       const r =
         intent.mode === 'new'
-          ? await git.createWorktree({
-              repoRoot: link.root,
-              branch,
-              // A fork's base commit exists only in the repo it came from, so
-              // it is resolved PER REPO and simply omitted where it is unknown;
-              // that repo then branches off its own default, which is the only
-              // sensible base available to it.
-              baseRef: intent.baseRef?.trim()
-                ? ((await git.resolveCommit(link.root, intent.baseRef.trim())) ?? undefined)
-                : undefined,
-              path: link.worktreePath,
-              exactPath: true
-            })
-          : await git.attachWorktree({
-              repoRoot: link.root,
-              branch,
-              path: link.worktreePath,
-              exactPath: true
-            })
+          ? await git.createWorktree(
+              {
+                repoRoot: link.root,
+                branch,
+                // A fork's base commit exists only in the repo it came from, so
+                // it is resolved PER REPO and simply omitted where it is unknown;
+                // that repo then branches off its own default, which is the only
+                // sensible base available to it.
+                baseRef: intent.baseRef?.trim()
+                  ? ((await git.resolveCommit(link.root, intent.baseRef.trim(), signal)) ??
+                    undefined)
+                  : undefined,
+                path: link.worktreePath,
+                exactPath: true
+              },
+              signal
+            )
+          : await git.attachWorktree(
+              {
+                repoRoot: link.root,
+                branch,
+                path: link.worktreePath,
+                exactPath: true
+              },
+              signal
+            )
 
       if (r.ok && r.worktree) {
         links.push({ ...link, branch: r.worktree.branch ?? branch })
@@ -316,6 +346,7 @@ async function createComposite(
     }
 
     if (!links.length) {
+      if (signal?.aborted) return { ok: false }
       return {
         ok: false,
         error:

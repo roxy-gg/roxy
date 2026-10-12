@@ -33,6 +33,7 @@ export interface PaintContext {
   viewportHeight: number
   now: number
   reducedMotion?: boolean
+  transparent?: boolean
   /** The region under the pointer, so it can be washed. */
   hovered: HitRegion | null
   /** Decoded images by src (the transcript keeps the cache). */
@@ -89,8 +90,12 @@ class Pen {
 export function paintScene(scene: Scene, paint: PaintContext): void {
   const { ctx, theme, scrollTop, viewportHeight } = paint
   ctx.save()
-  ctx.fillStyle = theme.palette.bg
-  ctx.fillRect(0, 0, scene.width, viewportHeight)
+  // Skipping the fill alone leaves old glyphs behind when scrolling.
+  if (paint.transparent) ctx.clearRect(0, 0, scene.width, viewportHeight)
+  else {
+    ctx.fillStyle = theme.palette.bg
+    ctx.fillRect(0, 0, scene.width, viewportHeight)
+  }
 
   ctx.translate(0, -scrollTop)
   const pen = new Pen(ctx)

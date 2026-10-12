@@ -72,8 +72,21 @@ async function main(): Promise<void> {
   migrationDb
     .prepare(`UPDATE queue SET recipient_id = 'roxy', source_chat_id = 'one' WHERE id = 'two'`)
     .run()
+  migrationDb.exec(`
+    INSERT INTO queue(id,chat_id,content,created_at,source_chat_id,message_id)
+      VALUES ('collaborator','two','user-directed prompt',2,'two','two');
+  `)
   for (const upgrade of MIGRATIONS.slice(25))
     typeof upgrade === 'function' ? upgrade(migrationDb) : migrationDb.exec(upgrade)
+  assert.deepEqual(
+    migrationDb.prepare('SELECT id, from_user FROM queue ORDER BY id').all(),
+    [
+      { id: 'collaborator', from_user: 1 },
+      { id: 'one', from_user: 0 },
+      { id: 'two', from_user: 0 }
+    ],
+    'v29 backfills only same-chat requests linked to user messages'
+  )
   assert.deepEqual(
     migrationDb
       .prepare('SELECT recipient_id, as_bot_id, state, error FROM queue WHERE id = ?')
@@ -103,7 +116,7 @@ async function main(): Promise<void> {
     (migrationDb.prepare('SELECT COUNT(*) AS n FROM messages').get() as { n: number }).n,
     2
   )
-  assert.equal((migrationDb.prepare('SELECT COUNT(*) AS n FROM queue').get() as { n: number }).n, 2)
+  assert.equal((migrationDb.prepare('SELECT COUNT(*) AS n FROM queue').get() as { n: number }).n, 3)
   assert.deepEqual(
     migrationDb.prepare('SELECT enabled,next_run_at FROM bot_jobs ORDER BY id').all(),
     [
@@ -133,6 +146,24 @@ async function main(): Promise<void> {
     )
     .run()
   skippedDb.pragma('user_version = 27')
+  skippedDb.exec(`INSERT INTO queue(id,chat_id,content,created_at)
+    VALUES ('skipped-queue','skipped-chat','queued before upgrade',1)`)
+  // Match startup ordering: the migration ladder must finish before repair runs.
+  const skippedVersion = skippedDb.pragma('user_version', { simple: true }) as number
+  for (let version = skippedVersion; version < MIGRATIONS.length; version++) {
+    skippedDb.transaction(() => {
+      const step = MIGRATIONS[version]
+      if (typeof step === 'string') skippedDb.exec(step)
+      else step(skippedDb)
+      skippedDb.pragma(`user_version = ${version + 1}`)
+    })()
+  }
+  assert.equal(skippedDb.pragma('user_version', { simple: true }), MIGRATIONS.length)
+  assert.deepEqual(
+    skippedDb.prepare('SELECT content, source_chat_id, message_id, from_user FROM queue').all(),
+    [{ content: 'queued before upgrade', source_chat_id: null, message_id: null, from_user: 0 }],
+    'v29 repairs its backfill dependencies without changing legacy queue content or origin'
+  )
   repairSchema(skippedDb)
   repairSchema(skippedDb)
   assert.equal((skippedDb.prepare('SELECT COUNT(*) AS n FROM loops').get() as { n: number }).n, 0)
@@ -204,6 +235,31 @@ async function main(): Promise<void> {
   assert.equal(unnamed.username, 'bot')
   assert.equal(unnamedToo.username, 'bot-2', 'generated handles do not collide')
   assert.equal(bots.getBot(unnamed.id)?.instructions, '', 'and it starts with no role')
+  assert.deepEqual(
+    bots.listBots().map((entry) => entry.id),
+    [bot.id, unnamed.id, unnamedToo.id]
+  )
+  bots.reorderBots([unnamedToo.id, bot.id, unnamed.id])
+  assert.deepEqual(
+    bots.listBots().map((entry) => entry.id),
+    [unnamedToo.id, bot.id, unnamed.id]
+  )
+  bots.reorderBots([unnamed.id, unnamed.id, 'deleted-bot'])
+  assert.deepEqual(
+    bots.listBots().map((entry) => entry.id),
+    [unnamed.id, unnamedToo.id, bot.id],
+    'deduplicate ids, ignore stale ids, preserve omitted bots'
+  )
+  const appended = bots.createBot('appended')
+  assert.equal(bots.listBots().at(-1)?.id, appended.id, 'new bots append after custom ordering')
+  repairSchema(getDb())
+  assert.deepEqual(
+    bots.listBots().map((entry) => entry.id),
+    [unnamed.id, unnamedToo.id, bot.id, appended.id],
+    'schema repair preserves custom ordering'
+  )
+  assert.throws(() => bots.reorderBots([1] as unknown as string[]), /array of ids/)
+  bots.removeBot(appended.id)
   bots.removeBot(unnamed.id)
   bots.removeBot(unnamedToo.id)
   bots.updateBot(bot.id, { instructions: 'Review PRs only when asked.' })
@@ -483,6 +539,7 @@ async function main(): Promise<void> {
   const mention = enqueuePrompt(session.id, 'Hola @reviewer, inspect this')
   assert.equal(mention.asBotId, undefined)
   wakeAutomation()
+  await new Promise(setImmediate)
   const routed = repo.listQueue(session.id).find((item) => item.id === mention.id)!
   assert.equal(routed.asBotId, undefined)
   assert.equal(repo.listQueue(bot.chatId).length, 0)
@@ -514,6 +571,7 @@ async function main(): Promise<void> {
     asBotId: helper.id
   })
   wakeAutomation()
+  await new Promise(setImmediate)
   assert.equal(
     repo.listQueue(session.id).find((item) => item.id === addressed.id)!.asBotId,
     helper.id
@@ -525,6 +583,7 @@ async function main(): Promise<void> {
     hops: 8
   })
   wakeAutomation()
+  await new Promise(setImmediate)
   const stopped = repo.listQueue(session.id).find((item) => item.id === exhausted.id)!
   assert.equal(stopped.state, 'failed')
   assert.match(stopped.error!, /provider/)
@@ -927,6 +986,10 @@ async function main(): Promise<void> {
       const bridgeList = await win.webContents.executeJavaScript('window.roxy.bots.list()')
       assert.ok(bridgeList.some((entry: { id: string }) => entry.id === viaBridge.id))
       await win.webContents.executeJavaScript(
+        `window.roxy.bots.reorder(${JSON.stringify([viaBridge.id])})`
+      )
+      assert.equal(bots.listBots()[0]?.id, viaBridge.id, 'bot reorder crosses preload and IPC')
+      await win.webContents.executeJavaScript(
         `window.roxy.bots.update(${JSON.stringify(viaBridge.id)}, { instructions: 'Updated through IPC' })`
       )
       assert.equal(bots.getBot(viaBridge.id)?.instructions, 'Updated through IPC')
@@ -1022,18 +1085,106 @@ async function main(): Promise<void> {
         )})`
       )
       assert.equal(routed.asBotId, worker.id)
+      assert.equal(routed.fromUser, true)
       assert.deepEqual(
         getDb()
-          .prepare('SELECT recipient_id, as_bot_id, message_id FROM queue WHERE id = ?')
+          .prepare('SELECT recipient_id, as_bot_id, message_id, from_user FROM queue WHERE id = ?')
           .get(routed.id),
         {
           recipient_id: worker.id,
           as_bot_id: worker.id,
-          message_id: repo.listMessages(local.id).at(-1)!.id
+          message_id: repo.listMessages(local.id).at(-1)!.id,
+          from_user: 1
         }
       )
       assert.equal(repo.listMessages(local.id).at(-1)?.role, 'user')
-      repo.removeQueueItem(routed.id)
+      const originalPrompt = repo.listMessages(local.id).at(-1)!
+      const editedText = 'Review the corrected collaborator request'
+      const attachment = {
+        dataUrl: 'data:image/png;base64,aW1hZ2U=',
+        mediaType: 'image/png',
+        name: 'corrected.png'
+      }
+      const edited = await win.webContents.executeJavaScript(
+        `window.roxy.queue.update(${JSON.stringify(routed.id)}, ${JSON.stringify(editedText)}, ${JSON.stringify([attachment])})`
+      )
+      assert.equal(edited.createdAt, routed.createdAt, 'editing preserves FIFO position')
+      assert.equal(edited.asBotId, worker.id, 'editing preserves the recipient')
+      assert.deepEqual(
+        repo.listMessages(local.id),
+        [
+          {
+            ...originalPrompt,
+            content: editedText,
+            parts: [
+              { type: 'text', text: editedText },
+              { type: 'image', ...attachment }
+            ]
+          }
+        ],
+        'a pending edit replaces the linked user message, not its author or identity'
+      )
+      assert.deepEqual(
+        getDb()
+          .prepare('SELECT recipient_id, as_bot_id, message_id FROM queue WHERE id = ?')
+          .get(routed.id),
+        { recipient_id: worker.id, as_bot_id: worker.id, message_id: originalPrompt.id }
+      )
+      // An unchanged save must not detach the message; attachment-only edits must
+      // update its parts too, including removal of the last image.
+      repo.updateQueueItem(routed.id, editedText, [attachment])
+      assert.equal(repo.listMessages(local.id).length, 1)
+      await win.webContents.executeJavaScript(
+        `window.roxy.queue.update(${JSON.stringify(routed.id)}, ${JSON.stringify(editedText)})`
+      )
+      assert.deepEqual(repo.listMessages(local.id)[0].parts, [{ type: 'text', text: editedText }])
+      getDb().prepare("UPDATE queue SET state = 'running' WHERE id = ?").run(routed.id)
+      assert.throws(() => repo.updateQueueItem(routed.id, 'Rejected edit'), /already running/)
+      assert.equal(repo.listMessages(local.id)[0].content, editedText)
+      assert.equal(repo.listQueue(local.id)[0].content, editedText)
+      getDb().prepare("UPDATE queue SET state = 'pending' WHERE id = ?").run(routed.id)
+      const beforeEditedRequest = requests.length
+      wakeAutomation()
+      const editDeadline = Date.now() + 10000
+      while (sessionBusy(local.id) && Date.now() < editDeadline)
+        await new Promise((resolve) => setTimeout(resolve, 10))
+      assert.equal(repo.listQueue(local.id).length, 0, 'edited collaborator request settles')
+      assert.equal(requests.length, beforeEditedRequest + 1)
+      const editedTranscript = repo.listMessages(local.id)
+      assert.equal(editedTranscript.length, 2, 'delivery does not recreate the user message')
+      assert.equal(editedTranscript[0].id, originalPrompt.id)
+      assert.equal(editedTranscript[0].role, 'user')
+      assert.equal(editedTranscript[0].content, editedText)
+      assert.equal(editedTranscript[1].botUsername, worker.username)
+      const editedRequest = requests.at(-1)!
+      assert.ok(
+        !JSON.stringify(editedRequest.messages).includes(originalPrompt.content),
+        'the superseded instruction is absent from model context'
+      )
+      assert.ok(
+        editedRequest.messages.some((m) => m.role === 'user' && m.content === editedText),
+        'the corrected instruction reaches the model as user-authored'
+      )
+      const ipcCancelledChat = repo.createChat({ title: 'IPC cancellation' })
+      const ipcCancelled = await win.webContents.executeJavaScript(
+        `window.roxy.queue.add(${JSON.stringify(ipcCancelledChat.id)}, 'Cancel this collaborator request', undefined, ${JSON.stringify(
+          {
+            sourceChatId: ipcCancelledChat.id,
+            asBotId: worker.id,
+            recipientId: worker.id,
+            fromUser: true
+          }
+        )})`
+      )
+      assert.equal(repo.listMessages(ipcCancelledChat.id).length, 1)
+      await win.webContents.executeJavaScript(
+        `window.roxy.queue.remove(${JSON.stringify(ipcCancelled.id)})`
+      )
+      assert.equal(
+        repo.listMessages(ipcCancelledChat.id).length,
+        0,
+        'IPC cancellation removes the user bubble'
+      )
       repo.addMessage({ chatId: local.id, role: 'user', content: 'Direct turn' })
       const input = {
         requestId: 'test-local-lock',
@@ -1101,6 +1252,65 @@ async function main(): Promise<void> {
         await new Promise((resolve) => setTimeout(resolve, 10))
       assert.ok(!sessionBusy(chatId), 'turn did not settle')
     }
+    const cancelledChat = repo.createChat({ title: 'Cancelled collaborator prompt' })
+    const kept = repo.addMessage({
+      chatId: cancelledChat.id,
+      role: 'user',
+      content: 'Keep this existing context.'
+    })
+    const cancelledText = 'REVIEW CANCELLED INSTRUCTION'
+    const cancelled = enqueuePrompt(cancelledChat.id, cancelledText, undefined, {
+      sourceChatId: cancelledChat.id,
+      asBotId: worker.id,
+      recipientId: worker.id,
+      fromUser: true
+    })
+    const cancelledMessage = repo.listMessages(cancelledChat.id).at(-1)!
+    assert.equal(
+      cancelledMessage.content,
+      cancelledText,
+      'collaborator prompt is eagerly persisted'
+    )
+    getDb().prepare("UPDATE queue SET state = 'running' WHERE id = ?").run(cancelled.id)
+    assert.throws(() => repo.removeQueueItem(cancelled.id), /Stop the session/)
+    assert.equal(repo.listQueue(cancelledChat.id).length, 1)
+    assert.ok(
+      repo.listMessages(cancelledChat.id).some((message) => message.id === cancelledMessage.id)
+    )
+    getDb().prepare("UPDATE queue SET state = 'pending' WHERE id = ?").run(cancelled.id)
+    repo.removeQueueItem(cancelled.id)
+    repo.removeQueueItem(cancelled.id) // Removing an unknown item remains a no-op.
+    assert.equal(repo.listQueue(cancelledChat.id).length, 0)
+    assert.deepEqual(
+      repo.listMessages(cancelledChat.id).map((message) => message.id),
+      [kept.id]
+    )
+    enqueuePrompt(cancelledChat.id, 'REVIEW NEXT TURN')
+    const beforeCancellation = requests.length
+    wakeAutomation()
+    await settle(cancelledChat.id)
+    assert.equal(requests.length, beforeCancellation + 1)
+    const nextContext = JSON.stringify(requests.at(-1)!.messages)
+    assert.ok(nextContext.includes('REVIEW NEXT TURN'))
+    assert.ok(nextContext.includes(kept.content), 'unrelated history is preserved')
+    assert.ok(
+      !nextContext.includes(cancelledText),
+      'cancelled instruction is absent from model context'
+    )
+
+    const failed = enqueuePrompt(cancelledChat.id, 'Previously attempted request', undefined, {
+      sourceChatId: cancelledChat.id,
+      asBotId: worker.id,
+      fromUser: true
+    })
+    const failedMessage = repo.listMessages(cancelledChat.id).at(-1)!
+    getDb().prepare("UPDATE queue SET state = 'failed' WHERE id = ?").run(failed.id)
+    repo.removeQueueItem(failed.id)
+    assert.ok(
+      repo.listMessages(cancelledChat.id).some((message) => message.id === failedMessage.id),
+      'removing a failed turn preserves its transcript'
+    )
+
     const hostFirst = repo.createChat({
       title: 'Host interprets intent',
       workspacePath: app.getPath('userData')
@@ -1510,6 +1720,40 @@ async function main(): Promise<void> {
     assert.equal(repo.listQueue(memorySession.id)[0].botId, memoryBot.id)
     assert.equal(repo.listQueue(memorySession.id)[0].botUsername, 'final-reviewer')
     for (const item of repo.listQueue(memorySession.id)) repo.removeQueueItem(item.id)
+    const queuedByBot = await runTool(
+      'queue_manage',
+      { action: 'create', session: memorySession.id, prompt: 'Bot-authored queued request' },
+      { cwd: sessionCwd(memoryBot.chatId), sessionId: memoryBot.chatId, botId: memoryBot.id }
+    )
+    assert.ok(queuedByBot.ok, queuedByBot.output)
+    const botPrompt = repo.listQueue(memorySession.id).at(-1)!
+    assert.equal(botPrompt.botId, memoryBot.id)
+    assert.equal(botPrompt.botUsername, 'final-reviewer')
+    closeDb()
+    assert.equal(
+      repo.listQueue(memorySession.id).at(-1)?.botId,
+      memoryBot.id,
+      'queued author survives reopening'
+    )
+    wakeAutomation()
+    await settle(memorySession.id)
+    const deliveredPrompt = repo
+      .listMessages(memorySession.id)
+      .find((message) => message.content === botPrompt.content)!
+    assert.ok(deliveredPrompt)
+    assert.equal(deliveredPrompt.role, 'user', 'cross-session delivery remains a prompt')
+    assert.equal(deliveredPrompt.botId, memoryBot.id)
+    assert.equal(deliveredPrompt.botUsername, 'final-reviewer')
+    closeDb()
+    assert.deepEqual(
+      repo.listMessages(memorySession.id).find((message) => message.id === deliveredPrompt.id),
+      deliveredPrompt,
+      'delivered attribution survives a database reload'
+    )
+    const humanPrompt = enqueuePrompt(memorySession.id, 'Human request mentioning @final-reviewer')
+    assert.equal(humanPrompt.botId, undefined)
+    assert.equal(humanPrompt.botUsername, undefined)
+    for (const item of repo.listQueue(memorySession.id)) repo.removeQueueItem(item.id)
     // Delegating from ANOTHER bot's chat: the work is the guest's, so the answer
     // has to come back to the guest. Resuming the chat's owner handed the
     // continuation to a bot that never asked for it, with its identity and config.
@@ -1524,6 +1768,12 @@ async function main(): Promise<void> {
     assert.equal(guestHandoff.botId, visitor.id, "the request is the guest's, not the owner's")
     wakeAutomation()
     await settle(memorySession.id)
+    const deliveredSend = repo
+      .listMessages(memorySession.id)
+      .find((message) => message.content === 'Guest follow-up')!
+    assert.equal(deliveredSend.role, 'user')
+    assert.equal(deliveredSend.botId, visitor.id)
+    assert.equal(deliveredSend.botUsername, visitor.username)
     const guestNudge = repo
       .listQueue(memoryBot.chatId)
       .find((q) => q.content.includes('answered above'))
@@ -1629,6 +1879,95 @@ async function main(): Promise<void> {
       'the global mode does not leak into the bot that owns the chat'
     )
     repo.setActiveAgent('build')
+
+    // Hidden failed/delayed automation must not trap user prompts in an idle bot chat.
+    for (const origin of ['agent', 'schedule'] as const) {
+      for (const blockedState of ['failed', 'delayed'] as const) {
+        const blocker = enqueuePrompt(memoryBot.chatId, 'Hidden automation', undefined, {
+          ...(origin === 'agent' ? { sourceChatId: session.id } : { scheduleId: workerJob.id }),
+          ...(blockedState === 'delayed' ? { notBefore: Date.now() + 60000 } : {})
+        })
+        if (blockedState === 'failed')
+          getDb()
+            .prepare("UPDATE queue SET state = 'failed', error = 'Automation failed' WHERE id = ?")
+            .run(blocker.id)
+        const blocked = repo.listQueue(memoryBot.chatId)[0]
+        const followup = enqueuePrompt(memoryBot.chatId, 'Automated follow-up', undefined, {
+          sourceChatId: session.id
+        })
+        const first = enqueuePrompt(memoryBot.chatId, 'First user request')
+        const second = enqueuePrompt(memoryBot.chatId, 'Second user request')
+        const before = requests.length
+
+        const release = claimTurn(memoryBot.chatId, new AbortController())!
+        wakeAutomation()
+        assert.equal(requests.length, before, 'an active turn still owns the bot chat')
+        release()
+        stopTurn(memoryBot.chatId)
+        wakeAutomation()
+        assert.equal(requests.length, before, 'Stop still pauses user delivery')
+        resumeQueue(memoryBot.chatId)
+
+        for (const item of [first, second]) {
+          wakeAutomation()
+          wakeAutomation()
+          await settle(memoryBot.chatId)
+          assert.equal(requests.at(-1)?.messages.at(-1)?.content, item.content)
+          assert.ok(!repo.listQueue(memoryBot.chatId).some((entry) => entry.id === item.id))
+        }
+        assert.equal(
+          requests.length,
+          before + 2,
+          `${origin} ${blockedState}: users run once in order`
+        )
+        assert.deepEqual(repo.listQueue(memoryBot.chatId), [blocked, followup])
+        wakeAutomation()
+        assert.equal(
+          requests.length,
+          before + 2,
+          'the failed/delayed automated chain stays blocked'
+        )
+
+        // Retained automation remains explicitly retryable/deliverable when due.
+        repo.updateQueueItem(blocker.id, 'Recovered automation')
+        getDb().prepare('UPDATE queue SET not_before = 0 WHERE id = ?').run(blocker.id)
+        wakeAutomation()
+        await settle(memoryBot.chatId)
+        assert.equal(requests.length, before + 3)
+        assert.deepEqual(repo.listQueue(memoryBot.chatId), [followup])
+        repo.removeQueueItem(followup.id)
+      }
+    }
+
+    // Visible failures, including user-requested guest turns, still require explicit retry.
+    for (const fromUser of [false, true]) {
+      const hidden = enqueuePrompt(memoryBot.chatId, 'Hidden failed continuation', undefined, {
+        sourceChatId: session.id
+      })
+      const failedUser = enqueuePrompt(
+        memoryBot.chatId,
+        'Failed user request',
+        undefined,
+        fromUser ? { sourceChatId: memoryBot.chatId, fromUser: true, asBotId: worker.id } : {}
+      )
+      getDb()
+        .prepare("UPDATE queue SET state = 'failed' WHERE id IN (?, ?)")
+        .run(hidden.id, failedUser.id)
+      enqueuePrompt(memoryBot.chatId, 'Do not bypass a visible failure')
+      const before = requests.length
+      wakeAutomation()
+      assert.equal(requests.length, before)
+      assert.ok(!sessionBusy(memoryBot.chatId))
+      repo.updateQueueItem(failedUser.id, 'Retried user request')
+      wakeAutomation()
+      await settle(memoryBot.chatId)
+      assert.equal(requests.length, before + 1)
+      assert.equal(
+        repo.listMessages(memoryBot.chatId).at(-1)?.botId,
+        fromUser ? worker.id : memoryBot.id
+      )
+      for (const item of repo.listQueue(memoryBot.chatId)) repo.removeQueueItem(item.id)
+    }
   } finally {
     stopAutomation()
     setPromptText({})

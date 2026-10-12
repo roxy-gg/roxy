@@ -126,7 +126,7 @@ function RoxyHero({
           <Check className="h-4 w-4" /> {t('onboarding.connected')}
         </span>
       ) : (
-        <span className="inline-flex shrink-0 items-center gap-1.5 sq sq-lg rounded-lg bg-accent px-3.5 py-2 text-sm font-semibold text-white transition-[filter] group-hover:brightness-110">
+        <span className="inline-flex shrink-0 items-center gap-1.5 sq sq-lg rounded-lg bg-accent px-3.5 py-2 text-sm font-semibold text-on-accent transition-[filter] group-hover:brightness-110">
           {t('onboarding.useRoxy')} <ArrowRight className="h-4 w-4" />
         </span>
       )}

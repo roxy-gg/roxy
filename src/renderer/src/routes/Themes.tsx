@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useTranslation, Trans } from 'react-i18next'
 import {
@@ -7,6 +7,7 @@ import {
   ChevronsUpDown,
   Copy,
   FolderOpen,
+  Image,
   Palette,
   Plus,
   RefreshCw,
@@ -26,11 +27,18 @@ import { api } from '../lib/api'
 import { cn } from '../lib/cn'
 import { Button, Textarea } from '../components/ui'
 import { PageShell } from '../components/PageShell'
+import { BackgroundSettings } from '../components/BackgroundSettings'
+import { SidebarNavItem } from '../components/SidebarFrame'
 
 export default function Themes(): JSX.Element {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const [data, setData] = useState<ThemeListResult | null>(null)
+  const [panel, setPanel] = useState<'background' | 'themes'>('background')
+  const panelRef = useRef<HTMLDivElement>(null)
+  useLayoutEffect(() => {
+    panelRef.current?.scrollIntoView({ block: 'start' })
+  }, [panel])
   const [busy, setBusy] = useState<string | null>(null)
   const [editing, setEditing] = useState<string | null>(null)
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
@@ -105,138 +113,180 @@ export default function Themes(): JSX.Element {
 
   return (
     <PageShell
-      title={t('themes.title')}
-      subtitle={t('themes.subtitle')}
+      title={t('appearance.title')}
       onBack={() => navigate('/')}
-    >
-      {error && <p className="mb-4 text-xs text-danger">{error}</p>}
-
-      <section className="mb-8">
-        <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-text-subtle">
-          {t('themes.builtIn')}
-        </h2>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          {builtins.map((t) => (
-            <ThemeCard
-              key={t.id}
-              theme={t}
-              active={t.id === activeId}
-              busy={busy === t.id}
-              onActivate={() => void activate(t.id)}
-              onDuplicate={() => void create(t.id)}
-            />
-          ))}
-        </div>
-      </section>
-
-      <section className="mb-8">
-        {/* Every action here acts on THIS section -- creating, rescanning and
-            revealing all concern user themes on disk, not the built-ins above.
-            Keeping them on the section header puts them where their effect is. */}
-        <div className="mb-3 flex items-center justify-between gap-3">
-          <h2 className="text-xs font-semibold uppercase tracking-wide text-text-subtle">
-            {t('themes.yourThemes')}
-          </h2>
-          <div className="flex items-center gap-1">
-            {/* Reveals the FOLDER, not the active theme: this sits under "Your
-                themes" now, and the active theme is often a built-in with no file
-                of its own. An empty id makes main fall back to the themes dir. */}
-            {data?.directory && (
-              <Button
-                size="sm"
-                variant="ghost"
-                title={data.directory}
-                onClick={() => void api.themes.reveal('')}
+      sidebar={
+        <nav aria-label={t('appearance.title')} className="flex gap-0.5 sm:flex-col">
+          {(['background', 'themes'] as const).map((id) => {
+            const Icon = id === 'background' ? Image : Palette
+            return (
+              <SidebarNavItem
+                key={id}
+                id={`appearance-${id}`}
+                type="button"
+                aria-current={panel === id ? 'page' : undefined}
+                aria-controls={`appearance-${id}-panel`}
+                onClick={() => setPanel(id)}
+                className="flex-1 sm:flex-none"
               >
-                <FolderOpen className="h-3.5 w-3.5" /> {t('themes.openFolder')}
-              </Button>
-            )}
-            <Button size="sm" variant="ghost" onClick={() => void load(true)}>
-              <RefreshCw className="h-3.5 w-3.5" /> {t('themes.rescan')}
-            </Button>
-            <Button size="sm" variant="ghost" onClick={() => void create()}>
-              <Plus className="h-3.5 w-3.5" /> {t('themes.newTheme')}
-            </Button>
-          </div>
-        </div>
+                <Icon aria-hidden="true" className="h-4 w-4 shrink-0 opacity-80" />
+                {t(`appearance.${id}`)}
+              </SidebarNavItem>
+            )
+          })}
+        </nav>
+      }
+    >
+      {/* Keep both panels mounted so switching never discards an unsaved theme. */}
+      <div
+        id="appearance-background-panel"
+        ref={panel === 'background' ? panelRef : undefined}
+        role="region"
+        aria-labelledby="appearance-background"
+        hidden={panel !== 'background'}
+        className="scroll-mt-8"
+      >
+        <BackgroundSettings />
+      </div>
+      <div
+        id="appearance-themes-panel"
+        ref={panel === 'themes' ? panelRef : undefined}
+        role="region"
+        aria-labelledby="appearance-themes"
+        hidden={panel !== 'themes'}
+        className="@container scroll-mt-8"
+      >
+        <h2 className="text-sm font-medium text-text">{t('appearance.themes')}</h2>
+        <p className="mt-1 mb-6 text-xs text-text-muted">{t('appearance.themeDescription')}</p>
+        {error && <p className="mb-4 text-xs text-danger">{error}</p>}
 
-        {custom.length === 0 ? (
-          <div className="sq sq-xl sq-ring sq-dashed rounded-xl border border-dashed border-border bg-surface/50 p-5 text-xs text-text-muted">
-            {t('themes.emptyLead')} <code className="text-text-subtle">theme.json</code>{' '}
-            {t('themes.emptyTail')}
-            <ul className="mt-2 flex flex-col gap-1 text-text-subtle">
-              <li>
-                <code>{data?.directory ?? '\u2026/themes'}</code>
-              </li>
-              <li>
-                <code>~/.roxy/themes/&lt;name&gt;/theme.json</code>
-              </li>
-            </ul>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            {custom.map((t) => (
+        <section className="mb-8">
+          <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-text-subtle">
+            {t('themes.builtIn')}
+          </h2>
+          <div className="grid grid-cols-1 gap-3 @min-[640px]:grid-cols-2">
+            {builtins.map((t) => (
               <ThemeCard
                 key={t.id}
                 theme={t}
                 active={t.id === activeId}
                 busy={busy === t.id}
-                editable
-                confirmingDelete={confirmDelete === t.id}
                 onActivate={() => void activate(t.id)}
                 onDuplicate={() => void create(t.id)}
-                onEdit={() => setEditing(editing === t.id ? null : t.id)}
-                onDelete={() => setConfirmDelete(t.id)}
-                onCancelDelete={() => setConfirmDelete(null)}
-                onConfirmDelete={() => void remove(t.id)}
               />
             ))}
           </div>
-        )}
-      </section>
+        </section>
 
-      {editing && (
         <section className="mb-8">
-          <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-text-subtle">
-            {t('themes.editing', {
-              name: themes.find((x) => x.id === editing)?.name ?? editing
-            })}
-          </h2>
-          {/* Editor and reference side by side: the reference is only really
+          {/* Every action here acts on THIS section -- creating, rescanning and
+            revealing all concern user themes on disk, not the built-ins above.
+            Keeping them on the section header puts them where their effect is. */}
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+            <h2 className="text-xs font-semibold uppercase tracking-wide text-text-subtle">
+              {t('themes.yourThemes')}
+            </h2>
+            <div className="flex flex-wrap items-center gap-1">
+              {/* Reveals the FOLDER, not the active theme: this sits under "Your
+                themes" now, and the active theme is often a built-in with no file
+                of its own. An empty id makes main fall back to the themes dir. */}
+              {data?.directory && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  title={data.directory}
+                  onClick={() => void api.themes.reveal('')}
+                >
+                  <FolderOpen className="h-3.5 w-3.5" /> {t('themes.openFolder')}
+                </Button>
+              )}
+              <Button size="sm" variant="ghost" onClick={() => void load(true)}>
+                <RefreshCw className="h-3.5 w-3.5" /> {t('themes.rescan')}
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => void create()}>
+                <Plus className="h-3.5 w-3.5" /> {t('themes.newTheme')}
+              </Button>
+            </div>
+          </div>
+
+          {custom.length === 0 ? (
+            <div className="sq sq-xl sq-ring sq-dashed rounded-xl border border-dashed border-border bg-surface/50 p-5 text-xs text-text-muted">
+              {t('themes.emptyLead')} <code className="text-text-subtle">theme.json</code>{' '}
+              {t('themes.emptyTail')}
+              <ul className="mt-2 flex flex-col gap-1 text-text-subtle">
+                <li>
+                  <code>{data?.directory ?? '\u2026/themes'}</code>
+                </li>
+                <li>
+                  <code>~/.roxy/themes/&lt;name&gt;/theme.json</code>
+                </li>
+              </ul>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 gap-3 @min-[640px]:grid-cols-2">
+              {custom.map((t) => (
+                <ThemeCard
+                  key={t.id}
+                  theme={t}
+                  active={t.id === activeId}
+                  busy={busy === t.id}
+                  editable
+                  confirmingDelete={confirmDelete === t.id}
+                  onActivate={() => void activate(t.id)}
+                  onDuplicate={() => void create(t.id)}
+                  onEdit={() => setEditing(editing === t.id ? null : t.id)}
+                  onDelete={() => setConfirmDelete(t.id)}
+                  onCancelDelete={() => setConfirmDelete(null)}
+                  onConfirmDelete={() => void remove(t.id)}
+                />
+              ))}
+            </div>
+          )}
+        </section>
+
+        {editing && (
+          <section className="mb-8">
+            <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-text-subtle">
+              {t('themes.editing', {
+                name: themes.find((x) => x.id === editing)?.name ?? editing
+              })}
+            </h2>
+            {/* Editor and reference side by side: the reference is only really
               actionable with a file open, and you shouldn't have to scroll away
               from the JSON to remember what "surface-2" paints. Stacks on narrow
               windows, where two columns would squeeze both. */}
-          <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-[minmax(0,1fr)_380px]">
-            <ThemeEditor
-              key={editing}
-              id={editing}
-              onClose={() => setEditing(null)}
-              onSaved={() => void load(true)}
-            />
-            <ThemeReference variant="panel" />
-          </div>
-        </section>
-      )}
+            <div className="grid grid-cols-1 items-start gap-4 @min-[680px]:grid-cols-2">
+              <ThemeEditor
+                key={editing}
+                id={editing}
+                onClose={() => setEditing(null)}
+                onSaved={() => void load(true)}
+              />
+              <ThemeReference variant="panel" />
+            </div>
+          </section>
+        )}
 
-      {data && data.warnings.length > 0 && (
-        <section className="mb-8">
-          <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-warning">
-            {t('themes.problemsFound')}
-          </h2>
-          <div className="flex flex-col gap-2 sq sq-xl sq-ring rounded-xl border border-border bg-surface p-4">
-            {data.warnings.map((w, i) => (
-              <div key={i} className="text-xs">
-                <div className="text-text-muted">{w.message}</div>
-                <div className="truncate font-mono text-[11px] text-text-subtle" title={w.file}>
-                  {w.file}
+        {data && data.warnings.length > 0 && (
+          <section className="mb-8">
+            <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-warning">
+              {t('themes.problemsFound')}
+            </h2>
+            <div className="flex flex-col gap-2 sq sq-xl sq-ring rounded-xl border border-border bg-surface p-4">
+              {data.warnings.map((w, i) => (
+                <div key={i} className="text-xs">
+                  <div className="text-text-muted">{w.message}</div>
+                  <div className="truncate font-mono text-[11px] text-text-subtle" title={w.file}>
+                    {w.file}
+                  </div>
                 </div>
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
+              ))}
+            </div>
+          </section>
+        )}
 
-      {!editing && <ThemeReference />}
+        {!editing && <ThemeReference />}
+      </div>
     </PageShell>
   )
 }

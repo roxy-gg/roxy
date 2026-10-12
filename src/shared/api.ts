@@ -3,6 +3,7 @@
  * Implemented in src/preload/index.ts, handled in src/main/ipc/*.
  */
 import type { Language } from './i18n'
+import type { BackgroundResult, BackgroundSettings, BackgroundState } from './background'
 import type { Bot, BotJob, BotJobInput } from './bots'
 import type { MotionPreference } from './motion'
 import type {
@@ -29,6 +30,7 @@ import type {
 } from './types'
 import type { McpServerConfig } from './mcp'
 import type { CliProxyLoginResult, CliProxyState } from './cliproxy'
+import type { ConnectionQuota } from './quota'
 import type { ForgeStatusView, ForgeHostView, ForgeKind } from './forge'
 import type { RepoLayout } from './repos'
 import type { SessionConfigPatch } from './session-config'
@@ -339,6 +341,8 @@ export interface ChatImage {
   dataUrl: string
   /** MIME type, e.g. 'image/png'. */
   mediaType: string
+  /** A delegated image must not be replayed to an unverified model. */
+  forwarded?: boolean
 }
 
 /** A single chat-completion message sent to the model. */
@@ -457,9 +461,17 @@ export interface LlmDelta {
  * `run` frames bracket the stream so the renderer knows exactly when to open the
  * live bubble and when to drop it in favour of the persisted transcript.
  */
-export type SubagentDelta =
+export type SubagentDelta = (
   | { subChatId: string; kind: 'event'; event: LlmChildEvent }
-  | { subChatId: string; kind: 'run'; state: 'running' | 'completed' | 'error' }
+  | { subChatId: string; kind: 'run'; state: 'running' | 'completed' | 'error'; message?: Message }
+) & { sequence: number }
+
+/** A snapshot's sequence separates already-folded events from its live tail. */
+export interface SubagentSnapshot {
+  parts: MessagePart[]
+  sequence: number
+  activityStartedAt: number
+}
 
 /** A subagent run in flight, for restoring live state after a window (re)load. */
 export interface SubagentRunView {
@@ -520,6 +532,8 @@ export interface ModelInfo {
   name: string
   reasoning: boolean
   toolCall: boolean
+  /** Affirmative input-image support; undefined means the catalog does not say. */
+  imageInput?: boolean
   /**
    * The effort levels this model actually accepts, when the provider says so.
    * Undefined = unknown, so the full Low..Max ladder is offered and clamping
@@ -531,6 +545,11 @@ export interface ModelInfo {
   contextLimit?: number
   /** Max output tokens, when known. */
   outputLimit?: number
+  /**
+   * GitHub Copilot only: premium requests one prompt to this model spends
+   * (0 = included in the plan, 1 = standard, 10 = Opus-class, ...).
+   */
+  premiumMultiplier?: number
   /** USD price per 1M tokens (from models.dev), when known â€” powers cost math. */
   cost?: ModelCost
 }
@@ -724,13 +743,19 @@ export interface RemoteStartInput {
  */
 export type RemoteDelta =
   | { sessionId: string; kind: 'event'; event: LlmEvent }
+  | { sessionId: string; kind: 'phase'; phase: 'starting' | 'running' }
   | {
       sessionId: string
       kind: 'turn'
       state: 'running' | 'idle'
+      phase?: 'starting' | 'running'
+      /** Persisted before the terminal event, so swapping out live parts is lossless. */
+      message?: Message
       botId?: string
       botUsername?: string
     }
+
+export type AutomationDelta = RemoteDelta & { sequence: number }
 
 /** Outcome of exporting the portable config bundle (skills + MCP servers). */
 export interface ConfigExportResult {
@@ -765,6 +790,8 @@ export interface ConfigImportResult {
 export interface RoxyApi {
   bots: {
     list(): Promise<Bot[]>
+    /** Reorder the bot strip; unlisted bots retain their order after the supplied ids. */
+    reorder(ids: string[]): Promise<void>
     /** Omit the username to get a free one: a bot can be named in chat later. */
     create(username?: string): Promise<Bot>
     update(id: string, patch: { username?: string; instructions?: string }): Promise<Bot>
@@ -778,12 +805,14 @@ export interface RoxyApi {
   }
   automation: {
     /** Main owns queued turns; renderers only mirror these events. */
-    onDelta(callback: (payload: RemoteDelta) => void): () => void
+    onDelta(callback: (payload: AutomationDelta) => void): () => void
     snapshot(): Promise<
       {
         sessionId: string
         parts: MessagePart[]
+        sequence: number
         activityStartedAt: number
+        phase?: 'starting' | 'running'
         botId?: string
         botUsername?: string
       }[]
@@ -907,6 +936,14 @@ export interface RoxyApi {
      */
     install(source: string, cwd?: string): Promise<SkillInstallResult>
   }
+  background: {
+    get(): Promise<BackgroundState>
+    /** Native picker; cancellation returns null without changing anything. */
+    choose(): Promise<BackgroundResult | null>
+    remove(): Promise<BackgroundResult>
+    update(settings: Partial<BackgroundSettings>): Promise<BackgroundResult>
+    onChanged(callback: (state: BackgroundState) => void): () => void
+  }
   themes: {
     /** Built-in themes followed by user themes found on disk. */
     list(): Promise<ThemeListResult>
@@ -1003,6 +1040,12 @@ export interface RoxyApi {
     /** Stop the local proxy (keeps the install and the signed-in accounts). */
     stop(): Promise<CliProxyState>
     /**
+     * Remaining allowance for one subscription connection (a sidecar account
+     * or GitHub Copilot), read from the upstream's own usage endpoint. Cached
+     * for a minute unless `force`.
+     */
+    quota(connectionId: string, force?: boolean): Promise<ConnectionQuota>
+    /**
      * Install from an archive the user downloaded themselves, for networks that
      * block or rewrite the download. Opens a file picker; the archive still has
      * to match the pinned release's checksum.
@@ -1067,8 +1110,8 @@ export interface RoxyApi {
     onDelta(callback: (payload: LlmDelta) => void): () => void
   }
   tasks: {
-    /** The background subagent tasks still running for a session. */
-    listRunning(sessionId: string): Promise<TaskUpdate[]>
+    /** Running background tasks, optionally restricted to one session. */
+    listRunning(sessionId?: string): Promise<TaskUpdate[]>
     /** Cancel a running background task by its job id. */
     cancel(jobId: string): Promise<void>
     /** Subscribe to background-task state changes; returns an unsubscribe fn. */
@@ -1080,14 +1123,9 @@ export interface RoxyApi {
      * session halfway through. Null when nothing is running for that id (its
      * persisted transcript is then the truth).
      */
-    snapshot(subChatId: string): Promise<MessagePart[] | null>
+    snapshot(subChatId: string): Promise<SubagentSnapshot | null>
     /** Every subagent currently running â€” restores live state after a window reload. */
     listRunning(): Promise<SubagentRunView[]>
-    /**
-     * Tell main which chat is on screen, so the end-of-turn prune spares a sub
-     * session the user is reading. Pass null when the open chat isn't a sub.
-     */
-    setViewed(chatId: string | null): Promise<void>
     /**
      * Cancel ONE running subagent, foreground or background, without touching
      * the turn that spawned it. Resolves false when nothing was running for that

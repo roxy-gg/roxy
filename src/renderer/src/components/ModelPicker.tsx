@@ -367,7 +367,14 @@ export function ModelPicker({
         }
       }}
     >
-      <button type="button" onClick={() => setOpen((o) => !o)} className={triggerClass}>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className={triggerClass}
+        aria-label={`${t('bots.model')}: ${triggerLabel}`}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+      >
         {activeProvider && (
           <ProviderLogo id={activeProvider.seedId} name={activeProvider.name} size={14} />
         )}
@@ -380,6 +387,8 @@ export function ModelPicker({
           <div
             ref={menuRef}
             data-model-picker-menu
+            role="dialog"
+            aria-label={t('bots.model')}
             className={cn(
               'animate-pop-in fixed z-[100] flex flex-col overflow-hidden sq-frame sq-xl sq-fill-elevated sq-ring edge edge-strong edge-panel rounded-xl border border-border bg-elevated shadow-float',
               side === 'bottom' ? 'origin-top-left' : 'origin-bottom-left'
@@ -488,12 +497,12 @@ export function ModelPicker({
                       <div className="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-surface">
                         <ProviderLogo id={p.seedId} name={p.name} size={20} />
                         {isSelected && !hasQuery && (
-                          <span className="absolute -bottom-0.5 -end-0.5 flex h-3 w-3 items-center justify-center rounded-full bg-accent text-white ring-2 ring-elevated">
+                          <span className="absolute -bottom-0.5 -end-0.5 flex h-3 w-3 items-center justify-center rounded-full bg-accent text-on-accent ring-2 ring-elevated">
                             <Check aria-hidden="true" className="h-2 w-2" strokeWidth={3} />
                           </span>
                         )}
                         {hasQuery && count !== undefined && count > 0 && (
-                          <span className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-accent/90 px-1.5 py-0.5 text-[10px] font-semibold text-white shadow-xs">
+                          <span className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-accent/90 px-1.5 py-0.5 text-[10px] font-semibold text-on-accent shadow-xs">
                             {count > 99 ? '99+' : count}
                           </span>
                         )}

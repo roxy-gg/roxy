@@ -95,6 +95,7 @@ export interface ToolCardInput {
   live: boolean
   /** Set when a cancel is genuinely available for this call. */
   cancellable: boolean
+  canOpenSubagent?: boolean
   /** Live chat queue — resolves bot_invoke Calling / Replied / Failed. */
   queue?: QueueItem[]
   /** False while the queue for this chat is still loading, so an empty one
@@ -180,6 +181,26 @@ export function layoutToolCard(
 
   if (part.image) {
     cursor += layoutImageBody(builder, part.image, x + 1, cursor, contentWidth)
+  }
+
+  if (open && input.canOpenSubagent && part.subChatId) {
+    const label = builder.t('transcript.openSubagent')
+    builder.text(
+      x + SPACE.cardPadX,
+      cursor + 7,
+      label,
+      font(FONT_SIZE.small, 500, 'sans'),
+      palette.accent
+    )
+    builder.region(
+      x + 1,
+      cursor,
+      contentWidth,
+      28,
+      { type: 'session', id: part.subChatId },
+      { hover: 'subtle', title: label }
+    )
+    cursor += 28
   }
 
   const height = cursor - top

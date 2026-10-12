@@ -223,6 +223,8 @@ export type MessagePart =
       mediaType: string
       /** Original file name, when known. */
       name?: string
+      /** Copied through delegation; require verified vision support on replay. */
+      forwarded?: boolean
     }
   | {
       type: 'tool'
@@ -246,6 +248,8 @@ export type MessagePart =
        * on every other tool, and on task cards from before this existed.
        */
       subChatId?: string
+      /** An out-of-band task result attaches to this launching call in the UI. */
+      resultFor?: string
       /**
        * Whether this call could be cancelled while it was running — set from the
        * `tool-start` event (see LlmEvent), which resolves it from the tool
@@ -289,6 +293,8 @@ export interface Message {
 }
 
 export interface AddMessageInput {
+  /** Optional client-generated ID for reconciling an optimistic send. */
+  id?: string
   chatId: string
   role: MessageRole
   content: string
@@ -332,6 +338,7 @@ export interface QueueImage {
   dataUrl: string
   mediaType: string
   name?: string
+  forwarded?: boolean
 }
 
 /**
@@ -366,12 +373,18 @@ export interface QueueItem {
   notBefore?: number
   error?: string
   /** Claimed items remain durable until their result has been persisted. */
-  state?: 'pending' | 'running' | 'failed'
+  state?: 'pending' | 'starting' | 'running' | 'failed'
+  /** Live admission reason; derived, never persisted as a second state machine. */
+  waitReason?: 'paused' | 'busy' | 'capacity' | 'blocked' | 'delayed'
   /** Set when a bot, not the user, wrote this prompt — the transcript attributes it. */
   botId?: string
   botUsername?: string
   /** Bot that should ANSWER this prompt, when it isn't the session's own bot. */
   asBotId?: string
+  /** Composer "Send to @bot" remains user-authored even though it has a source chat. */
+  fromUser?: boolean
+  /** Scheduled prompts name their originating job so the UI does not present them as user drafts. */
+  scheduleId?: string
 }
 
 // ---- Integrations & skills ---------------------------------------------------
@@ -556,6 +569,9 @@ export interface ProviderUsage {
   name: string
   today: UsageBucket
   last30d: UsageBucket
+  /** The last 7 local days, today included (the titlebar pill's window). */
+  last7d: UsageBucket
+  topModel7d: string | null
   /** Most-used model over the window, by token volume. */
   topModel: string | null
   /** Daily spend for the last 30 days (bar graph). */
@@ -571,6 +587,8 @@ export interface UsageStats {
   overview: {
     today: UsageBucket
     last30d: UsageBucket
+    last7d: UsageBucket
+    topModel7d: string | null
     topModel: string | null
     daily: UsageDay[]
     hasEstimates: boolean
