@@ -28,6 +28,7 @@
     "emptyPreview": "空のチャット",
     "errors": {
       "invalidImage": "40メガピクセル未満の有効なPNG、JPEG、WebP、またはGIFを選択してください。",
+      "invalidVideo": "This video could not be played. Try an H.264 MP4 or MOV under 40 megapixels.",
       "readFailed": "背景画像を読み取れませんでした。もう一度選択してみてください。",
       "saveFailed": "背景を保存できませんでした。以前の設定が保持されています。",
       "tooLarge": "この画像は大きすぎます。25 MB 未満の画像を選択してください。"
@@ -55,6 +56,19 @@
     "sessionOpacityHint": "読みやすくするために、これを低く保ちます。",
     "sessionPreview": "会話",
     "showOn": "背景を表示する場所",
+    "sidebarHints": {
+      "default": "Keep the sidebar's solid theme surface.",
+      "dimmed": "Extend the image across the window under a darker sidebar.",
+      "glass": "Extend the image across the window with a blurred sidebar."
+    },
+    "sidebarOpacity": "Sidebar opacity",
+    "sidebarOpacityHint": "Independent of your theme color. 0% is transparent; 100% is solid. Select Glass or Dimmed to adjust. Windows may disable blur, but your opacity still applies.",
+    "sidebarStyle": "Sidebar background",
+    "sidebarStyles": {
+      "default": "Default",
+      "dimmed": "Dimmed",
+      "glass": "Glass"
+    },
     "title": "チャットの背景"
   },
   "bots": {

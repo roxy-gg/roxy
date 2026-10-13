@@ -6,13 +6,13 @@
   pointer-events: none;
   user-select: none;
 }
-.chat-wallpaper img {
+.chat-wallpaper :is(img, video) {
   width: 100%;
   height: 100%;
   object-fit: cover;
   object-position: center;
 }
-.chat-wallpaper[data-effect='haze'] img {
+.chat-wallpaper[data-effect='haze'] :is(img, video) {
   filter: blur(12px) saturate(0.85);
   transform: scale(1.05);
 }
@@ -20,6 +20,65 @@
   position: absolute;
   inset: 0;
   background: linear-gradient(180deg, transparent, var(--color-bg));
+}
+.chat-wallpaper-shared {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  overflow: hidden;
+}
+.chat-wallpaper-shared :is(img, video) {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.chat-wallpaper-shared :is(img, video)[data-effect='haze'] {
+  filter: blur(12px) saturate(0.85);
+  transform: scale(1.05);
+}
+[data-sidebar-style] [data-shared-pane] {
+  background: transparent;
+}
+[data-sidebar-style] .chat-background-host {
+  background: transparent;
+  z-index: 0;
+}
+[data-sidebar-style] .chat-background-host::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: var(--color-bg);
+  opacity: 1;
+  pointer-events: none;
+}
+[data-sidebar-style] .chat-background-host[data-wallpaper]::before {
+  opacity: calc(1 - var(--chat-wallpaper-opacity));
+}
+[data-sidebar-style='glass'] :is([data-sidebar-frame], .sidebar-rail) {
+  position: relative;
+  background: rgb(from var(--color-surface) r g b / var(--sidebar-opacity, 66%));
+  isolation: isolate;
+}
+/* Blur a decorative layer, not the containing block of sidebar dialogs. */
+[data-sidebar-style='glass'] :is([data-sidebar-frame], .sidebar-rail)::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  backdrop-filter: blur(18px) saturate(1.2);
+}
+[data-sidebar-style='dimmed'] :is([data-sidebar-frame], .sidebar-rail) {
+  background: rgb(from var(--color-surface) r g b / var(--sidebar-opacity, 88%));
+}
+.background-sidebar-glass {
+  background: rgb(from var(--color-surface) r g b / var(--sidebar-opacity, 66%));
+  backdrop-filter: blur(18px) saturate(1.2);
+}
+.background-sidebar-dimmed {
+  background: rgb(from var(--color-surface) r g b / var(--sidebar-opacity, 88%));
 }
 [data-wallpaper] .composer-gutter {
   background: transparent;
@@ -66,8 +125,39 @@
   }
 }
 @media (prefers-contrast: more) {
-  .chat-wallpaper {
+  .chat-wallpaper,
+  .chat-wallpaper-shared {
     display: none;
+  }
+  [data-sidebar-style] [data-shared-pane] {
+    background: var(--color-bg);
+  }
+  [data-sidebar-style] .chat-background-host[data-wallpaper]::before {
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-transparency: reduce) {
+  [data-sidebar-style='glass'] :is([data-sidebar-frame], .sidebar-rail)::before,
+  .background-sidebar-glass {
+    backdrop-filter: none;
+  }
+}
+@media (prefers-contrast: more) {
+  [data-sidebar-style='glass'] :is([data-sidebar-frame], .sidebar-rail) {
+    background: rgb(from var(--color-surface) r g b / 1);
+  }
+  [data-sidebar-style='dimmed'] :is([data-sidebar-frame], .sidebar-rail) {
+    background: rgb(from var(--color-surface) r g b / 1);
+  }
+  .background-sidebar-glass,
+  .background-sidebar-dimmed {
+    background: rgb(from var(--color-surface) r g b / 1);
+    backdrop-filter: none;
+  }
+}
+@media (prefers-contrast: more) {
+  [data-sidebar-style='glass'] :is([data-sidebar-frame], .sidebar-rail)::before {
+    backdrop-filter: none;
   }
 }
 @supports not (backdrop-filter: blur(1px)) {

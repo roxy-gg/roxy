@@ -28,6 +28,7 @@
     "emptyPreview": "Chat vide",
     "errors": {
       "invalidImage": "Choisissez une image PNG, JPEG, WebP ou GIF valide de moins de 40 mégapixels.",
+      "invalidVideo": "This video could not be played. Try an H.264 MP4 or MOV under 40 megapixels.",
       "readFailed": "Impossible de lire l'image de fond. Essayez de la choisir à nouveau.",
       "saveFailed": "Impossible d'enregistrer l'arrière-plan. Vos paramètres précédents ont été conservés.",
       "tooLarge": "Cette image est trop grande. Choisissez-en une de moins de 25 Mo."
@@ -55,6 +56,19 @@
     "sessionOpacityHint": "Gardez cette valeur plus basse pour une lecture plus facile.",
     "sessionPreview": "Conversation",
     "showOn": "Afficher l'arrière-plan sur",
+    "sidebarHints": {
+      "default": "Keep the sidebar's solid theme surface.",
+      "dimmed": "Extend the image across the window under a darker sidebar.",
+      "glass": "Extend the image across the window with a blurred sidebar."
+    },
+    "sidebarOpacity": "Sidebar opacity",
+    "sidebarOpacityHint": "Independent of your theme color. 0% is transparent; 100% is solid. Select Glass or Dimmed to adjust. Windows may disable blur, but your opacity still applies.",
+    "sidebarStyle": "Sidebar background",
+    "sidebarStyles": {
+      "default": "Default",
+      "dimmed": "Dimmed",
+      "glass": "Glass"
+    },
     "title": "Arrière-plan du chat"
   },
   "bots": {

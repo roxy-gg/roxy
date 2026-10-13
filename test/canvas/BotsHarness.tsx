@@ -3,8 +3,7 @@ import { HashRouter } from 'react-router-dom'
 import type { Bot, BotJob, BotJobInput } from '../../src/shared/bots'
 import type { Chat, Message, MessagePart, QueueItem } from '../../src/shared/types'
 import { useRoxyStore } from '../../src/renderer/src/lib/store'
-import { Sidebar } from '../../src/renderer/src/components/Sidebar'
-import { ChatView } from '../../src/renderer/src/components/ChatView'
+import Chat from '../../src/renderer/src/routes/Chat'
 
 const baseChat: Chat = {
   id: 'project-chat',
@@ -568,9 +567,8 @@ export function BotsHarness(): JSX.Element {
           Bot and human requests fixture
         </button>
       </div>
-      <div className="flex min-h-0 flex-1">
-        <Sidebar />
-        <ChatView />
+      <div id="main-sidebar-harness" className="flex min-h-0 flex-1">
+        <Chat />
       </div>
     </HashRouter>
   )

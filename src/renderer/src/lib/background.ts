@@ -1,12 +1,15 @@
 import { useSyncExternalStore } from 'react'
 import { DEFAULT_BACKGROUND, normalizeBackground, type BackgroundState } from '@shared/background'
 import { api } from './api'
+import { prefersReducedMotion, subscribeMotion } from './motion'
 
 const listeners = new Set<() => void>()
 let snapshot = {
   settings: { ...DEFAULT_BACKGROUND },
   image: null as string | null,
   rendered: null as string | null,
+  poster: undefined as string | undefined,
+  reduced: prefersReducedMotion(),
   processing: false,
   failed: false,
   ready: false
@@ -15,6 +18,12 @@ let worker: Worker | undefined
 let objectUrl: string | undefined
 let revision = 0
 
+export function backgroundMediaFailed(source: string): void {
+  if (snapshot.rendered !== source) return
+  snapshot = { ...snapshot, failed: true }
+  notify()
+}
+
 function notify(): void {
   for (const listener of listeners) listener()
 }
@@ -22,8 +31,13 @@ function notify(): void {
 export function applyBackground(state: BackgroundState): void {
   revision++
   const settings = normalizeBackground(state.settings)
-  const regenerate = state.image !== snapshot.image || settings.effect !== snapshot.settings.effect
-  snapshot = { ...snapshot, ...state, settings, ready: true }
+  const reduced = prefersReducedMotion()
+  const regenerate =
+    state.image !== snapshot.image ||
+    settings.effect !== snapshot.settings.effect ||
+    state.poster !== snapshot.poster ||
+    reduced !== snapshot.reduced
+  snapshot = { ...snapshot, ...state, poster: state.poster, settings, reduced, ready: true }
   if (!regenerate) {
     notify()
     return
@@ -32,8 +46,14 @@ export function applyBackground(state: BackgroundState): void {
   worker = undefined
   if (objectUrl) URL.revokeObjectURL(objectUrl)
   objectUrl = undefined
-  snapshot = { ...snapshot, rendered: state.image, failed: false, processing: false }
-  if (state.image && !['none', 'haze'].includes(settings.effect)) {
+  const source =
+    (state.image?.startsWith('data:video/') &&
+      (reduced || !['none', 'haze'].includes(settings.effect))) ||
+    (reduced && state.image?.startsWith('data:image/gif;'))
+      ? (state.poster ?? state.image)
+      : state.image
+  snapshot = { ...snapshot, rendered: source, failed: false, processing: false }
+  if (source && !['none', 'haze'].includes(settings.effect)) {
     snapshot = { ...snapshot, processing: true }
     try {
       const current = new Worker(new URL('./background-effects.worker.ts', import.meta.url), {
@@ -60,7 +80,7 @@ export function applyBackground(state: BackgroundState): void {
         worker = undefined
         notify()
       }
-      current.postMessage({ image: state.image, effect: settings.effect })
+      current.postMessage({ image: source, effect: settings.effect })
     } catch {
       snapshot = { ...snapshot, processing: false, failed: true }
     }
@@ -85,6 +105,9 @@ export function startBackground(): () => void {
   let disposed = false
   const atStart = revision
   const off = api.background.onChanged(applyBackground)
+  const offMotion = subscribeMotion(() => {
+    if (snapshot.ready) applyBackground(snapshot)
+  })
   void api.background
     .get()
     .then((state) => {
@@ -99,6 +122,7 @@ export function startBackground(): () => void {
   return () => {
     disposed = true
     off()
+    offMotion()
     worker?.terminate()
     worker = undefined
     if (objectUrl) URL.revokeObjectURL(objectUrl)

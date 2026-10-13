@@ -554,13 +554,20 @@ export function registerIpc(): void {
     const win = BrowserWindow.fromWebContents(event.sender)
     const options: Electron.OpenDialogOptions = {
       properties: ['openFile'],
-      filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif'] }]
+      filters: [
+        {
+          name: 'Background media',
+          extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'mp4', 'mov']
+        }
+      ]
     }
     const chosen = win
       ? await dialog.showOpenDialog(win, options)
       : await dialog.showOpenDialog(options)
     if (chosen.canceled || !chosen.filePaths[0]) return null
-    return broadcastBackground(await background.importBackground(chosen.filePaths[0]))
+    return broadcastBackground(
+      await background.importBackground(chosen.filePaths[0], win ?? undefined)
+    )
   })
   ipcMain.handle(CHANNELS.backgroundRemove, async () =>
     broadcastBackground(await background.removeBackground())

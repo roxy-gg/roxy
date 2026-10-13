@@ -1,16 +1,19 @@
 import { backgroundOpacity, type BackgroundSettings } from '@shared/background'
 import { useBackground } from '../lib/background'
+import { BackgroundMedia } from './BackgroundMedia'
 
 export function ChatBackground({
   empty,
-  settings: preview
+  settings: preview,
+  fullStrength = false
 }: {
   empty: boolean
   settings?: BackgroundSettings
+  fullStrength?: boolean
 }): JSX.Element | null {
   const background = useBackground()
   const settings = preview ?? background.settings
-  const opacity = backgroundOpacity(settings, empty)
+  const opacity = fullStrength ? 1 : backgroundOpacity(settings, empty)
   if (!background.rendered || opacity === 0) return null
   return (
     <div
@@ -19,7 +22,7 @@ export function ChatBackground({
       data-effect={settings.effect}
       style={{ opacity }}
     >
-      <img src={background.rendered} alt="" draggable={false} />
+      <BackgroundMedia effect={settings.effect} />
       {settings.effect === 'haze' && <div className="chat-wallpaper-haze" />}
     </div>
   )

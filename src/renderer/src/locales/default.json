@@ -673,16 +673,16 @@
   },
   "background": {
     "title": "Chat background",
-    "description": "Your image, your theme. Add a background to your chats; colors and glass follow the theme you choose. The image stays on this device and is never sent with messages.",
+    "description": "Add an image, looping GIF, or video to your chats. Your theme colors follow along. The background stays on this device and is never sent with messages.",
     "preview": "Live preview",
     "emptyPreview": "Empty chat",
     "sessionPreview": "Conversation",
-    "noImage": "A little more you. Start with an image.",
+    "noImage": "A little more you. Start with an image or video.",
     "sampleReply": "Your theme keeps the conversation in focus.",
     "samplePrompt": "What would you like to build?",
-    "formats": "PNG, JPEG, WebP or GIF, up to 25 MB. Saved as a still image.",
-    "choose": "Choose image",
-    "change": "Change image",
+    "formats": "Images, GIF, MP4 or MOV, up to 25 MB. GIFs loop with every effect; videos loop with None or Haze. Video effects and reduced motion use a still frame. H.264 video is recommended; codec support varies.",
+    "choose": "Choose background",
+    "change": "Change background",
     "remove": "Remove",
     "effect": "Image effect",
     "processing": "Preparing effect...",
@@ -695,10 +695,23 @@
     "sessionOpacityHint": "Keep this lower for easier reading.",
     "percent": "{{value}}%",
     "glass": "Glass composer",
+    "sidebarStyle": "Sidebar background",
+    "sidebarOpacity": "Sidebar opacity",
+    "sidebarOpacityHint": "Independent of your theme color. 0% is transparent; 100% is solid. Select Glass or Dimmed to adjust. Windows may disable blur, but your opacity still applies.",
+    "sidebarStyles": {
+      "default": "Default",
+      "glass": "Glass",
+      "dimmed": "Dimmed"
+    },
+    "sidebarHints": {
+      "default": "Keep the sidebar's solid theme surface.",
+      "glass": "Extend the image across the window with a blurred sidebar.",
+      "dimmed": "Extend the image across the window under a darker sidebar."
+    },
     "glassHint": "A softly blurred surface, tinted by your current theme.",
     "autoSave": "Changes save automatically. Works with every theme.",
     "reset": "Reset effects",
-    "effectFailed": "The effect could not be prepared. Showing the original image; try another effect.",
+    "effectFailed": "The background or effect could not be played. Showing the original or a still frame when available; try choosing it again.",
     "effects": {
       "none": "None",
       "dither": "Dither",
@@ -717,8 +730,9 @@
     },
     "errors": {
       "invalidImage": "Choose a valid PNG, JPEG, WebP or GIF under 40 megapixels.",
-      "tooLarge": "This image is too large. Choose one under 25 MB.",
-      "readFailed": "Could not read the background image. Try choosing it again.",
+      "invalidVideo": "This video could not be played. Try an H.264 MP4 or MOV under 40 megapixels.",
+      "tooLarge": "This background is too large. Choose one under 25 MB; GIFs must have at most 80 frames and 40 million total frame pixels.",
+      "readFailed": "Could not read the background. Try choosing it again.",
       "saveFailed": "Could not save the background. Your previous settings have been kept."
     }
   },

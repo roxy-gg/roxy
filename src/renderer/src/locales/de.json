@@ -28,6 +28,7 @@
     "emptyPreview": "Leerer Chat",
     "errors": {
       "invalidImage": "Wählen Sie ein gültiges PNG, JPEG, WebP oder GIF unter 40 Megapixeln.",
+      "invalidVideo": "This video could not be played. Try an H.264 MP4 or MOV under 40 megapixels.",
       "readFailed": "Das Hintergrundbild konnte nicht gelesen werden. Versuchen Sie, es erneut auszuwählen.",
       "saveFailed": "Der Hintergrund konnte nicht gespeichert werden. Ihre vorherigen Einstellungen wurden beibehalten.",
       "tooLarge": "Dieses Bild ist zu groß. Wählen Sie eines unter 25 MB."
@@ -55,6 +56,19 @@
     "sessionOpacityHint": "Für bessere Lesbarkeit niedriger halten.",
     "sessionPreview": "Unterhaltung",
     "showOn": "Hintergrund anzeigen auf",
+    "sidebarHints": {
+      "default": "Keep the sidebar's solid theme surface.",
+      "dimmed": "Extend the image across the window under a darker sidebar.",
+      "glass": "Extend the image across the window with a blurred sidebar."
+    },
+    "sidebarOpacity": "Sidebar opacity",
+    "sidebarOpacityHint": "Independent of your theme color. 0% is transparent; 100% is solid. Select Glass or Dimmed to adjust. Windows may disable blur, but your opacity still applies.",
+    "sidebarStyle": "Sidebar background",
+    "sidebarStyles": {
+      "default": "Default",
+      "dimmed": "Dimmed",
+      "glass": "Glass"
+    },
     "title": "Chat-Hintergrund"
   },
   "bots": {

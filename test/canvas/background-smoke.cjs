@@ -8,6 +8,15 @@ let win, server
 const errors = []
 const wait = (ms = 120) => new Promise((resolve) => setTimeout(resolve, ms))
 const evaluate = (code) => win.webContents.executeJavaScript(`(async () => { ${code} })()`, true)
+const cleanup = () => {
+  try {
+    fs.rmSync(temp, { recursive: true, force: true })
+  } catch (error) {
+    if (!['EPERM', 'EBUSY'].includes(error.code)) throw error
+    // Chromium can retain profile locks until Electron exits on Windows.
+    console.warn(`Temporary profile retained until process exit: ${error.code}`)
+  }
+}
 const sidebarStyles = () =>
   evaluate(`return ['#main-sidebar-harness aside', '#appearance-page aside'].map(selector => {
     const s=getComputedStyle(document.querySelector(selector));
@@ -36,16 +45,21 @@ async function run() {
     const { createServer } = await import('vite')
     server = await createServer({
       configFile: path.join(__dirname, 'vite.config.mjs'),
-      server: { host: '127.0.0.1', port: 3100, strictPort: true }
+      server: { host: '127.0.0.1', port: 3101, strictPort: true }
     })
     await server.listen()
-    url = 'http://127.0.0.1:3100/'
+    url = 'http://127.0.0.1:3101/'
   }
   win = new BrowserWindow({
     width: 1440,
     height: 1000,
     show: true,
-    webPreferences: { contextIsolation: true, nodeIntegration: false, backgroundThrottling: false }
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      backgroundThrottling: false,
+      partition: 'background-smoke'
+    }
   })
   win.webContents.on('console-message', (_e, level, message) => {
     if (level >= 3) errors.push(message)
@@ -74,6 +88,131 @@ async function run() {
     'block',
     'a chosen wallpaper remains visible on Windows'
   )
+  const sidebar = '#main-sidebar-harness [data-sidebar-frame]'
+  await click('[aria-label="Sidebar background"] button:nth-child(2)')
+  await until(`document.querySelector('#main-sidebar-harness [data-sidebar-style="glass"]')`)
+  assert.equal(
+    await evaluate(
+      `return document.querySelectorAll('#main-sidebar-harness .chat-wallpaper-shared').length`
+    ),
+    1
+  )
+  assert.equal(
+    await evaluate(
+      `return document.querySelectorAll('#main-sidebar-harness [data-wallpaper] .chat-wallpaper').length`
+    ),
+    0
+  )
+  assert.equal(
+    await evaluate(
+      `return getComputedStyle(document.querySelector('#main-sidebar-harness [data-wallpaper]'), '::before').opacity`
+    ),
+    '0.7'
+  )
+  assert.equal(
+    await evaluate(
+      `return getComputedStyle(document.querySelector('#wallpaper-settings .background-sidebar-glass')).backdropFilter`
+    ),
+    'blur(18px) saturate(1.2)'
+  )
+  assert.equal(
+    await evaluate(
+      `return getComputedStyle(document.querySelector(${JSON.stringify(sidebar)}), '::before').backdropFilter`
+    ),
+    'blur(18px) saturate(1.2)'
+  )
+  await evaluate(`window.roxy.remote = {
+    status: async () => ({phase:'live', guests:0, rev:0, url:'https://example.com', pin:'123456'})
+  }`)
+  await click('#main-sidebar-harness button:has(.lucide-monitor-smartphone)')
+  assert.ok(
+    await evaluate(`const dialog=document.querySelector('[role="dialog"][aria-modal="true"]');
+    const box=dialog.getBoundingClientRect();
+    return dialog.parentElement === document.body && box.x === 0 && box.y === 0 && box.width === innerWidth && box.height === innerHeight;
+  `),
+    'remote dialog spans the viewport above glass sidebar and chat'
+  )
+  await click('[role="dialog"][aria-modal="true"] button:has(.lucide-x)')
+  await click('[aria-label="Sidebar background"] button:nth-child(3)')
+  await setInput('#background-sidebarOpacity', '25')
+  await evaluate(
+    `document.querySelector('#background-sidebarOpacity').dispatchEvent(new PointerEvent('pointerup', {bubbles:true}))`
+  )
+  await until(`window.roxy.background.get().then(s => s.settings.sidebarOpacity === 25)`)
+  const sidebarAlpha = () =>
+    evaluate(
+      `return Number(getComputedStyle(document.querySelector(${JSON.stringify(sidebar)})).backgroundColor.match(/(?:,|\\/)\\s*([\\d.]+)\\s*\\)$/)?.[1])`
+    )
+  assert.equal(await sidebarAlpha(), 0.25, 'sidebar opacity is independently adjustable')
+  await evaluate(`window.__surface = document.documentElement.style.getPropertyValue('--color-surface');
+    document.documentElement.style.setProperty('--color-surface', 'rgba(80, 60, 100, 0.2)')`)
+  assert.equal(await sidebarAlpha(), 0.25, 'theme alpha does not multiply explicit sidebar opacity')
+  await setInput('#background-sidebarOpacity', '100')
+  await evaluate(
+    `document.querySelector('#background-sidebarOpacity').dispatchEvent(new PointerEvent('pointerup', {bubbles:true}))`
+  )
+  await until(`window.roxy.background.get().then(s => s.settings.sidebarOpacity === 100)`)
+  assert.equal(
+    await evaluate(
+      `const c=document.createElement('canvas');c.width=c.height=1;const ctx=c.getContext('2d');
+       ctx.fillStyle=getComputedStyle(document.querySelector(${JSON.stringify(sidebar)})).backgroundColor;
+       ctx.fillRect(0,0,1,1);return ctx.getImageData(0,0,1,1).data[3]`
+    ),
+    255,
+    '100% is solid even with a translucent theme color'
+  )
+  await evaluate(`document.documentElement.style.setProperty('--color-surface', window.__surface)`)
+  await setInput('#background-sidebarOpacity', '25')
+  await evaluate(
+    `document.querySelector('#background-sidebarOpacity').dispatchEvent(new PointerEvent('pointerup', {bubbles:true}))`
+  )
+  await until(`window.roxy.background.get().then(s => s.settings.sidebarOpacity === 25)`)
+  await click('#background-theme')
+  await click('#background-theme')
+  assert.equal(await sidebarAlpha(), 0.25, 'changing theme color does not reset sidebar opacity')
+  await click('#background-theme')
+  await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', {
+    features: [{ name: 'prefers-reduced-transparency', value: 'reduce' }]
+  })
+  assert.equal(
+    await sidebarAlpha(),
+    0.25,
+    'Windows reduced transparency honors explicitly chosen opacity'
+  )
+  await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', {
+    features: [{ name: 'prefers-contrast', value: 'more' }]
+  })
+  assert.equal(
+    await evaluate(
+      `return getComputedStyle(document.querySelector('#main-sidebar-harness .chat-wallpaper-shared')).display`
+    ),
+    'none'
+  )
+  assert.equal(
+    await evaluate(
+      `return getComputedStyle(document.querySelector(${JSON.stringify(sidebar)})).backgroundColor.includes('0.25')`
+    ),
+    false,
+    'high contrast stays solid'
+  )
+  await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', {
+    features: [{ name: 'prefers-reduced-transparency', value: 'no-preference' }]
+  })
+  await until(`document.querySelector('#main-sidebar-harness [data-sidebar-style="dimmed"]')`)
+  assert.equal(
+    await evaluate(
+      `return getComputedStyle(document.querySelector(${JSON.stringify(sidebar)})).backdropFilter`
+    ),
+    'none'
+  )
+  await click('[aria-label="Sidebar background"] button:nth-child(1)')
+  await until(`!document.querySelector('#main-sidebar-harness [data-sidebar-style]')`)
+  assert.equal(
+    await evaluate(
+      `return document.querySelectorAll('#main-sidebar-harness .chat-wallpaper-shared').length`
+    ),
+    0
+  )
   assert.equal(
     await evaluate(
       `return getComputedStyle(document.querySelector('.composer-panel'), '::before').backdropFilter`
@@ -87,6 +226,205 @@ async function run() {
     'rgba(0, 0, 0, 0)'
   )
   const original = await evaluate(`return document.querySelector('[data-wallpaper] img').src`)
+  await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', {
+    features: [
+      { name: 'prefers-reduced-transparency', value: 'no-preference' },
+      { name: 'prefers-reduced-motion', value: 'no-preference' }
+    ]
+  })
+  await evaluate(`await window.roxy.settings.setMotion('system')`)
+  for (const format of ['mp4', 'mov']) {
+    await evaluate(`location.hash = '#${format}'`)
+    await click('#wallpaper-settings button:has(.lucide-image-plus)')
+    await until(
+      `document.querySelector('#main-sidebar-harness video')?.readyState >= 2 && !document.querySelector('#main-sidebar-harness video').paused`
+    )
+    assert.ok(
+      await evaluate(`const video=document.querySelector('#main-sidebar-harness video');
+      return video.muted && video.loop && video.playsInline && !video.controls && video.videoWidth === 96 && video.videoHeight === 64`),
+      `${format} is decoded, muted, and looping`
+    )
+    await evaluate(`window.__loopCount = 0; window.__lastTime = 0;
+      document.querySelector('#main-sidebar-harness video').addEventListener('timeupdate', e => {
+        if (e.target.currentTime < window.__lastTime) window.__loopCount++;
+        window.__lastTime=e.target.currentTime;
+      })`)
+    await until(`window.__loopCount > 0`)
+    await click('[aria-label="Sidebar background"] button:nth-child(2)')
+    await until(
+      `document.querySelector('#main-sidebar-harness .chat-wallpaper-shared video')?.paused === false`
+    )
+    assert.equal(
+      await evaluate(`return document.querySelectorAll('#main-sidebar-harness video').length`),
+      1,
+      'one video spans chat and sidebar'
+    )
+    await evaluate(`document.querySelector('#main-sidebar-harness').setAttribute('inert','')`)
+    await until(`document.querySelector('#main-sidebar-harness video').paused`)
+    await evaluate(`document.querySelector('#main-sidebar-harness').removeAttribute('inert')`)
+    await until(`!document.querySelector('#main-sidebar-harness video').paused`)
+    await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', {
+      features: [
+        { name: 'prefers-reduced-transparency', value: 'no-preference' },
+        { name: 'prefers-reduced-motion', value: 'reduce' }
+      ]
+    })
+    await until(
+      `!document.querySelector('#main-sidebar-harness video') && document.querySelector('#main-sidebar-harness .chat-wallpaper-shared img')`
+    )
+    await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', {
+      features: [
+        { name: 'prefers-reduced-transparency', value: 'no-preference' },
+        { name: 'prefers-reduced-motion', value: 'no-preference' }
+      ]
+    })
+    await until(`document.querySelector('#main-sidebar-harness video')?.paused === false`)
+    await click('[aria-labelledby="background-effect-label"] button:nth-child(2)')
+    await until(
+      `document.querySelector('#main-sidebar-harness .chat-wallpaper-shared img')?.src.startsWith('blob:')`
+    )
+    assert.equal(
+      await evaluate(`return document.querySelectorAll('#main-sidebar-harness video').length`),
+      0,
+      'processed effects use still frame'
+    )
+    await click('[aria-labelledby="background-effect-label"] button:nth-child(6)')
+    await until(`document.querySelector('#main-sidebar-harness video')?.paused === false`)
+    await win.loadURL(`${url}?background`)
+    await until(`document.querySelector('#main-sidebar-harness video')?.paused === false`)
+    await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', {
+      features: [
+        { name: 'prefers-reduced-transparency', value: 'no-preference' },
+        { name: 'prefers-reduced-motion', value: 'no-preference' }
+      ]
+    })
+    await evaluate(`await window.roxy.settings.setMotion('system')`)
+    assert.equal(
+      await evaluate(
+        `return (await window.roxy.background.get()).image.startsWith('data:video/mp4;')`
+      ),
+      true,
+      'video restored after reload'
+    )
+    await click('[aria-labelledby="background-effect-label"] button:nth-child(1)')
+    await click('[aria-label="Sidebar background"] button:nth-child(1)')
+  }
+  await win.loadURL(`${url}?background&motion-race`)
+  await until(
+    `document.documentElement.dataset.motion === 'reduced' && document.querySelector('#main-sidebar-harness .chat-wallpaper img')`
+  )
+  assert.ok(
+    await evaluate(`return (await window.roxy.background.get()).image.startsWith('data:video/')`),
+    'motion bootstrap does not discard initial media load'
+  )
+  await evaluate(`await window.roxy.settings.setMotion('on'); location.hash='#gif'`)
+  await click('#wallpaper-settings button:has(.lucide-image-plus)')
+  await evaluate(`await window.roxy.settings.setMotion('system')`)
+  await until(
+    `document.querySelector('#main-sidebar-harness .chat-wallpaper img')?.src.startsWith('data:image/gif;')`
+  )
+  const sharp = require('sharp')
+  for (const index of [1, 2, 3, 4, 5, 6]) {
+    await click(`[aria-labelledby="background-effect-label"] button:nth-child(${index})`)
+    await until(`!document.querySelector('[aria-live="polite"]').textContent`)
+    const selector = '#main-sidebar-harness .chat-wallpaper img'
+    if (index >= 2 && index <= 5) {
+      await until(`document.querySelector(${JSON.stringify(selector)})?.src.startsWith('blob:')`)
+      assert.deepEqual(
+        await evaluate(`const bytes = new Uint8Array(await (await fetch(document.querySelector(${JSON.stringify(selector)}).src)).arrayBuffer());
+        const view = new DataView(bytes.buffer); const delays=[]; let frames=0, plays=-1;
+        for(let offset=8;offset<bytes.length;){
+          const size=view.getUint32(offset), type=String.fromCharCode(...bytes.subarray(offset+4,offset+8));
+          if(type==='acTL'){frames=view.getUint32(offset+8);plays=view.getUint32(offset+12)}
+          if(type==='fcTL')delays.push(view.getUint16(offset+28)/view.getUint16(offset+30));
+          offset+=size+12;
+        }
+        return {frames,plays,delays};`),
+        { frames: 2, plays: 0, delays: [0.1, 0.1] },
+        'GIF effect retains all frames, timing, and infinite looping'
+      )
+    }
+    const samples = new Set()
+    for (let sample = 0; sample < 12; sample++) {
+      await wait(70)
+      const rect =
+        await evaluate(`const box=document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect();
+        return {x:Math.round(box.x+box.width/2-16),y:Math.round(box.y+box.height/2-16),width:32,height:32}`)
+      const screenshot = await win.webContents.capturePage(rect)
+      samples.add((await sharp(screenshot.toPNG()).raw().toBuffer()).toString('base64'))
+    }
+    assert.ok(
+      samples.size > 1,
+      `GIF effect ${index} actually changes visible frames across multiple loops`
+    )
+  }
+  await click('[aria-labelledby="background-effect-label"] button:nth-child(2)')
+  await click('[aria-label="Sidebar background"] button:nth-child(3)')
+  await until(
+    `document.querySelector('#main-sidebar-harness .chat-wallpaper-shared img')?.src.startsWith('blob:')`
+  )
+  const sharedSource = await evaluate(
+    `return document.querySelector('#main-sidebar-harness .chat-wallpaper-shared img').src`
+  )
+  await setInput('#background-sidebarOpacity', '25')
+  await evaluate(
+    `document.querySelector('#background-sidebarOpacity').dispatchEvent(new PointerEvent('pointerup', {bubbles:true}))`
+  )
+  assert.equal(
+    await evaluate(
+      `return document.querySelector('#main-sidebar-harness .chat-wallpaper-shared img').src`
+    ),
+    sharedSource,
+    'opacity adjustments do not restart GIF processing'
+  )
+  const sharedSamples = new Set()
+  for (let i = 0; i < 12; i++) {
+    await wait(70)
+    const rect =
+      await evaluate(`const box=document.querySelector('#main-sidebar-harness .chat-wallpaper-shared img').getBoundingClientRect();
+      return {x:Math.round(box.x+box.width/2-16),y:Math.round(box.y+box.height/2-16),width:32,height:32}`)
+    const screenshot = await win.webContents.capturePage(rect)
+    sharedSamples.add((await sharp(screenshot.toPNG()).raw().toBuffer()).toString('base64'))
+  }
+  assert.ok(sharedSamples.size > 1, 'full-window dithered GIF changes frames too')
+  await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', {
+    features: [
+      { name: 'prefers-reduced-transparency', value: 'no-preference' },
+      { name: 'prefers-reduced-motion', value: 'reduce' }
+    ]
+  })
+  await until(`document.documentElement.dataset.motion === 'reduced' && !document.querySelector('[aria-live="polite"]').textContent
+    && document.querySelector('#main-sidebar-harness .chat-wallpaper-shared img')?.src !== ${JSON.stringify(sharedSource)}`)
+  assert.equal(
+    await evaluate(`const bytes=new Uint8Array(await (await fetch(document.querySelector('#main-sidebar-harness .chat-wallpaper-shared img').src)).arrayBuffer());
+    return new TextDecoder().decode(bytes).includes('acTL');`),
+    false,
+    'reduced-motion dither output is a still frame'
+  )
+  await click('[aria-label="Sidebar background"] button:nth-child(1)')
+  await click('[aria-labelledby="background-effect-label"] button:nth-child(1)')
+  await until(
+    `document.querySelector('#main-sidebar-harness .chat-wallpaper img')?.src.startsWith('data:image/png;')`
+  )
+  await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', {
+    features: [
+      { name: 'prefers-reduced-transparency', value: 'no-preference' },
+      { name: 'prefers-reduced-motion', value: 'no-preference' }
+    ]
+  })
+  await until(
+    `document.querySelector('#main-sidebar-harness .chat-wallpaper img')?.src.startsWith('data:image/gif;')`
+  )
+  await evaluate(`location.hash=''`)
+  await evaluate(`await window.roxy.settings.setMotion('on')`)
+  await evaluate(`await window.roxy.background.update({ sidebarOpacity:25 })`)
+  await click('#wallpaper-settings button:has(.lucide-image-plus)')
+  await until(
+    `document.querySelector('#main-sidebar-harness .chat-wallpaper img')?.src === ${JSON.stringify(original)}`
+  )
+  await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', {
+    features: [{ name: 'prefers-reduced-transparency', value: 'no-preference' }]
+  })
   await click('.composer-panel button[aria-haspopup="dialog"]')
   assert.ok(
     await evaluate(`const dialog = document.querySelector('[role="dialog"]');
@@ -255,6 +593,11 @@ async function run() {
     await evaluate(`return (await window.roxy.background.get()).settings.emptyOpacity`),
     42,
     'reload retains settings'
+  )
+  assert.equal(
+    await evaluate(`return (await window.roxy.background.get()).settings.sidebarOpacity`),
+    25,
+    'reload retains sidebar opacity'
   )
   await until(`document.documentElement.hasAttribute('data-squircle')`)
   assert.equal(
@@ -502,11 +845,20 @@ async function run() {
     draft,
     'panel switch preserves unsaved JSON'
   )
-  for (const width of [760, 390]) {
+  for (const width of [1440, 1000, 760, 390]) {
     win.setSize(width, 844)
     await wait()
     for (const panel of ['background', 'themes']) {
       await click(`#appearance-${panel}`)
+      if (panel === 'background') {
+        assert.ok(
+          await evaluate(`const tracks = [...document.querySelectorAll('#appearance-background-panel input[type="range"]')].map(el => el.getBoundingClientRect());
+            const labels = [...document.querySelectorAll('#appearance-background-panel output')].map(el => el.getBoundingClientRect());
+            return tracks.length === 3 && tracks.every(box => Math.abs(box.width - tracks[0].width) < 1 && Math.abs(box.x - tracks[0].x) < 1)
+              && labels.every(box => Math.abs(box.x - labels[0].x) < 1 && Math.abs(box.width - labels[0].width) < 1);`),
+          `slider tracks and percentage labels align at ${width}px`
+        )
+      }
       assert.ok(
         await evaluate(
           `const p=document.querySelector('#appearance-${panel}-panel');return p.scrollWidth <= p.clientWidth`
@@ -568,7 +920,7 @@ app
   .then(async () => {
     win?.destroy()
     await server?.close()
-    fs.rmSync(temp, { recursive: true, force: true })
+    cleanup()
     app.exit(0)
   })
   .catch(async (error) => {
@@ -576,6 +928,6 @@ app
     console.error(errors)
     win?.destroy()
     await server?.close()
-    fs.rmSync(temp, { recursive: true, force: true })
+    cleanup()
     app.exit(1)
   })

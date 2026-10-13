@@ -28,6 +28,7 @@
     "emptyPreview": "空聊天",
     "errors": {
       "invalidImage": "请选择有效的 PNG、JPEG、WebP 或 GIF 图片，大小不超过 40 兆像素。",
+      "invalidVideo": "This video could not be played. Try an H.264 MP4 or MOV under 40 megapixels.",
       "readFailed": "无法读取背景图片。请尝试重新选择。",
       "saveFailed": "无法保存背景。您的先前设置已保留。",
       "tooLarge": "此图片过大。请选择小于 25 MB 的图片。"
@@ -55,6 +56,19 @@
     "sessionOpacityHint": "保持较低以方便阅读。",
     "sessionPreview": "对话",
     "showOn": "显示背景于",
+    "sidebarHints": {
+      "default": "Keep the sidebar's solid theme surface.",
+      "dimmed": "Extend the image across the window under a darker sidebar.",
+      "glass": "Extend the image across the window with a blurred sidebar."
+    },
+    "sidebarOpacity": "Sidebar opacity",
+    "sidebarOpacityHint": "Independent of your theme color. 0% is transparent; 100% is solid. Select Glass or Dimmed to adjust. Windows may disable blur, but your opacity still applies.",
+    "sidebarStyle": "Sidebar background",
+    "sidebarStyles": {
+      "default": "Default",
+      "dimmed": "Dimmed",
+      "glass": "Glass"
+    },
     "title": "聊天背景"
   },
   "bots": {

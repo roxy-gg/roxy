@@ -28,6 +28,7 @@
     "emptyPreview": "Пустой чат",
     "errors": {
       "invalidImage": "Выберите действительный PNG, JPEG, WebP или GIF размером до 40 мегапикселей.",
+      "invalidVideo": "This video could not be played. Try an H.264 MP4 or MOV under 40 megapixels.",
       "readFailed": "Не удалось прочитать фоновое изображение. Попробуйте выбрать его снова.",
       "saveFailed": "Не удалось сохранить фон. Ваши предыдущие настройки были сохранены.",
       "tooLarge": "Это изображение слишком большое. Выберите изображение размером до 25 МБ."
@@ -55,6 +56,19 @@
     "sessionOpacityHint": "Уменьшите это значение для более лёгкого чтения.",
     "sessionPreview": "Разговор",
     "showOn": "Показывать фон в",
+    "sidebarHints": {
+      "default": "Keep the sidebar's solid theme surface.",
+      "dimmed": "Extend the image across the window under a darker sidebar.",
+      "glass": "Extend the image across the window with a blurred sidebar."
+    },
+    "sidebarOpacity": "Sidebar opacity",
+    "sidebarOpacityHint": "Independent of your theme color. 0% is transparent; 100% is solid. Select Glass or Dimmed to adjust. Windows may disable blur, but your opacity still applies.",
+    "sidebarStyle": "Sidebar background",
+    "sidebarStyles": {
+      "default": "Default",
+      "dimmed": "Dimmed",
+      "glass": "Glass"
+    },
     "title": "Фон чата"
   },
   "bots": {

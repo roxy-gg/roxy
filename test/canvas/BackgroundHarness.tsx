@@ -11,6 +11,9 @@ import {
   type BackgroundState
 } from '../../src/shared/background'
 import { BUILT_IN_THEMES, resolveTheme } from '../../src/shared/theme'
+import mp4Url from '../fixtures/background.mp4?url'
+import movUrl from '../fixtures/background.mov?url'
+import gifUrl from '../fixtures/background.gif?url'
 
 const canvas = document.createElement('canvas')
 canvas.width = 1200
@@ -53,9 +56,28 @@ const delayed = (
   return work
 }
 window.roxy.background = {
-  get: async () => state,
-  choose: async () => (location.hash === '#cancel' ? null : commit({ ...state, image })),
-  remove: async () => commit({ ...state, image: null }),
+  get: async () => {
+    if (new URLSearchParams(location.search).has('motion-race'))
+      await new Promise((resolve) => setTimeout(resolve, 200))
+    return state
+  },
+  choose: async () => {
+    if (location.hash === '#cancel') return null
+    const mediaUrl = { '#mp4': mp4Url, '#mov': movUrl, '#gif': gifUrl }[location.hash]
+    if (mediaUrl) {
+      const blob = await (await fetch(mediaUrl)).blob()
+      const media = await new Promise<string>((resolve) => {
+        const reader = new FileReader()
+        reader.onload = () => resolve(reader.result as string)
+        reader.readAsDataURL(
+          new Blob([blob], { type: location.hash === '#gif' ? 'image/gif' : 'video/mp4' })
+        )
+      })
+      return commit({ settings: state.settings, image: media, poster: image })
+    }
+    return commit({ settings: state.settings, image })
+  },
+  remove: async () => commit({ settings: state.settings, image: null }),
   update: (settings) =>
     delayed(() =>
       commit({ ...state, settings: normalizeBackground({ ...state.settings, ...settings }) })
@@ -68,6 +90,11 @@ window.roxy.background = {
   }
 }
 const stop = startBackground()
+if (new URLSearchParams(location.search).has('motion-race')) {
+  setTimeout(() => {
+    void window.roxy.settings.setMotion('reduced')
+  }, 20)
+}
 import.meta.hot?.dispose(stop)
 installSquircle()
 

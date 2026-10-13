@@ -28,6 +28,7 @@
     "emptyPreview": "खाली चैट",
     "errors": {
       "invalidImage": "40 मेगापिक्सेल से कम का एक वैध PNG, JPEG, WebP या GIF चुनें।",
+      "invalidVideo": "This video could not be played. Try an H.264 MP4 or MOV under 40 megapixels.",
       "readFailed": "पृष्ठभूमि छवि को पढ़ा नहीं जा सका। इसे फिर से चुनने का प्रयास करें।",
       "saveFailed": "पृष्ठभूमि को सहेजा नहीं जा सका। आपकी पिछली सेटिंग्स रखी गई हैं।",
       "tooLarge": "यह छवि बहुत बड़ी है। 25 MB से कम का एक चुनें।"
@@ -55,6 +56,19 @@
     "sessionOpacityHint": "आसान पढ़ने के लिए इसे कम रखें।",
     "sessionPreview": "बातचीत",
     "showOn": "पृष्ठभूमि दिखाएँ",
+    "sidebarHints": {
+      "default": "Keep the sidebar's solid theme surface.",
+      "dimmed": "Extend the image across the window under a darker sidebar.",
+      "glass": "Extend the image across the window with a blurred sidebar."
+    },
+    "sidebarOpacity": "Sidebar opacity",
+    "sidebarOpacityHint": "Independent of your theme color. 0% is transparent; 100% is solid. Select Glass or Dimmed to adjust. Windows may disable blur, but your opacity still applies.",
+    "sidebarStyle": "Sidebar background",
+    "sidebarStyles": {
+      "default": "Default",
+      "dimmed": "Dimmed",
+      "glass": "Glass"
+    },
     "title": "चैट पृष्ठभूमि"
   },
   "bots": {

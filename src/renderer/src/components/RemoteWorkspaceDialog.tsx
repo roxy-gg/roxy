@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { QRCodeSVG } from 'qrcode.react'
 import { useTranslation } from 'react-i18next'
 import { Check, Copy, Loader2, MonitorSmartphone, ShieldCheck, Smartphone, X } from 'lucide-react'
@@ -75,9 +76,12 @@ export function RemoteWorkspaceDialog({ onClose }: { onClose: () => void }): JSX
 
   const sharing = remote.phase === 'live' || remote.phase === 'offline'
 
-  return (
+  return createPortal(
     <div
       className="animate-scrim-in fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-6"
+      role="dialog"
+      aria-modal="true"
+      aria-label={t('remote.title')}
       onClick={onClose}
     >
       <div
@@ -140,7 +144,8 @@ export function RemoteWorkspaceDialog({ onClose }: { onClose: () => void }): JSX
           </div>
         )}
       </div>
-    </div>
+    </div>,
+    document.body
   )
 }
 

@@ -198,8 +198,18 @@ export function ChatView(): JSX.Element {
   // No workspace open — prompt to open a folder to start a session.
   if (!activeChat) {
     return (
-      <div className="chat-background-host relative isolate flex h-full min-w-0 flex-1 flex-col bg-bg">
-        <ChatBackground empty />
+      <div
+        data-wallpaper={
+          (!!background.rendered && backgroundOpacity(background.settings, true) > 0) || undefined
+        }
+        className="chat-background-host relative isolate flex h-full min-w-0 flex-1 flex-col bg-bg"
+        style={
+          {
+            '--chat-wallpaper-opacity': backgroundOpacity(background.settings, true)
+          } as React.CSSProperties
+        }
+      >
+        {background.settings.sidebarStyle === 'default' && <ChatBackground empty />}
         <div className="titlebar reserve-controls-right h-12 shrink-0" />
         <div className="flex flex-1 flex-col items-center justify-center px-6 text-center">
           <img
@@ -218,7 +228,12 @@ export function ChatView(): JSX.Element {
   }
 
   return (
-    <div className="@container/chat relative flex h-full min-w-0 flex-1 bg-bg">
+    <div
+      className="@container/chat relative flex h-full min-w-0 flex-1 bg-bg"
+      data-shared-pane={
+        (background.settings.sidebarStyle !== 'default' && !!background.rendered) || undefined
+      }
+    >
       {botPaneOpen && activeBot && (
         <BotSettingsPane
           key={activeBot.id}
@@ -231,9 +246,16 @@ export function ChatView(): JSX.Element {
         key="conversation"
         className="chat-background-host relative isolate flex min-h-0 min-w-0 flex-1 flex-col"
         data-wallpaper={wallpaper || undefined}
+        style={
+          {
+            '--chat-wallpaper-opacity': backgroundOpacity(background.settings, isEmpty)
+          } as React.CSSProperties
+        }
         data-glass={(wallpaper && background.settings.glass) || undefined}
       >
-        {wallpaper && <ChatBackground empty={isEmpty} />}
+        {wallpaper && background.settings.sidebarStyle === 'default' && (
+          <ChatBackground empty={isEmpty} />
+        )}
         <header className="titlebar reserve-controls-right flex h-12 shrink-0 items-center justify-between gap-3 px-4">
           {activeBot ? (
             <div className="flex min-w-0 items-center gap-2">

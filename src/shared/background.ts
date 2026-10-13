@@ -8,6 +8,8 @@ export const BACKGROUND_EFFECTS = [
   'haze'
 ] as const
 export type BackgroundEffect = (typeof BACKGROUND_EFFECTS)[number]
+export const SIDEBAR_STYLES = ['default', 'glass', 'dimmed'] as const
+export type SidebarStyle = (typeof SIDEBAR_STYLES)[number]
 
 export interface BackgroundSettings {
   effect: BackgroundEffect
@@ -15,12 +17,16 @@ export interface BackgroundSettings {
   emptyOpacity: number
   sessionOpacity: number
   glass: boolean
+  sidebarStyle: SidebarStyle
+  sidebarOpacity: number
 }
 
 export interface BackgroundState {
   settings: BackgroundSettings
-  /** A bounded, decoded PNG from main, never a path or remote URL. */
+  /** Bounded device-local image/video data, never a path or remote URL. */
   image: string | null
+  /** Decoded still frame for video effects and reduced motion. */
+  poster?: string
 }
 
 export const DEFAULT_BACKGROUND: BackgroundSettings = {
@@ -28,16 +34,18 @@ export const DEFAULT_BACKGROUND: BackgroundSettings = {
   showOn: 'all',
   emptyOpacity: 30,
   sessionOpacity: 15,
-  glass: true
+  glass: true,
+  sidebarStyle: 'default',
+  sidebarOpacity: 66
 }
 
 export type BackgroundResult =
   | { ok: true; state: BackgroundState }
-  | { ok: false; error: 'invalidImage' | 'tooLarge' | 'readFailed' | 'saveFailed' }
+  | { ok: false; error: 'invalidImage' | 'invalidVideo' | 'tooLarge' | 'readFailed' | 'saveFailed' }
 
 export function normalizeBackground(value: unknown): BackgroundSettings {
   const input = value && typeof value === 'object' ? (value as Record<string, unknown>) : {}
-  const opacity = (key: 'emptyOpacity' | 'sessionOpacity'): number => {
+  const opacity = (key: 'emptyOpacity' | 'sessionOpacity' | 'sidebarOpacity'): number => {
     const n = input[key]
     return typeof n === 'number' && Number.isFinite(n)
       ? Math.round(Math.max(0, Math.min(100, n)))
@@ -50,7 +58,11 @@ export function normalizeBackground(value: unknown): BackgroundSettings {
     showOn: input.showOn === 'empty' ? 'empty' : 'all',
     emptyOpacity: opacity('emptyOpacity'),
     sessionOpacity: opacity('sessionOpacity'),
-    glass: typeof input.glass === 'boolean' ? input.glass : DEFAULT_BACKGROUND.glass
+    glass: typeof input.glass === 'boolean' ? input.glass : DEFAULT_BACKGROUND.glass,
+    sidebarStyle: SIDEBAR_STYLES.includes(input.sidebarStyle as SidebarStyle)
+      ? (input.sidebarStyle as SidebarStyle)
+      : DEFAULT_BACKGROUND.sidebarStyle,
+    sidebarOpacity: opacity('sidebarOpacity')
   }
 }
 

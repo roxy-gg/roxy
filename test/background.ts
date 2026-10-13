@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { app } from 'electron'
+import { app, BrowserWindow } from 'electron'
 import { promises as fs } from 'node:fs'
 import { spawn } from 'node:child_process'
 import os from 'node:os'
@@ -15,12 +15,34 @@ import {
 import * as service from '../src/main/services/background'
 
 async function run(): Promise<void> {
+  app.on('window-all-closed', () => {})
   if (process.env.ROXY_BACKGROUND_RELOAD_TEST) {
     app.setPath('userData', process.env.ROXY_BACKGROUND_RELOAD_TEST)
+    if (process.env.ROXY_BACKGROUND_VIDEO_RELOAD) {
+      const state = await service.getBackground()
+      assert.ok(state.image?.startsWith('data:video/mp4;base64,'))
+      assert.ok(state.poster?.startsWith('data:image/png;base64,'))
+      assert.equal(state.settings.sidebarOpacity, 37)
+      console.log('Fresh process restored video without the original file')
+      return
+    }
     const state = await service.getBackground()
-    assert.deepEqual(state.settings, { ...DEFAULT_BACKGROUND, effect: 'ascii', sessionOpacity: 22 })
+    assert.deepEqual(state.settings, {
+      ...DEFAULT_BACKGROUND,
+      effect: 'ascii',
+      sessionOpacity: 22,
+      sidebarStyle: 'glass'
+    })
     assert.ok(state.image?.startsWith('data:image/png;base64,'))
+    const gif = await service.importBackground(
+      path.join(process.env.ROXY_BACKGROUND_RELOAD_TEST, 'animated.gif')
+    )
+    assert.ok(gif.ok)
+    assert.ok(gif.state.image?.startsWith('data:image/gif;base64,'))
     console.log('Fresh process restored wallpaper without the original file')
+    await service.importBackground(
+      path.join(process.env.ROXY_BACKGROUND_RELOAD_TEST, 'restored.png')
+    )
     return
   }
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'roxy-background-'))
@@ -36,6 +58,13 @@ async function run(): Promise<void> {
       }),
       DEFAULT_BACKGROUND
     )
+    assert.equal(normalizeBackground({ sidebarStyle: 'glass' }).sidebarStyle, 'glass')
+    assert.equal(normalizeBackground({ sidebarStyle: 'dimmed' }).sidebarStyle, 'dimmed')
+    assert.equal(normalizeBackground({ sidebarStyle: 'bad' }).sidebarStyle, 'default')
+    assert.equal(normalizeBackground({ sidebarOpacity: -1 }).sidebarOpacity, 0)
+    assert.equal(normalizeBackground({ sidebarOpacity: 120 }).sidebarOpacity, 100)
+    assert.equal(normalizeBackground({ sidebarOpacity: NaN }).sidebarOpacity, 66)
+    assert.equal(normalizeBackground({ sidebarOpacity: 37 }).sidebarOpacity, 37)
     assert.equal(normalizeBackground({ emptyOpacity: -100, sessionOpacity: 500 }).emptyOpacity, 0)
     assert.equal(normalizeBackground({ sessionOpacity: 500 }).sessionOpacity, 100)
     for (const effect of BACKGROUND_EFFECTS)
@@ -69,11 +98,88 @@ async function run(): Promise<void> {
     )
     assert.equal(saved.image, imported.state.image)
     assert.ok(!JSON.stringify(saved).includes(input))
+    const gifInput = path.join(directory, 'animated.gif')
+    const frames = Buffer.alloc(16 * 16 * 2 * 4)
+    for (let i = 0; i < 16 * 16; i++) {
+      frames[i * 4] = 255
+      frames[i * 4 + 3] = 255
+      frames[(16 * 16 + i) * 4 + 2] = 255
+      frames[(16 * 16 + i) * 4 + 3] = 255
+    }
+    await sharp(frames, { raw: { width: 16, height: 32, channels: 4, pageHeight: 16 } })
+      .gif({ delay: [100, 100], loop: 1 })
+      .toFile(gifInput)
+    const gif = await service.importBackground(gifInput)
+    assert.ok(gif.ok)
+    assert.ok(gif.state.image?.startsWith('data:image/gif;base64,'))
+    const gifMeta = await sharp(Buffer.from(gif.state.image!.split(',')[1], 'base64'), {
+      animated: true
+    }).metadata()
+    assert.equal(gifMeta.pages, 2)
+    assert.deepEqual(gifMeta.delay, [100, 100])
+    assert.equal((await service.getBackground()).image, gif.state.image)
 
+    assert.equal(gifMeta.loop, 0, 'GIFs always loop even if the original has a finite loop')
+    assert.ok(gif.state.poster?.startsWith('data:image/png;base64,'))
+    for (const extension of ['mp4', 'mov']) {
+      const videoInput = path.join(directory, `clip.${extension}`)
+      await fs.copyFile(
+        path.join(process.cwd(), `test/fixtures/background.${extension}`),
+        videoInput
+      )
+      const result = await service.importBackground(videoInput)
+      assert.ok(result.ok, `${extension} video decodes`)
+      assert.ok(result.state.image?.startsWith('data:video/mp4;base64,'))
+      assert.ok(result.state.poster?.startsWith('data:image/png;base64,'))
+      const frame = await sharp(
+        Buffer.from(result.state.poster!.split(',')[1], 'base64')
+      ).metadata()
+      assert.equal(frame.width, 96)
+      assert.equal(frame.height, 64)
+      await service.updateBackground({ sidebarOpacity: 37 })
+      await fs.rm(videoInput)
+      await new Promise<void>((resolve, reject) => {
+        const child = spawn(process.execPath, [process.argv[1]], {
+          env: {
+            ...process.env,
+            ROXY_BACKGROUND_RELOAD_TEST: directory,
+            ROXY_BACKGROUND_VIDEO_RELOAD: '1'
+          },
+          stdio: 'inherit'
+        })
+        child.once('error', reject)
+        child.once('exit', (code) =>
+          code === 0 ? resolve() : reject(new Error(`Video reload exited ${code}`))
+        )
+      })
+      const badVideo = path.join(directory, 'bad.mp4')
+      await fs.writeFile(badVideo, data)
+      assert.deepEqual(await service.importBackground(badVideo), {
+        ok: false,
+        error: 'invalidVideo'
+      })
+      assert.equal(
+        (await service.getBackground()).image,
+        result.state.image,
+        'invalid video keeps previous background'
+      )
+      await service.removeBackground()
+      assert.equal((await service.getBackground()).poster, undefined)
+    }
+    assert.deepEqual(
+      await service.importBackground(
+        path.join(process.cwd(), 'test/fixtures/background-unsupported.mov')
+      ),
+      { ok: false, error: 'invalidVideo' },
+      'unsupported MOV codec is rejected'
+    )
+    await fs.writeFile(path.join(directory, 'restored.png'), data)
+    await service.importBackground(input)
     const updated = await service.updateBackground({
       ...DEFAULT_BACKGROUND,
       effect: 'ascii',
-      sessionOpacity: 22
+      sessionOpacity: 22,
+      sidebarStyle: 'glass'
     })
     assert.ok(updated.ok)
     assert.equal(updated.state.image, imported.state.image)
@@ -167,11 +273,63 @@ async function run(): Promise<void> {
       { code: 'ENOENT' },
       'reset removes stale temp file'
     )
+    await fs.writeFile(
+      file,
+      JSON.stringify({ settings: DEFAULT_BACKGROUND, image: gif.state.image })
+    )
+    assert.ok(
+      (await service.getBackground()).poster?.startsWith('data:image/png;base64,'),
+      'older GIF state gains a reduced-motion poster'
+    )
+    await service.resetBackground()
+    await fs.writeFile(
+      file,
+      JSON.stringify({
+        settings: DEFAULT_BACKGROUND,
+        image: 'data:video/mp4;base64,AAAA',
+        poster: 'data:image/png;base64,AAAA'
+      })
+    )
+    assert.equal((await service.getBackground()).image, null, 'corrupt video poster is rejected')
+    await service.resetBackground()
+    for (const interrupt of ['closed', 'crashed'] as const) {
+      app.once('browser-window-created', (_event, decoder) => {
+        decoder.webContents.once('did-finish-load', () => {
+          if (interrupt === 'closed') decoder.destroy()
+          else decoder.webContents.forcefullyCrashRenderer()
+        })
+      })
+      assert.deepEqual(
+        await service.importBackground(path.join(process.cwd(), 'test/fixtures/background.mp4')),
+        { ok: false, error: 'invalidVideo' },
+        `${interrupt} decoder does not hang import`
+      )
+      assert.equal(BrowserWindow.getAllWindows().length, 0, 'decoder disposed on interruption')
+    }
+    const owner = new BrowserWindow({ show: false, webPreferences: { sandbox: true } })
+    app.once('browser-window-created', (_event, decoder) => {
+      decoder.webContents.once('did-finish-load', () => owner.destroy())
+    })
+    assert.deepEqual(
+      await service.importBackground(
+        path.join(process.cwd(), 'test/fixtures/background.mov'),
+        owner
+      ),
+      { ok: false, error: 'invalidVideo' },
+      'closing the picker owner aborts the hidden decoder'
+    )
+    assert.equal(BrowserWindow.getAllWindows().length, 0)
     console.log(
-      'BACKGROUND OK: defaults, validation, six effects, quantization, import, resize, metadata stripping, persistence, removal and reset'
+      'BACKGROUND OK: looping GIF, MP4/MOV decode, codec rejection, posters, interrupted imports, persistence, effects and reset'
     )
   } finally {
-    await fs.rm(directory, { recursive: true, force: true })
+    await fs
+      .rm(directory, { recursive: true, force: true })
+      .catch((error: NodeJS.ErrnoException) => {
+        if (!['EPERM', 'EBUSY'].includes(error.code ?? '')) throw error
+        // Chromium releases its temporary profile locks when Electron exits on Windows.
+        console.warn(`Temporary decoder profile retained until process exit: ${error.code}`)
+      })
   }
 }
 void app
