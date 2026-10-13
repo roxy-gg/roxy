@@ -28,7 +28,7 @@
     "emptyPreview": "دردشة فارغة",
     "errors": {
       "invalidImage": "اختر صورة PNG أو JPEG أو WebP أو GIF صالحة بحجم أقل من 40 ميجابكسل.",
-      "invalidVideo": "This video could not be played. Try an H.264 MP4 or MOV under 40 megapixels.",
+      "invalidVideo": "تعذر تشغيل هذا الفيديو. جرب ملف H.264 MP4 أو MOV أقل من 40 ميجابكسل.",
       "readFailed": "تعذر قراءة صورة الخلفية. حاول اختيارها مرة أخرى.",
       "saveFailed": "تعذر حفظ الخلفية. تم الاحتفاظ بإعداداتك السابقة.",
       "tooLarge": "هذه الصورة كبيرة جدًا. اختر واحدة بحجم أقل من 25 ميجابايت."
@@ -57,17 +57,17 @@
     "sessionPreview": "محادثة",
     "showOn": "إظهار الخلفية على",
     "sidebarHints": {
-      "default": "Keep the sidebar's solid theme surface.",
-      "dimmed": "Extend the image across the window under a darker sidebar.",
-      "glass": "Extend the image across the window with a blurred sidebar."
+      "default": "احتفظ بسطح المظهر الصلب للشريط الجانبي.",
+      "dimmed": "مد الصورة عبر النافذة تحت شريط جانبي أغمق.",
+      "glass": "مد الصورة عبر النافذة بشريط جانبي مموه."
     },
-    "sidebarOpacity": "Sidebar opacity",
-    "sidebarOpacityHint": "Independent of your theme color. 0% is transparent; 100% is solid. Select Glass or Dimmed to adjust. Windows may disable blur, but your opacity still applies.",
-    "sidebarStyle": "Sidebar background",
+    "sidebarOpacity": "شفافية الشريط الجانبي",
+    "sidebarOpacityHint": "مستقل عن لون المظهر الخاص بك. 0% شفاف؛ 100% صلب. حدد زجاجي أو معتم للضبط. قد تقوم Windows بتعطيل التمويه، ولكن شفافيتك لا تزال سارية.",
+    "sidebarStyle": "خلفية الشريط الجانبي",
     "sidebarStyles": {
-      "default": "Default",
-      "dimmed": "Dimmed",
-      "glass": "Glass"
+      "default": "افتراضي",
+      "dimmed": "معتم",
+      "glass": "زجاجي"
     },
     "title": "خلفية الدردشة"
   },

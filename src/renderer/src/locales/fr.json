@@ -28,7 +28,7 @@
     "emptyPreview": "Chat vide",
     "errors": {
       "invalidImage": "Choisissez une image PNG, JPEG, WebP ou GIF valide de moins de 40 mégapixels.",
-      "invalidVideo": "This video could not be played. Try an H.264 MP4 or MOV under 40 megapixels.",
+      "invalidVideo": "Cette vidéo n’a pas pu être lue. Essayez un MP4 ou MOV H.264 de moins de 40 mégapixels.",
       "readFailed": "Impossible de lire l'image de fond. Essayez de la choisir à nouveau.",
       "saveFailed": "Impossible d'enregistrer l'arrière-plan. Vos paramètres précédents ont été conservés.",
       "tooLarge": "Cette image est trop grande. Choisissez-en une de moins de 25 Mo."
@@ -57,17 +57,17 @@
     "sessionPreview": "Conversation",
     "showOn": "Afficher l'arrière-plan sur",
     "sidebarHints": {
-      "default": "Keep the sidebar's solid theme surface.",
-      "dimmed": "Extend the image across the window under a darker sidebar.",
-      "glass": "Extend the image across the window with a blurred sidebar."
+      "default": "Conserver la surface de thème unie de la barre latérale.",
+      "dimmed": "Étendre l’image sur toute la fenêtre sous une barre latérale plus sombre.",
+      "glass": "Étendre l’image sur toute la fenêtre avec une barre latérale floue."
     },
-    "sidebarOpacity": "Sidebar opacity",
-    "sidebarOpacityHint": "Independent of your theme color. 0% is transparent; 100% is solid. Select Glass or Dimmed to adjust. Windows may disable blur, but your opacity still applies.",
-    "sidebarStyle": "Sidebar background",
+    "sidebarOpacity": "Opacité de la barre latérale",
+    "sidebarOpacityHint": "Indépendante de la couleur de votre thème. 0 % est transparent ; 100 % est opaque. Sélectionnez Verre ou Estompé pour ajuster. Windows peut désactiver le flou, mais votre opacité s’applique toujours.",
+    "sidebarStyle": "Arrière-plan de la barre latérale",
     "sidebarStyles": {
-      "default": "Default",
-      "dimmed": "Dimmed",
-      "glass": "Glass"
+      "default": "Par défaut",
+      "dimmed": "Estompé",
+      "glass": "Verre"
     },
     "title": "Arrière-plan du chat"
   },

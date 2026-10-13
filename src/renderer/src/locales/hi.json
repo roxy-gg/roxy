@@ -28,7 +28,7 @@
     "emptyPreview": "खाली चैट",
     "errors": {
       "invalidImage": "40 मेगापिक्सेल से कम का एक वैध PNG, JPEG, WebP या GIF चुनें।",
-      "invalidVideo": "This video could not be played. Try an H.264 MP4 or MOV under 40 megapixels.",
+      "invalidVideo": "यह वीडियो नहीं चलाया जा सका। 40 मेगापिक्सल से कम का H.264 MP4 या MOV आज़माएँ।",
       "readFailed": "पृष्ठभूमि छवि को पढ़ा नहीं जा सका। इसे फिर से चुनने का प्रयास करें।",
       "saveFailed": "पृष्ठभूमि को सहेजा नहीं जा सका। आपकी पिछली सेटिंग्स रखी गई हैं।",
       "tooLarge": "यह छवि बहुत बड़ी है। 25 MB से कम का एक चुनें।"
@@ -57,17 +57,17 @@
     "sessionPreview": "बातचीत",
     "showOn": "पृष्ठभूमि दिखाएँ",
     "sidebarHints": {
-      "default": "Keep the sidebar's solid theme surface.",
-      "dimmed": "Extend the image across the window under a darker sidebar.",
-      "glass": "Extend the image across the window with a blurred sidebar."
+      "default": "साइडबार की ठोस थीम सतह रखें।",
+      "dimmed": "एक गहरे साइडबार के नीचे छवि को विंडो में फैलाएँ।",
+      "glass": "ब्लर किए गए साइडबार के साथ छवि को विंडो में फैलाएँ।"
     },
-    "sidebarOpacity": "Sidebar opacity",
-    "sidebarOpacityHint": "Independent of your theme color. 0% is transparent; 100% is solid. Select Glass or Dimmed to adjust. Windows may disable blur, but your opacity still applies.",
-    "sidebarStyle": "Sidebar background",
+    "sidebarOpacity": "साइडबार अपारदर्शिता",
+    "sidebarOpacityHint": "आपके थीम रंग से स्वतंत्र। 0% पारदर्शी है; 100% ठोस है। समायोजित करने के लिए ग्लास या डिम्ड चुनें। विंडोज ब्लर को अक्षम कर सकता है, लेकिन आपकी अपारदर्शिता अभी भी लागू होती है।",
+    "sidebarStyle": "साइडबार बैकग्राउंड",
     "sidebarStyles": {
-      "default": "Default",
-      "dimmed": "Dimmed",
-      "glass": "Glass"
+      "default": "डिफ़ॉल्ट",
+      "dimmed": "डिम्ड",
+      "glass": "ग्लास"
     },
     "title": "चैट पृष्ठभूमि"
   },

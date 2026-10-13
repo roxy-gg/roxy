@@ -28,7 +28,7 @@
     "emptyPreview": "Пустой чат",
     "errors": {
       "invalidImage": "Выберите действительный PNG, JPEG, WebP или GIF размером до 40 мегапикселей.",
-      "invalidVideo": "This video could not be played. Try an H.264 MP4 or MOV under 40 megapixels.",
+      "invalidVideo": "Это видео не может быть воспроизведено. Попробуйте H.264 MP4 или MOV размером менее 40 мегапикселей.",
       "readFailed": "Не удалось прочитать фоновое изображение. Попробуйте выбрать его снова.",
       "saveFailed": "Не удалось сохранить фон. Ваши предыдущие настройки были сохранены.",
       "tooLarge": "Это изображение слишком большое. Выберите изображение размером до 25 МБ."
@@ -57,17 +57,17 @@
     "sessionPreview": "Разговор",
     "showOn": "Показывать фон в",
     "sidebarHints": {
-      "default": "Keep the sidebar's solid theme surface.",
-      "dimmed": "Extend the image across the window under a darker sidebar.",
-      "glass": "Extend the image across the window with a blurred sidebar."
+      "default": "Сохранить сплошную поверхность темы боковой панели.",
+      "dimmed": "Растянуть изображение по всему окну под более темной боковой панелью.",
+      "glass": "Растянуть изображение по всему окну с размытой боковой панелью."
     },
-    "sidebarOpacity": "Sidebar opacity",
-    "sidebarOpacityHint": "Independent of your theme color. 0% is transparent; 100% is solid. Select Glass or Dimmed to adjust. Windows may disable blur, but your opacity still applies.",
-    "sidebarStyle": "Sidebar background",
+    "sidebarOpacity": "Прозрачность боковой панели",
+    "sidebarOpacityHint": "Независимо от цвета вашей темы. 0% — прозрачный; 100% — сплошной. Выберите «Стекло» или «Затемненный» для настройки. Windows может отключить размытие, но ваша прозрачность все равно будет применяться.",
+    "sidebarStyle": "Фон боковой панели",
     "sidebarStyles": {
-      "default": "Default",
-      "dimmed": "Dimmed",
-      "glass": "Glass"
+      "default": "По умолчанию",
+      "dimmed": "Затемненный",
+      "glass": "Стекло"
     },
     "title": "Фон чата"
   },
@@ -80,7 +80,7 @@
     "confirmSave": "Сохранить изменения",
     "confirmSaveDescription": "Применить эти изменения и продолжить редактирование этого бота.",
     "confirmSaveTitle": "Сохранить настройки бота?",
-    "cron": "Cron",
+    "cron": "Крон",
     "cronHint": "Пять полей: минута, час, день месяца, месяц, день недели. Используется указанный выше часовой пояс.",
     "delete": "Удалить бота",
     "deleteConfirm": "Удалить @{{username}}, его чат и все его расписания? Это действие необратимо.",

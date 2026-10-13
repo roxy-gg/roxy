@@ -28,7 +28,7 @@
     "emptyPreview": "空聊天",
     "errors": {
       "invalidImage": "请选择有效的 PNG、JPEG、WebP 或 GIF 图片，大小不超过 40 兆像素。",
-      "invalidVideo": "This video could not be played. Try an H.264 MP4 or MOV under 40 megapixels.",
+      "invalidVideo": "此视频无法播放。请尝试使用 H.264 MP4 或 MOV 格式，且像素不超过 40 兆。",
       "readFailed": "无法读取背景图片。请尝试重新选择。",
       "saveFailed": "无法保存背景。您的先前设置已保留。",
       "tooLarge": "此图片过大。请选择小于 25 MB 的图片。"
@@ -57,17 +57,17 @@
     "sessionPreview": "对话",
     "showOn": "显示背景于",
     "sidebarHints": {
-      "default": "Keep the sidebar's solid theme surface.",
-      "dimmed": "Extend the image across the window under a darker sidebar.",
-      "glass": "Extend the image across the window with a blurred sidebar."
+      "default": "保持侧边栏的纯色主题表面。",
+      "dimmed": "在较暗的侧边栏下将图像延伸到整个窗口。",
+      "glass": "通过模糊的侧边栏将图像延伸到整个窗口。"
     },
-    "sidebarOpacity": "Sidebar opacity",
-    "sidebarOpacityHint": "Independent of your theme color. 0% is transparent; 100% is solid. Select Glass or Dimmed to adjust. Windows may disable blur, but your opacity still applies.",
-    "sidebarStyle": "Sidebar background",
+    "sidebarOpacity": "侧边栏不透明度",
+    "sidebarOpacityHint": "独立于您的主题颜色。0% 为透明；100% 为实色。选择“玻璃”或“变暗”进行调整。Windows 可能会禁用模糊效果，但您的不透明度设置仍然有效。",
+    "sidebarStyle": "侧边栏背景",
     "sidebarStyles": {
-      "default": "Default",
-      "dimmed": "Dimmed",
-      "glass": "Glass"
+      "default": "默认",
+      "dimmed": "变暗",
+      "glass": "玻璃"
     },
     "title": "聊天背景"
   },

@@ -28,7 +28,7 @@
     "emptyPreview": "Chat vacío",
     "errors": {
       "invalidImage": "Elija un PNG, JPEG, WebP o GIF válido de menos de 40 megapíxeles.",
-      "invalidVideo": "This video could not be played. Try an H.264 MP4 or MOV under 40 megapixels.",
+      "invalidVideo": "Este vídeo no se pudo reproducir. Prueba con un MP4 o MOV H.264 de menos de 40 megapíxeles.",
       "readFailed": "No se pudo leer la imagen de fondo. Intente seleccionarla de nuevo.",
       "saveFailed": "No se pudo guardar el fondo. Se han mantenido sus ajustes anteriores.",
       "tooLarge": "Esta imagen es demasiado grande. Elija una de menos de 25 MB."
@@ -57,17 +57,17 @@
     "sessionPreview": "Conversación",
     "showOn": "Mostrar fondo en",
     "sidebarHints": {
-      "default": "Keep the sidebar's solid theme surface.",
-      "dimmed": "Extend the image across the window under a darker sidebar.",
-      "glass": "Extend the image across the window with a blurred sidebar."
+      "default": "Mantener la superficie sólida del tema de la barra lateral.",
+      "dimmed": "Extender la imagen por toda la ventana bajo una barra lateral más oscura.",
+      "glass": "Extender la imagen por toda la ventana con una barra lateral difuminada."
     },
-    "sidebarOpacity": "Sidebar opacity",
-    "sidebarOpacityHint": "Independent of your theme color. 0% is transparent; 100% is solid. Select Glass or Dimmed to adjust. Windows may disable blur, but your opacity still applies.",
-    "sidebarStyle": "Sidebar background",
+    "sidebarOpacity": "Opacidad de la barra lateral",
+    "sidebarOpacityHint": "Independiente del color de tu tema. 0% es transparente; 100% es sólido. Selecciona Cristal o Atenuado para ajustar. Windows puede deshabilitar el desenfoque, pero tu opacidad seguirá aplicándose.",
+    "sidebarStyle": "Fondo de la barra lateral",
     "sidebarStyles": {
-      "default": "Default",
-      "dimmed": "Dimmed",
-      "glass": "Glass"
+      "default": "Predeterminado",
+      "dimmed": "Atenuado",
+      "glass": "Cristal"
     },
     "title": "Fondo del chat"
   },
