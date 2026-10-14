@@ -295,14 +295,20 @@ export function parseAntigravityModels(body: unknown): ParsedQuota {
     if (!info) continue
     const fraction = num(info.remainingFraction ?? info.remaining_fraction ?? info.remaining)
     const resetsAt = toEpochMs(info.resetTime ?? info.reset_time)
-    // Upstream omits the fraction entirely once a model is exhausted.
-    const remaining = fraction !== null ? fraction * 100 : resetsAt ? 0 : 100
+    // Upstream omits the fraction entirely once a model is exhausted (it still
+    // sends the reset). With neither, the allowance is unknown: skip it rather
+    // than guess a percentage.
+    if (fraction === null && !resetsAt) continue
+    const remaining = fraction !== null ? fraction * 100 : 0
+    // A full allowance has not started its window: upstream still sends a
+    // rolling `resetTime` (always ~5h ahead), which is not a real countdown.
+    const showReset = resetsAt && clampPct(remaining) < 100
     const name = m.displayName ?? m.display_name
     buckets.push({
       id: key,
       label: typeof name === 'string' && name ? name : key,
       remaining: clampPct(remaining),
-      ...(resetsAt ? { resetsAt } : {}),
+      ...(showReset ? { resetsAt } : {}),
       models: [key]
     })
   }
@@ -497,4 +503,37 @@ export function bucketsForModel(quota: ConnectionQuota, model: string | undefine
   return quota.buckets
     .filter((b) => bucketAppliesTo(b, model))
     .sort((a, b) => a.remaining - b.remaining)
+}
+
+/**
+ * Upstreams whose limits are independent allowances rather than nested windows
+ * of one budget. Every bucket they report is a pickable, reorderable entry in
+ * the usage popover, not just the ones metering the session's model.
+ *
+ *  - `antigravity` (Google subscription): `fetchAvailableModels` reports one
+ *    allowance per model, so each model is its own entry.
+ *  - `copilot`: `copilot_internal/user` exposes no per-model remaining usage;
+ *    models draw from shared account allowances (AI credits / premium requests,
+ *    chat, completions) at a per-model rate. Those allowances are the entries.
+ */
+export function isPerModelSource(source: QuotaSource): boolean {
+  return source === 'antigravity' || source === 'copilot'
+}
+
+/**
+ * The limits the user can order and pick for the pill: the ones metering
+ * `model` first (tightest first), then, for per-model upstreams, every other
+ * allowance in its natural order. Claude/Codex keep only the applicable ones.
+ */
+export function selectableBuckets(
+  quota: ConnectionQuota,
+  model: string | undefined,
+  multiplier?: number
+): QuotaBucket[] {
+  const applicable =
+    quota.upstream === 'copilot'
+      ? copilotBucketsForModel(quota, multiplier)
+      : bucketsForModel(quota, model)
+  if (!isPerModelSource(quota.upstream)) return applicable
+  return [...applicable, ...quota.buckets.filter((b) => !applicable.includes(b))]
 }

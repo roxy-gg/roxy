@@ -45,6 +45,7 @@ import { modelLabel, pickDefaultModel, resolveProviderModel } from '../src/share
 import {
   bucketsForModel,
   copilotBucketsForModel,
+  selectableBuckets,
   copilotOverageUsd,
   copilotTokenCost,
   parseCopilotUser,
@@ -6414,12 +6415,17 @@ async function main(): Promise<void> {
         'gemini-2.5-flash': { quotaInfo: { resetTime: '2026-09-30T00:00:00Z' } },
         tab_flash_lite_preview: { quotaInfo: { remainingFraction: 1 } },
         internal: { isInternal: true, quotaInfo: { remainingFraction: 1 } },
-        unmetered: { displayName: 'No quota' }
+        unmetered: { displayName: 'No quota' },
+        unknown: { displayName: 'Unknown', quotaInfo: {} },
+        fresh: {
+          displayName: 'Fresh',
+          quotaInfo: { remainingFraction: 1, resetTime: '2026-09-30T00:00:00Z' }
+        }
       }
     })
     check(
-      'quota: antigravity skips tab/internal/unmetered',
-      anti.buckets.length === 2,
+      'quota: antigravity skips tab/internal/unmetered/unknown',
+      anti.buckets.length === 3 && !anti.buckets.some((b) => b.id === 'unknown'),
       JSON.stringify(anti)
     )
     check(
@@ -6436,6 +6442,21 @@ async function main(): Promise<void> {
       bucketsForModel(aq, 'roxy-abc/gemini-3-pro-high')
         .map((b) => b.id)
         .join() === 'gemini-3-pro-high'
+    )
+    check(
+      'quota: antigravity lists every model as selectable, session model first',
+      selectableBuckets(aq, 'roxy-abc/gemini-2.5-flash')
+        .map((b) => b.id)
+        .join() === 'gemini-2.5-flash,fresh,gemini-3-pro-high'
+    )
+    check(
+      'quota: antigravity full allowance shows no placeholder reset',
+      anti.buckets.find((b) => b.id === 'fresh')?.resetsAt === undefined &&
+        anti.buckets.find((b) => b.id === 'gemini-3-pro-high')?.resetsAt !== undefined
+    )
+    check(
+      'quota: claude selectable limits stay scoped to the model',
+      !selectableBuckets(cq, 'claude-sonnet-4-5').some((b) => b.id === 'seven_day_opus')
     )
 
     check(
@@ -6491,6 +6512,26 @@ async function main(): Promise<void> {
     const cq2 = { connectionId: 'c', upstream: 'copilot' as const, fetchedAt: now, ...cop }
     check('copilot: included model ignores premium', copilotBucketsForModel(cq2, 0).length === 0)
     check('copilot: premium model is metered', copilotBucketsForModel(cq2, 10)[0]?.id === 'premium')
+    check(
+      'copilot: included model can still pick the premium allowance',
+      selectableBuckets(cq2, 'gpt-4.1', 0)
+        .map((x) => x.id)
+        .join() === 'premium'
+    )
+    const cq3 = {
+      ...cq2,
+      buckets: [
+        { id: 'premium', label: 'Premium requests', remaining: 15 },
+        { id: 'chat', label: 'Chat messages', remaining: 60 },
+        { id: 'completions', label: 'Code completions', remaining: 90 }
+      ]
+    }
+    check(
+      'copilot: every allowance is selectable, metering ones first',
+      selectableBuckets(cq3, 'm', 1)
+        .map((x) => x.id)
+        .join() === 'premium,chat,completions'
+    )
 
     // Usage-based billing (shape captured from a live enterprise account).
     const ubb = parseCopilotUser({
