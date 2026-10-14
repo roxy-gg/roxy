@@ -498,3 +498,36 @@ export function bucketsForModel(quota: ConnectionQuota, model: string | undefine
     .filter((b) => bucketAppliesTo(b, model))
     .sort((a, b) => a.remaining - b.remaining)
 }
+
+/**
+ * Upstreams whose limits are independent allowances rather than nested windows
+ * of one budget. Every bucket they report is a pickable, reorderable entry in
+ * the usage popover, not just the ones metering the session's model.
+ *
+ *  - `antigravity` (Google subscription): `fetchAvailableModels` reports one
+ *    allowance per model, so each model is its own entry.
+ *  - `copilot`: `copilot_internal/user` exposes no per-model remaining usage;
+ *    models draw from shared account allowances (AI credits / premium requests,
+ *    chat, completions) at a per-model rate. Those allowances are the entries.
+ */
+export function isPerModelSource(source: QuotaSource): boolean {
+  return source === 'antigravity' || source === 'copilot'
+}
+
+/**
+ * The limits the user can order and pick for the pill: the ones metering
+ * `model` first (tightest first), then, for per-model upstreams, every other
+ * allowance in its natural order. Claude/Codex keep only the applicable ones.
+ */
+export function selectableBuckets(
+  quota: ConnectionQuota,
+  model: string | undefined,
+  multiplier?: number
+): QuotaBucket[] {
+  const applicable =
+    quota.upstream === 'copilot'
+      ? copilotBucketsForModel(quota, multiplier)
+      : bucketsForModel(quota, model)
+  if (!isPerModelSource(quota.upstream)) return applicable
+  return [...applicable, ...quota.buckets.filter((b) => !applicable.includes(b))]
+}

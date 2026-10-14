@@ -36,6 +36,7 @@ import {
   copilotBucketsForModel,
   copilotOverageUsd,
   planSource,
+  selectableBuckets,
   type ConnectionQuota,
   type PremiumUsage,
   type QuotaBucket,
@@ -558,10 +559,17 @@ export function QuotaMeter({
     q.upstream === 'copilot'
       ? copilotBucketsForModel(q, multiplierOf(connectionId, m))
       : bucketsForModel(q, m)
+  // Everything the user may pick and reorder. Google and Copilot list every
+  // per-model / account allowance, not only the ones metering this model.
+  const pickable = (
+    q: ConnectionQuota,
+    connectionId: string,
+    m: string | undefined
+  ): QuotaBucket[] => selectableBuckets(q, m, multiplierOf(connectionId, m))
   // The first limit in the user's order; with no saved order that is the tightest.
   const activeLimits = activeQuota ? scoped(activeQuota, activeId, model ?? undefined) : []
   const selected = applyOrder(
-    activeLimits,
+    activeQuota ? pickable(activeQuota, activeId, model ?? undefined) : [],
     activeQuota ? (order[activeQuota.upstream] ?? []) : []
   )[0]
   const tightest = activeLimits[0]
@@ -574,11 +582,13 @@ export function QuotaMeter({
   const isActive = viewed.id === activeId
   // Another provider's catalog won't have this model; scope only within a family.
   const scopeModel = viewed.seedId === provider.seedId ? (model ?? undefined) : undefined
-  const natural = fresh ? scoped(fresh, viewed.id, scopeModel) : []
+  const natural = fresh ? pickable(fresh, viewed.id, scopeModel) : []
   const applicable = applyOrder(natural, fresh ? (order[fresh.upstream] ?? []) : [])
   const others = fresh
     ? fresh.buckets.filter((b) =>
-        fresh.upstream === 'copilot' ? !natural.includes(b) : !bucketAppliesTo(b, scopeModel)
+        fresh.upstream === 'copilot'
+          ? !natural.includes(b)
+          : !natural.includes(b) && !bucketAppliesTo(b, scopeModel)
       )
     : []
   const saveOrder = (ids: string[]): void => {

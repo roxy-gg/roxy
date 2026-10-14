@@ -45,6 +45,7 @@ import { modelLabel, pickDefaultModel, resolveProviderModel } from '../src/share
 import {
   bucketsForModel,
   copilotBucketsForModel,
+  selectableBuckets,
   copilotOverageUsd,
   copilotTokenCost,
   parseCopilotUser,
@@ -6437,6 +6438,16 @@ async function main(): Promise<void> {
         .map((b) => b.id)
         .join() === 'gemini-3-pro-high'
     )
+    check(
+      'quota: antigravity lists every model as selectable, session model first',
+      selectableBuckets(aq, 'roxy-abc/gemini-2.5-flash')
+        .map((b) => b.id)
+        .join() === 'gemini-2.5-flash,gemini-3-pro-high'
+    )
+    check(
+      'quota: claude selectable limits stay scoped to the model',
+      !selectableBuckets(cq, 'claude-sonnet-4-5').some((b) => b.id === 'seven_day_opus')
+    )
 
     check(
       'quota: codex request carries the workspace id',
@@ -6491,6 +6502,26 @@ async function main(): Promise<void> {
     const cq2 = { connectionId: 'c', upstream: 'copilot' as const, fetchedAt: now, ...cop }
     check('copilot: included model ignores premium', copilotBucketsForModel(cq2, 0).length === 0)
     check('copilot: premium model is metered', copilotBucketsForModel(cq2, 10)[0]?.id === 'premium')
+    check(
+      'copilot: included model can still pick the premium allowance',
+      selectableBuckets(cq2, 'gpt-4.1', 0)
+        .map((x) => x.id)
+        .join() === 'premium'
+    )
+    const cq3 = {
+      ...cq2,
+      buckets: [
+        { id: 'premium', label: 'Premium requests', remaining: 15 },
+        { id: 'chat', label: 'Chat messages', remaining: 60 },
+        { id: 'completions', label: 'Code completions', remaining: 90 }
+      ]
+    }
+    check(
+      'copilot: every allowance is selectable, metering ones first',
+      selectableBuckets(cq3, 'm', 1)
+        .map((x) => x.id)
+        .join() === 'premium,chat,completions'
+    )
 
     // Usage-based billing (shape captured from a live enterprise account).
     const ubb = parseCopilotUser({
