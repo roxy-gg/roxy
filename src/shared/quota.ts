@@ -295,14 +295,20 @@ export function parseAntigravityModels(body: unknown): ParsedQuota {
     if (!info) continue
     const fraction = num(info.remainingFraction ?? info.remaining_fraction ?? info.remaining)
     const resetsAt = toEpochMs(info.resetTime ?? info.reset_time)
-    // Upstream omits the fraction entirely once a model is exhausted.
-    const remaining = fraction !== null ? fraction * 100 : resetsAt ? 0 : 100
+    // Upstream omits the fraction entirely once a model is exhausted (it still
+    // sends the reset). With neither, the allowance is unknown: skip it rather
+    // than guess a percentage.
+    if (fraction === null && !resetsAt) continue
+    const remaining = fraction !== null ? fraction * 100 : 0
+    // A full allowance has not started its window: upstream still sends a
+    // rolling `resetTime` (always ~5h ahead), which is not a real countdown.
+    const showReset = resetsAt && clampPct(remaining) < 100
     const name = m.displayName ?? m.display_name
     buckets.push({
       id: key,
       label: typeof name === 'string' && name ? name : key,
       remaining: clampPct(remaining),
-      ...(resetsAt ? { resetsAt } : {}),
+      ...(showReset ? { resetsAt } : {}),
       models: [key]
     })
   }

@@ -6415,12 +6415,17 @@ async function main(): Promise<void> {
         'gemini-2.5-flash': { quotaInfo: { resetTime: '2026-09-30T00:00:00Z' } },
         tab_flash_lite_preview: { quotaInfo: { remainingFraction: 1 } },
         internal: { isInternal: true, quotaInfo: { remainingFraction: 1 } },
-        unmetered: { displayName: 'No quota' }
+        unmetered: { displayName: 'No quota' },
+        unknown: { displayName: 'Unknown', quotaInfo: {} },
+        fresh: {
+          displayName: 'Fresh',
+          quotaInfo: { remainingFraction: 1, resetTime: '2026-09-30T00:00:00Z' }
+        }
       }
     })
     check(
-      'quota: antigravity skips tab/internal/unmetered',
-      anti.buckets.length === 2,
+      'quota: antigravity skips tab/internal/unmetered/unknown',
+      anti.buckets.length === 3 && !anti.buckets.some((b) => b.id === 'unknown'),
       JSON.stringify(anti)
     )
     check(
@@ -6442,7 +6447,12 @@ async function main(): Promise<void> {
       'quota: antigravity lists every model as selectable, session model first',
       selectableBuckets(aq, 'roxy-abc/gemini-2.5-flash')
         .map((b) => b.id)
-        .join() === 'gemini-2.5-flash,gemini-3-pro-high'
+        .join() === 'gemini-2.5-flash,fresh,gemini-3-pro-high'
+    )
+    check(
+      'quota: antigravity full allowance shows no placeholder reset',
+      anti.buckets.find((b) => b.id === 'fresh')?.resetsAt === undefined &&
+        anti.buckets.find((b) => b.id === 'gemini-3-pro-high')?.resetsAt !== undefined
     )
     check(
       'quota: claude selectable limits stay scoped to the model',
