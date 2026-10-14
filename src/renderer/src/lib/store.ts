@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { DEFAULT_AGENT_ID, getAgent } from '@shared/agents'
 import type { Language } from '@shared/i18n'
-import { moveVisibleQueueItem } from '@shared/queue'
+import { isClaimedQueueItem, moveVisibleQueueItem, nextQueueItem } from '@shared/queue'
 import i18n, { applyLanguage } from '../i18n'
 import type {
   AppSettings,
@@ -586,16 +586,14 @@ function applyAutomationDelta(payload: AutomationDelta): void {
  *
  * Checking the queue keeps a chain of prompts (or a bot handoff) from chiming
  * once per step: only the turn that leaves the session idle announces itself.
- * Only the HEAD matters, exactly as main's FIFO consumer (`wakeAutomation`)
- * sees it: a failed or future-scheduled head blocks everything behind it, so
- * the session is idle even with pending items further down.
+ * Reuse main's `nextQueueItem` admission policy: blocked automation can yield
+ * to user prompts, and claimed work anywhere in the queue keeps it busy.
  *
  * `turnRevision` pins the turn being announced. Main can start the next turn
  * while the queue is being read; that one will announce itself later.
  *
- * `fromAutomation` marks a turn main ran off this queue. Only then is a failed
- * head necessarily the turn that just ended (a failed head blocks the FIFO, so
- * nothing behind it could have run); after a direct send it may be stale.
+ * `fromAutomation` marks a turn main ran off this queue. Check for main's Stop
+ * marker in that case; after a direct send the marker may be stale.
  */
 async function notifyIfSessionIdle(
   chatId: string,
@@ -605,17 +603,17 @@ async function notifyIfSessionIdle(
   }: { turnRevision?: number; fromAutomation?: boolean } = {}
 ): Promise<void> {
   if (!useRoxyStore.getState().settings?.notifyOnComplete) return
-  let next: QueueItem | undefined
+  let items: QueueItem[]
   try {
-    next = (await api.queue.list(chatId))[0]
+    items = await api.queue.list(chatId)
   } catch (error) {
     console.warn('Failed to check queue before notifying:', error)
     return
   }
   // Stopped from somewhere this renderer never saw (the phone, a bot tool):
   // main marks the interrupted item instead of setting `stopChats`.
-  if (fromAutomation && next?.state === 'failed' && next.error === 'Stopped.') return
-  if (next && next.state !== 'failed' && (next.notBefore ?? 0) <= Date.now()) return
+  if (fromAutomation && items[0]?.state === 'failed' && items[0].error === 'Stopped.') return
+  if (items.some(isClaimedQueueItem) || nextQueueItem(items)) return
   const state = useRoxyStore.getState()
   if (
     automationTurnRevisions.get(chatId) !== turnRevision ||

@@ -24,9 +24,7 @@ let element: HTMLAudioElement | null = null
 /**
  * Play the notification chime.
  *
- * Never throws: autoplay may still be locked because the user has not
- * interacted with the page yet, and that must not take the turn's cleanup down
- * with it.
+ * Playback failures must not interrupt the turn's cleanup.
  */
 export async function playNotificationSound(): Promise<void> {
   try {

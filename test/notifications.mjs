@@ -267,7 +267,16 @@ for (const pending of ['finished', 'deleted', null, 'failed', 'onboarding']) {
   assert.equal(window.location.hash, '#/settings')
 }
 
-// Completion decisions in the store: the queue head, Stop, and in-flight races.
+// Completion decisions in the store: queue admission, Stop, and in-flight races.
+const queueCode = transformSync(
+  readFileSync(new URL('../src/shared/queue.ts', import.meta.url), 'utf8')
+    .replace(/^import .* from .*\n/gm, '')
+    .replace(/^export /gm, ''),
+  { loader: 'ts' }
+).code
+const { nextQueueItem, isClaimedQueueItem } = new Function(
+  `${queueCode}\nreturn { nextQueueItem, isClaimedQueueItem };`
+)()
 const extract = (pattern, name) => {
   const code = store.match(pattern)?.[0]
   assert.ok(code, `${name} found`)
@@ -321,6 +330,8 @@ function decisions({ queue = [], settings = { notifyOnComplete: true }, stopChat
     'api',
     'notifyTurnComplete',
     'console',
+    'nextQueueItem',
+    'isClaimedQueueItem',
     `
     let automationSnapshotEvents = null;
         const automationTurnRevisions = new Map();
@@ -330,9 +341,14 @@ function decisions({ queue = [], settings = { notifyOnComplete: true }, stopChat
     ${decisionCode}
     return { applyAutomationDelta, notifyIfSessionIdle };
   `
-  )(useRoxyStore, api, (_settings, chat) => notified.push(chat.id), {
-    warn: (...args) => warnings.push(args)
-  })
+  )(
+    useRoxyStore,
+    api,
+    (_settings, chat) => notified.push(chat.id),
+    { warn: (...args) => warnings.push(args) },
+    nextQueueItem,
+    isClaimedQueueItem
+  )
   const turn = (turnState) =>
     fns.applyAutomationDelta({ sessionId: 'c1', kind: 'turn', state: turnState })
   return { ...fns, h, turn, notified, warnings, state: () => state }
@@ -364,6 +380,30 @@ for (const [label, head] of [
   d.turn('idle')
   await flush()
   assert.deepEqual(d.notified, ['c1'], label)
+}
+for (const origin of [{ sourceChatId: 'other' }, { scheduleId: 'scheduled' }]) {
+  for (const head of [
+    { state: 'failed', error: 'boom', ...origin },
+    { state: 'pending', notBefore: Date.now() + 60_000, ...origin }
+  ]) {
+    const d = decisions({ queue: [head, pending] })
+    d.turn('running')
+    d.turn('idle')
+    await flush()
+    assert.equal(d.notified.length, 0, 'blocked automation yields to a pending user prompt')
+    d.h.queue = [head]
+    d.turn('running')
+    d.turn('idle')
+    await flush()
+    assert.deepEqual(d.notified, ['c1'], 'notify once after the user prompt finishes')
+  }
+}
+for (const state of ['starting', 'running']) {
+  const d = decisions({ queue: [{ state: 'failed', error: 'boom' }, { state }] })
+  d.turn('running')
+  d.turn('idle')
+  await flush()
+  assert.equal(d.notified.length, 0, 'claimed work anywhere in the queue keeps the session busy')
 }
 {
   const d = decisions({ queue: [{ state: 'failed', error: 'Stopped.' }] })

@@ -14,12 +14,8 @@ import { showCompletionNotification } from '../lib/notify'
  * while the window is focused is not a preference either: it is what the
  * feature should always do, so it lives in `shouldNotify`.
  *
- * The preview tests both the banner and the chime, and
- * the click doubles as the gesture that unlocks Chromium's autoplay policy -- an
- * app that has never been clicked in cannot play audio, so without it the first
- * chime is swallowed. That is also why the button is never disabled: the person
- * who just switched notifications ON and touched nothing else is exactly the one
- * who needs to make that gesture.
+ * The preview tests both the banner and the chime. It stays available even
+ * when automatic notifications are off, because it is an explicit test.
  */
 export function NotificationSettings(): JSX.Element {
   const { t } = useTranslation()
