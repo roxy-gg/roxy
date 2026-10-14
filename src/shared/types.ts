@@ -485,7 +485,7 @@ export interface AppSettings {
    */
   activeThemeId: string | null
   /**
-   * Notify when a turn finishes: chime and OS toast together, or nothing.
+   * Notify when a turn finishes: chime and OS toast together, or nothing. Defaults off.
    *
    * One switch, not three. Separate sound / toast / when controls were three
    * ways of asking the same question, and their combinations (toast but no

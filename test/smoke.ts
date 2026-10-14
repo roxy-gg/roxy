@@ -207,6 +207,25 @@ async function main(): Promise<void> {
   // Auto-workstream defaults ON and is stored only when disabled, so existing
   // installs are opted in without a migration.
   check('auto-workstream defaults on', repo.getSettings().autoWorkstream === true)
+  check('completion notifications default off', repo.getSettings().notifyOnComplete === false)
+  check(
+    'enabling notifications returns on',
+    repo.setNotifyOnComplete(true).notifyOnComplete === true
+  )
+  check('completion notification opt-in persists', repo.getSettings().notifyOnComplete === true)
+  check(
+    'disabling notifications returns off',
+    repo.setNotifyOnComplete(false).notifyOnComplete === false
+  )
+  check('completion notifications stay off', repo.getSettings().notifyOnComplete === false)
+  getDb().prepare('INSERT INTO settings(key, value) VALUES(?, ?)').run('notify_on_complete', '0')
+  check('an existing notification opt-out stays off', repo.getSettings().notifyOnComplete === false)
+  repo.setNotifyOnComplete(true)
+  check(
+    'an existing notification opt-out can be enabled',
+    repo.getSettings().notifyOnComplete === true
+  )
+  repo.setNotifyOnComplete(false)
   check('motion defaults on', repo.getSettings().motion === 'on')
   repo.setMotion('reduced')
   check('reduced motion persists', repo.getSettings().motion === 'reduced')

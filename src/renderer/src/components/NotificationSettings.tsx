@@ -25,7 +25,7 @@ export function NotificationSettings(): JSX.Element {
   const { t } = useTranslation()
   const settings = useRoxyStore((s) => s.settings)
   const setNotifyOnComplete = useRoxyStore((s) => s.setNotifyOnComplete)
-  const enabled = settings?.notifyOnComplete ?? true
+  const enabled = settings?.notifyOnComplete ?? false
 
   return (
     <div className="sq sq-xl sq-ring flex flex-col gap-3 rounded-xl border border-border bg-surface p-4 sm:flex-row sm:items-center sm:justify-between">

@@ -137,9 +137,8 @@ export function getSettings(): AppSettings {
     language: normalizeLanguage(map.get('language')),
     motion: normalizeMotion(map.get('motion')),
     activeThemeId: map.get('active_theme_id') ?? null,
-    // Defaults ON, so the absence of a row means enabled - same convention as
-    // auto_workstream above, and for the same reason: no migration needed.
-    notifyOnComplete: map.get('notify_on_complete') !== '0'
+    // Notifications are opt-in; an absent setting stays silent.
+    notifyOnComplete: map.get('notify_on_complete') === '1'
   }
 }
 
@@ -253,8 +252,7 @@ export function setAutoWorkstream(enabled: boolean): AppSettings {
 }
 
 export function setNotifyOnComplete(enabled: boolean): AppSettings {
-  // Store only the OFF state; see getSettings for why.
-  setSetting('notify_on_complete', enabled ? null : '0')
+  setSetting('notify_on_complete', enabled ? '1' : null)
   return getSettings()
 }
 
