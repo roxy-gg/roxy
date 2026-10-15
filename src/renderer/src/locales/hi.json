@@ -516,6 +516,7 @@
     "loading": "उपयोग जाँचा जा रहा है...",
     "modelRate": "यह मॉडल",
     "modelRatePerM": "यह मॉडल, प्रति 10 लाख इनपुट / आउटपुट",
+    "noModelLimit": "No metered limit for this model",
     "otherModels": "अन्य मॉडल",
     "overage": "इस महीने का अतिरिक्त उपयोग",
     "perMillion": "{{rate}}",

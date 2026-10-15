@@ -516,6 +516,7 @@
     "loading": "Consultando el uso...",
     "modelRate": "Este modelo",
     "modelRatePerM": "Este modelo, por 1M entrada / salida",
+    "noModelLimit": "No metered limit for this model",
     "otherModels": "Otros modelos",
     "overage": "Uso adicional este mes",
     "perMillion": "{{rate}}",

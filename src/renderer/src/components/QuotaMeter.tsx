@@ -630,7 +630,8 @@ export function QuotaMeter({
 
   const pillTitle = selected
     ? t('quota.pillTitle', { percent: selected.remaining, account: activeAccount })
-    : (activeQuota?.error ?? t('quota.title', { account: activeAccount }))
+    : (activeQuota?.error ??
+      (activeQuota ? t('quota.noModelLimit') : t('quota.title', { account: activeAccount })))
 
   const switchAccount = async (): Promise<void> => {
     if (!model) return
@@ -665,7 +666,9 @@ export function QuotaMeter({
         ) : activeQuota?.error ? (
           <AlertCircle className="h-3.5 w-3.5 text-warning" />
         ) : activeQuota ? (
-          <span>--</span>
+          <span title={t('quota.noModelLimit')} aria-label={t('quota.noModelLimit')}>
+            --
+          </span>
         ) : (
           <Loader2 className="h-3.5 w-3.5 animate-spin" />
         )}

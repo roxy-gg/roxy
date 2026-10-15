@@ -6437,29 +6437,49 @@ async function main(): Promise<void> {
         .map((b) => b.id)
         .join() === 'gemini-3-pro-high'
     )
-    check(
-      'quota: antigravity matches tiered model variants',
-      bucketsForModel(
-        {
-          connectionId: 'c',
-          upstream: 'antigravity',
-          fetchedAt: now,
-          buckets: [
-            {
-              id: 'gemini-3.8-flash-tiered',
-              label: 'Gemini 3.8 Flash',
-              remaining: 98,
-              models: [
-                'gemini-3.8-flash-tiered',
-                'gemini-3.8-flash-high',
-                'gemini-3.8-flash',
-                'gemini-3-8-flash'
-              ]
-            }
-          ]
+    const tieredParsed = parseAntigravityModels({
+      models: {
+        'gemini-3.8-flash-tiered': {
+          quotaInfo: { remainingFraction: 0.98, resetTime: '2026-09-30T00:00:00Z' }
         },
-        'gemini-3.8-flash-high'
-      )[0]?.remaining === 98
+        'gemini-3-flash': {
+          quotaInfo: { remainingFraction: 0.8, resetTime: '2026-09-30T00:00:00Z' }
+        },
+        'gemini-3-flash-agent': {
+          quotaInfo: { remainingFraction: 0.5, resetTime: '2026-09-30T00:00:00Z' }
+        },
+        'gemini-3.5-flash-low': {
+          quotaInfo: { remainingFraction: 0.6, resetTime: '2026-09-30T00:00:00Z' }
+        }
+      }
+    })
+    const tieredBucket = tieredParsed.buckets.find((b) => b.id === 'gemini-3.8-flash-tiered')
+    check(
+      'quota: antigravity tiered model without displayName derives label and includes high variant',
+      tieredBucket?.label === 'Gemini 3.8 Flash' &&
+        tieredBucket.models?.includes('gemini-3.8-flash-high') === true,
+      JSON.stringify(tieredBucket)
+    )
+    const tieredQuota = {
+      connectionId: 'c',
+      upstream: 'antigravity' as const,
+      fetchedAt: now,
+      ...tieredParsed
+    }
+    check(
+      'quota: antigravity tiered bucket meters high variant',
+      bucketsForModel(tieredQuota, 'roxy-x/gemini-3.8-flash-high')[0]?.id ===
+        'gemini-3.8-flash-tiered'
+    )
+    check(
+      'quota: antigravity exact model does not match agent variant',
+      bucketsForModel(tieredQuota, 'gemini-3-flash')
+        .map((b) => b.id)
+        .join() === 'gemini-3-flash'
+    )
+    check(
+      'quota: antigravity base model does not match low variant',
+      bucketsForModel(tieredQuota, 'gemini-3.5-flash').length === 0
     )
 
     check(

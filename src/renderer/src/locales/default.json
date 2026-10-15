@@ -918,6 +918,7 @@
     "resetReady": "Refilled",
     "currentModel": "Applies to {{model}}",
     "otherModels": "Other models",
+    "noModelLimit": "No metered limit for this model",
     "plan": "{{plan}} plan",
     "refresh": "Refresh",
     "updated": "Updated {{time}}",

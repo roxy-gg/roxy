@@ -516,6 +516,7 @@
     "loading": "正在检查用量...",
     "modelRate": "此模型",
     "modelRatePerM": "此模型，每 100 万 输入 / 输出",
+    "noModelLimit": "No metered limit for this model",
     "otherModels": "其他模型",
     "overage": "本月额外用量",
     "perMillion": "{{rate}}",

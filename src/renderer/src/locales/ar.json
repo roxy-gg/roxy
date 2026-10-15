@@ -516,6 +516,7 @@
     "loading": "جارٍ التحقق من الاستخدام...",
     "modelRate": "هذا النموذج",
     "modelRatePerM": "هذا النموذج، لكل مليون إدخال / إخراج",
+    "noModelLimit": "No metered limit for this model",
     "otherModels": "نماذج أخرى",
     "overage": "استخدام إضافي هذا الشهر",
     "perMillion": "{{rate}}",

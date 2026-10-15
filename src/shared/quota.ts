@@ -297,15 +297,21 @@ export function parseAntigravityModels(body: unknown): ParsedQuota {
     const resetsAt = toEpochMs(info.resetTime ?? info.reset_time)
     // Upstream omits the fraction entirely once a model is exhausted.
     const remaining = fraction !== null ? fraction * 100 : resetsAt ? 0 : 100
-    let name = m.displayName ?? m.display_name
-    if (!name && key === 'gemini-3.8-flash-tiered') name = 'Gemini 3.8 Flash'
-    const modelKeys = [key]
-    if (key === 'gemini-3.8-flash-tiered') {
-      modelKeys.push('gemini-3.8-flash-high', 'gemini-3.8-flash', 'gemini-3-8-flash')
-    }
+    const name = m.displayName ?? m.display_name
+    const isTiered = key.endsWith('-tiered')
+    const base = isTiered ? key.slice(0, -'-tiered'.length) : key
+    const modelKeys = isTiered
+      ? [key, base, `${base}-high`, `${base}-medium`, `${base}-low`]
+      : [key]
+    const fallbackLabel = isTiered
+      ? base
+          .split('-')
+          .map((w) => (w ? w[0].toUpperCase() + w.slice(1) : w))
+          .join(' ')
+      : key
     buckets.push({
       id: key,
-      label: typeof name === 'string' && name ? name : key,
+      label: typeof name === 'string' && name ? name : fallbackLabel,
       remaining: clampPct(remaining),
       ...(resetsAt ? { resetsAt } : {}),
       models: modelKeys
@@ -485,27 +491,12 @@ function bareModel(model: string): string {
   return (slash >= 0 ? model.slice(slash + 1) : model).toLowerCase()
 }
 
-function normalizeModel(model: string): string {
-  return bareModel(model)
-    .replace(/-(tiered|high|medium|low|thinking|agent)$/, '')
-    .replace(/[._]/g, '-')
-}
-
 /** Whether a bucket meters this model. Account-wide buckets meter every model. */
 export function bucketAppliesTo(bucket: QuotaBucket, model: string | undefined): boolean {
   if (!bucket.models && !bucket.family) return true
   if (!model) return false
   const bare = bareModel(model)
-  if (bucket.models) {
-    if (bucket.models.some((m) => bareModel(m) === bare)) return true
-    // When the model isn't an exact match, check normalized stems (e.g. flash-high -> flash-tiered)
-    // but only if the bucket models explicitly use tiered or high/low variants.
-    const norm = normalizeModel(bare)
-    return bucket.models.some((m) => {
-      const mNorm = normalizeModel(m)
-      return mNorm === norm && (m.includes('tiered') || bare.includes('tiered') || norm.length > 5)
-    })
-  }
+  if (bucket.models) return bucket.models.some((m) => bareModel(m) === bare)
   return bare.includes(bucket.family!)
 }
 

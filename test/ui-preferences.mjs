@@ -397,6 +397,25 @@ for (const [account, model, ids] of [
   assert.equal(find(mounted.tree, quotaUI.Meter).props.value, 2)
 }
 
+// Loaded quota with no applicable limits displays '--' with an explanatory label and no Loader2
+const unmeteredProps = { provider: gemini, model: 'unmetered-model' }
+let unmeteredView = render(quotaUI.QuotaMeter, unmeteredProps)
+unmeteredView.context.values[1] = state.quotas
+const unmeteredTree = render(quotaUI.QuotaMeter, unmeteredProps, unmeteredView.context).tree
+assert.ok(
+  nodes(unmeteredTree).some(
+    (node) =>
+      node.props?.children === '--' &&
+      node.props?.title === 'quota.noModelLimit' &&
+      node.props?.['aria-label'] === 'quota.noModelLimit'
+  )
+)
+assert.ok(
+  !nodes(unmeteredTree).some(
+    (node) => node.type === 'Loader2' || node.props?.className?.includes('animate-spin')
+  )
+)
+
 const settingsSource = readFileSync('src/renderer/src/routes/Settings.tsx', 'utf8')
 const escapeOverride = settingsSource.match(/onEscape=\{(\(\) => \{[\s\S]*?\n      \})\}/)[1]
 const makeOverride = new Function(
