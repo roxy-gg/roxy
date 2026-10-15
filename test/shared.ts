@@ -6437,6 +6437,30 @@ async function main(): Promise<void> {
         .map((b) => b.id)
         .join() === 'gemini-3-pro-high'
     )
+    check(
+      'quota: antigravity matches tiered model variants',
+      bucketsForModel(
+        {
+          connectionId: 'c',
+          upstream: 'antigravity',
+          fetchedAt: now,
+          buckets: [
+            {
+              id: 'gemini-3.8-flash-tiered',
+              label: 'Gemini 3.8 Flash',
+              remaining: 98,
+              models: [
+                'gemini-3.8-flash-tiered',
+                'gemini-3.8-flash-high',
+                'gemini-3.8-flash',
+                'gemini-3-8-flash'
+              ]
+            }
+          ]
+        },
+        'gemini-3.8-flash-high'
+      )[0]?.remaining === 98
+    )
 
     check(
       'quota: codex request carries the workspace id',

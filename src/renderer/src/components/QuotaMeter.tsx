@@ -508,7 +508,12 @@ export function QuotaMeter({
     setLoading(connectionId)
     let q: ConnectionQuota
     try {
-      q = await api.cliproxy.quota(connectionId, force)
+      q = (await api.cliproxy.quota(connectionId, force)) ?? {
+        connectionId,
+        upstream,
+        buckets: [],
+        fetchedAt: Date.now()
+      }
     } catch (e) {
       q = {
         connectionId,
@@ -658,7 +663,9 @@ export function QuotaMeter({
             <span>{selected.remaining}%</span>
           </>
         ) : activeQuota?.error ? (
-          <AlertCircle className="h-3.5 w-3.5" />
+          <AlertCircle className="h-3.5 w-3.5 text-warning" />
+        ) : activeQuota ? (
+          <span>--</span>
         ) : (
           <Loader2 className="h-3.5 w-3.5 animate-spin" />
         )}
