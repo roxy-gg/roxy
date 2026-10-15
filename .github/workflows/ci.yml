@@ -179,6 +179,16 @@ jobs:
           ELECTRON_DISABLE_SANDBOX: '1'
         run: xvfb-run --auto-servernum npm run smoke:bot-order-ui
 
+      - name: Subscription quota ordering (Linux, via virtual display)
+        if: runner.os == 'Linux'
+        env:
+          ELECTRON_DISABLE_SANDBOX: '1'
+        run: xvfb-run --auto-servernum npm run smoke:quota-order-ui
+
+      - name: Subscription quota ordering
+        if: runner.os != 'Linux'
+        run: npm run smoke:quota-order-ui
+
       - name: Multi-repo suite (composite worktrees, real git)
         run: npm run smoke:multirepo
 

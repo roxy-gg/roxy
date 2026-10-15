@@ -129,10 +129,12 @@ function applyOrder(buckets: QuotaBucket[], order: string[]): QuotaBucket[] {
 function BucketRow({
   bucket,
   now,
+  appliesTo,
   grip
 }: {
   bucket: QuotaBucket
   now: number
+  appliesTo?: string
   grip?: JSX.Element
 }): JSX.Element {
   const { t } = useTranslation()
@@ -153,6 +155,11 @@ function BucketRow({
           </span>
         </div>
         <Meter value={bucket.remaining} />
+        {appliesTo && (
+          <div className="mt-1 text-[11px] text-text-subtle">
+            {t('quota.currentModel', { model: appliesTo })}
+          </div>
+        )}
         {reset && <div className="mt-1 text-[11px] text-text-subtle tabular-nums">{reset}</div>}
       </div>
     </div>
@@ -167,10 +174,12 @@ function BucketRow({
 function BucketList({
   buckets,
   now,
+  modelScope,
   onReorder
 }: {
   buckets: QuotaBucket[]
   now: number
+  modelScope?: { model: string; bucketIds: string[] }
   onReorder?: (ids: string[]) => void
 }): JSX.Element {
   const { t } = useTranslation()
@@ -246,6 +255,7 @@ function BucketList({
           <BucketRow
             bucket={b}
             now={now}
+            appliesTo={modelScope?.bucketIds.includes(b.id) ? modelScope.model : undefined}
             grip={
               sortable ? (
                 <button
@@ -718,7 +728,17 @@ export function QuotaMeter({
                     {t('quota.currentModel', { model: scopeModel })}
                   </div>
                 )}
-                <BucketList key={viewed.id} buckets={listed} now={now} onReorder={saveOrder} />
+                <BucketList
+                  key={viewed.id}
+                  buckets={listed}
+                  now={now}
+                  modelScope={
+                    allLimits && scopeModel
+                      ? { model: scopeModel, bucketIds: natural.map((b) => b.id) }
+                      : undefined
+                  }
+                  onReorder={saveOrder}
+                />
                 {isActive && applicable.length > 1 && (
                   <div className="mt-0.5 text-[11px] text-text-subtle">
                     {t('quota.pillHint', { limit: applicable[0].label })}

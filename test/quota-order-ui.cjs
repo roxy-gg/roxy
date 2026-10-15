@@ -1,4 +1,7 @@
-/** Real renderer regression for subscription quota ordering; no live accounts. */
+/**
+ * Subscription ordering with simulated quotas. Starts an isolated harness on a
+ * dedicated test port, or reuses a canvas harness supplied through ROXY_TEST_URL.
+ */
 const assert = require('node:assert/strict')
 const { app, BrowserWindow } = require('electron')
 const { mkdtempSync } = require('node:fs')
@@ -17,29 +20,21 @@ async function until(body) {
   throw new Error('Timed out: ' + body)
 }
 async function run() {
-  const { createServer } = await import('vite')
-  server = await createServer({
-    configFile: path.join(__dirname, 'canvas/vite.config.mjs'),
-    server: { port: 3112, strictPort: true },
-    plugins: [
-      {
-        name: 'quota-test',
-        configureServer(server) {
-          // Serve before Vite's index fallback; no fixture files or live bridge.
-          server.middlewares.use('/quota-test', (_req, res) => {
-            res.setHeader('Content-Type', 'text/html')
-            res.end('<html><body><div id="root"></div></body></html>')
-          })
-        }
-      }
-    ]
-  })
-  await server.listen()
+  let url = process.env.ROXY_TEST_URL
+  if (!url) {
+    const { createServer } = await import('vite')
+    server = await createServer({
+      configFile: path.join(__dirname, 'canvas/vite.config.mjs'),
+      server: { port: 3190, strictPort: true }
+    })
+    await server.listen()
+    url = server.resolvedUrls.local[0]
+  }
   win = new BrowserWindow({ show: false, width: 1100, height: 780 })
   win.webContents.on('console-message', (_event, level, text) => {
     if (level >= 3) errors.push(text)
   })
-  await win.loadURL('http://localhost:3112/quota-test')
+  await win.loadURL(new URL('quota.html', url).href)
   const moduleUrl = (file) =>
     path.posix.join('/@fs/', path.resolve(__dirname, '../', file).replaceAll('\\', '/'))
   await evaluate(`
@@ -101,7 +96,7 @@ async function run() {
     )
     const labels = () =>
       evaluate(
-        `return [...document.querySelectorAll('button[draggable="true"]')].map((b) => b.parentElement.textContent.trim())`
+        `return [...document.querySelectorAll('button[draggable="true"]')].map((b) => b.parentElement.textContent.replace(${JSON.stringify('Applies to ' + model)}, '').trim())`
       )
     assert.deepEqual(
       await labels(),
@@ -146,6 +141,17 @@ async function run() {
       percent
     )
     assert.ok((await labels())[0].startsWith(reordered[0]))
+    if (upstream !== 'claude') {
+      const applies = upstream === 'antigravity' ? ['gemini-pro'] : ['premium', 'chat']
+      assert.deepEqual(
+        await evaluate(`
+        return [...document.querySelectorAll('button[draggable="true"]')]
+          .filter((b) => b.parentElement.textContent.includes(${JSON.stringify('Applies to ' + model)}))
+          .map((b) => b.parentElement.querySelector('.truncate').textContent)
+      `),
+        reordered.filter((id) => applies.includes(id))
+      )
+    }
     // Keyboard and click-menu alternatives use the same persisted ordering.
     await evaluate(
       `document.querySelector('button[draggable="true"]').dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'ArrowDown' }))`

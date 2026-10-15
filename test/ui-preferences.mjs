@@ -354,6 +354,15 @@ for (const [account, model, ids] of [
     (node) => node.type === quotaUI.BucketRow
   )
   assert.ok(rows.every((row) => row.props.grip?.props.draggable))
+  const applicableId = account === gemini ? 'gemini-pro' : 'premium'
+  for (const row of rows) {
+    assert.equal(row.props.appliesTo, row.props.bucket.id === applicableId ? model : undefined)
+    const rendered = render(quotaUI.BucketRow, row.props).tree
+    assert.equal(
+      nodes(rendered).some((node) => node.props?.children === 'quota.currentModel'),
+      row.props.bucket.id === applicableId
+    )
+  }
   const before = find(view.tree, quotaUI.Meter).props
   all[0].props.onReorder(ids)
   view = render(quotaUI.QuotaMeter, activeProps, view.context)
@@ -378,6 +387,7 @@ for (const [account, model, ids] of [
   const browsed = find(mounted.tree, quotaUI.BucketList)
   assert.equal(browsed.props.buckets.length, 2)
   assert.equal(typeof browsed.props.onReorder, 'function')
+  assert.equal(browsed.props.modelScope, undefined)
   browsed.props.onReorder([...ids].reverse())
   mounted = render(quotaUI.QuotaMeter, props, mounted.context)
   assert.deepEqual(
