@@ -764,6 +764,12 @@ for (const providerId of CLIPROXY_PROVIDER_IDS) {
   check(`${providerId}: connectable from onboarding`, isConnectableNow(seed!))
 }
 check('cliproxy: all seven subscriptions are registered', CLIPROXY_PROVIDER_IDS.length === 7)
+check(
+  'providers: only Roxy API key is recommended',
+  SEED_PROVIDERS.filter((p) => p.recommended)
+    .map((p) => `${p.id}:${p.auth}`)
+    .join() === 'roxy:api-key'
+)
 check('cliproxy: codex is sidecar-backed', isCliProxyProvider(CODEX_PROVIDER_ID))
 check('cliproxy: gemini is sidecar-backed', isCliProxyProvider(GEMINI_PROVIDER_ID))
 check('cliproxy: claude is sidecar-backed', isCliProxyProvider(CLAUDE_PROVIDER_ID))
