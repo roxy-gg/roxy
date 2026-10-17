@@ -98,18 +98,18 @@ const PORT_RANGE_END = 8399
 // trust this over the network, a wrong entry breaks every install - it has to be
 // checkable.
 export const PINNED_SHA256: Record<string, string> = {
-  'CLIProxyAPI_7.3.15_windows_amd64.zip':
-    '2722eccdabdbca935cfbd41e99b00a8017e91e45296e34b30004932c176b01b2',
-  'CLIProxyAPI_7.3.15_windows_aarch64.zip':
-    'de4db7058bf4f9fcbf2097ed693a1c28a2e9364949ee16a57cccac0fd0a6a12f',
-  'CLIProxyAPI_7.3.15_darwin_aarch64.tar.gz':
-    'c1e49c148a94c476dc43a6a0eed28bca34239d5153ebb7792048d8c18f3b92f0',
-  'CLIProxyAPI_7.3.15_darwin_amd64.tar.gz':
-    '1dd2f2f5d57c2c9172eb51837d07f1f014d02ab1093215401a00c61d942bb972',
-  'CLIProxyAPI_7.3.15_linux_amd64.tar.gz':
-    '801c3a23061d57a830e67fcd033fda26e96c2bfe93e1b2e34e4428ed7defc7e5',
-  'CLIProxyAPI_7.3.15_linux_aarch64.tar.gz':
-    '0b147342517b2f0f0cb80a4630e4f863cdd531fa0e90986f30a437c81ba82e75'
+  'CLIProxyAPI_8.0.32_windows_amd64.zip':
+    'df364b1f2dc9fe357f6a481bfb8a4066c3e5f5ef4ad7abfe45e59b4cec547c18',
+  'CLIProxyAPI_8.0.32_windows_aarch64.zip':
+    '9e83b3f19f3359b52a1fe7acc763ed9285698a46d49caec650943d5b67e82010',
+  'CLIProxyAPI_8.0.32_darwin_aarch64.tar.gz':
+    '48fe6a391a01e730ee6ebe3f1609ff92578a97a7a9a44579013ca8f3a6d58d51',
+  'CLIProxyAPI_8.0.32_darwin_amd64.tar.gz':
+    'c327f421d995692f6590a752abd449db5e71df61803b7041e4d3bd59cd1e1bd8',
+  'CLIProxyAPI_8.0.32_linux_amd64.tar.gz':
+    '082a4a38d9470c070ac85ab2d9c4a2aa51f9a7ee19831c3b811e26fe5b7480a7',
+  'CLIProxyAPI_8.0.32_linux_aarch64.tar.gz':
+    '76aac452dd224490ea5ea1ea0224199d7a410f14ef39a087b81893d15c62f363'
 }
 
 /**
@@ -1095,6 +1095,12 @@ async function fetchConnectionQuota(connectionId: string): Promise<ConnectionQuo
   const row = connectionFor(connectionId)
   const upstream = specFor(row.seedId).upstream
   const base = { connectionId, upstream, fetchedAt: Date.now() }
+  if (quotaRequests(upstream).length === 0)
+    return {
+      ...base,
+      buckets: [],
+      error: 'Usage lookup is not supported for this subscription yet.'
+    }
   const file = row.proxyAuthFile
   if (!file) return { ...base, buckets: [], error: 'Account is not bound. Reconnect it.' }
   if (!row.enabled) return { ...base, buckets: [], error: 'This connection is disabled.' }
@@ -1354,6 +1360,9 @@ function finishLogin(loginState: string): void {
   clearTimeout(attempt.timer)
   activeLogins.delete(attempt.providerId)
   loginAttempts.delete(loginState)
+  const deviceCodes = { ...state.deviceCodes }
+  delete deviceCodes[attempt.providerId]
+  update({ deviceCodes })
 }
 
 /** Reserve the upstream until pollLogin completes (not merely until URL return). */
@@ -1447,7 +1456,7 @@ async function startLoginUnlocked(
 ): Promise<CliProxyLoginStart> {
   const spec = specFor(providerId)
   await ensureRunning()
-  if (!(await isPortFree(spec.callbackPort))) {
+  if (spec.callbackPort !== null && !(await isPortFree(spec.callbackPort))) {
     throw new Error(
       `Port ${spec.callbackPort} is already in use, and the ${spec.accountLabel} sign-in redirect ` +
         `requires it. Close any running ${spec.accountLabel} CLI or proxy and try again.`
@@ -1463,15 +1472,22 @@ async function startLoginUnlocked(
   // failure lands at the worst possible moment: the user signs in, approves
   // consent, and only then gets ERR_CONNECTION_REFUSED, with the authorization
   // code stranded in the address bar.
-  const body = await management<{ status?: string; url?: string; state?: string; error?: string }>(
-    `${spec.authUrlPath}?is_webui=true`
-  )
+  const body = await management<{
+    status?: string
+    url?: string
+    state?: string
+    error?: string
+    user_code?: string
+  }>(`${spec.authUrlPath}?is_webui=true`)
   if (!body.url || !body.state) throw new Error(body.error || 'Sign-in could not be started.')
+  if (body.user_code) {
+    update({ deviceCodes: { ...state.deviceCodes, [providerId]: body.user_code } })
+  }
 
   // Confirm the listener is actually up before sending anyone to the browser.
   // The endpoint returning 200 is not evidence that the port got bound, and this
   // is the last moment we can fail cheaply.
-  if (!(await waitForCallbackListener(spec.callbackPort))) {
+  if (spec.callbackPort !== null && !(await waitForCallbackListener(spec.callbackPort))) {
     throw new Error(
       'The sign-in listener could not start. Something may be blocking port ' +
         `${spec.callbackPort} on this machine.`

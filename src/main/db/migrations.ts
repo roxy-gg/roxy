@@ -6,7 +6,11 @@ export function providerAccountName(seedId: string, accountNumber: number): stri
   const names: Record<string, string> = {
     'codex-subscription': 'ChatGPT',
     'gemini-subscription': 'Gemini',
-    'claude-subscription': 'Claude'
+    'claude-subscription': 'Claude',
+    'kimi-subscription': 'Kimi',
+    'grok-subscription': 'Grok',
+    'meta-subscription': 'Meta Muse',
+    'devin-subscription': 'Devin'
   }
   return `${names[seedId] ?? resolveSeed(seedId).name} ${accountNumber}`
 }

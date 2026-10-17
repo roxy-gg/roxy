@@ -161,6 +161,8 @@ export function quotaRequests(
         },
         data: '{}'
       }))
+    default:
+      return []
   }
 }
 
@@ -333,6 +335,8 @@ export function parseQuota(
       return parseClaudeUsage(body)
     case 'antigravity':
       return parseAntigravityModels(body)
+    default:
+      return { buckets: [] }
   }
 }
 

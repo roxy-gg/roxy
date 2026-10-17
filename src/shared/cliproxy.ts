@@ -29,6 +29,10 @@ export const GEMINI_PROVIDER_ID = 'gemini-subscription'
 
 /** Provider id for the Claude/Anthropic-subscription provider backed by the sidecar. */
 export const CLAUDE_PROVIDER_ID = 'claude-subscription'
+export const KIMI_PROVIDER_ID = 'kimi-subscription'
+export const GROK_PROVIDER_ID = 'grok-subscription'
+export const META_PROVIDER_ID = 'meta-subscription'
+export const DEVIN_PROVIDER_ID = 'devin-subscription'
 
 /**
  * The upstreams Roxy can sign into through the sidecar.
@@ -48,7 +52,14 @@ export const CLAUDE_PROVIDER_ID = 'claude-subscription'
  * written by the main-process service). Antigravity is the only Gemini login the
  * pinned binary can perform on its own.
  */
-export type CliProxyUpstream = 'codex' | 'antigravity' | 'claude'
+export type CliProxyUpstream =
+  | 'codex'
+  | 'antigravity'
+  | 'claude'
+  | 'kimi'
+  | 'xai'
+  | 'meta'
+  | 'devin'
 
 /** Everything that differs between one sidecar-backed subscription and another. */
 export interface CliProxyUpstreamSpec {
@@ -73,11 +84,12 @@ export interface CliProxyUpstreamSpec {
    * Loopback port the sidecar opens for this provider's OAuth callback.
    *
    * Fixed by the redirect URI registered with the upstream, so it is not
-   * negotiable. Checking it is free BEFORE opening a browser, and that check is
+   * negotiable. Null for device authorization or callbacks on the proxy port.
+   * Checking it is free BEFORE opening a browser, and that check is
    * the difference between a clear error and a failure that only lands after the
    * user has already signed in and approved consent.
    */
-  callbackPort: number
+  callbackPort: number | null
   /**
    * `owned_by` values on `/v1/models` that belong to this upstream.
    *
@@ -121,6 +133,39 @@ export const CLIPROXY_UPSTREAMS: Record<string, CliProxyUpstreamSpec> = {
     callbackPort: 54545,
     modelOwners: ['anthropic'],
     accountLabel: 'Claude'
+  },
+  [KIMI_PROVIDER_ID]: {
+    upstream: 'kimi',
+    providerId: KIMI_PROVIDER_ID,
+    authUrlPath: '/kimi-auth-url',
+    callbackPort: null,
+    modelOwners: ['moonshot'],
+    accountLabel: 'Kimi'
+  },
+  [GROK_PROVIDER_ID]: {
+    upstream: 'xai',
+    providerId: GROK_PROVIDER_ID,
+    authUrlPath: '/xai-auth-url',
+    callbackPort: null,
+    modelOwners: ['xai'],
+    accountLabel: 'Grok'
+  },
+  [META_PROVIDER_ID]: {
+    upstream: 'meta',
+    providerId: META_PROVIDER_ID,
+    authUrlPath: '/meta-auth-url',
+    callbackPort: null,
+    modelOwners: ['meta'],
+    accountLabel: 'Meta Muse'
+  },
+  [DEVIN_PROVIDER_ID]: {
+    upstream: 'devin',
+    providerId: DEVIN_PROVIDER_ID,
+    authUrlPath: '/devin-auth-url',
+    // Devin uses /callback on the proxy's existing HTTP port.
+    callbackPort: null,
+    modelOwners: ['devin'],
+    accountLabel: 'Devin'
   }
 }
 
@@ -147,7 +192,7 @@ export function providerIdForUpstream(upstream: string): string | undefined {
  * holds the user's OAuth tokens, so it is never auto-updated to whatever
  * `latest` happens to be on the day someone first clicks Sign in.
  */
-export const CLIPROXY_VERSION = '7.3.15'
+export const CLIPROXY_VERSION = '8.0.32'
 
 /** Where the pinned release assets come from. */
 export const CLIPROXY_REPO = 'router-for-me/CLIProxyAPI'
@@ -202,6 +247,8 @@ export interface CliProxyState {
    * single call, and splitting them here keeps a single source of truth.
    */
   accounts: CliProxyAccount[]
+  /** Device authorization codes for in-flight logins, keyed by provider id. */
+  deviceCodes?: Record<string, string>
   /** Pinned release the local install corresponds to. */
   version: string
   /** Monotonic revision, so the renderer can drop out-of-order pushes. */

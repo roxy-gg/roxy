@@ -763,7 +763,7 @@ for (const providerId of CLIPROXY_PROVIDER_IDS) {
   check(`${providerId}: no hardcoded base URL`, seed?.baseURL === undefined)
   check(`${providerId}: connectable from onboarding`, isConnectableNow(seed!))
 }
-check('cliproxy: all three subscriptions are registered', CLIPROXY_PROVIDER_IDS.length === 3)
+check('cliproxy: all seven subscriptions are registered', CLIPROXY_PROVIDER_IDS.length === 7)
 check('cliproxy: codex is sidecar-backed', isCliProxyProvider(CODEX_PROVIDER_ID))
 check('cliproxy: gemini is sidecar-backed', isCliProxyProvider(GEMINI_PROVIDER_ID))
 check('cliproxy: claude is sidecar-backed', isCliProxyProvider(CLAUDE_PROVIDER_ID))
@@ -787,7 +787,8 @@ check('cliproxy: unknown provider has no upstream spec', upstreamFor('openai') =
   // OAuth redirect - the failure would look like a broken sign-in, not a clash.
   check(
     'cliproxy: every callback port is unique',
-    new Set(specs.map((s) => s.callbackPort)).size === specs.length
+    new Set(specs.filter((s) => s.callbackPort !== null).map((s) => s.callbackPort)).size ===
+      specs.filter((s) => s.callbackPort !== null).length
   )
   check(
     'cliproxy: every auth route is unique',
@@ -867,7 +868,25 @@ check(
   'cliproxy: upstream key maps back to its provider id',
   providerIdForUpstream('antigravity') === GEMINI_PROVIDER_ID
 )
-check('cliproxy: unknown upstream maps to nothing', providerIdForUpstream('kimi') === undefined)
+check('cliproxy: unknown upstream maps to nothing', providerIdForUpstream('unknown') === undefined)
+for (const [upstream, id] of [
+  ['kimi', 'kimi-subscription'],
+  ['xai', 'grok-subscription'],
+  ['meta', 'meta-subscription'],
+  ['devin', 'devin-subscription']
+] as const) {
+  check(`${id}: maps the upstream credential type`, providerIdForUpstream(upstream) === id)
+  check(`${id}: needs no separate callback listener`, upstreamFor(id)?.callbackPort === null)
+  const ownState = {
+    ...IDLE_CLIPROXY_STATE,
+    accounts: [{ file: `${upstream}-test.json`, type: upstream }]
+  }
+  check(
+    `${id}: account is isolated`,
+    CLIPROXY_PROVIDER_IDS.filter((p) => accountsFor(ownState, p).length).join() === id
+  )
+  check(`${id}: unsupported usage is explicit`, quotaRequests(upstream).length === 0)
+}
 
 // Model partitioning. One sidecar serves ONE /v1/models for every signed-in
 // subscription, so the owner sets must not overlap - if they did, a model would

@@ -799,6 +799,20 @@
     "title": "Habilidades & Ferramentas",
     "writes": "gravações"
   },
+  "subscription": {
+    "blurb": "Sign in with your {{provider}} account to use the models available to your plan through a local proxy. No API key required. Your provider's plan limits and charges still apply.",
+    "browser": "Finish signing in with {{provider}} in your browser.",
+    "continue": "Continue with {{provider}}",
+    "deviceCode": "If prompted, enter this code in your browser: <code>{{code}}</code>",
+    "downloading": "Downloading the local proxy...",
+    "failed": "Sign-in failed.",
+    "howItWorks": "Roxy includes <proxy>CLIProxyAPI v{{version}}</proxy> (checksum-verified during the build and validated before launch) and runs it on 127.0.0.1 while Roxy is open. It holds the login on this machine and exposes it to Roxy as a normal model endpoint. Your credentials never reach Roxy's servers, and the proxy is closed when you quit.",
+    "signOut": "Sign out",
+    "signingOut": "Signing out...",
+    "starting": "Starting the local proxy...",
+    "title": "Use your {{provider}} subscription",
+    "waiting": "Waiting for sign-in..."
+  },
   "themes": {
     "active": "Ativo",
     "appearanceTheme": "Tema {{appearance}}",

@@ -419,6 +419,20 @@ export const SEED_PROVIDERS: SeedProvider[] = [
       'Sign in with the Anthropic account behind your Claude Pro or Max plan and run on the Claude models it already includes - no API key, no per-token billing. Uses the same local proxy (CLIProxyAPI) as the other subscription providers, keeping your tokens on this machine.'
   },
 
+  ...[
+    { id: 'kimi-subscription', name: 'Kimi Code', group: 'labs' as const },
+    { id: 'grok-subscription', name: 'Grok Build', group: 'frontier' as const },
+    { id: 'meta-subscription', name: 'Meta Muse Code', group: 'frontier' as const },
+    { id: 'devin-subscription', name: 'Devin', group: 'gateway' as const }
+  ].map(
+    (provider): SeedProvider => ({
+      ...provider,
+      wire: 'openai-chat',
+      auth: 'subscription',
+      recommended: true
+    })
+  ),
+
   // ---- G. GitHub ----
   {
     id: 'github-copilot',
@@ -500,6 +514,10 @@ export const FEATURED_PROVIDER_IDS = [
   'codex-subscription',
   'gemini-subscription',
   'claude-subscription',
+  'kimi-subscription',
+  'grok-subscription',
+  'meta-subscription',
+  'devin-subscription',
   'openai',
   'anthropic',
   'google',

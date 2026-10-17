@@ -18,53 +18,11 @@
  * sentence beats a multi-step wizard.
  */
 import { useEffect, useState } from 'react'
-import { useTranslation } from 'react-i18next'
+import { Trans, useTranslation } from 'react-i18next'
 import { Check, ExternalLink, Loader2, ShieldCheck } from 'lucide-react'
-import {
-  CODEX_PROVIDER_ID,
-  IDLE_CLIPROXY_STATE,
-  accountsFor,
-  upstreamFor,
-  type CliProxyState
-} from '@shared/cliproxy'
+import { IDLE_CLIPROXY_STATE, accountsFor, upstreamFor, type CliProxyState } from '@shared/cliproxy'
 import { api } from '../lib/api'
 import { Button } from './ui'
-
-/** Per-provider wording. The mechanics are identical; only the nouns differ. */
-const COPY: Record<string, { title: string; blurb: string; cta: string; browser: string }> = {
-  [CODEX_PROVIDER_ID]: {
-    title: 'Use your ChatGPT subscription',
-    blurb:
-      'Sign in with the ChatGPT account behind your Plus, Pro, or Team plan and run Roxy on the models it already includes — no API key and no per-token bill.',
-    cta: 'Continue with ChatGPT',
-    browser: 'Finish signing in with ChatGPT in your browser.'
-  },
-  'gemini-subscription': {
-    title: 'Use your Google Gemini subscription',
-    blurb:
-      'Sign in with the Google account behind your Gemini plan and run Roxy on the Gemini models it already includes — no API key and no per-token bill.',
-    cta: 'Continue with Google',
-    browser: 'Finish signing in with Google in your browser.'
-  },
-  'claude-subscription': {
-    title: 'Use your Claude subscription',
-    blurb:
-      'Sign in with the Anthropic account behind your Claude Pro or Max plan and run Roxy on the Claude models it already includes — no API key and no per-token bill.',
-    cta: 'Continue with Claude',
-    browser: 'Finish signing in with Claude in your browser.'
-  }
-}
-
-function copyFor(providerId: string): (typeof COPY)[string] {
-  return (
-    COPY[providerId] ?? {
-      title: 'Use your subscription',
-      blurb: 'Sign in with the account behind your plan and use it here — no API key required.',
-      cta: 'Continue',
-      browser: 'Finish signing in in your browser.'
-    }
-  )
-}
 
 /** Subscribe to sidecar state, seeded with its current value. */
 export function useCliProxyState(): CliProxyState {
@@ -98,7 +56,7 @@ export function SubscriptionSetup({
   const state = useCliProxyState()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const copy = copyFor(providerId)
+  const provider = upstreamFor(providerId)?.accountLabel ?? providerId
 
   const signIn = async (): Promise<void> => {
     setBusy(true)
@@ -106,7 +64,7 @@ export function SubscriptionSetup({
     try {
       const result = await api.cliproxy.login(providerId, connectionId)
       if (!result.ok) {
-        setError(result.error ?? 'Sign-in failed.')
+        setError(result.error ?? t('subscription.failed'))
         return
       }
       onConnected()
@@ -124,8 +82,8 @@ export function SubscriptionSetup({
   return (
     <div className="flex flex-col gap-4">
       <div>
-        <h2 className="text-lg font-semibold">{copy.title}</h2>
-        <p className="mt-1 text-sm text-text-muted">{copy.blurb}</p>
+        <h2 className="text-lg font-semibold">{t('subscription.title', { provider })}</h2>
+        <p className="mt-1 text-sm text-text-muted">{t('subscription.blurb', { provider })}</p>
       </div>
 
       {connected && (
@@ -139,14 +97,23 @@ export function SubscriptionSetup({
         </div>
       )}
 
-      {busy && <Progress state={state} browserLabel={copy.browser} />}
+      {busy && <Progress state={state} browserLabel={t('subscription.browser', { provider })} />}
+      {busy && state.deviceCodes?.[providerId] && (
+        <p className="text-sm text-text-muted">
+          <Trans
+            i18nKey="subscription.deviceCode"
+            values={{ code: state.deviceCodes[providerId] }}
+            components={{ code: <code className="select-all font-mono text-text" /> }}
+          />
+        </p>
+      )}
 
       {error && <p className="text-xs text-danger">{error}</p>}
 
       <Button variant="primary" onClick={signIn} disabled={busy}>
         {busy ? (
           <>
-            <Loader2 className="h-4 w-4 animate-spin" /> Waiting for sign-in…
+            <Loader2 className="h-4 w-4 animate-spin" /> {t('subscription.waiting')}
           </>
         ) : connectionId ? (
           t('settings.providers.reconnect')
@@ -154,7 +121,7 @@ export function SubscriptionSetup({
           t('settings.providers.addAccount')
         ) : (
           <>
-            {copy.cta} <ExternalLink className="h-4 w-4" />
+            {t('subscription.continue', { provider })} <ExternalLink className="h-4 w-4" />
           </>
         )}
       </Button>
@@ -172,11 +139,12 @@ function Progress({
   state: CliProxyState
   browserLabel: string
 }): JSX.Element {
+  const { t } = useTranslation()
   if (state.status === 'downloading') {
     return (
       <div className="flex flex-col gap-2">
         <div className="flex items-center justify-between text-xs text-text-muted">
-          <span>Downloading the local proxy…</span>
+          <span>{t('subscription.downloading')}</span>
           <span className="tabular-nums">{state.progress}%</span>
         </div>
         <div className="h-1.5 overflow-hidden rounded-full bg-surface-2">
@@ -188,7 +156,7 @@ function Progress({
       </div>
     )
   }
-  const label = state.status === 'starting' ? 'Starting the local proxy…' : browserLabel
+  const label = state.status === 'starting' ? t('subscription.starting') : browserLabel
   return (
     <div className="flex items-center gap-2 sq sq-xl sq-ring rounded-xl border border-border bg-surface-2 p-3 text-sm text-text-muted">
       <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
@@ -207,20 +175,21 @@ function HowItWorks({ version }: { version: string }): JSX.Element {
     <div className="flex gap-2.5 sq sq-xl sq-ring rounded-xl border border-border bg-surface p-3">
       <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-text-subtle" />
       <div className="text-xs leading-relaxed text-text-subtle">
-        Roxy includes{' '}
-        <button
-          type="button"
-          onClick={() =>
-            void api.system.openExternal('https://github.com/router-for-me/CLIProxyAPI')
-          }
-          className="text-accent transition-colors hover:underline"
-        >
-          CLIProxyAPI v{version}
-        </button>{' '}
-        (checksum-verified during the build and validated before launch) and runs it on 127.0.0.1
-        while Roxy is open. It holds the login on this machine and exposes it to Roxy as a normal
-        model endpoint — your credentials never reach Roxy&apos;s servers, and the proxy is closed
-        when you quit.
+        <Trans
+          i18nKey="subscription.howItWorks"
+          values={{ version }}
+          components={{
+            proxy: (
+              <button
+                type="button"
+                onClick={() =>
+                  void api.system.openExternal('https://github.com/router-for-me/CLIProxyAPI')
+                }
+                className="text-accent transition-colors hover:underline"
+              />
+            )
+          }}
+        />
       </div>
     </div>
   )
@@ -228,6 +197,7 @@ function HowItWorks({ version }: { version: string }): JSX.Element {
 
 /** Signed-in accounts + proxy status, for a Settings provider row. */
 export function SubscriptionAccounts({ providerId }: { providerId: string }): JSX.Element | null {
+  const { t } = useTranslation()
   const state = useCliProxyState()
   const [busy, setBusy] = useState<string | null>(null)
   const accounts = accountsFor(state, providerId)
@@ -255,7 +225,7 @@ export function SubscriptionAccounts({ providerId }: { providerId: string }): JS
             disabled={busy === a.file}
             className="text-text-subtle transition-colors hover:text-danger disabled:opacity-40"
           >
-            {busy === a.file ? 'Signing out…' : 'Sign out'}
+            {busy === a.file ? t('subscription.signingOut') : t('subscription.signOut')}
           </button>
         </div>
       ))}

@@ -29,6 +29,11 @@ import {
   CLAUDE_PROVIDER_ID,
   CODEX_PROVIDER_ID,
   GEMINI_PROVIDER_ID,
+  KIMI_PROVIDER_ID,
+  GROK_PROVIDER_ID,
+  META_PROVIDER_ID,
+  DEVIN_PROVIDER_ID,
+  upstreamFor,
   checksumsUrl,
   releaseAsset,
   sha256For
@@ -268,6 +273,81 @@ async function main(): Promise<void> {
   await disconnectConnection(second.id)
   await ensureRunning()
   check('unknown OAuth state is not reported as successful', !(await pollLogin('unknown-state')).ok)
+
+  // All new upstreams must bind and route by file, including Devin's multi-vendor catalog.
+  for (const id of [KIMI_PROVIDER_ID, GROK_PROVIDER_ID, META_PROVIDER_ID, DEVIN_PROVIDER_ID]) {
+    const spec = upstreamFor(id)!
+    const file = `${spec.upstream}-integration.json`
+    await stop()
+    await fs.writeFile(
+      path.join(authDir, file),
+      JSON.stringify({
+        type: spec.upstream,
+        access_token: 'synthetic-token',
+        api_key: 'synthetic-key'
+      })
+    )
+    await ensureRunning()
+    const row = (await reconcileConnections()).find((p) => p.proxyAuthFile === file)
+    check(`${id}: credential binds to the correct provider`, row?.seedId === id)
+    if (!row) continue
+    const catalog = await listConnectionModels(row.id)
+    check(`${id}: per-file catalog is populated`, catalog.length > 0)
+    check(
+      `${id}: models route through the bound account`,
+      catalog.every((m) => routeModel(row.id, m.id) === `${row.proxyPrefix}/${m.id}`)
+    )
+    if (id === DEVIN_PROVIDER_ID) {
+      check(
+        'Devin retains models from other vendors',
+        catalog.some((m) => /claude|gpt/.test(m.id))
+      )
+    }
+    await disconnectConnection(row.id)
+    check(`${id}: disconnect removes its credential`, !(await exists(path.join(authDir, file))))
+  }
+  await ensureRunning()
+  // Simulate provider-issued device challenges without creating real login sessions.
+  const realFetch = globalThis.fetch
+  try {
+    globalThis.fetch = async (input, init) => {
+      const url = String(input)
+      if (['/kimi-auth-url?', '/xai-auth-url?', '/meta-auth-url?'].some((p) => url.includes(p))) {
+        return Response.json({
+          url: 'https://example.test/activate',
+          state: url,
+          user_code: 'TEST-CODE'
+        })
+      }
+      return realFetch(input, init)
+    }
+    for (const id of [KIMI_PROVIDER_ID, GROK_PROVIDER_ID, META_PROVIDER_ID]) {
+      const challenge = await startLogin(id)
+      check(
+        `${id}: device login starts without a callback listener`,
+        challenge.url === 'https://example.test/activate'
+      )
+      check(
+        `${id}: device code is published for the UI`,
+        (await status()).deviceCodes?.[id] === 'TEST-CODE'
+      )
+    }
+  } finally {
+    globalThis.fetch = realFetch
+    await stop()
+  }
+  check(
+    'stopping clears pending device codes',
+    Object.keys((await status()).deviceCodes ?? {}).length === 0
+  )
+  await ensureRunning()
+  const devinLogin = await startLogin(DEVIN_PROVIDER_ID)
+  const devinURL = new URL(devinLogin.url)
+  check(
+    'Devin login uses the proxy port for its callback',
+    devinURL.searchParams.get('redirect_uri') === baseUrl()!.replace('/v1', '/callback')
+  )
+  check('Devin login returns a PKCE challenge', !!devinURL.searchParams.get('code_challenge'))
 
   // ---- the management API is reachable and the Codex login flow starts ----
   const login = await startLogin(CODEX_PROVIDER_ID)
@@ -557,7 +637,7 @@ async function main(): Promise<void> {
       expected: 'a'.repeat(64),
       actual: 'b'.repeat(64),
       stream: 'b'.repeat(64),
-      asset: 'CLIProxyAPI_7.3.15_darwin_aarch64.tar.gz',
+      asset: 'CLIProxyAPI_8.0.32_darwin_aarch64.tar.gz',
       ...over
     })
 
@@ -568,8 +648,8 @@ async function main(): Promise<void> {
       1004,
       1004,
       D({
-        actual: PINNED_SHA256['CLIProxyAPI_7.3.15_linux_amd64.tar.gz'],
-        stream: PINNED_SHA256['CLIProxyAPI_7.3.15_linux_amd64.tar.gz']
+        actual: PINNED_SHA256['CLIProxyAPI_8.0.32_linux_amd64.tar.gz'],
+        stream: PINNED_SHA256['CLIProxyAPI_8.0.32_linux_amd64.tar.gz']
       }) as never
     )
     check(

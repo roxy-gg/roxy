@@ -44,7 +44,10 @@ async function fetchBytes(url, label) {
 }
 
 async function releaseMetadata() {
-  const requested = process.env.CLIPROXY_VERSION?.replace(/^v/, '')
+  const source = await fs.readFile(path.join(__dirname, '../src/shared/cliproxy.ts'), 'utf8')
+  const pinned = source.match(/export const CLIPROXY_VERSION = '([^']+)'/)?.[1]
+  if (!pinned) throw new Error('Missing pinned CLIProxyAPI version.')
+  const requested = process.env.CLIPROXY_VERSION?.replace(/^v/, '') || pinned
   const url = requested ? `${API}/releases/tags/v${requested}` : `${API}/releases/latest`
   const release = JSON.parse(
     (await fetchBytes(url, 'CLIProxyAPI release metadata')).toString('utf8')
