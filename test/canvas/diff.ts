@@ -507,6 +507,18 @@ const longInput = (messages: Message[], state = view()) => ({
   viewport: { top: 0, height: 600, tail: true, targetId: undefined as string | undefined }
 })
 
+check('transcript tails add no extra space after the last message', () => {
+  for (const messages of [longMessages.slice(0, 2), longMessages]) {
+    for (const streaming of [null, [], [{ type: 'text', text: 'Still writing.' }]] satisfies (
+      | MessagePart[]
+      | null
+    )[]) {
+      const scene = layoutTranscript({ ...longInput(messages), streaming }, new BlockCache())
+      const last = scene.blocks.at(-1)!
+      assert.equal(scene.height, last.y + last.height)
+    }
+  }
+})
 check('cold long history measures the tail, not every message', () => {
   const scene = layoutTranscript(longInput(longMessages), new BlockCache())
   assert.equal(scene.blocks.length, 150)
@@ -698,6 +710,72 @@ check('unfinished markdown boundaries always advance the parser', () => {
     const parsed = parseMarkdown(text)
     assert.ok(Array.isArray(parsed))
   }
+})
+check('tables interrupt paragraphs without requiring a blank line', () => {
+  for (const newline of ['\n', '\r\n']) {
+    for (const outerPipes of [true, false]) {
+      const row = (cells: string): string => (outerPipes ? `| ${cells} |` : cells)
+      const table = [row('Item | Cart Quantity'), row('--- | ---:'), row('Limes | 5')]
+      const parsed = parseMarkdown(['**In Your Cart**', ...table].join(newline))
+      assert.deepEqual(
+        parsed.map((block) => block.type),
+        ['paragraph', 'table']
+      )
+      assert.equal(parsed[0].type === 'paragraph' && parsed[0].text, '**In Your Cart**')
+      const block = parsed[1]
+      assert.ok(block.type === 'table')
+      assert.deepEqual(block.align, ['l', 'r'])
+      assert.equal(block.header.length, 2)
+      assert.equal(block.rows.length, 1)
+    }
+  }
+})
+check('table boundaries survive streaming and nested block quotes', () => {
+  const intro = 'Your cart is updated.\nNo order has been placed.'
+  const table = '| Item | Quantity |\n| --- | --- |\n| Limes | 5 |'
+  const text = `${intro}\n${table}\n\nStill pending.\n${table}`
+  for (let end = 0; end <= text.length; end++) {
+    const parsed = parseMarkdown(text.slice(0, end))
+    if (end >= intro.length + '\n| Item | Quantity |\n| --- | --- |'.length) {
+      assert.ok(parsed.some((block) => block.type === 'table'))
+    }
+  }
+  assert.deepEqual(
+    parseMarkdown(text).map((block) => block.type),
+    ['paragraph', 'table', 'paragraph', 'table']
+  )
+  const quoted = parseMarkdown(
+    `> In your cart\n${table
+      .split('\n')
+      .map((line) => `> ${line}`)
+      .join('\n')}`
+  )
+  assert.ok(quoted[0].type === 'quote')
+  assert.deepEqual(
+    quoted[0].blocks.map((block) => block.type),
+    ['paragraph', 'table']
+  )
+  assert.equal(parseMarkdown(`In your cart\n${table.split('\n')[0]}`).length, 1)
+  assert.equal(parseMarkdown(`\`\`\`text\n${text}\n\`\`\``)[0].type, 'code')
+})
+check('a table after prose lays out cells rather than raw pipe syntax', () => {
+  const builder = new Builder(metrics, theme, { value: 0 }, t)
+  const height = layoutMarkdown(
+    builder,
+    '**In Your Cart**\n| Item | Cart Quantity |\n| --- | --- |\n| Limes | 5 |',
+    0,
+    0,
+    600,
+    { color: theme.palette.text, size: 14 }
+  )
+  const block = builder.finish('cart', 0, height)
+  const item = block.selectable.find((line) => line.text.trim() === 'Item')
+  const quantity = block.selectable.find((line) => line.text.trim() === 'Cart Quantity')
+  assert.ok(item && quantity)
+  assert.equal(item.y, quantity.y)
+  assert.ok(quantity.x > item.x)
+  assert.ok(block.nodes.some((node) => node.kind === 'hairline'))
+  assert.ok(block.selectable.every((line) => !line.text.includes('|')))
 })
 check('large markdown replies only lay out nearby sections', () => {
   const content = Array.from(
@@ -918,6 +996,101 @@ check('activity timer sits below the copy and narrow copy still ellipsizes', () 
   assert.equal(elapsed.x, label.x)
   assert.ok(elapsed.y > label.y)
   assert.ok(elapsed.x < scene.width)
+})
+check('subtask batches show independent cards at main transcript width', () => {
+  const children: MessagePart[] = [
+    {
+      type: 'tool',
+      tool: 'task',
+      state: 'running',
+      callId: 'child-0',
+      subChatId: 'sub-0',
+      title: 'Explore: Renderer',
+      children: [
+        { type: 'tool', tool: 'read', state: 'running', callId: 'read-0', title: 'renderer.ts' }
+      ]
+    },
+    {
+      type: 'tool',
+      tool: 'task',
+      state: 'done',
+      callId: 'child-1',
+      subChatId: 'sub-1',
+      title: 'Explore: Runtime',
+      output: 'Found the runtime.'
+    }
+  ]
+  const batch: MessagePart = {
+    type: 'tool',
+    tool: 'task',
+    state: 'running',
+    callId: 'batch',
+    title: 'Investigate subtasks',
+    input: { tasks: [{ description: 'Renderer', prompt: 'Inspect it' }] },
+    children
+  }
+  const message: Message = {
+    id: 'batch-message',
+    chatId: 'chat',
+    role: 'assistant',
+    content: '',
+    parts: [batch],
+    createdAt: 0
+  }
+  const emptyBatch = { ...batch, children: undefined }
+  const startup = layoutTranscript(
+    { ...longInput([]), streaming: [emptyBatch], viewport: undefined },
+    new BlockCache()
+  )
+  assert.equal(
+    startup.blocks[0].regions.filter((region) => region.action.type === 'toggle').length,
+    0,
+    'the batch wrapper does not flash before delegates start'
+  )
+  for (const windowed of [false, true]) {
+    const state = view()
+    const childId = windowed ? 'batch-message/0/0' : '__streaming__/0/0'
+    state.open.add(childId)
+    const scene = layoutTranscript(
+      {
+        ...longInput(windowed ? [...longMessages, message] : [message], state),
+        streaming: windowed ? null : [batch],
+        viewport: windowed ? { top: 0, height: 600, tail: true } : undefined,
+        subagentIds: new Set(['sub-0', 'sub-1'])
+      },
+      new BlockCache()
+    )
+    const block = scene.blocks.at(-1)!
+    const toggles = block.regions.filter(
+      (region) =>
+        region.action.type === 'toggle' &&
+        (region.action.id === `${windowed ? 'batch-message' : '__streaming__'}/0/0` ||
+          region.action.id === `${windowed ? 'batch-message' : '__streaming__'}/0/1`)
+    )
+    assert.deepEqual(
+      toggles.map((region) => region.action),
+      [
+        { type: 'toggle', id: windowed ? 'batch-message/0/0' : '__streaming__/0/0' },
+        { type: 'toggle', id: windowed ? 'batch-message/0/1' : '__streaming__/0/1' }
+      ]
+    )
+    assert.equal(toggles[0].w, toggles[1].w, 'siblings share the main column width')
+    assert.ok(
+      block.regions.some(
+        (region) => region.action.type === 'session' && region.action.id === 'sub-0'
+      ),
+      'expanded child still opens its own session'
+    )
+    assert.ok(JSON.stringify(block.nodes).includes('renderer.ts'), 'expanded child keeps its work')
+    assert.ok(!JSON.stringify(block.nodes).includes('Investigate subtasks'))
+    assert.ok(
+      block.regions.some(
+        (region) =>
+          region.action.type === 'cancel' &&
+          region.action.id === (windowed ? 'batch-message/0/0' : '__streaming__/0/0')
+      )
+    )
+  }
 })
 check('live reasoning starts collapsed and can be toggled closed again', () => {
   const state = view()

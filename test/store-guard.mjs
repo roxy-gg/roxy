@@ -50,7 +50,7 @@ check('undefined stays undefined', asChatId(undefined) === undefined)
 //    `name: async (arg) => {`), not the interface declaration above it.
 for (const action of ['stop', 'compactConversation']) {
   const impl = new RegExp(
-    `^  ${action}: (?:async )?\\([^)]*\\) => \\{\\n([\\s\\S]*?)\\n  \\},`,
+    `^  ${action}: (?:async )?\\([^)]*\\) => \\{\\n([\\s\\S]*?)\\n  \\}(?:,|\\n\\}\\))`,
     'm'
   )
   const body = src.match(impl)?.[1]
@@ -659,9 +659,6 @@ const subagentSet = (patch) =>
   Object.assign(subagentState, typeof patch === 'function' ? patch(subagentState) : patch)
 let snapshotRequest = deferred()
 let readMessages = async () => []
-const taskUpdateAction = src.match(
-  /^  handleTaskUpdate: async \(update\) => \{[\s\S]*?\n  \}/m
-)?.[0]
 const subagentFns = new Function(
   'useRoxyStore',
   'api',
@@ -687,14 +684,10 @@ const subagentFns = new Function(
     const notifyIfSessionIdle = async () => {}
     const remoteTurns = new Map()
     let automationSnapshotEvents = null
-    let taskRevision = 0
-    const taskRevisions = new Map()
     const get = useRoxyStore.getState, set = useRoxyStore.setState
     ${subagentCode}
-    const actions = {${taskUpdateAction}}
     return { apply: applySubagentDelta, hydrate: hydrateSubagent, turns: subagentTurns,
-      load: loadTranscript, remember: rememberMessage, automate: applyAutomationDelta,
-      updateTask: actions.handleTaskUpdate }
+      load: loadTranscript, remember: rememberMessage, automate: applyAutomationDelta }
   `,
     { loader: 'ts' }
   ).code
@@ -817,7 +810,7 @@ check(
     frames.size === 0
 )
 
-console.log('store: completed transcript survives delayed task refreshes')
+console.log('store: completed transcript survives delayed reads')
 const userRow = {
   id: 'user',
   chatId: 'parent',
@@ -846,24 +839,14 @@ const parentRow = {
   ]
 }
 subagentState.messages = [userRow]
-subagentState.runningTasks = {}
 const staleMessages = deferred()
-const taskLoadStarted = deferred()
-readMessages = () => {
-  taskLoadStarted.resolve()
-  return staleMessages.promise
-}
-const taskLoad = subagentFns.updateTask({
-  jobId: 'result-job',
-  sessionId: 'parent',
-  state: 'completed'
-})
-await taskLoadStarted.promise
+readMessages = () => staleMessages.promise
+const lateParentRead = subagentFns.load('parent')
 subagentFns.remember(parentRow)
 staleMessages.resolve([userRow, resultRow])
-await taskLoad
+await lateParentRead
 check(
-  'a background refresh begun before parent persistence cannot erase the saved parent reply',
+  'a stale read begun before parent persistence cannot erase the saved parent reply',
   visibleMessages(subagentState.messages, subagentState.optimisticMessages.parent).some(
     (row) => row === parentRow
   )
@@ -971,7 +954,7 @@ check(
 )
 
 console.log('store: cancellation never lies about task completion')
-for (const name of ['cancelSubagent', 'cancelBackgroundTask']) {
+for (const name of ['cancelSubagent']) {
   const action = src.match(
     new RegExp(`^  ${name}: async \\([^)]*\\) => \\{\\n[\\s\\S]*?\\n  \\},`, 'm')
   )?.[0]
@@ -988,34 +971,29 @@ for (const name of ['cancelSubagent', 'cancelBackgroundTask']) {
       stateWrites++
     }
   )
-  const pending = cancel('parent-or-sub', 'job')
+  const pending = cancel('sub')
   check(`${name}: pending cancellation keeps real running state`, stateWrites === 0)
   request.resolve(Promise.reject(new Error('IPC unavailable')))
   await pending.catch(() => {})
   check(`${name}: failed cancellation does not hide unfinished work`, stateWrites === 0)
   request = deferred()
-  const accepted = cancel('parent-or-sub', 'job')
+  const accepted = cancel('sub')
   request.resolve(true)
   await accepted
   check(`${name}: accepted cancellation still waits for the terminal event`, stateWrites === 0)
 }
 
-console.log('store: window recreation restores running tasks without reviving completed work')
-const taskBootstrap = src.match(/^    if \(!taskUpdateSubscribed\) \{[\s\S]*?^    \}/m)?.[0]
+console.log('store: window recreation restores running children without reviving completed work')
 const subagentBootstrap = src.match(/^    if \(!subagentDeltaSubscribed\) \{[\s\S]*?^    \}/m)?.[0]
-check('task and subagent restore handlers found', !!taskBootstrap && !!subagentBootstrap)
-const taskList = deferred()
+check('subagent restore handler found', !!subagentBootstrap)
 const subagentList = deferred()
-let taskListener
 let subagentListener
 const restored = {
   runningSubagents: {},
   activityStartedAt: {},
-  tasks: [],
   refreshChats: async () => {}
 }
 const hydrated = []
-const taskRevisions = new Map()
 const subagentRunRevisions = new Map()
 const restoreState = (patch) =>
   Object.assign(restored, typeof patch === 'function' ? patch(restored) : patch)
@@ -1023,29 +1001,21 @@ new Function(
   'api',
   'get',
   'set',
-  'taskRevisions',
   'subagentRunRevisions',
   'hydrateSubagent',
   transformSync(
     `
-    let taskUpdateSubscribed = false, subagentDeltaSubscribed = false
-    let taskRevision = 0, subagentRevision = 0
+    let subagentDeltaSubscribed = false
+    let subagentRevision = 0
     function applySubagentDelta(update) {
       subagentRunRevisions.set(update.subChatId, ++subagentRevision)
     }
-    ${taskBootstrap}
     ${subagentBootstrap}
   `,
     { loader: 'ts' }
   ).code
 )(
   {
-    tasks: {
-      onUpdate: (cb) => {
-        taskListener = cb
-      },
-      listRunning: () => taskList.promise
-    },
     subagents: {
       onDelta: (cb) => {
         subagentListener = cb
@@ -1061,28 +1031,17 @@ new Function(
     }
   }),
   restoreState,
-  taskRevisions,
   subagentRunRevisions,
   (id) => {
     hydrated.push(id)
   }
 )
-taskListener({ jobId: 'finished', state: 'completed' })
 subagentListener({ subChatId: 'finished-sub', kind: 'run', state: 'completed' })
-taskList.resolve([
-  { jobId: 'finished', state: 'running' },
-  { jobId: 'running', state: 'running' }
-])
 subagentList.resolve([
   { subChatId: 'finished-sub', activityStartedAt: 10 },
   { subChatId: 'running-sub', activityStartedAt: 20 }
 ])
-await taskList.promise
 await subagentList.promise
-check(
-  'a fresh window restores background task badges',
-  restored.tasks.length === 1 && restored.tasks[0].jobId === 'running'
-)
 check(
   'late listRunning responses cannot restore finished subagents',
   !restored.runningSubagents['finished-sub'] && restored.runningSubagents['running-sub']
@@ -1157,7 +1116,9 @@ check(
 // A removed account pin is NOT permission to send history to the first other
 // account. Execute compaction's real resolver with a surviving sibling account.
 console.log('store: pinned account isolation')
-const compactAction = src.match(/^  compactConversation: async \([^)]*\) => \{\n[\s\S]*?\n  \},/m)
+const compactAction = src.match(
+  /^  compactConversation: async \([^)]*\) => \{\n[\s\S]*?\n  \}(?=\n\}\))/m
+)
 if (!compactAction) throw new Error('Missing compactConversation action')
 const compactCompiled = transformSync(`const actions = {${compactAction[0]}}`, {
   loader: 'ts'

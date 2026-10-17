@@ -298,12 +298,23 @@ export function parseAntigravityModels(body: unknown): ParsedQuota {
     // Upstream omits the fraction entirely once a model is exhausted.
     const remaining = fraction !== null ? fraction * 100 : resetsAt ? 0 : 100
     const name = m.displayName ?? m.display_name
+    const isTiered = key.endsWith('-tiered')
+    const base = isTiered ? key.slice(0, -'-tiered'.length) : key
+    const modelKeys = isTiered
+      ? [key, base, `${base}-high`, `${base}-medium`, `${base}-low`]
+      : [key]
+    const fallbackLabel = isTiered
+      ? base
+          .split('-')
+          .map((w) => (w ? w[0].toUpperCase() + w.slice(1) : w))
+          .join(' ')
+      : key
     buckets.push({
       id: key,
-      label: typeof name === 'string' && name ? name : key,
+      label: typeof name === 'string' && name ? name : fallbackLabel,
       remaining: clampPct(remaining),
       ...(resetsAt ? { resetsAt } : {}),
-      models: [key]
+      models: modelKeys
     })
   }
   buckets.sort((a, b) => a.label.localeCompare(b.label))

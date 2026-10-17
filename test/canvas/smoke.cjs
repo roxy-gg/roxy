@@ -170,6 +170,17 @@ async function run() {
       'return Math.abs(document.querySelector("canvas").width / devicePixelRatio - el.clientWidth) <= 1'
     )
   )
+  check(
+    'table immediately after prose renders as separate canvas columns',
+    await probe(`
+      const lines=scene.blocks.flatMap(b=>b.selectable);
+      const concern=lines.find(l=>l.text.trim()==='Concern');
+      const before=lines.find(l=>l.text.trim()==='Before');
+      const after=lines.find(l=>l.text.trim()==='After');
+      return concern && before && after && concern.y===before.y && before.y===after.y &&
+        concern.x<before.x && before.x<after.x && !lines.some(l=>l.text.includes('| ---'));
+    `)
+  )
 
   await clickDom('#top')
   await clickDom('#stream')

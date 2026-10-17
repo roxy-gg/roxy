@@ -39,6 +39,20 @@ const setInput = async (selector, value, type = 'HTMLInputElement') => {
     el.dispatchEvent(new Event('input', {bubbles:true})); el.dispatchEvent(new Event('change', {bubbles:true}));`)
   await wait()
 }
+const sampleWallpaper = async (selector) => {
+  const rect =
+    await evaluate(`const img=document.querySelector(${JSON.stringify(selector)}); await img.decode(); const image=img.getBoundingClientRect();
+    const chat=document.querySelector('#main-sidebar-harness .chat-background-host').getBoundingClientRect();
+    const left=Math.ceil(Math.max(image.left,chat.left,0)), right=Math.floor(Math.min(image.right,chat.right,innerWidth));
+    const top=Math.ceil(Math.max(image.top,chat.top,0)), bottom=Math.floor(Math.min(image.bottom,chat.bottom,innerHeight));
+    return {x:left,y:Math.ceil(top+(bottom-top)/4),width:right-left,height:Math.floor((bottom-top)/2)};`)
+  assert.ok(rect.width > 0 && rect.height > 0, 'wallpaper sample is visible')
+  // A tiny center crop can hit transparent pixels in every ASCII frame.
+  const screenshot = await win.webContents.capturePage(rect)
+  return (await require('sharp')(screenshot.toPNG()).resize(64, 64).raw().toBuffer()).toString(
+    'base64'
+  )
+}
 async function run() {
   let url = process.env.CANVAS_TEST_URL
   if (!url) {
@@ -323,7 +337,6 @@ async function run() {
   await until(
     `document.querySelector('#main-sidebar-harness .chat-wallpaper img')?.src.startsWith('data:image/gif;')`
   )
-  const sharp = require('sharp')
   for (const index of [1, 2, 3, 4, 5, 6]) {
     await click(`[aria-labelledby="background-effect-label"] button:nth-child(${index})`)
     await until(`!document.querySelector('[aria-live="polite"]').textContent`)
@@ -347,11 +360,7 @@ async function run() {
     const samples = new Set()
     for (let sample = 0; sample < 12; sample++) {
       await wait(70)
-      const rect =
-        await evaluate(`const box=document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect();
-        return {x:Math.round(box.x+box.width/2-16),y:Math.round(box.y+box.height/2-16),width:32,height:32}`)
-      const screenshot = await win.webContents.capturePage(rect)
-      samples.add((await sharp(screenshot.toPNG()).raw().toBuffer()).toString('base64'))
+      samples.add(await sampleWallpaper(selector))
     }
     assert.ok(
       samples.size > 1,
@@ -380,11 +389,7 @@ async function run() {
   const sharedSamples = new Set()
   for (let i = 0; i < 12; i++) {
     await wait(70)
-    const rect =
-      await evaluate(`const box=document.querySelector('#main-sidebar-harness .chat-wallpaper-shared img').getBoundingClientRect();
-      return {x:Math.round(box.x+box.width/2-16),y:Math.round(box.y+box.height/2-16),width:32,height:32}`)
-    const screenshot = await win.webContents.capturePage(rect)
-    sharedSamples.add((await sharp(screenshot.toPNG()).raw().toBuffer()).toString('base64'))
+    sharedSamples.add(await sampleWallpaper('#main-sidebar-harness .chat-wallpaper-shared img'))
   }
   assert.ok(sharedSamples.size > 1, 'full-window dithered GIF changes frames too')
   await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', {
@@ -400,6 +405,13 @@ async function run() {
     return new TextDecoder().decode(bytes).includes('acTL');`),
     false,
     'reduced-motion dither output is a still frame'
+  )
+  const stillSample = await sampleWallpaper('#main-sidebar-harness .chat-wallpaper-shared img')
+  await wait(250)
+  assert.equal(
+    await sampleWallpaper('#main-sidebar-harness .chat-wallpaper-shared img'),
+    stillSample,
+    'wallpaper sampling does not mistake unrelated UI changes for animation'
   )
   await click('[aria-label="Sidebar background"] button:nth-child(1)')
   await click('[aria-labelledby="background-effect-label"] button:nth-child(1)')

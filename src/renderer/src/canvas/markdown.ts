@@ -179,6 +179,8 @@ export function parseMarkdown(src: string): MdBlock[] {
     while (i < lines.length) {
       const l = lines[i]
       if (l.trim() === '') break
+      // Tables can interrupt prose without a blank line before the header.
+      if (l.includes('|') && i + 1 < lines.length && isDelimiterRow(lines[i + 1])) break
       if (/^\s*(#{1,6}\s|>|```|~~~)/.test(l)) break
       if (/^(\s*)([-*+])\s+/.test(l) || /^(\s*)\d{1,9}[.)]\s+/.test(l)) break
       body.push(l.trim())

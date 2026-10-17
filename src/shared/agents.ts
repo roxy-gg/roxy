@@ -1,7 +1,7 @@
 /**
  * Agent + subagent catalog, mirroring opencode's built-in agents
  * (github.com/sst/opencode, MIT). A subagent is just a child session run through
- * the same loop with its own system prompt and a narrowed set of tools.
+ * the same loop with its own system prompt and configured tools.
  *
  * Each agent's prompt lives in resources/prompts/<promptFile>; the model-default
  * prompt is used when promptFile is omitted.
@@ -44,23 +44,14 @@ export const AGENTS: AgentDef[] = [
     promptFile: 'plan.txt'
   },
   {
-    id: 'general',
-    name: 'General',
-    description:
-      'General-purpose agent for researching complex questions and running multi-step tasks in parallel.',
-    mode: 'subagent',
-    hidden: false,
-    color: '#a371f7',
-    tools: 'all'
-  },
-  {
     id: 'explore',
     name: 'Explore',
-    description: 'Fast, read-only agent specialized for searching and understanding codebases.',
+    description:
+      'Investigative subagent for independent research and side quests; shares the workspace and has full tools.',
     mode: 'subagent',
     hidden: false,
     color: '#f0883e',
-    tools: ['grep', 'glob', 'list', 'bash', 'webfetch', 'read', 'skill'],
+    tools: 'all',
     promptFile: 'agent-explore.txt'
   },
   {
@@ -83,29 +74,11 @@ export function getAgent(id: string): AgentDef | undefined {
 
 /**
  * An agent is read-only when it may not write or edit files (its tool allowlist
- * excludes both). Plan mode qualifies, and so does the `explore` subagent.
- *
- * This drives two separate rules:
- *  - A read-only agent may only delegate to read-only subagents, so it can't
- *    sidestep its own restriction by spawning an editing one.
- *  - Write-capable subagents are SERIALIZED within a turn, because two of them
- *    editing the same file would clobber each other (see harness/agent.ts).
+ * excludes both). Plan mode qualifies. Explore has full tools; its preference
+ * for investigation is guidance, not a permissions boundary.
  */
 export function isReadOnlyAgent(agent: AgentDef): boolean {
   return agent.tools !== 'all' && !agent.tools.includes('write') && !agent.tools.includes('edit')
-}
-
-/**
- * Whether a `task` call names a subagent that can modify the filesystem.
- *
- * An unknown or malformed subagent name counts as write-capable: the default is
- * `general` (tools: 'all'), and treating an unknown name as safe-to-parallelize
- * would be exactly the wrong way to be wrong.
- */
-export function isWriteCapableSubagent(subagentType: string): boolean {
-  const agent = getAgent(subagentType)
-  if (!agent) return true
-  return !isReadOnlyAgent(agent)
 }
 
 export const PRIMARY_AGENTS = AGENTS.filter((a) => a.mode === 'primary' && !a.hidden)

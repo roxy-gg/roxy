@@ -22,7 +22,6 @@ import {
   setWindowFactory
 } from './services/notifications'
 import { cleanupToolOutputs } from './services/tool-output-store'
-import { cancelAllBackgroundJobs } from './services/background-tasks'
 import { shutdownAllLsp } from './services/lsp'
 import { shutdownAllMcp } from './services/mcp'
 import { shutdownRemote } from './services/remote'
@@ -196,7 +195,6 @@ app.on('before-quit', () => {
 
 app.on('will-quit', () => {
   killAllBackground()
-  cancelAllBackgroundJobs()
   closeAllBrowsers()
   shutdownAllLsp()
   void shutdownAllMcp()

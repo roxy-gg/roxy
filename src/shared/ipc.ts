@@ -190,13 +190,6 @@ export const CHANNELS = {
   /** main -> renderer event carrying a streamed completion chunk */
   llmDelta: 'llm:delta',
 
-  /** main -> renderer event when a background subagent task changes state */
-  taskUpdate: 'task:update',
-  /** renderer -> main: list a session's running background tasks */
-  tasksListRunning: 'tasks:listRunning',
-  /** renderer -> main: cancel a running background task */
-  tasksCancel: 'tasks:cancel',
-
   /** main -> renderer: one live step of a subagent, tagged with ITS OWN session id */
   subagentDelta: 'subagent:delta',
   /** renderer -> main: catch-up parts for a subagent already mid-run */

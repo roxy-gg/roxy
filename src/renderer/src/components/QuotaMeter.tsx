@@ -88,8 +88,8 @@ function Meter({
 
 /**
  * Renderer-local ordering, shared across accounts and sessions within each
- * upstream, never across providers. Only applicable limits of the active
- * account can edit it. Without a preference the tightest limit comes first.
+ * upstream, never across providers. Any browsed account can edit it.
+ * Without a preference the tightest applicable limit comes first.
  */
 const ORDER_KEY = 'roxy.quota.order.v1'
 type QuotaOrder = Partial<Record<QuotaSource, string[]>>
@@ -129,10 +129,12 @@ function applyOrder(buckets: QuotaBucket[], order: string[]): QuotaBucket[] {
 function BucketRow({
   bucket,
   now,
+  appliesTo,
   grip
 }: {
   bucket: QuotaBucket
   now: number
+  appliesTo?: string
   grip?: JSX.Element
 }): JSX.Element {
   const { t } = useTranslation()
@@ -153,6 +155,11 @@ function BucketRow({
           </span>
         </div>
         <Meter value={bucket.remaining} />
+        {appliesTo && (
+          <div className="mt-1 text-[11px] text-text-subtle">
+            {t('quota.currentModel', { model: appliesTo })}
+          </div>
+        )}
         {reset && <div className="mt-1 text-[11px] text-text-subtle tabular-nums">{reset}</div>}
       </div>
     </div>
@@ -167,10 +174,12 @@ function BucketRow({
 function BucketList({
   buckets,
   now,
+  modelScope,
   onReorder
 }: {
   buckets: QuotaBucket[]
   now: number
+  modelScope?: { model: string; bucketIds: string[] }
   onReorder?: (ids: string[]) => void
 }): JSX.Element {
   const { t } = useTranslation()
@@ -246,6 +255,7 @@ function BucketList({
           <BucketRow
             bucket={b}
             now={now}
+            appliesTo={modelScope?.bucketIds.includes(b.id) ? modelScope.model : undefined}
             grip={
               sortable ? (
                 <button
@@ -498,7 +508,12 @@ export function QuotaMeter({
     setLoading(connectionId)
     let q: ConnectionQuota
     try {
-      q = await api.cliproxy.quota(connectionId, force)
+      q = (await api.cliproxy.quota(connectionId, force)) ?? {
+        connectionId,
+        upstream,
+        buckets: [],
+        fetchedAt: Date.now()
+      }
     } catch (e) {
       q = {
         connectionId,
@@ -581,8 +596,14 @@ export function QuotaMeter({
         fresh.upstream === 'copilot' ? !natural.includes(b) : !bucketAppliesTo(b, scopeModel)
       )
     : []
+  // Per-model allowances (Google) and chat/completion caps (Copilot) must
+  // share one list, otherwise a single applicable bucket has no drag handle.
+  const allLimits = fresh?.upstream === 'antigravity' || fresh?.upstream === 'copilot'
+  const listed = allLimits
+    ? applyOrder([...natural, ...others], order[fresh.upstream] ?? [])
+    : applicable
   const saveOrder = (ids: string[]): void => {
-    if (!isActive || !fresh) return
+    if (!fresh) return
     const known = new Set(fresh.buckets.map((b) => b.id))
     const next = {
       ...order,
@@ -609,7 +630,8 @@ export function QuotaMeter({
 
   const pillTitle = selected
     ? t('quota.pillTitle', { percent: selected.remaining, account: activeAccount })
-    : (activeQuota?.error ?? t('quota.title', { account: activeAccount }))
+    : (activeQuota?.error ??
+      (activeQuota ? t('quota.noModelLimit') : t('quota.title', { account: activeAccount })))
 
   const switchAccount = async (): Promise<void> => {
     if (!model) return
@@ -642,7 +664,11 @@ export function QuotaMeter({
             <span>{selected.remaining}%</span>
           </>
         ) : activeQuota?.error ? (
-          <AlertCircle className="h-3.5 w-3.5" />
+          <AlertCircle className="h-3.5 w-3.5 text-warning" />
+        ) : activeQuota ? (
+          <span title={t('quota.noModelLimit')} aria-label={t('quota.noModelLimit')}>
+            --
+          </span>
         ) : (
           <Loader2 className="h-3.5 w-3.5 animate-spin" />
         )}
@@ -707,30 +733,38 @@ export function QuotaMeter({
                     spend7d={viewedSpend7d}
                   />
                 )}
-                {applicable.length > 0 && scopeModel && (
+                {!allLimits && applicable.length > 0 && scopeModel && (
                   <div className="mb-0.5 mt-1 text-[11px] text-text-subtle">
                     {t('quota.currentModel', { model: scopeModel })}
                   </div>
                 )}
                 <BucketList
                   key={viewed.id}
-                  buckets={applicable}
+                  buckets={listed}
                   now={now}
-                  onReorder={isActive ? saveOrder : undefined}
+                  modelScope={
+                    allLimits && scopeModel
+                      ? { model: scopeModel, bucketIds: natural.map((b) => b.id) }
+                      : undefined
+                  }
+                  onReorder={saveOrder}
                 />
                 {isActive && applicable.length > 1 && (
                   <div className="mt-0.5 text-[11px] text-text-subtle">
                     {t('quota.pillHint', { limit: applicable[0].label })}
                   </div>
                 )}
-                {others.length > 0 && (
+                {!allLimits && others.length > 0 && (
                   <>
                     <div className="mb-0.5 mt-3 border-t border-border pt-2 text-[11px] text-text-subtle">
                       {t('quota.otherModels')}
                     </div>
-                    {others.map((b) => (
-                      <BucketRow key={b.id} bucket={b} now={now} />
-                    ))}
+                    <BucketList
+                      key={`${viewed.id}-others`}
+                      buckets={applyOrder(others, order[fresh.upstream] ?? [])}
+                      now={now}
+                      onReorder={saveOrder}
+                    />
                   </>
                 )}
               </>

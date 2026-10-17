@@ -46,6 +46,18 @@ function safeSegment(value: string): string {
  * full text to disk and return a head/tail preview with a pointer to the file.
  * A write failure degrades gracefully to an in-memory preview (never throws).
  */
+export async function saveToolOutput(
+  sessionId: string,
+  callId: string,
+  text: string
+): Promise<string> {
+  const dir = path.join(toolOutputRoot(), safeSegment(sessionId || 'session'))
+  await fs.mkdir(dir, { recursive: true })
+  const file = path.join(dir, `tool_${safeSegment(callId || String(Date.now()))}.txt`)
+  await fs.writeFile(file, text, 'utf8')
+  return file
+}
+
 export async function boundToolOutput(
   sessionId: string,
   callId: string,

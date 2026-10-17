@@ -23,7 +23,7 @@ new Function(
     write: false
   }).outputFiles[0].text
 )(quotasModule, quotasModule.exports)
-const provider = { id: 'a', seedId: 'claude', name: 'Claude', enabled: true }
+const provider = { id: 'a', seedId: 'claude-subscription', name: 'Claude', enabled: true }
 const sibling = { ...provider, id: 'b' }
 const bucket = (id, label, remaining, family) => ({
   id,
@@ -85,7 +85,16 @@ function load(path, extra = '') {
     react: hooks,
     'react-i18next': { useTranslation: () => ({ t: (key) => key }) },
     '@shared/quota': quotasModule.exports,
-    '@shared/cliproxy': { upstreamFor: (seed) => ({ upstream: seed, accountLabel: seed }) },
+    '@shared/cliproxy': {
+      upstreamFor: (seed) => {
+        const upstream = {
+          'claude-subscription': 'claude',
+          'gemini-subscription': 'antigravity',
+          'codex-subscription': 'codex'
+        }[seed]
+        return upstream ? { upstream, accountLabel: upstream } : undefined
+      }
+    },
     '../lib/store': { useRoxyStore: (selector) => selector(state) },
     '../lib/api': { api: {} },
     './ContextMenu': {
@@ -210,10 +219,10 @@ mounted = render(quotaUI.QuotaMeter, props, mounted.context)
 assert.equal(find(mounted.tree, quotaUI.Meter).props.value, 91)
 assert.equal(find(mounted.tree, quotaUI.Meter).props.status, 2)
 assert.ok(nodes(mounted.tree).some((node) => node.props?.children === 'quota.pillHint'))
-assert.equal(nodes(mounted.tree).filter((node) => node.type === quotaUI.BucketList).length, 1)
+assert.equal(nodes(mounted.tree).filter((node) => node.type === quotaUI.BucketList).length, 2)
 assert.ok(
   nodes(mounted.tree).some(
-    (node) => node.type === quotaUI.BucketRow && node.props.bucket.id === 'seven_day_opus'
+    (node) => node.type === quotaUI.BucketList && node.props.buckets[0]?.id === 'seven_day_opus'
   )
 )
 const saved = JSON.parse(storage.get(key))
@@ -235,9 +244,15 @@ assert.equal(find(mounted.tree, quotaUI.Meter).props.value, 91)
 localStorage.setItem = storageSet
 find(mounted.tree, 'select').props.onChange({ target: { value: 'b' } })
 mounted = render(quotaUI.QuotaMeter, props, mounted.context)
-assert.equal(find(mounted.tree, quotaUI.BucketList).props.onReorder, undefined)
+const siblingLimits = find(mounted.tree, quotaUI.BucketList)
+assert.equal(typeof siblingLimits.props.onReorder, 'function')
+assert.ok(find(render(quotaUI.BucketList, siblingLimits.props).tree, quotaUI.BucketRow).props.grip)
 assert.ok(!nodes(mounted.tree).some((node) => node.props?.children === 'quota.pillHint'))
 assert.equal(find(mounted.tree, quotaUI.Meter).props.value, 91)
+siblingLimits.props.onReorder(['seven_day', 'five_hour'])
+mounted = render(quotaUI.QuotaMeter, props, mounted.context)
+assert.equal(find(mounted.tree, quotaUI.Meter).props.value, 2)
+assert.deepEqual(JSON.parse(storage.get(key)).claude, ['seven_day', 'five_hour'])
 assert.deepEqual(
   quotaUI.applyOrder([weekly, five], []).map((b) => b.id),
   ['seven_day', 'five_hour']
@@ -305,6 +320,101 @@ nodes(dragging.tree)
 assert.deepEqual(moves[2], ['five_hour', 'seven_day'])
 const readOnly = render(quotaUI.BucketList, { buckets: [weekly, five], now: 0 })
 assert.equal(find(readOnly.tree, quotaUI.BucketRow).props.grip, undefined)
+const single = render(quotaUI.BucketList, { buckets: [weekly], now: 0, onReorder() {} })
+assert.equal(find(single.tree, quotaUI.BucketRow).props.grip, undefined)
+
+// Every allowance is reorderable, including when browsing another provider.
+const gemini = { ...provider, id: 'google', seedId: 'gemini-subscription' }
+const copilot = { ...provider, id: 'github', seedId: 'github-copilot' }
+state.providers.push(gemini, copilot)
+const modelBucket = (id, remaining) => ({ ...bucket(id, id, remaining), models: [id] })
+state.quotas.google = {
+  connectionId: 'google',
+  upstream: 'antigravity',
+  buckets: [modelBucket('gemini-pro', 75), modelBucket('gemini-flash', 10)]
+}
+state.quotas.github = {
+  connectionId: 'github',
+  upstream: 'copilot',
+  buckets: [bucket('premium', 'Premium requests', 60), bucket('completions', 'Completions', 5)]
+}
+for (const [account, model, ids] of [
+  [gemini, 'gemini-pro', ['gemini-flash', 'gemini-pro']],
+  [copilot, 'paid-model', ['completions', 'premium']]
+]) {
+  const activeProps = { provider: account, model }
+  let view = render(quotaUI.QuotaMeter, activeProps)
+  view.context.values[1] = state.quotas
+  find(view.tree, 'button').props.onClick()
+  view = render(quotaUI.QuotaMeter, activeProps, view.context)
+  const all = nodes(view.tree).filter((node) => node.type === quotaUI.BucketList)
+  assert.equal(all.length, 1)
+  assert.equal(all[0].props.buckets.length, 2)
+  const rows = nodes(render(quotaUI.BucketList, all[0].props).tree).filter(
+    (node) => node.type === quotaUI.BucketRow
+  )
+  assert.ok(rows.every((row) => row.props.grip?.props.draggable))
+  const applicableId = account === gemini ? 'gemini-pro' : 'premium'
+  for (const row of rows) {
+    assert.equal(row.props.appliesTo, row.props.bucket.id === applicableId ? model : undefined)
+    const rendered = render(quotaUI.BucketRow, row.props).tree
+    assert.equal(
+      nodes(rendered).some((node) => node.props?.children === 'quota.currentModel'),
+      row.props.bucket.id === applicableId
+    )
+  }
+  const before = find(view.tree, quotaUI.Meter).props
+  all[0].props.onReorder(ids)
+  view = render(quotaUI.QuotaMeter, activeProps, view.context)
+  assert.deepEqual(
+    find(view.tree, quotaUI.BucketList).props.buckets.map((b) => b.id),
+    ids
+  )
+  assert.equal(find(view.tree, quotaUI.Meter).props.value, before.value)
+  assert.equal(find(view.tree, quotaUI.Meter).props.status, before.status)
+  const reloaded = render(quotaUI.QuotaMeter, activeProps)
+  reloaded.context.values[1] = state.quotas
+  reloaded.context.values[4] = true
+  assert.deepEqual(
+    find(
+      render(quotaUI.QuotaMeter, activeProps, reloaded.context).tree,
+      quotaUI.BucketList
+    ).props.buckets.map((b) => b.id),
+    ids
+  )
+  find(mounted.tree, 'select').props.onChange({ target: { value: account.id } })
+  mounted = render(quotaUI.QuotaMeter, props, mounted.context)
+  const browsed = find(mounted.tree, quotaUI.BucketList)
+  assert.equal(browsed.props.buckets.length, 2)
+  assert.equal(typeof browsed.props.onReorder, 'function')
+  assert.equal(browsed.props.modelScope, undefined)
+  browsed.props.onReorder([...ids].reverse())
+  mounted = render(quotaUI.QuotaMeter, props, mounted.context)
+  assert.deepEqual(
+    find(mounted.tree, quotaUI.BucketList).props.buckets.map((b) => b.id),
+    [...ids].reverse()
+  )
+  assert.equal(find(mounted.tree, quotaUI.Meter).props.value, 2)
+}
+
+// Loaded quota with no applicable limits displays '--' with an explanatory label and no Loader2
+const unmeteredProps = { provider: gemini, model: 'unmetered-model' }
+let unmeteredView = render(quotaUI.QuotaMeter, unmeteredProps)
+unmeteredView.context.values[1] = state.quotas
+const unmeteredTree = render(quotaUI.QuotaMeter, unmeteredProps, unmeteredView.context).tree
+assert.ok(
+  nodes(unmeteredTree).some(
+    (node) =>
+      node.props?.children === '--' &&
+      node.props?.title === 'quota.noModelLimit' &&
+      node.props?.['aria-label'] === 'quota.noModelLimit'
+  )
+)
+assert.ok(
+  !nodes(unmeteredTree).some(
+    (node) => node.type === 'Loader2' || node.props?.className?.includes('animate-spin')
+  )
+)
 
 const settingsSource = readFileSync('src/renderer/src/routes/Settings.tsx', 'utf8')
 const escapeOverride = settingsSource.match(/onEscape=\{(\(\) => \{[\s\S]*?\n      \})\}/)[1]

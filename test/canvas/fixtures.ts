@@ -59,6 +59,7 @@ that layout is now *retained* — see \`src/renderer/src/canvas/\` for the piece
 
 ### Why
 
+The rendering comparison:
 | Concern | Before | After |
 | --- | --- | ---: |
 | Cost model | grows with history | grows with viewport |

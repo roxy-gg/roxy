@@ -16,9 +16,9 @@ export const SPACE = {
   columnPadX: 16,
   /** `max-w-3xl` — the column's measure. */
   columnMax: 768,
-  /** `pt-4` / `pb-6` on the message column. */
+  /** Top padding on the message column; the last message supplies bottom padding. */
   columnPadTop: 16,
-  columnPadBottom: 24,
+  columnPadBottom: 0,
 
   /** `gap-3` between a message's avatar and its body. */
   avatarGap: 12,

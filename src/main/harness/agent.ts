@@ -10,7 +10,7 @@
  * and the Vercel AI SDK drives the Anthropic (Claude) and Google (Gemini) wires.
  * Wires without tool support yet (azure/bedrock) fall back to a plain answer.
  */
-import type { ChatMessage, LlmEvent } from '../../shared/api'
+import type { ChatMessage, LlmChildEvent, LlmEvent } from '../../shared/api'
 import type {
   Message,
   MessagePart,
@@ -22,13 +22,7 @@ import type { Bot, BotJob } from '../../shared/bots'
 import { isInterruptibleTool } from '../../shared/tools'
 import { MAX_FORWARDED_IMAGES } from '../../shared/attachments'
 import { PartsFold, partsToContent, taskPreview } from '../../shared/parts'
-import {
-  getAgent,
-  isReadOnlyAgent,
-  isWriteCapableSubagent,
-  DEFAULT_AGENT_ID,
-  type AgentDef
-} from '../../shared/agents'
+import { getAgent, isReadOnlyAgent, DEFAULT_AGENT_ID, type AgentDef } from '../../shared/agents'
 import {
   selectPromptName,
   buildEnvironment,
@@ -37,25 +31,14 @@ import {
 } from '../../shared/prompt'
 import { flattenToolHistory, sanitizeToolCallId } from '../../shared/tool-history'
 import { pruneToolMessages, KEEP_RECENT_TOKENS, messageTokens } from '../../shared/context'
-import {
-  MAX_PARALLEL_SUBAGENTS,
-  BACKGROUND_TASK_CONTINUATION,
-  backgroundTaskRequest,
-  parseTaskInput,
-  partitionToolCalls,
-  runTasksByWriteCapability,
-  renderBackgroundStarted,
-  renderTaskResult,
-  type PlannedCall,
-  type TaskInput
-} from '../../shared/parallel'
+import { parseTaskInput, partitionToolCalls, type TaskInput } from '../../shared/parallel'
 import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import * as repo from '../db/repo'
 import { HOST_USERNAME, isHostSpeaker } from '../../shared/bots'
 import { botActivity, chatBot, getBot, listBots, listJobs } from '../db/bots'
 import { runTool, type ToolContext } from './tools'
-import { boundToolOutput } from '../services/tool-output-store'
+import { boundToolOutput, saveToolOutput } from '../services/tool-output-store'
 import { listModels, modelCost } from '../services/models'
 import { omitMessageImages } from '../services/attachments'
 import {
@@ -81,15 +64,7 @@ import type { McpServerRecord } from '../../shared/mcp'
 import { SKILL_TOOL_NAME, SKILL_TOOL_DESCRIPTION } from '../../shared/skills'
 import { listSkills, skillInstructions } from '../services/skills'
 import { findGitRoot } from '../services/workspace'
-import {
-  registerBackgroundJob,
-  finishBackgroundJob,
-  cancelBackgroundJob
-} from '../services/background-tasks'
 import { startSubagentRun } from '../services/subagent-stream'
-import { enqueuePrompt } from '../services/automation'
-import { queuePaused } from '../services/turn-state'
-import { notifyTranscriptChanged } from '../services/remote'
 import { startToolRun } from '../services/tool-runs'
 import {
   recordRetry,
@@ -1142,20 +1117,22 @@ type ToolSchema = ReturnType<typeof fn>
 /** The delegation tool — lets a primary agent spawn a focused subagent. */
 const TASK_SCHEMA = fn(
   'task',
-  'Delegate a focused, self-contained sub-task to a specialized subagent that runs on its own and reports back. Use this to parallelize or offload work (e.g. research the codebase, build a page). The subagent has NO memory of this conversation, so put ALL the context it needs into `prompt`. It returns a single report. Call task multiple times IN ONE turn to batch independent work. CONCURRENCY: read-only "explore" subagents run in PARALLEL (bounded) - that is what subagents are for, and you should fan them out freely. Write-capable "general" subagents are SERIALIZED one at a time, because they share this session\'s working directory and would otherwise overwrite each other\'s edits; several of them in one turn is correct but no faster than doing the work yourself. To get genuinely parallel WRITES, the user should open separate sessions - each gets its own git worktree and therefore its own filesystem. This tool is NOT how you reach a bot: a subagent is a blank child of your own context that reports only back to you, while a bot is a peer with its own brief that answers in the shared transcript - use bot_invoke for that.',
+  'Run independent investigations or side quests in parallel. Supply complete context in each prompt: Explore subagents do not inherit this conversation. They have full tools but share this workspace, so coordinated edits are not recommended. There is no task-count or concurrency limit. This call waits until every subtask completes, fails, or is cancelled, then returns every result in input order. No other parent tools run while the batch is active. This is not a persistent bot handoff.',
   {
-    description: str('A short (3-5 word) label for the task.'),
-    prompt: str('The complete task for the subagent, including every bit of context it needs.'),
-    subagent_type: str(
-      'Which subagent: "general" (full tools, multi-step work) or "explore" (read-only search/understanding).'
-    ),
-    background: {
-      type: 'boolean',
-      description:
-        'Run detached: return immediately and notify you when it finishes, instead of blocking for the result. Use ONLY for independent, long-running work you can continue past. Do NOT poll it or duplicate its work. Default false (wait for the result).'
+    tasks: {
+      type: 'array',
+      minItems: 1,
+      items: {
+        type: 'object',
+        properties: {
+          description: str('A short label for this investigation.'),
+          prompt: str('The complete assignment and context for this subagent.')
+        },
+        required: ['description', 'prompt']
+      }
     }
   },
-  ['description', 'prompt', 'subagent_type']
+  ['tasks']
 )
 
 /** The schemas an agent may call: its allowlisted base tools, plus `task` for primaries. */
@@ -1191,8 +1168,7 @@ function agentAllowsSkill(agent: AgentDef): boolean {
 
 /**
  * Whether a subagent can actually run `git commit` (it has the `bash` tool). Used
- * to decide whether to give it the co-author trailer instruction — read-only
- * agents (e.g. explore) never commit, so they don't need it.
+ * to decide whether to give it the co-author trailer instruction.
  */
 function agentCanCommit(agent: AgentDef): boolean {
   return agent.tools === 'all' || agent.tools.includes('bash')
@@ -1445,8 +1421,8 @@ export async function runAgentTurn(opts: RunTurnOptions): Promise<void> {
   // results survive across turns so the model keeps its multi-turn reasoning.
   const convo: OpenAiMessage[] = [systemMessage, ...messages].map(toOpenAiMessage)
 
-  // The agent runs with its allowlisted tools. Primaries may delegate via `task`;
-  // a read-only agent (Plan) may only spawn read-only subagents (enforced below).
+  // Primaries can delegate through `task`; Plan does not expose a full-access
+  // Explore subagent.
   await runLoop({
     providerId,
     copilotSession,
@@ -1465,7 +1441,7 @@ export async function runAgentTurn(opts: RunTurnOptions): Promise<void> {
     emitTool: emit,
     onText: (delta) => emit({ type: 'text', delta }),
     onReasoning: (delta) => emit({ type: 'reasoning', delta }),
-    tools: [...schemasFor(agent.tools, true), ...mcpSchemas, ...skillSchemas],
+    tools: [...schemasFor(agent.tools, !readOnly), ...mcpSchemas, ...skillSchemas],
     mcpTools: mcpSchemas,
     skillTools: skillSchemas,
     skillInfo,
@@ -1582,8 +1558,6 @@ async function runLoop(o: LoopOptions): Promise<string> {
     metricsId
   } = o
   let lastText = ''
-  let acceptingBackground = true
-  const backgroundResults: { message: Message; resume: () => void }[] = []
 
   // The tool list is normally fixed for the turn, but the `mcp` tool can connect a
   // brand-new server mid-turn. When it does, we recompute the MCP schemas and merge
@@ -1598,148 +1572,188 @@ async function runLoop(o: LoopOptions): Promise<string> {
 
   // No step cap — keep streaming → running tools → repeating until the model
   // finishes with prose (no tool calls) or the user stops it (signal aborts).
-  try {
-    for (;;) {
-      if (signal.aborted) return lastText
-      if (backgroundResults.length) {
-        convo.push({
-          role: 'user',
-          content: backgroundTaskRequest(backgroundResults.splice(0).map(({ message }) => message))
-        })
-      }
-      if (
-        o.copilotSession !== undefined &&
-        repo.getCopilotSessionKey(providerId) !== o.copilotSession
-      ) {
-        throw new ModelHttpError(409, 'GitHub Copilot account changed during this turn. Try again.')
-      }
-      const { text, toolCalls, usage } = await streamTurn(
-        providerId,
-        vision,
-        model,
-        trimConvo(convo, contextLimit, metricsId),
-        signal,
-        reasoning,
-        effort,
-        liveTools,
-        onText,
-        onReasoning,
-        { onRetry: () => recordRetry(metricsId) }
-      )
-      // Record this model call's usage/cost (subagents pass their own sessionId).
-      const cost = recordCall(providerId, model, sessionId, usage)
-      // ...and the same call's shape into the in-flight turn summary. Attributed
-      // to `metricsId` (the TOP-level session) rather than `sessionId`, so a
-      // subagent's model calls roll up into the turn the user actually started -
-      // its own sub-session has no collector and its work would otherwise vanish.
-      recordStep(
-        metricsId,
-        model,
-        usage ? { input: usage.input, output: usage.output, cacheRead: usage.cacheRead } : null,
-        cost
-      )
-      if (text) lastText = text
-      if (toolCalls.length === 0) {
-        // A detached result may have arrived DURING this model response. Give it
-        // another step instead of silently ending before it has seen the report.
-        if (!backgroundResults.length) return lastText
-        if (text) {
-          convo.push({ role: 'assistant', content: text })
-          onText('\n\n')
-        }
-        continue
-      }
+  for (;;) {
+    if (signal.aborted) return lastText
+    if (
+      o.copilotSession !== undefined &&
+      repo.getCopilotSessionKey(providerId) !== o.copilotSession
+    ) {
+      throw new ModelHttpError(409, 'GitHub Copilot account changed during this turn. Try again.')
+    }
+    const { text, toolCalls, usage } = await streamTurn(
+      providerId,
+      vision,
+      model,
+      trimConvo(convo, contextLimit, metricsId),
+      signal,
+      reasoning,
+      effort,
+      liveTools,
+      onText,
+      onReasoning,
+      { onRetry: () => recordRetry(metricsId) }
+    )
+    // Record this model call's usage/cost (subagents pass their own sessionId).
+    const cost = recordCall(providerId, model, sessionId, usage)
+    // ...and the same call's shape into the in-flight turn summary. Attributed
+    // to `metricsId` (the TOP-level session) rather than `sessionId`, so a
+    // subagent's model calls roll up into the turn the user actually started -
+    // its own sub-session has no collector and its work would otherwise vanish.
+    recordStep(
+      metricsId,
+      model,
+      usage ? { input: usage.input, output: usage.output, cacheRead: usage.cacheRead } : null,
+      cost
+    )
+    if (text) lastText = text
+    if (toolCalls.length === 0) return lastText
 
-      convo.push({
-        role: 'assistant',
-        content: text || null,
-        tool_calls: toolCalls.map((tc) => ({
-          id: tc.id,
-          type: 'function',
-          function: { name: tc.name, arguments: tc.args }
+    convo.push({
+      role: 'assistant',
+      content: text || null,
+      tool_calls: toolCalls.map((tc) => ({
+        id: tc.id,
+        type: 'function',
+        function: { name: tc.name, arguments: tc.args }
+      }))
+    })
+
+    // A task batch blocks every other parent tool until all its children settle.
+    // If the model emitted multiple task calls, only the first runs; the rest
+    // receive a deferred result and can be included in the next batch.
+    // Every result is paired back to its call id in the ORIGINAL order, so the
+    // assistant.tool_calls → role:'tool' structure the model sees stays valid.
+    const { tasks, others } = partitionToolCalls(toolCalls)
+    const taskBatch = tasks[0]
+
+    // Children share the parent's workspace; their prompt discourages
+    // coordinated edits without restricting their tools.
+    const runTask = async (tc: ToolCallAccum): Promise<{ id: string; content: string }> => {
+      try {
+        const batch = parseTaskInput(tc.args)
+        for (const _task of batch) recordSubagent(metricsId)
+        trackFeature(metricsId, 'subagent')
+        const settled = await Promise.allSettled(
+          batch.map((input, index) =>
+            runSubagent({
+              callId: `${tc.id}-child-${index}`,
+              batchCallId: tc.id,
+              input,
+              providerId,
+              copilotSession: o.copilotSession,
+              vision,
+              model,
+              cwd,
+              parentChatId,
+              parentActor: { botId, botUsername: o.botUsername ?? HOST_USERNAME },
+              // Subagents share their parent's browser window (its project's one window).
+              browserKey,
+              readOnly,
+              signal,
+              emit: emitTool,
+              reasoning,
+              effort,
+              contextLimit,
+              depth,
+              mcpTools: liveMcpTools,
+              skillTools,
+              skillInfo,
+              metricsId
+            })
+          )
+        )
+        const results = settled.map((result, index) => ({
+          description: batch[index].description,
+          ...(result.status === 'fulfilled'
+            ? result.value
+            : { status: 'failed', report: String(result.reason), subChatId: null })
         }))
-      })
-
-      // Run the turn's tool calls. `task` delegations overlap with the other
-      // tools, which stay sequential so file-mutating calls can't race each other.
-      // Every result is paired back to its call id in the ORIGINAL order, so the
-      // assistant.tool_calls → role:'tool' structure the model sees stays valid.
-      const { tasks, others } = partitionToolCalls(toolCalls)
-
-      // Subagents inherit their parent's cwd verbatim — they must, since their
-      // work has to land in the tree that spawned them. That makes two parallel
-      // WRITE-capable subagents a file race inside a single session, so
-      // concurrency is constrained by write capability rather than by worktree:
-      //   - readers (explore) still fan out through the bounded pool
-      //   - writers (general) run strictly one at a time
-      // Parallel writes belong in separate top-level sessions, which get their own
-      // worktrees and therefore their own filesystem.
-      //
-      // KNOWN GAP: a BACKGROUND write-capable subagent (background: true) is
-      // detached by design and is not covered by this rule, so it can still race a
-      // foreground writer. Guarding it with the same lock was considered and
-      // rejected: a background subagent can run for minutes, so a shared mutex
-      // would let detached work stall an interactive turn — head-of-line blocking
-      // that's a worse failure than the race it prevents. It's handled at the
-      // prompt level instead (see renderBackgroundStarted, which tells the model
-      // not to touch the same files as a running background task).
-      const runTask = async (tc: PlannedCall): Promise<{ id: string; content: string }> => {
-        const parsed = parseTaskInput(tc.args)
-        try {
-          const result = await runSubagent({
-            callId: tc.id,
-            input: parsed,
-            providerId,
-            copilotSession: o.copilotSession,
-            vision,
-            model,
-            cwd,
-            parentChatId,
-            parentActor: { botId, botUsername: o.botUsername ?? HOST_USERNAME },
-            onBackgroundResult: (message, resume) => {
-              if (!acceptingBackground || signal.aborted) return false
-              backgroundResults.push({ message, resume })
-              return true
-            },
-            // Subagents share their parent's browser window (its project's one window).
-            browserKey,
-            readOnly,
-            signal,
-            emit: emitTool,
-            reasoning,
-            effort,
-            contextLimit,
-            depth,
-            mcpTools: liveMcpTools,
-            skillTools,
-            skillInfo,
-            metricsId
+        const full = JSON.stringify({ results })
+        const available = Math.max(1000, (contextLimit || 32000) - 16000) * 3
+        if (full.length <= available) return { id: tc.id, content: full }
+        // Keep one status and session reference per child. The complete reports
+        // remain available through the full output file and child sessions.
+        const fullPath = await saveToolOutput(sessionId ?? '', tc.id, full)
+        const manifest = results.map(({ report, ...rest }) => ({
+          ...rest,
+          reportLength: report.length
+        }))
+        const perReport = Math.max(
+          0,
+          Math.floor((available - JSON.stringify(manifest).length - 1000) / results.length)
+        )
+        return {
+          id: tc.id,
+          content: JSON.stringify({
+            fullOutput: `Full results saved to ${fullPath}; use read on that path to retrieve them.`,
+            results: results.map(({ report, ...rest }) => ({
+              ...rest,
+              report:
+                report.length > perReport
+                  ? `${report.slice(0, perReport)} [preview; full report in batch output]`
+                  : report
+            }))
           })
-          return { id: tc.id, content: result.slice(0, 12_000) }
-        } catch (e) {
-          const msg = e instanceof Error ? e.message : String(e)
-          return { id: tc.id, content: renderTaskResult(parsed.subagentType, 'error', msg) }
+        }
+      } catch (e) {
+        return {
+          id: tc.id,
+          content: `Subtask batch failed: ${e instanceof Error ? e.message : String(e)}`
         }
       }
+    }
 
-      // Started here, not awaited, so the subagents run while the sequential tools
-      // below execute. runTask never throws (runSubagent handles its own errors,
-      // and the guard inside turns any setup failure into a task_error).
-      // Delegation is one of the strongest signals we have about how Roxy is
-      // really used - a session that fans out to subagents is a different product
-      // from one that answers questions - so count the spawns and flag the
-      // capability once per session.
-      for (let i = 0; i < tasks.length; i++) recordSubagent(metricsId)
-      if (tasks.length > 0) trackFeature(metricsId, 'subagent')
-
-      const tasksSettled = runTasksByWriteCapability(tasks, {
-        isWriteCapable: (tc) => isWriteCapableSubagent(parseTaskInput(tc.args).subagentType),
-        limit: MAX_PARALLEL_SUBAGENTS,
-        run: runTask,
-        aborted: () => signal.aborted
+    const resultById = new Map<string, string>()
+    if (taskBatch) {
+      const batch = taskBatch
+      const taskInputs = (() => {
+        try {
+          return parseTaskInput(batch.args)
+        } catch {
+          return []
+        }
+      })()
+      emitTool({
+        type: 'tool-start',
+        callId: batch.id,
+        tool: 'task',
+        title: 'Investigate subtasks',
+        input: { tasks: taskInputs },
+        cancellable: false
       })
+      const result = await runTask(batch)
+      const delivered = result.content.startsWith('{"fullOutput":')
+        ? result.content
+        : await boundToolOutput(sessionId ?? '', result.id, result.content)
+      resultById.set(result.id, delivered)
+      emitTool({
+        type: 'tool-end',
+        callId: batch.id,
+        output: delivered,
+        ok: !result.content.startsWith('Subtask batch failed:')
+      })
+      recordTool(metricsId, 'task', !result.content.startsWith('Subtask batch failed:'))
+      if (signal.aborted) return lastText
+      // The model must decide what to do next using the finished reports.
+      // Calls emitted in the same response must not race the investigations.
+      for (const tc of toolCalls) {
+        if (tc.id === batch.id) continue
+        const deferred =
+          'Deferred: a subtask batch was active. Request this tool again after reviewing its results.'
+        emitTool({
+          type: 'tool-start',
+          callId: tc.id,
+          tool: tc.name,
+          title: tc.name,
+          input: {},
+          cancellable: false
+        })
+        emitTool({ type: 'tool-end', callId: tc.id, output: deferred, ok: false })
+        resultById.set(tc.id, deferred)
+      }
+    }
 
-      const resultById = new Map<string, string>()
+    if (!taskBatch) {
       for (const tc of others) {
         if (signal.aborted) break
         let input: Record<string, unknown> = {}
@@ -1824,40 +1838,33 @@ async function runLoop(o: LoopOptions): Promise<string> {
         const toolText = stripAnsi(result.output) || '(no output)'
         resultById.set(tc.id, await boundToolOutput(sessionId ?? '', tc.id, toolText))
       }
-
-      // If the model just added/enabled/reconnected an MCP server via the `mcp` tool,
-      // its connection is now live in the process-global pool — recompute this
-      // workspace's MCP schemas and merge them into the tool list so the new tools
-      // are callable on the very next model step (this turn), not only next message.
-      if (cwd && !readOnly && others.some((tc) => tc.name === 'mcp')) {
-        const ids = new Set(gatherMcpRecords(cwd).map((r) => r.id))
-        liveMcpTools = mcpToolSchemas(ids)
-        liveTools = [...baseTools, ...liveMcpTools]
-      }
-
-      // Join the subagents, then append every tool result in the original
-      // tool_calls order so the paired structure is preserved for the next stream.
-      for (const r of await tasksSettled) resultById.set(r.result.id, r.result.content)
-      if (signal.aborted) return lastText
-      for (const tc of toolCalls) {
-        convo.push({
-          role: 'tool',
-          tool_call_id: tc.id,
-          content: resultById.get(tc.id) ?? '(no result)'
-        })
-      }
     }
-  } finally {
-    acceptingBackground = false
-    // If another tool failed before the next model step, keep undelivered
-    // reports routable. The continuation still respects the session's Stop.
-    for (const result of backgroundResults) result.resume()
+
+    // If the model just added/enabled/reconnected an MCP server via the `mcp` tool,
+    // its connection is now live in the process-global pool — recompute this
+    // workspace's MCP schemas and merge them into the tool list so the new tools
+    // are callable on the very next model step (this turn), not only next message.
+    if (!taskBatch && cwd && !readOnly && others.some((tc) => tc.name === 'mcp')) {
+      const ids = new Set(gatherMcpRecords(cwd).map((r) => r.id))
+      liveMcpTools = mcpToolSchemas(ids)
+      liveTools = [...baseTools, ...liveMcpTools]
+    }
+
+    // Pair every result with the model's original tool-call order.
+    if (signal.aborted) return lastText
+    for (const tc of toolCalls) {
+      convo.push({
+        role: 'tool',
+        tool_call_id: tc.id,
+        content: resultById.get(tc.id) ?? '(no result)'
+      })
+    }
   }
 }
 
 interface SubagentOptions {
   callId: string
-  /** The parsed `task` arguments (description/prompt/subagent_type/background). */
+  batchCallId: string
   input: TaskInput
   providerId: string
   copilotSession?: string | null
@@ -1866,11 +1873,9 @@ interface SubagentOptions {
   cwd: string
   parentChatId?: string
   parentActor: { botId?: string; botUsername: string }
-  onBackgroundResult: (message: Message, resume: () => void) => boolean
-  /** Browser isolation key inherited from the parent, so the subagent shares the
-   *  project's one browser window instead of spawning its own. */
+  /** Browser isolation key inherited from the parent session. */
   browserKey?: string
-  /** The parent is read-only (Plan) — only read-only subagents may be spawned. */
+  /** Plan mode cannot delegate to full-access Explore children. */
   readOnly?: boolean
   signal: AbortSignal
   emit: (event: LlmEvent) => void
@@ -1893,9 +1898,14 @@ interface SubagentOptions {
 }
 
 /** Spawn a subagent: a focused child run of the same loop, returned as a `task` result. */
-async function runSubagent(o: SubagentOptions): Promise<string> {
+async function runSubagent(o: SubagentOptions): Promise<{
+  status: 'completed' | 'failed' | 'cancelled'
+  report: string
+  subChatId: string | null
+}> {
   const {
     callId,
+    batchCallId,
     input,
     providerId,
     vision,
@@ -1915,34 +1925,25 @@ async function runSubagent(o: SubagentOptions): Promise<string> {
     skillInfo,
     metricsId
   } = o
-  const { description, prompt, subagentType, background } = input
-  const parentHops = parentChatId
-    ? repo.listQueue(parentChatId).find((item) => item.state === 'running')?.hops
-    : undefined
-  const fail = (msg: string): string => {
-    emit({
+  const { description, prompt } = input
+  const subagentType = 'explore'
+  const emitChild = (
+    event: LlmChildEvent | { type: 'tool-child'; callId: string; event: LlmChildEvent }
+  ): void => emit({ type: 'tool-child', callId: batchCallId, event })
+  const fail = (msg: string): { status: 'failed'; report: string; subChatId: null } => {
+    emitChild({
       type: 'tool-start',
       callId,
       tool: 'task',
       title: description,
-      input: { description, prompt, subagent_type: subagentType }
+      input: { description, prompt }
     })
-    emit({ type: 'tool-end', callId, output: msg, ok: false })
-    return renderTaskResult(subagentType, 'error', msg)
+    emitChild({ type: 'tool-end', callId, output: msg, ok: false })
+    return { status: 'failed', report: msg, subChatId: null }
   }
 
-  const agent = getAgent(subagentType)
-  if (!agent || agent.mode !== 'subagent') {
-    return fail(`Unknown subagent "${subagentType}". Valid subagents: general, explore.`)
-  }
-  // A read-only agent (Plan) may only delegate to read-only subagents, so it can't
-  // sidestep its own restriction by spawning an editing subagent (opencode denies
-  // `task.general` in plan mode for the same reason).
-  if (readOnly && !isReadOnlyAgent(agent)) {
-    return fail(
-      `In read-only (Plan) mode you can only delegate to the read-only "explore" subagent, not "${subagentType}".`
-    )
-  }
+  const agent = getAgent(subagentType)!
+  if (readOnly) return fail('Subtasks are unavailable in read-only (Plan) mode.')
   if (depth >= MAX_SUBAGENT_DEPTH) {
     return fail('Subagents cannot spawn further subagents.')
   }
@@ -1950,15 +1951,20 @@ async function runSubagent(o: SubagentOptions): Promise<string> {
   // Persist the subagent as its own `sub` session linked to the parent, created
   // and seeded with the prompt UP FRONT so it shows in the sidebar (with its
   // badge) the moment it spins up — not only once it finishes.
-  const subChatId =
-    parentChatId != null
-      ? repo.createChat({
-          title: `${agent.name}: ${description}`.slice(0, 80),
-          kind: 'sub',
-          workspacePath: cwd,
-          parentId: parentChatId
-        }).id
-      : null
+  let subChatId: string | null = null
+  try {
+    subChatId =
+      parentChatId != null
+        ? repo.createChat({
+            title: `${agent.name}: ${description}`.slice(0, 80),
+            kind: 'sub',
+            workspacePath: cwd,
+            parentId: parentChatId
+          }).id
+        : null
+  } catch (error) {
+    return fail(`Could not create subagent session: ${String(error)}`)
+  }
   if (subChatId) {
     try {
       repo.addMessage({
@@ -1972,13 +1978,10 @@ async function runSubagent(o: SubagentOptions): Promise<string> {
     }
   }
 
-  // Run the subagent's own loop: record its steps as parts, persist them to the
-  // sub session, and return the final report + state. `forwardToParent` streams
-  // the nested tool cards into the launching turn (foreground) — a background run
-  // skips that (the turn may already be over) and reports via the sub session.
+  // Run the child's loop, persist its transcript, and stream progress to the
+  // parent task card and the child session.
   const runBody = async (
     runSignal: AbortSignal,
-    forwardToParent: boolean,
     onCancel: () => void
   ): Promise<{
     report: string
@@ -2013,7 +2016,7 @@ async function runSubagent(o: SubagentOptions): Promise<string> {
           parentChatId: parentChatId ?? null,
           description,
           subagentType,
-          background: background === true,
+          background: false,
           cancel: onCancel
         })
       : null
@@ -2021,14 +2024,10 @@ async function runSubagent(o: SubagentOptions): Promise<string> {
      * Every step the subagent takes — its prose, its thinking, and its tool calls
      * — folded into its own transcript and fanned out to both audiences:
      *
-     *  - the parent turn, wrapped as a `tool-child` addressed to this `task`
-     *    card, so the launching session shows the delegate working live;
+     *  - the parent turn, nested under this batch's child card;
      *  - the sub session's own stream, tagged with ITS chat id, so opening the
      *    subagent's individual chat streams the same work in full fidelity.
      *
-     * A background run skips the parent forward (its launching turn is typically
-     * over) but still streams to its own session — which is the only place a
-     * detached subagent was ever watchable.
      */
     const emitNested = (event: LlmEvent): void => {
       // Depth is capped at 1, so a subagent never emits `tool-child` itself; the
@@ -2036,7 +2035,7 @@ async function runSubagent(o: SubagentOptions): Promise<string> {
       // silently mis-addressing a grandchild's events to the wrong card.
       if (event.type === 'tool-child') return
       fold.apply(event)
-      if (forwardToParent) emit({ type: 'tool-child', callId, event })
+      emitChild({ type: 'tool-child', callId, event })
       live?.emit(event)
     }
 
@@ -2077,12 +2076,8 @@ async function runSubagent(o: SubagentOptions): Promise<string> {
         // one turn the user started.
         metricsId
       })
-      // A cancel lands BETWEEN steps, where runLoop returns normally with a
-      // partial report — so reaching here says nothing about whether the work
-      // actually finished. Check the signal before calling it a success, or a
-      // cancelled delegate would be recorded as `completed` and its truncated
-      // report would be handed to the parent model as a real answer. (The
-      // background path already guarded this; the foreground path did not.)
+      // A cancel can land between steps after runLoop returned partial text.
+      // Check the signal before treating that partial result as complete.
       const cancelled = runSignal.aborted
       const savedMessage = persistSub()
       // Persist BEFORE ending the run: the renderer reloads the sub session's
@@ -2108,7 +2103,7 @@ async function runSubagent(o: SubagentOptions): Promise<string> {
       live?.finish('error', savedMessage)
       if (cancelled)
         return {
-          report: cancelledReport(description, ''),
+          report: cancelledReport(description, partsToContent(fold.parts)),
           state: 'cancelled',
           children: taskPreview(fold.parts)
         }
@@ -2120,128 +2115,13 @@ async function runSubagent(o: SubagentOptions): Promise<string> {
     }
   }
 
-  // ---- Background: launch detached, return immediately, report on completion. ----
-  // opencode gates this behind an experimental flag; Roxy makes it first-class.
-  // Requires a parent session to persist the report onto; without one, run inline.
-  if (background && parentChatId != null) {
-    emit({
-      type: 'tool-start',
-      callId,
-      tool: 'task',
-      title: `${agent.name}: ${description} (background)`,
-      input: { description, prompt, subagent_type: subagentType, background: true },
-      // Lets the card offer a cancel for this one detached delegate.
-      subChatId: subChatId ?? undefined
-    })
-    emit({
-      type: 'tool-end',
-      callId,
-      output: `Started "${description}" in the background.`,
-      ok: true
-    })
-
-    // Its own signal — the launching turn ending must NOT cancel it (that's the
-    // whole point). Session delete / app quit cancel it via the registry.
-    // A detached background task is the most autonomous thing Roxy does - the
-    // user walks away and it keeps working - so its adoption is worth its own
-    // signal rather than being folded into the subagent count.
-    trackFeature(metricsId, 'background_task')
-    const { jobId, signal: bgSignal } = registerBackgroundJob({
-      sessionId: parentChatId,
-      subChatId,
-      description,
-      subagentType
-    })
-    void runBody(bgSignal, false, () => cancelBackgroundJob(jobId))
-      .then(({ report, state, children }) => {
-        // A cancelled job (session delete, app quit, or explicit cancel) aborts
-        // bgSignal. That abort can land BETWEEN steps, where runLoop returns
-        // normally with a partial/empty report — so `state` may be 'completed'
-        // even though the work was cut short. Never record a cancelled run as a
-        // successful completion: the transcript card AND the structured tool
-        // history the next turn reconstructs from it would both mislead.
-        const cancelled = bgSignal.aborted || state === 'cancelled'
-        const finalState: 'completed' | 'error' = cancelled ? 'error' : state
-        const finalReport = cancelled
-          ? `The "${description}" background task was cancelled before it finished.`
-          : report
-        // Deliver the report onto the parent session as a self-contained task card,
-        // so it's visible in the transcript AND becomes structured tool history the
-        // next turn can see (reconstructTurn pairs the call with its result).
-        try {
-          const message = repo.addMessage({
-            chatId: parentChatId,
-            role: 'assistant',
-            content: '',
-            ...o.parentActor,
-            parts: [
-              {
-                type: 'tool',
-                tool: 'task',
-                state: finalState === 'error' ? 'error' : 'done',
-                title: `Background ${
-                  cancelled ? 'cancelled' : finalState === 'error' ? 'failed' : 'done'
-                }: ${description}`,
-                callId: `bgres_${jobId}`,
-                resultFor: callId,
-                subChatId: subChatId ?? undefined,
-                input: { description, subagent_type: subagentType, background: true },
-                output: finalReport,
-                children
-              }
-            ]
-          })
-          notifyTranscriptChanged(parentChatId)
-          if (!cancelled) {
-            const resume = (): void => {
-              if (queuePaused(parentChatId) || !repo.getChat(parentChatId)) return
-              // One pending continuation per actor can consume several reports.
-              // Never dedupe against a running turn: its context is already fixed.
-              if (
-                repo
-                  .listQueue(parentChatId)
-                  .some(
-                    (item) =>
-                      item.state === 'pending' &&
-                      item.content === BACKGROUND_TASK_CONTINUATION &&
-                      item.botId === o.parentActor.botId &&
-                      (!!item.botId || item.botUsername === o.parentActor.botUsername)
-                  )
-              )
-                return
-              enqueuePrompt(parentChatId, BACKGROUND_TASK_CONTINUATION, undefined, {
-                sourceChatId: parentChatId,
-                recipientId: o.parentActor.botId ?? HOST_USERNAME,
-                asBotId: o.parentActor.botId,
-                messageId: message.id,
-                hops: parentHops,
-                ...o.parentActor
-              })
-            }
-            if (!o.onBackgroundResult(message, resume)) resume()
-          }
-        } catch {
-          // parent may have been deleted mid-run — the broadcast below still fires
-        }
-        finishBackgroundJob(jobId, finalState)
-      })
-      .catch(() => {
-        // runBody is written never to reject, but guard the detached chain anyway:
-        // once the launching turn is gone there is no owner for a stray rejection.
-        finishBackgroundJob(jobId, 'error')
-      })
-    return renderBackgroundStarted(subagentType, description)
-  }
-
-  // ---- Foreground: announce, run to completion, return the report. ----
-  emit({
+  // Announce this child on the parent card, then wait for its result.
+  emitChild({
     type: 'tool-start',
     callId,
     tool: 'task',
     title: `${agent.name}: ${description}`,
-    input: { description, prompt, subagent_type: subagentType },
-    // Addresses the cancel button on this card at THIS delegate — the parent
-    // turn keeps running when it's clicked.
+    input: { description, prompt },
     subChatId: subChatId ?? undefined
   })
   // Its OWN controller, chained to the parent's signal rather than being it.
@@ -2256,12 +2136,9 @@ async function runSubagent(o: SubagentOptions): Promise<string> {
   if (signal.aborted) controller.abort()
   else signal.addEventListener('abort', cascade, { once: true })
   try {
-    const { report, state } = await runBody(controller.signal, true, cascade)
-    emit({ type: 'tool-end', callId, output: report, ok: state === 'completed' })
-    // The parent itself was stopped — this delegate died as collateral, and the
-    // turn is being torn down anyway, so report it as the cancellation it was.
-    if (state === 'cancelled') return renderTaskResult(subagentType, 'error', report)
-    return renderTaskResult(subagentType, state, report)
+    const { report, state } = await runBody(controller.signal, cascade)
+    emitChild({ type: 'tool-end', callId, output: report, ok: state === 'completed' })
+    return { status: state === 'error' ? 'failed' : state, report, subChatId }
   } finally {
     signal.removeEventListener('abort', cascade)
   }
@@ -2295,13 +2172,13 @@ function cancelledReport(description: string, partial: string): string {
   return (
     `The user cancelled the "${description}" subagent before it finished. ` +
     'Do not start it again unless they ask. Continue with the rest of your work.' +
-    (got ? `\n\nPartial output before it was cancelled:\n${got.slice(0, 2000)}` : '')
+    (got ? `\n\nPartial output before it was cancelled:\n${got}` : '')
   )
 }
 
 /** A subagent's focused system prompt: who it is, that it starts blank, and to report back. */
 function subagentSystemPrompt(agent: AgentDef, cwd: string, skillInfo?: string): string {
-  // Prefer the agent's tuned prompt (e.g. explore's "file search specialist") when
+  // Prefer the agent's tuned prompt when
   // one is injected; otherwise fall back to a generic identity line.
   const injected = agent.promptFile ? agentPromptText[agent.promptFile] : undefined
   const lines = [
