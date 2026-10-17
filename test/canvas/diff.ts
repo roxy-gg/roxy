@@ -507,6 +507,18 @@ const longInput = (messages: Message[], state = view()) => ({
   viewport: { top: 0, height: 600, tail: true, targetId: undefined as string | undefined }
 })
 
+check('transcript tails add no extra space after the last message', () => {
+  for (const messages of [longMessages.slice(0, 2), longMessages]) {
+    for (const streaming of [null, [], [{ type: 'text', text: 'Still writing.' }]] satisfies (
+      | MessagePart[]
+      | null
+    )[]) {
+      const scene = layoutTranscript({ ...longInput(messages), streaming }, new BlockCache())
+      const last = scene.blocks.at(-1)!
+      assert.equal(scene.height, last.y + last.height)
+    }
+  }
+})
 check('cold long history measures the tail, not every message', () => {
   const scene = layoutTranscript(longInput(longMessages), new BlockCache())
   assert.equal(scene.blocks.length, 150)

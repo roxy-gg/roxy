@@ -101,9 +101,6 @@ export function ChatView(): JSX.Element {
       : false
   )
   const submit = useRoxyStore((s) => s.submit)
-  const starting = useRoxyStore((s) =>
-    s.activeChatId ? !!s.startingAutomation[s.activeChatId] : false
-  )
   const stop = useRoxyStore((s) => s.stop)
   const storedQueue = useRoxyStore((s) => s.queue)
   const optimisticQueue = useRoxyStore((s) =>
@@ -406,35 +403,17 @@ export function ChatView(): JSX.Element {
             onCancelTool={(callId) => void cancelToolCall(callId)}
           />
         )}
-        {/* The transcript used to end on a hard clip: the scrollport edge sliced
-          text mid-glyph, straight into the composer’s flat gutter, and the two
-          together read as a black bar cutting the pane in half. This is a
-          gradient of the pane’s own background laid over the last 24px of the
-          scroller, so lines dissolve into the composer instead of being cut.
-
-          Pulled back up by its own height (-mt-6) so it costs no layout — the
-          scroller keeps every pixel of flex-1 — and inert to the pointer, so
-          scrolling and text selection still work underneath it. The matching
-          pb-6 on the message column is what keeps the last line legible: at
-          max scroll it ends above the gradient instead of under it.
-
-          The mr-2.5 is the scrollbar gutter (10px, see ::-webkit-scrollbar
-          in main.css). The bar occupies the scroller’s right edge, so a
-          full-width fade would paint over its last 24px and wash out the
-          thumb exactly when you drag it to the end. */}
+        {/* The fade overlaps the scroller without adding layout space. The last
+          message's own bottom padding keeps its text clear of the fade, and
+          mr-2.5 leaves the scrollbar uncovered. */}
         <div
           aria-hidden
           className={cn(
-            'pointer-events-none relative z-10 -mt-6 mr-2.5 h-6 shrink-0',
+            'pointer-events-none relative z-10 -mt-2 mr-2.5 h-2 shrink-0',
             !wallpaper && 'bg-gradient-to-b from-transparent to-bg'
           )}
         />
 
-        {starting && (
-          <p role="status" className="mx-auto w-full max-w-3xl px-4 pt-2 text-xs text-text-subtle">
-            {t('queue.starting')}
-          </p>
-        )}
         {deliveryIssues.length > 0 && (
           <div className={cn('px-4 pt-2', !wallpaper && 'bg-bg')}>
             <div className="mx-auto max-w-3xl">
