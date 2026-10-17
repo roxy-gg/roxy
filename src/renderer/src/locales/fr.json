@@ -597,6 +597,25 @@
       },
       "version": "Roxy v{{version}}"
     },
+    "activity": {
+      "activeDays": "Active days",
+      "currentStreak": "Current streak",
+      "date": "Date",
+      "days_one": "day",
+      "days_other": "days",
+      "description": "One turn is one assistant reply. Your activity history stays here even when you delete a conversation.",
+      "failed": "Couldn't load your activity. Reopen Settings to try again.",
+      "longestStreak": "Longest streak",
+      "peak_one": "Busiest day in this period: {{value}} turn.",
+      "peak_other": "Busiest day in this period: {{value}} turns.",
+      "period": "{{start}} to {{end}}",
+      "recent": "Last 7 days",
+      "total": "Agent turns",
+      "turnCount_one": "{{value}} turn",
+      "turnCount_other": "{{value}} turns",
+      "turns_one": "turn in this period",
+      "turns_other": "turns in this period"
+    },
     "backup": {
       "description": "Exportez vos compétences globales et les configurations de vos serveurs MCP vers un seul fichier, puis importez-le sur un autre ordinateur pour le configurer de la même manière. L'importation écrase les compétences/serveurs qui partagent un nom.",
       "heading": "Sauvegarde et restauration",
@@ -662,6 +681,18 @@
       "reduced": "Réduit",
       "saveFailed": "Impossible d'enregistrer la préférence de mouvement. Veuillez réessayer.",
       "system": "Suivre le système"
+    },
+    "navigation": {
+      "accounts": "Accounts",
+      "activity": "Activity",
+      "activityEmpty": "Your activity will appear here after your first agent response.",
+      "addOns": "Add-Ons",
+      "colors": "Colors",
+      "general": "General",
+      "openRemote": "Manage remote access",
+      "section": "Settings section",
+      "theme": "Theme",
+      "worktrees": "Worktree configuration"
     },
     "notifications": {
       "completeDescription": "Recevez une notification lorsque Roxy a terminé une réponse. Utile pour les tâches longues. Ne se déclenche que lorsque Roxy n'est pas au premier plan ; cliquez dessus pour accéder à cette session.",

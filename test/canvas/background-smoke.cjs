@@ -135,18 +135,6 @@ async function run() {
     ),
     'blur(18px) saturate(1.2)'
   )
-  await evaluate(`window.roxy.remote = {
-    status: async () => ({phase:'live', guests:0, rev:0, url:'https://example.com', pin:'123456'})
-  }`)
-  await click('#main-sidebar-harness button:has(.lucide-monitor-smartphone)')
-  assert.ok(
-    await evaluate(`const dialog=document.querySelector('[role="dialog"][aria-modal="true"]');
-    const box=dialog.getBoundingClientRect();
-    return dialog.parentElement === document.body && box.x === 0 && box.y === 0 && box.width === innerWidth && box.height === innerHeight;
-  `),
-    'remote dialog spans the viewport above glass sidebar and chat'
-  )
-  await click('[role="dialog"][aria-modal="true"] button:has(.lucide-x)')
   await click('[aria-label="Sidebar background"] button:nth-child(3)')
   await setInput('#background-sidebarOpacity', '25')
   await evaluate(
@@ -715,39 +703,88 @@ async function run() {
   await until(`localStorage.getItem('roxy.sidebar.width') === '352'`)
   assert.equal(await evaluate(`return document.body.style.cursor`), '', 'resize releases cursor')
   await win.loadURL(`${url}?appearance`)
-  await until(`!!document.querySelector('#appearance-background')`)
+  await until(`!!document.querySelector('#settings-activity-panel tbody')`)
+  assert.equal(
+    await evaluate(
+      `return document.querySelector('#settings-activity').getAttribute('aria-current')`
+    ),
+    'page',
+    'Settings opens on Activity by default'
+  )
+  assert.deepEqual(
+    await evaluate(
+      `return [...document.querySelectorAll('#settings-activity-panel dl dd:first-of-type')].map(el => el.textContent)`
+    ),
+    ['24', '3', '2', '2'],
+    'activity summary uses real turn totals and streaks'
+  )
+  assert.deepEqual(
+    await evaluate(
+      `return [...document.querySelectorAll('#settings-activity-panel tbody td')].map(el => el.textContent)`
+    ),
+    ['12', '8', '0', '4', '0', '0', '0'],
+    'recent activity includes exact daily counts and idle days'
+  )
+  await click('#settings-background')
   assert.deepEqual(
     await evaluate(`return [...document.querySelectorAll('nav button')].map(b => b.textContent)`),
-    ['Background', 'Color Theme']
+    [
+      'Background',
+      'Colors',
+      'Motion',
+      'Skills',
+      'MCP',
+      'Backup & restore',
+      'Accounts',
+      'Browser',
+      'Language',
+      'Worktree configuration',
+      'Notifications',
+      'Remote',
+      'Activity',
+      'Privacy',
+      'About'
+    ]
   )
   assert.equal(
     await evaluate(
-      `return document.querySelector('#appearance-background').getAttribute('aria-current')`
+      `return document.querySelector('#settings-background').getAttribute('aria-current')`
     ),
     'page'
   )
   assert.equal(
-    await evaluate(`return document.querySelector('#appearance-themes-panel').checkVisibility()`),
+    await evaluate(`return document.querySelector('#settings-colors-panel').checkVisibility()`),
     false
   )
   assert.ok(
     await evaluate(
-      `return document.querySelector('#appearance-page aside').getBoundingClientRect().right <= document.querySelector('#appearance-background-panel').getBoundingClientRect().left`
+      `return document.querySelector('#appearance-page aside').getBoundingClientRect().right <= document.querySelector('#settings-background-panel').getBoundingClientRect().left`
     ),
     'menu sits on the left'
   )
-  await click('#appearance-background-panel button:has(.lucide-image-plus)')
-  await until(`!!document.querySelector('#appearance-background-panel .chat-wallpaper')`)
+  // Remote is reachable from Settings without losing the page on dialog close.
+  await click('#settings-remote')
+  await click('#settings-remote-panel button')
+  assert.ok(
+    await evaluate(`const dialog=document.querySelector('[role="dialog"][aria-modal="true"]');
+    const box=dialog.getBoundingClientRect();
+    return dialog.parentElement === document.body && box.x === 0 && box.y === 0 && box.width === innerWidth && box.height === innerHeight;
+  `),
+    'remote dialog remains viewport-wide within Settings'
+  )
+  await click('[role="dialog"][aria-modal="true"] button:has(.lucide-x)')
+  assert.equal(await evaluate(`return !!document.querySelector('#appearance-page')`), true)
+  await click('#settings-background')
+  await click('#settings-background-panel button:has(.lucide-image-plus)')
+  await until(`!!document.querySelector('#settings-background-panel .chat-wallpaper')`)
   const wallpaper = await evaluate(`return (await window.roxy.background.get()).image`)
-  await click('#appearance-themes')
+  await click('#settings-colors')
   assert.equal(
-    await evaluate(
-      `return document.querySelector('#appearance-background-panel').checkVisibility()`
-    ),
+    await evaluate(`return document.querySelector('#settings-background-panel').checkVisibility()`),
     false
   )
   await evaluate(
-    `const panel=document.querySelector('#appearance-themes-panel'); [...panel.querySelectorAll('button')].find(b => b.textContent.trim()==='Apply').click()`
+    `const panel=document.querySelector('#settings-colors-panel'); [...panel.querySelectorAll('button')].find(b => b.textContent.trim()==='Apply').click()`
   )
   await until(`document.documentElement.dataset.appearance === 'light'`)
   assert.deepEqual(
@@ -757,15 +794,15 @@ async function run() {
   )
   assert.equal(await evaluate(`return (await window.roxy.background.get()).image`), wallpaper)
   await evaluate(
-    `const panel=document.querySelector('#appearance-themes-panel'); [...panel.querySelectorAll('button')].find(b => b.textContent.trim()==='New theme').click()`
+    `const panel=document.querySelector('#settings-colors-panel'); [...panel.querySelectorAll('button')].find(b => b.textContent.trim()==='New theme').click()`
   )
-  await until(`!!document.querySelector('#appearance-themes-panel textarea')`)
+  await until(`!!document.querySelector('#settings-colors-panel textarea')`)
   const draft = '{"id":"custom-0","name":"Unsaved draft","colors":{"bg":"#131026"}}'
-  await setInput('#appearance-themes-panel textarea', draft, 'HTMLTextAreaElement')
+  await setInput('#settings-colors-panel textarea', draft, 'HTMLTextAreaElement')
   await evaluate(
-    `window.__appearanceEditor = document.querySelector('#appearance-themes-panel textarea'); window.__appearanceEditor.scrollIntoView()`
+    `window.__appearanceEditor = document.querySelector('#settings-colors-panel textarea'); window.__appearanceEditor.scrollIntoView()`
   )
-  await click('#appearance-background')
+  await click('#settings-background')
   assert.ok(
     await evaluate(
       `return document.querySelector('#background-heading').getBoundingClientRect().top < 130`
@@ -793,7 +830,7 @@ async function run() {
   )
   assert.equal(
     await evaluate(
-      `const a=getComputedStyle(document.querySelector('#appearance-background')); const b=getComputedStyle(document.querySelector('#main-sidebar-harness button:has(.lucide-palette)'));return [a.padding,a.gap,a.fontSize].join('|') === [b.padding,b.gap,b.fontSize].join('|')`
+      `const a=getComputedStyle(document.querySelector('#settings-background')); const b=getComputedStyle(document.querySelector('#main-sidebar-harness button:has(.lucide-settings)'));return [a.padding,a.gap,a.fontSize].join('|') === [b.padding,b.gap,b.fontSize].join('|')`
     ),
     true,
     'navigation shares spacing and typography'
@@ -803,11 +840,11 @@ async function run() {
   )
   // The shared row has a 140ms color transition; wait for the selected state to settle.
   await until(
-    `getComputedStyle(document.querySelector('#appearance-background')).backgroundColor === ${JSON.stringify(styles)}`
+    `getComputedStyle(document.querySelector('#settings-background')).backgroundColor === ${JSON.stringify(styles)}`
   )
   assert.equal(
     await evaluate(
-      `return getComputedStyle(document.querySelector('#appearance-background')).backgroundColor`
+      `return getComputedStyle(document.querySelector('#settings-background')).backgroundColor`
     ),
     styles,
     'selected navigation uses the main sidebar selected surface'
@@ -845,27 +882,44 @@ async function run() {
     )
   }
   await evaluate(`document.documentElement.dataset.platform='win32'`)
-  await click('#appearance-themes')
+  await click('#settings-colors')
   assert.equal(
     await evaluate(
-      `return document.querySelector('#appearance-themes-panel textarea') === window.__appearanceEditor`
+      `return document.querySelector('#settings-colors-panel textarea') === window.__appearanceEditor`
     ),
     true
   )
   assert.equal(
-    await evaluate(`return document.querySelector('#appearance-themes-panel textarea').value`),
+    await evaluate(`return document.querySelector('#settings-colors-panel textarea').value`),
     draft,
     'panel switch preserves unsaved JSON'
   )
   for (const width of [1440, 1000, 760, 390]) {
     win.setSize(width, 844)
     await wait()
-    for (const panel of ['background', 'themes']) {
-      await click(`#appearance-${panel}`)
+    for (const panel of [
+      'background',
+      'colors',
+      'motion',
+      'skills',
+      'mcp',
+      'backup',
+      'accounts',
+      'browser',
+      'language',
+      'worktrees',
+      'notifications',
+      'remote',
+      'activity',
+      'privacy',
+      'about'
+    ]) {
+      if (width < 640) await setInput('#settings-section', panel, 'HTMLSelectElement')
+      else await click(`#settings-${panel}`)
       if (panel === 'background') {
         assert.ok(
-          await evaluate(`const tracks = [...document.querySelectorAll('#appearance-background-panel input[type="range"]')].map(el => el.getBoundingClientRect());
-            const labels = [...document.querySelectorAll('#appearance-background-panel output')].map(el => el.getBoundingClientRect());
+          await evaluate(`const tracks = [...document.querySelectorAll('#settings-background-panel input[type="range"]')].map(el => el.getBoundingClientRect());
+            const labels = [...document.querySelectorAll('#settings-background-panel output')].map(el => el.getBoundingClientRect());
             return tracks.length === 3 && tracks.every(box => Math.abs(box.width - tracks[0].width) < 1 && Math.abs(box.x - tracks[0].x) < 1)
               && labels.every(box => Math.abs(box.x - labels[0].x) < 1 && Math.abs(box.width - labels[0].width) < 1);`),
           `slider tracks and percentage labels align at ${width}px`
@@ -873,7 +927,7 @@ async function run() {
       }
       assert.ok(
         await evaluate(
-          `const p=document.querySelector('#appearance-${panel}-panel');return p.scrollWidth <= p.clientWidth`
+          `const p=document.querySelector('#settings-${panel}-panel');return p.scrollWidth <= p.clientWidth`
         ),
         `${panel} fits at ${width}px`
       )
@@ -881,13 +935,14 @@ async function run() {
   }
   assert.ok(
     await evaluate(
-      `return document.querySelector('#appearance-page aside').getBoundingClientRect().bottom <= document.querySelector('#appearance-themes-panel').getBoundingClientRect().top`
+      `return document.querySelector('#appearance-page aside').getBoundingClientRect().bottom <= document.querySelector('#settings-about-panel').getBoundingClientRect().top`
     ),
     'narrow menu moves above panel'
   )
+  win.setSize(1440, 1000)
   win.focus()
   await wait()
-  await evaluate(`document.querySelector('#appearance-background').focus()`)
+  await evaluate(`document.querySelector('#settings-background').focus()`)
   const enter = { key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 }
   await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent', {
     type: 'rawKeyDown',
@@ -902,12 +957,35 @@ async function run() {
   await wait()
   assert.equal(
     await evaluate(
-      `return document.querySelector('#appearance-background').getAttribute('aria-current')`
+      `return document.querySelector('#settings-background').getAttribute('aria-current')`
     ),
     'page',
     'menu works with keyboard'
   )
   win.setSize(1440, 1000)
+  await click('#settings-skills')
+  await evaluate(
+    `[...document.querySelectorAll('#settings-skills-panel button')].find(b => b.textContent.trim() === 'New skill').click()`
+  )
+  await setInput('#settings-skills-panel input', 'draft-skill')
+  await click('#settings-mcp')
+  await evaluate(
+    `[...document.querySelectorAll('#settings-mcp-panel button')].find(b => b.textContent.trim() === 'Add MCP server').click()`
+  )
+  await setInput('#settings-mcp-panel input', 'draft-server')
+  await click('#settings-browser')
+  await click('#settings-skills')
+  assert.equal(
+    await evaluate(`return document.querySelector('#settings-skills-panel input').value`),
+    'draft-skill',
+    'skill draft survives section changes'
+  )
+  await click('#settings-mcp')
+  assert.equal(
+    await evaluate(`return document.querySelector('#settings-mcp-panel input').value`),
+    'draft-server',
+    'MCP draft survives section changes'
+  )
   await click('#appearance-page aside .titlebar button')
   assert.equal(
     await evaluate(`return !!document.querySelector('#appearance-page')`),
@@ -921,9 +999,31 @@ async function run() {
     288,
     'chat retains the shared width on return'
   )
+  assert.equal(
+    await evaluate(
+      `return document.querySelectorAll('#main-sidebar-harness button:has(.lucide-settings)').length`
+    ),
+    1,
+    'one Settings entry in expanded sidebar'
+  )
+  await click('#main-sidebar-harness button:has(.lucide-panel-left-close)')
+  assert.equal(
+    await evaluate(
+      `return document.querySelectorAll('#main-sidebar-harness button:has(.lucide-settings)').length`
+    ),
+    1,
+    'one Settings entry in collapsed rail'
+  )
+  assert.equal(
+    await evaluate(
+      `return document.querySelectorAll('#main-sidebar-harness button:has(.lucide-lightbulb), #main-sidebar-harness button:has(.lucide-plug), #main-sidebar-harness button:has(.lucide-palette), #main-sidebar-harness button:has(.lucide-monitor-smartphone)').length`
+    ),
+    0,
+    'no separate utility entries remain'
+  )
   assert.deepEqual(errors, [])
   console.log(
-    'BACKGROUND UI OK: six effects, glass, canvas alpha/repaint, persistence, accessibility, appearance navigation, draft retention and narrow layouts'
+    'BACKGROUND UI OK: six effects, glass, canvas alpha/repaint, persistence, accessibility, grouped settings, theme/skill/MCP draft retention and all narrow panels'
   )
 }
 app

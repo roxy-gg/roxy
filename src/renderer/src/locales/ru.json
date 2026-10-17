@@ -597,6 +597,25 @@
       },
       "version": "Roxy v{{version}}"
     },
+    "activity": {
+      "activeDays": "Active days",
+      "currentStreak": "Current streak",
+      "date": "Date",
+      "days_one": "day",
+      "days_other": "days",
+      "description": "One turn is one assistant reply. Your activity history stays here even when you delete a conversation.",
+      "failed": "Couldn't load your activity. Reopen Settings to try again.",
+      "longestStreak": "Longest streak",
+      "peak_one": "Busiest day in this period: {{value}} turn.",
+      "peak_other": "Busiest day in this period: {{value}} turns.",
+      "period": "{{start}} to {{end}}",
+      "recent": "Last 7 days",
+      "total": "Agent turns",
+      "turnCount_one": "{{value}} turn",
+      "turnCount_other": "{{value}} turns",
+      "turns_one": "turn in this period",
+      "turns_other": "turns in this period"
+    },
     "backup": {
       "description": "Экспортируйте свои глобальные навыки и конфигурации серверов MCP в один файл, затем импортируйте его на другом компьютере, чтобы настроить его таким же образом. Импорт перезаписывает навыки/серверы с одинаковым именем.",
       "heading": "Резервное копирование и восстановление",
@@ -662,6 +681,18 @@
       "reduced": "Уменьшено",
       "saveFailed": "Не удалось сохранить настройки движения. Попробуйте ещё раз.",
       "system": "Как в системе"
+    },
+    "navigation": {
+      "accounts": "Accounts",
+      "activity": "Activity",
+      "activityEmpty": "Your activity will appear here after your first agent response.",
+      "addOns": "Add-Ons",
+      "colors": "Colors",
+      "general": "General",
+      "openRemote": "Manage remote access",
+      "section": "Settings section",
+      "theme": "Theme",
+      "worktrees": "Worktree configuration"
     },
     "notifications": {
       "completeDescription": "Получайте уведомление, когда Roxy завершит ответ. Полезно для длительных задач. Срабатывает, только когда Roxy не в фокусе; нажмите, чтобы перейти к этой сессии.",

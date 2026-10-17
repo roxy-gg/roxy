@@ -5,9 +5,6 @@ import roxy from './assets/roxy.png'
 import Onboarding from './routes/Onboarding'
 import Chat from './routes/Chat'
 import Integrations from './routes/Integrations'
-import Skills from './routes/Skills'
-import Mcp from './routes/Mcp'
-import Themes from './routes/Themes'
 import Settings from './routes/Settings'
 
 function Splash(): JSX.Element {
@@ -55,10 +52,10 @@ function AppRoutes({ onboarded }: { onboarded: boolean }): JSX.Element {
             <Route path="/onboarding" element={<Onboarding />} />
             <Route path="/" element={onboarded ? null : <Navigate to="/onboarding" replace />} />
             <Route path="/integrations" element={<Integrations />} />
-            <Route path="/skills" element={<Skills />} />
-            <Route path="/mcp" element={<Mcp />} />
-            <Route path="/themes" element={<Themes />} />
-            <Route path="/settings" element={<Settings />} />
+            <Route path="/skills" element={<Navigate to="/settings/skills" replace />} />
+            <Route path="/mcp" element={<Navigate to="/settings/mcp" replace />} />
+            <Route path="/themes" element={<Navigate to="/settings/background" replace />} />
+            <Route path="/settings/:section?" element={<Settings />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </div>

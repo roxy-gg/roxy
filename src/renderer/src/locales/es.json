@@ -597,6 +597,25 @@
       },
       "version": "Roxy v{{version}}"
     },
+    "activity": {
+      "activeDays": "Active days",
+      "currentStreak": "Current streak",
+      "date": "Date",
+      "days_one": "day",
+      "days_other": "days",
+      "description": "One turn is one assistant reply. Your activity history stays here even when you delete a conversation.",
+      "failed": "Couldn't load your activity. Reopen Settings to try again.",
+      "longestStreak": "Longest streak",
+      "peak_one": "Busiest day in this period: {{value}} turn.",
+      "peak_other": "Busiest day in this period: {{value}} turns.",
+      "period": "{{start}} to {{end}}",
+      "recent": "Last 7 days",
+      "total": "Agent turns",
+      "turnCount_one": "{{value}} turn",
+      "turnCount_other": "{{value}} turns",
+      "turns_one": "turn in this period",
+      "turns_other": "turns in this period"
+    },
     "backup": {
       "description": "Exporta tus habilidades globales y la configuración de tus servidores MCP a un único archivo y luego impórtalo en otro ordenador para dejarlo igual. Al importar se sobrescriben las habilidades y los servidores que compartan nombre.",
       "heading": "Copia de seguridad y restauración",
@@ -662,6 +681,18 @@
       "reduced": "Reducido",
       "saveFailed": "No se pudo guardar la preferencia de movimiento. Inténtalo de nuevo.",
       "system": "Seguir sistema"
+    },
+    "navigation": {
+      "accounts": "Accounts",
+      "activity": "Activity",
+      "activityEmpty": "Your activity will appear here after your first agent response.",
+      "addOns": "Add-Ons",
+      "colors": "Colors",
+      "general": "General",
+      "openRemote": "Manage remote access",
+      "section": "Settings section",
+      "theme": "Theme",
+      "worktrees": "Worktree configuration"
     },
     "notifications": {
       "completeDescription": "Recibe una notificación cuando Roxy termine una respuesta. Útil para tareas largas. Solo se activa cuando Roxy no está en primer plano; haz clic para ir a esa sesión.",

@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
 import { useTranslation, Trans } from 'react-i18next'
 import {
   Download,
@@ -16,24 +15,19 @@ import { TOOLS, TOOL_CATEGORIES, type ToolDef } from '@shared/tools'
 import type { SkillView } from '@shared/api'
 import { api } from '../lib/api'
 import { Badge, Button, Input, Textarea } from '../components/ui'
-import { PageShell } from '../components/PageShell'
 import { ConfigBackup } from '../components/ConfigBackup'
 
-export default function Skills(): JSX.Element {
+export default function Skills({ active }: { active: boolean }): JSX.Element {
   const { t } = useTranslation()
-  const navigate = useNavigate()
 
   return (
-    <PageShell
-      title={t('skills.title')}
-      subtitle={t('skills.subtitle')}
-      onBack={() => navigate('/')}
-    >
+    <div className="@container">
+      <p className="mb-6 text-sm text-text-muted">{t('skills.subtitle')}</p>
       <div className="flex flex-col gap-9">
-        <DiscoveredSkills />
+        <DiscoveredSkills active={active} />
         <BuiltInTools />
       </div>
-    </PageShell>
+    </div>
   )
 }
 
@@ -59,7 +53,7 @@ function BuiltInTools(): JSX.Element {
           <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-text-subtle">
             {category}
           </h3>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div className="grid grid-cols-1 gap-3 @min-[640px]:grid-cols-2">
             {TOOLS.filter((t) => t.category === category).map((tool) => (
               <ToolCard key={tool.id} tool={tool} />
             ))}
@@ -79,7 +73,7 @@ interface SkillDraft {
 }
 
 /** The real, filesystem-discovered skills (SKILL.md files under the user's global roots). */
-function DiscoveredSkills(): JSX.Element {
+function DiscoveredSkills({ active }: { active: boolean }): JSX.Element {
   const { t } = useTranslation()
   const [skills, setSkills] = useState<SkillView[]>([])
   const [loading, setLoading] = useState(true)
@@ -88,11 +82,20 @@ function DiscoveredSkills(): JSX.Element {
   const [installing, setInstalling] = useState(false)
 
   useEffect(() => {
+    if (!active) return
+    let alive = true
     api.skills
       .list()
-      .then(setSkills)
-      .finally(() => setLoading(false))
-  }, [])
+      .then((rows) => {
+        if (alive) setSkills(rows)
+      })
+      .finally(() => {
+        if (alive) setLoading(false)
+      })
+    return () => {
+      alive = false
+    }
+  }, [active])
 
   const refresh = async (): Promise<void> => {
     setRefreshing(true)
@@ -120,11 +123,11 @@ function DiscoveredSkills(): JSX.Element {
 
   return (
     <section>
-      <div className="mb-3 flex items-center justify-between">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-xs font-semibold uppercase tracking-wide text-text-subtle">
           {t('skills.discovered')}
         </h2>
-        <div className="flex items-center gap-1">
+        <div className="flex flex-wrap items-center gap-1">
           <Button
             size="sm"
             variant="ghost"
@@ -197,7 +200,7 @@ function DiscoveredSkills(): JSX.Element {
       ) : skills.length === 0 ? (
         !draft && !installing && <EmptySkills />
       ) : (
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <div className="grid grid-cols-1 gap-3 @min-[640px]:grid-cols-2">
           {skills.map((skill) => (
             <DiscoveredSkillCard
               key={skill.location}

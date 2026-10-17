@@ -1,6 +1,6 @@
 import './bridge'
 import { createRoot } from 'react-dom/client'
-import { HashRouter } from 'react-router-dom'
+import { HashRouter, Route, Routes } from 'react-router-dom'
 import '@fontsource-variable/geist/index.css'
 import '@fontsource-variable/geist-mono/index.css'
 import '../../src/renderer/src/assets/main.css'
@@ -167,7 +167,10 @@ createRoot(document.getElementById('root')!).render(
         <ModelPicker />
       </div>
     ) : (
-      <Settings />
+      <Routes>
+        <Route path="/settings/:section?" element={<Settings />} />
+        <Route path="/" element={<Settings />} />
+      </Routes>
     )}
   </HashRouter>
 )

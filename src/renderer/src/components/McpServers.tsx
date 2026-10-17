@@ -37,7 +37,10 @@ const JSON_PLACEHOLDER = `{
 }`
 
 /** List/add/toggle/reconnect/remove external MCP tool servers. Shared by Settings + the MCP page. */
-export function McpServers({ showBackup = false }: { showBackup?: boolean } = {}): JSX.Element {
+export function McpServers({
+  showBackup = false,
+  active = true
+}: { showBackup?: boolean; active?: boolean } = {}): JSX.Element {
   const { t } = useTranslation()
   const [servers, setServers] = useState<McpServerView[]>([])
   const [loading, setLoading] = useState(true)
@@ -56,11 +59,17 @@ export function McpServers({ showBackup = false }: { showBackup?: boolean } = {}
   }
 
   useEffect(() => {
+    if (!active) return
+    let alive = true
     api.mcp.list().then((rows) => {
+      if (!alive) return
       setServers(rows)
       setLoading(false)
     })
-  }, [])
+    return () => {
+      alive = false
+    }
+  }, [active])
 
   const toggle = async (id: string, enabled: boolean): Promise<void> => {
     setBusy(id)

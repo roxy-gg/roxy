@@ -1,7 +1,9 @@
 import './BackgroundHarness'
-import { MemoryRouter, useLocation } from 'react-router-dom'
+import { aggregateActivityDays } from '../../src/shared/activity'
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { Sidebar } from '../../src/renderer/src/components/Sidebar'
-import Themes from '../../src/renderer/src/routes/Themes'
+import Settings from '../../src/renderer/src/routes/Settings'
+import { useRoxyStore } from '../../src/renderer/src/lib/store'
 import { applyTheme } from '../../src/renderer/src/lib/theme'
 import {
   BUILT_IN_THEMES,
@@ -13,6 +15,47 @@ import {
   toThemeView,
   type ThemeFile
 } from '../../src/shared/theme'
+
+Object.assign(window.roxy, {
+  system: {
+    ...window.roxy.system,
+    getVersions: async () => ({ app: 'test', electron: 'test', chrome: 'test', node: 'test' })
+  },
+  browser: {
+    getProxy: async () => ({
+      enabled: false,
+      scheme: 'http',
+      host: '',
+      port: 0,
+      username: '',
+      hasPassword: false
+    }),
+    onProxyChanged: () => () => {}
+  },
+  forge: { listHosts: async () => [] },
+  activity: {
+    stats: async () =>
+      aggregateActivityDays(
+        new Map([
+          ['2026-10-17', 12],
+          ['2026-10-16', 8],
+          ['2026-10-14', 4]
+        ]),
+        new Date(2026, 9, 17, 12).getTime(),
+        371
+      )
+  },
+  remote: {
+    status: async () => ({
+      phase: 'live',
+      guests: 0,
+      rev: 0,
+      url: 'https://example.com',
+      pin: '123456'
+    })
+  }
+})
+useRoxyStore.setState({ providers: [], refreshProviders: async () => {} })
 
 let activeId = DEFAULT_THEME_ID
 const custom: ThemeFile[] = []
@@ -66,7 +109,7 @@ window.roxy.themes = {
 
 export function AppearanceHarness(): JSX.Element {
   return (
-    <MemoryRouter initialEntries={['/themes']}>
+    <MemoryRouter initialEntries={['/settings']}>
       <AppearancePages />
     </MemoryRouter>
   )
@@ -87,7 +130,9 @@ function AppearancePages(): JSX.Element {
       </div>
       {pathname !== '/' && (
         <div id="appearance-page" className="absolute inset-0 bg-bg">
-          <Themes />
+          <Routes>
+            <Route path="/settings/:section?" element={<Settings />} />
+          </Routes>
         </div>
       )}
     </div>

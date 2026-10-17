@@ -1,4 +1,4 @@
-import { useEffect, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useRef, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ArrowLeft } from 'lucide-react'
 import { SidebarFrame, SidebarNavItem } from './SidebarFrame'
@@ -10,6 +10,7 @@ export function PageShell({
   onBack,
   onEscape,
   actions,
+  contentKey,
   children
 }: {
   title: string
@@ -18,9 +19,14 @@ export function PageShell({
   onBack: () => void
   onEscape?: () => boolean
   actions?: ReactNode
+  contentKey?: string
   children: ReactNode
 }): JSX.Element {
   const { t } = useTranslation()
+  const contentRef = useRef<HTMLDivElement>(null)
+  useLayoutEffect(() => {
+    if (contentRef.current) contentRef.current.scrollTop = 0
+  }, [contentKey])
   useEffect(() => {
     const onKey = (event: KeyboardEvent): void => {
       if (
@@ -55,7 +61,7 @@ export function PageShell({
             <span className="truncate text-sm font-medium">{title}</span>
             {actions && <div className="ml-auto">{actions}</div>}
           </header>
-          <div className="min-h-0 min-w-0 flex-1 overflow-y-auto">
+          <div ref={contentRef} className="min-h-0 min-w-0 flex-1 overflow-y-auto">
             <div className="mx-auto max-w-3xl px-6 py-8">
               {subtitle && <p className="mb-6 text-sm text-text-muted">{subtitle}</p>}
               {children}

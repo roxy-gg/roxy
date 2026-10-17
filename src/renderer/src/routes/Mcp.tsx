@@ -1,18 +1,12 @@
-import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { McpServers } from '../components/McpServers'
-import { PageShell } from '../components/PageShell'
 
-export default function Mcp(): JSX.Element {
+export default function Mcp({ active }: { active: boolean }): JSX.Element {
   const { t } = useTranslation()
-  const navigate = useNavigate()
   return (
-    <PageShell
-      title={t('mcpPage.title')}
-      subtitle={t('mcpPage.subtitle')}
-      onBack={() => navigate('/')}
-    >
-      <McpServers showBackup />
-    </PageShell>
+    <>
+      <p className="mb-6 text-sm text-text-muted">{t('mcpPage.subtitle')}</p>
+      <McpServers showBackup active={active} />
+    </>
   )
 }

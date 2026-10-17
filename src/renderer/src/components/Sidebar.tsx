@@ -15,12 +15,8 @@ import {
   GitBranch,
   GitFork,
   Hammer,
-  Lightbulb,
-  MonitorSmartphone,
   PanelLeftClose,
   PanelLeftOpen,
-  Palette,
-  Plug,
   Plus,
   Settings as SettingsIcon,
   Square,
@@ -34,12 +30,10 @@ import { isPullRequestPhase } from '@shared/forge'
 import { statusKeyForSession } from '@shared/workstream'
 import { repoCountBadge } from '@shared/repos'
 import { useRoxyStore } from '../lib/store'
-import { api } from '../lib/api'
 import { cn } from '../lib/cn'
 import { ContextMenuRow, ContextMenuSurface, CONTEXT_MENU_PAD, CONTEXT_ROW_H } from './ContextMenu'
 import { TONE_BG, TONE_TEXT_STATIC } from '../lib/lifecycle'
 import { BotsSection } from './BotsSection'
-import { RemoteWorkspaceDialog } from './RemoteWorkspaceDialog'
 import { BrailleSpinner } from './ThinkingIndicator'
 import { UpdateCard } from './UpdateCard'
 import { SidebarFrame, SidebarNavItem } from './SidebarFrame'
@@ -182,7 +176,6 @@ export function Sidebar(): JSX.Element {
   )
   // The open right-click menu: which session, and where the cursor was.
   const [contextMenu, setContextMenu] = useState<{ chat: Chat; x: number; y: number } | null>(null)
-  const [remoteOpen, setRemoteOpen] = useState(false)
   const remotePhase = useRoxyStore((s) => s.remote.phase)
   // Green only when truly live; amber while spinning up or reconnecting.
   const remoteDot: 'green' | 'amber' | null =
@@ -512,50 +505,24 @@ export function Sidebar(): JSX.Element {
         <BotsSection rail />
         <div className="mb-3 mt-auto flex flex-col items-center gap-1">
           <button
-            onClick={() => setRemoteOpen(true)}
-            title={t('sidebar.remoteWorkspace')}
+            onClick={() => navigate('/settings')}
+            title={t('sidebar.settings')}
             className="relative press-scale flex h-8 w-8 items-center justify-center sq sq-lg rounded-lg text-text-muted hover:bg-white/5 hover:text-text"
           >
-            <MonitorSmartphone className="h-4 w-4" />
+            <SettingsIcon className="h-4 w-4" />
             {remoteDot && (
               <span
                 className={cn(
                   'absolute right-1 top-1 h-1.5 w-1.5 rounded-full ring-2 ring-surface',
                   remoteDot === 'green' ? 'bg-success' : 'bg-warning'
                 )}
+                title={t(
+                  remoteDot === 'green' ? 'sidebar.sharingLive' : 'sidebar.sharingConnecting'
+                )}
               />
             )}
           </button>
-          <button
-            onClick={() => navigate('/skills')}
-            title={t('sidebar.skills')}
-            className="press-scale flex h-8 w-8 items-center justify-center sq sq-lg rounded-lg text-text-muted hover:bg-white/5 hover:text-text"
-          >
-            <Lightbulb className="h-4 w-4" />
-          </button>
-          <button
-            onClick={() => navigate('/mcp')}
-            title={t('sidebar.mcpServers')}
-            className="press-scale flex h-8 w-8 items-center justify-center sq sq-lg rounded-lg text-text-muted hover:bg-white/5 hover:text-text"
-          >
-            <Plug className="h-4 w-4" />
-          </button>
-          <button
-            onClick={() => navigate('/themes')}
-            title={t('appearance.title')}
-            className="press-scale flex h-8 w-8 items-center justify-center sq sq-lg rounded-lg text-text-muted hover:bg-white/5 hover:text-text"
-          >
-            <Palette className="h-4 w-4" />
-          </button>
-          <button
-            onClick={() => navigate('/settings')}
-            title={t('sidebar.settings')}
-            className="press-scale flex h-8 w-8 items-center justify-center sq sq-lg rounded-lg text-text-muted hover:bg-white/5 hover:text-text"
-          >
-            <SettingsIcon className="h-4 w-4" />
-          </button>
         </div>
-        {remoteOpen && <RemoteWorkspaceDialog onClose={() => setRemoteOpen(false)} />}
       </aside>
     )
   }
@@ -572,13 +539,6 @@ export function Sidebar(): JSX.Element {
           <span className="text-sm font-semibold tracking-tight">Roxy</span>
         </div>
         <div className="sidebar-controls ml-auto flex items-center gap-1">
-          <button
-            onClick={() => navigate('/settings')}
-            title={t('sidebar.settings')}
-            className="press-scale flex h-7 w-7 items-center justify-center sq sq-lg rounded-lg text-text-muted hover:bg-white/5 hover:text-text"
-          >
-            <SettingsIcon className="h-4 w-4" />
-          </button>
           <button
             onClick={() => setRailed(true)}
             title={t('sidebar.collapse')}
@@ -999,9 +959,21 @@ export function Sidebar(): JSX.Element {
         />
       )}
 
-      {remoteOpen && <RemoteWorkspaceDialog onClose={() => setRemoteOpen(false)} />}
-
-      <CustomizeNav onOpenRemote={() => setRemoteOpen(true)} remoteDot={remoteDot} />
+      <div className="border-t border-border px-3 py-2">
+        <SidebarNavItem className="w-full" onClick={() => navigate('/settings')}>
+          <SettingsIcon aria-hidden="true" className="h-4 w-4 shrink-0 opacity-80" />
+          <span className="flex-1">{t('sidebar.settings')}</span>
+          {remoteDot && (
+            <span
+              className={cn(
+                'h-2 w-2 shrink-0 rounded-full',
+                remoteDot === 'green' ? 'bg-success' : 'bg-warning'
+              )}
+              title={t(remoteDot === 'green' ? 'sidebar.sharingLive' : 'sidebar.sharingConnecting')}
+            />
+          )}
+        </SidebarNavItem>
+      </div>
 
       <UpdateCard />
     </SidebarFrame>
@@ -1060,112 +1032,5 @@ function SessionContextMenu({
         />
       ))}
     </ContextMenuSurface>
-  )
-}
-
-/** Counts of discovered skills + configured MCP servers, refreshed when focused. */
-function useCustomizeCounts(): { skills: number; mcp: number } {
-  const [counts, setCounts] = useState<{ skills: number; mcp: number }>({ skills: 0, mcp: 0 })
-  useEffect(() => {
-    let alive = true
-    const load = (): void => {
-      Promise.all([api.skills.list(), api.mcp.list()])
-        .then(([skills, mcp]) => {
-          if (alive) setCounts({ skills: skills.length, mcp: mcp.length })
-        })
-        .catch(() => {})
-    }
-    load()
-    // Re-count when the window regains focus (the user may have edited skills/MCP on a page).
-    window.addEventListener('focus', load)
-    return () => {
-      alive = false
-      window.removeEventListener('focus', load)
-    }
-  }, [])
-  return counts
-}
-
-/**
- * The utility section pinned to the bottom of the sidebar — quick access to
- * Remote Workspace (share to phone), plus the Skills and MCP Servers pages
- * (à la VS Code's Customizations panel), with a live count/indicator on each.
- */
-function CustomizeNav({
-  onOpenRemote,
-  remoteDot
-}: {
-  onOpenRemote: () => void
-  remoteDot: 'green' | 'amber' | null
-}): JSX.Element {
-  const { t } = useTranslation()
-  const navigate = useNavigate()
-  const counts = useCustomizeCounts()
-  const items: {
-    label: string
-    icon: typeof Lightbulb
-    onClick: () => void
-    count?: number
-    dot?: 'green' | 'amber' | null
-  }[] = [
-    {
-      label: t('sidebar.remoteWorkspace'),
-      icon: MonitorSmartphone,
-      onClick: onOpenRemote,
-      dot: remoteDot
-    },
-    {
-      label: t('sidebar.skills'),
-      icon: Lightbulb,
-      onClick: () => navigate('/skills'),
-      count: counts.skills
-    },
-    {
-      label: t('sidebar.mcpServers'),
-      icon: Plug,
-      onClick: () => navigate('/mcp'),
-      count: counts.mcp
-    },
-    { label: t('appearance.title'), icon: Palette, onClick: () => navigate('/themes') }
-  ]
-  return (
-    <div className="border-t border-border px-3 py-2">
-      <div className="flex flex-col gap-0.5">
-        {items.map((it) => (
-          <SidebarNavItem key={it.label} onClick={it.onClick}>
-            <it.icon className="h-4 w-4 shrink-0 opacity-80" />
-            <span className="flex-1 text-left">{it.label}</span>
-            {it.dot ? (
-              <span
-                className="relative flex h-2 w-2 shrink-0"
-                title={
-                  it.dot === 'green' ? t('sidebar.sharingLive') : t('sidebar.sharingConnecting')
-                }
-              >
-                <span
-                  className={cn(
-                    'absolute inline-flex h-full w-full animate-ping rounded-full opacity-70',
-                    it.dot === 'green' ? 'bg-success' : 'bg-warning'
-                  )}
-                />
-                <span
-                  className={cn(
-                    'relative inline-flex h-2 w-2 rounded-full',
-                    it.dot === 'green' ? 'bg-success' : 'bg-warning'
-                  )}
-                />
-              </span>
-            ) : (
-              it.count !== undefined &&
-              it.count > 0 && (
-                <span className="shrink-0 text-[10px] tabular-nums text-text-subtle">
-                  {it.count}
-                </span>
-              )
-            )}
-          </SidebarNavItem>
-        ))}
-      </div>
-    </div>
   )
 }

@@ -463,6 +463,37 @@
     "openPort": "Open localhost:{{port}} in this session's browser"
   },
   "settings": {
+    "navigation": {
+      "theme": "Theme",
+      "addOns": "Add-Ons",
+      "general": "General",
+      "colors": "Colors",
+      "accounts": "Accounts",
+      "worktrees": "Worktree configuration",
+      "activity": "Activity",
+      "activityEmpty": "Your activity will appear here after your first agent response.",
+      "section": "Settings section",
+      "openRemote": "Manage remote access"
+    },
+    "activity": {
+      "description": "One turn is one assistant reply. Your activity history stays here even when you delete a conversation.",
+      "period": "{{start}} to {{end}}",
+      "total": "Agent turns",
+      "activeDays": "Active days",
+      "currentStreak": "Current streak",
+      "longestStreak": "Longest streak",
+      "turns_one": "turn in this period",
+      "turns_other": "turns in this period",
+      "days_one": "day",
+      "days_other": "days",
+      "recent": "Last 7 days",
+      "date": "Date",
+      "turnCount_one": "{{value}} turn",
+      "turnCount_other": "{{value}} turns",
+      "peak_one": "Busiest day in this period: {{value}} turn.",
+      "peak_other": "Busiest day in this period: {{value}} turns.",
+      "failed": "Couldn't load your activity. Reopen Settings to try again."
+    },
     "motion": {
       "heading": "Appearance",
       "label": "Motion",

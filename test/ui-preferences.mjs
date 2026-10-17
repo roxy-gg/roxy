@@ -70,6 +70,7 @@ const hooks = {
   useMemo: (factory) => factory(),
   useCallback: (callback) => callback,
   useId: () => 'test-id',
+  useLayoutEffect: () => {},
   useEffect: (effect) => current.effects.push(effect)
 }
 const windowEvents = new Map()

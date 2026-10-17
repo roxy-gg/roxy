@@ -597,6 +597,25 @@
       },
       "version": "रॉक्सी v{{version}}"
     },
+    "activity": {
+      "activeDays": "Active days",
+      "currentStreak": "Current streak",
+      "date": "Date",
+      "days_one": "day",
+      "days_other": "days",
+      "description": "One turn is one assistant reply. Your activity history stays here even when you delete a conversation.",
+      "failed": "Couldn't load your activity. Reopen Settings to try again.",
+      "longestStreak": "Longest streak",
+      "peak_one": "Busiest day in this period: {{value}} turn.",
+      "peak_other": "Busiest day in this period: {{value}} turns.",
+      "period": "{{start}} to {{end}}",
+      "recent": "Last 7 days",
+      "total": "Agent turns",
+      "turnCount_one": "{{value}} turn",
+      "turnCount_other": "{{value}} turns",
+      "turns_one": "turn in this period",
+      "turns_other": "turns in this period"
+    },
     "backup": {
       "description": "अपने वैश्विक कौशल और MCP सर्वर कॉन्फ़िगरेशन को एक फ़ाइल में निर्यात करें, फिर इसे उसी तरह सेट करने के लिए दूसरे कंप्यूटर पर आयात करें। आयात करने से उन कौशलों/सर्वरों को अधिलेखित कर दिया जाता है जिनका नाम समान होता है।",
       "heading": "बैकअप और पुनर्स्थापना",
@@ -662,6 +681,18 @@
       "reduced": "कम",
       "saveFailed": "गति वरीयता सहेजी नहीं जा सकी। फिर से प्रयास करें।",
       "system": "सिस्टम का पालन करें"
+    },
+    "navigation": {
+      "accounts": "Accounts",
+      "activity": "Activity",
+      "activityEmpty": "Your activity will appear here after your first agent response.",
+      "addOns": "Add-Ons",
+      "colors": "Colors",
+      "general": "General",
+      "openRemote": "Manage remote access",
+      "section": "Settings section",
+      "theme": "Theme",
+      "worktrees": "Worktree configuration"
     },
     "notifications": {
       "completeDescription": "जब Roxy कोई प्रतिक्रिया पूरी कर ले तो सूचना पाएं। लंबे समय तक चलने वाले कार्यों के लिए उपयोगी। यह केवल तभी आती है जब Roxy फ़ोकस में न हो; उस सत्र पर जाने के लिए उस पर क्लिक करें।",

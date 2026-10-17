@@ -1,7 +1,26 @@
 import { useEffect, useId, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useParams } from 'react-router-dom'
 import { useTranslation, Trans } from 'react-i18next'
-import { ChevronDown, ChevronRight, Globe, Palette, Plus, Trash2 } from 'lucide-react'
+import {
+  Activity,
+  Bell,
+  ChevronDown,
+  DatabaseBackup,
+  GitBranch,
+  Globe,
+  Image,
+  Info,
+  Languages,
+  Lightbulb,
+  MonitorSmartphone,
+  Palette,
+  Plug,
+  Plus,
+  Shield,
+  Sparkles,
+  Trash2,
+  UserRound
+} from 'lucide-react'
 import type { AppVersions } from '@shared/types'
 import type { UpdateInfo } from '@shared/api'
 import { resolveSeed } from '@shared/providers'
@@ -18,7 +37,6 @@ import {
 } from '@shared/branch'
 import { randomSlug, slugToBranchSegment } from '@shared/slugs'
 import { PageShell } from '../components/PageShell'
-import { McpServers } from '../components/McpServers'
 import { CookiePanel } from '../components/CookiePanel'
 import { ProxyPanel } from '../components/ProxyPanel'
 import { ConfigBackup } from '../components/ConfigBackup'
@@ -28,6 +46,47 @@ import { ProviderAccount } from '../components/ProviderAccount'
 import { NotificationSettings } from '../components/NotificationSettings'
 import { useRoxyStore } from '../lib/store'
 import { MotionSettings } from '../components/MotionSettings'
+import { BackgroundSettings } from '../components/BackgroundSettings'
+import { RemoteWorkspaceDialog } from '../components/RemoteWorkspaceDialog'
+import { SidebarNavItem } from '../components/SidebarFrame'
+import Themes from './Themes'
+import Skills from './Skills'
+import Mcp from './Mcp'
+
+const SETTINGS_GROUPS = [
+  {
+    label: 'settings.navigation.theme',
+    items: [
+      { id: 'background', label: 'appearance.background', icon: Image },
+      { id: 'colors', label: 'settings.navigation.colors', icon: Palette },
+      { id: 'motion', label: 'settings.motion.label', icon: Sparkles }
+    ]
+  },
+  {
+    label: 'settings.navigation.addOns',
+    items: [
+      { id: 'skills', label: 'sidebar.skills', icon: Lightbulb },
+      { id: 'mcp', label: 'sidebar.mcpServers', icon: Plug },
+      { id: 'backup', label: 'settings.backup.heading', icon: DatabaseBackup }
+    ]
+  },
+  {
+    label: 'settings.navigation.general',
+    items: [
+      { id: 'accounts', label: 'settings.navigation.accounts', icon: UserRound },
+      { id: 'browser', label: 'settings.browser.heading', icon: Globe },
+      { id: 'language', label: 'settings.language.heading', icon: Languages },
+      { id: 'worktrees', label: 'settings.navigation.worktrees', icon: GitBranch },
+      { id: 'notifications', label: 'settings.notifications.heading', icon: Bell },
+      { id: 'remote', label: 'sidebar.remoteWorkspace', icon: MonitorSmartphone },
+      { id: 'activity', label: 'settings.navigation.activity', icon: Activity },
+      { id: 'privacy', label: 'settings.privacy.heading', icon: Shield },
+      { id: 'about', label: 'settings.about.heading', icon: Info }
+    ]
+  }
+] as const
+
+type SettingsSection = (typeof SETTINGS_GROUPS)[number]['items'][number]['id']
 
 /** The section heading repeated down the page. */
 const SECTION_HEADING = 'mb-3 text-xs font-semibold uppercase tracking-wide text-text-subtle'
@@ -35,6 +94,18 @@ const SECTION_HEADING = 'mb-3 text-xs font-semibold uppercase tracking-wide text
 export default function Settings(): JSX.Element {
   const { t } = useTranslation()
   const navigate = useNavigate()
+  const { section } = useParams()
+  const selected = SETTINGS_GROUPS.flatMap((group) => [...group.items]).find(
+    (item) => item.id === section
+  )
+  const panel: SettingsSection = selected?.id ?? 'activity'
+  // Mount on first visit, then retain editors and their unsaved drafts.
+  const [visited, setVisited] = useState<Set<SettingsSection>>(() => new Set([panel]))
+  useEffect(() => {
+    setVisited((previous) => (previous.has(panel) ? previous : new Set([...previous, panel])))
+  }, [panel])
+  const [remoteOpen, setRemoteOpen] = useState(false)
+  const remotePhase = useRoxyStore((s) => s.remote.phase)
   const providers = useRoxyStore((s) => s.providers)
   const settings = useRoxyStore((s) => s.settings)
   const refreshProviders = useRoxyStore((s) => s.refreshProviders)
@@ -55,6 +126,9 @@ export default function Settings(): JSX.Element {
   const [versions, setVersions] = useState<AppVersions | null>(null)
   const [update, setUpdate] = useState<UpdateInfo | null>(null)
   const [confirmingReset, setConfirmingReset] = useState(false)
+  useEffect(() => {
+    setConfirmingReset(false)
+  }, [panel])
   const [cookiesOpen, setCookiesOpen] = useState(false)
   const cookiesPanelId = useId()
   const [resetting, setResetting] = useState(false)
@@ -139,6 +213,69 @@ export default function Settings(): JSX.Element {
   return (
     <PageShell
       title={t('settings.title')}
+      contentKey={panel}
+      sidebar={
+        <>
+          <label htmlFor="settings-section" className="sr-only">
+            {t('settings.navigation.section')}
+          </label>
+          <select
+            id="settings-section"
+            value={panel}
+            onChange={(event) => navigate('/settings/' + event.target.value)}
+            className="h-10 w-full rounded-lg border border-border bg-surface-2 px-3 text-sm text-text sm:hidden"
+          >
+            {SETTINGS_GROUPS.map((group) => (
+              <optgroup key={group.label} label={t(group.label)}>
+                {group.items.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {t(item.label)}
+                  </option>
+                ))}
+              </optgroup>
+            ))}
+          </select>
+          <nav aria-label={t('settings.title')} className="hidden flex-col gap-5 sm:flex">
+            {SETTINGS_GROUPS.map((group) => (
+              <section key={group.label} aria-labelledby={group.label}>
+                <h2
+                  id={group.label}
+                  className="mb-1.5 px-2 text-[11px] font-semibold uppercase tracking-wide text-text-subtle"
+                >
+                  {t(group.label)}
+                </h2>
+                <div className="flex flex-col gap-0.5">
+                  {group.items.map(({ id, label, icon: Icon }) => (
+                    <SidebarNavItem
+                      key={id}
+                      id={'settings-' + id}
+                      aria-current={panel === id ? 'page' : undefined}
+                      aria-controls={'settings-' + id + '-panel'}
+                      onClick={() => navigate('/settings/' + id)}
+                    >
+                      <Icon aria-hidden="true" className="h-4 w-4 shrink-0 opacity-80" />
+                      <span className="min-w-0 flex-1">{t(label)}</span>
+                      {id === 'remote' && remotePhase !== 'idle' && remotePhase !== 'error' && (
+                        <span
+                          className={cn(
+                            'h-1.5 w-1.5 shrink-0 rounded-full',
+                            remotePhase === 'live' ? 'bg-success' : 'bg-warning'
+                          )}
+                          title={t(
+                            remotePhase === 'live'
+                              ? 'sidebar.sharingLive'
+                              : 'sidebar.sharingConnecting'
+                          )}
+                        />
+                      )}
+                    </SidebarNavItem>
+                  ))}
+                </div>
+              </section>
+            ))}
+          </nav>
+        </>
+      }
       onBack={() => navigate('/')}
       onEscape={() => {
         if (resetting) return true
@@ -162,24 +299,76 @@ export default function Settings(): JSX.Element {
           onClose={() => setSetup(null)}
         />
       )}
-      <ActivitySection />
-      <MotionSettings onChange={setMotion} />
-      <button
-        type="button"
-        onClick={() => navigate('/themes')}
-        className="mb-8 flex w-full items-center gap-3 rounded-xl border border-border bg-surface p-4 text-left hover:border-border-strong focus-visible:outline-accent"
+      <div
+        id="settings-background-panel"
+        role="region"
+        aria-labelledby="settings-background"
+        hidden={panel !== 'background'}
       >
-        <Palette aria-hidden="true" className="h-4 w-4 shrink-0 text-text-muted" />
-        <span className="min-w-0 flex-1">
-          <span className="block text-sm font-medium text-text">{t('appearance.title')}</span>
-          <span className="mt-0.5 block text-xs text-text-muted">
-            {t('appearance.description')}
-          </span>
-        </span>
-        <ChevronRight aria-hidden="true" className="h-4 w-4 shrink-0 text-text-subtle" />
-      </button>
+        {(visited.has('background') || panel === 'background') && <BackgroundSettings />}
+      </div>
+      <div
+        id="settings-colors-panel"
+        role="region"
+        aria-labelledby="settings-colors"
+        hidden={panel !== 'colors'}
+      >
+        {(visited.has('colors') || panel === 'colors') && <Themes />}
+      </div>
+      <div
+        id="settings-skills-panel"
+        role="region"
+        aria-labelledby="settings-skills"
+        hidden={panel !== 'skills'}
+      >
+        {(visited.has('skills') || panel === 'skills') && <Skills active={panel === 'skills'} />}
+      </div>
+      <div
+        id="settings-mcp-panel"
+        role="region"
+        aria-labelledby="settings-mcp"
+        hidden={panel !== 'mcp'}
+      >
+        {(visited.has('mcp') || panel === 'mcp') && <Mcp active={panel === 'mcp'} />}
+      </div>
+      <div
+        id="settings-activity-panel"
+        role="region"
+        aria-labelledby="settings-activity"
+        hidden={panel !== 'activity'}
+      >
+        {(visited.has('activity') || panel === 'activity') && <ActivitySection />}
+      </div>
+      <div
+        id="settings-motion-panel"
+        role="region"
+        aria-labelledby="settings-motion"
+        hidden={panel !== 'motion'}
+      >
+        {(visited.has('motion') || panel === 'motion') && <MotionSettings onChange={setMotion} />}
+      </div>
+      <section
+        id="settings-remote-panel"
+        role="region"
+        aria-labelledby="settings-remote"
+        hidden={panel !== 'remote'}
+      >
+        <h2 className={SECTION_HEADING}>{t('remote.title')}</h2>
+        <p className="mb-4 text-sm text-text-muted">{t('remote.idleBody')}</p>
+        <Button onClick={() => setRemoteOpen(true)}>
+          <MonitorSmartphone className="h-4 w-4" />
+          {t('settings.navigation.openRemote')}
+        </Button>
+      </section>
+      {remoteOpen && <RemoteWorkspaceDialog onClose={() => setRemoteOpen(false)} />}
 
-      <section className="mb-8">
+      <section
+        id="settings-accounts-panel"
+        role="region"
+        aria-labelledby="settings-accounts"
+        hidden={panel !== 'accounts'}
+        className="mb-8"
+      >
         <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
           <h2 className="text-xs font-semibold uppercase tracking-wide text-text-subtle">
             {t('settings.providers.heading')}
@@ -276,7 +465,13 @@ export default function Settings(): JSX.Element {
           again, so it earns none of the cost of a custom popover -- and the
           native control already gives us type-ahead, keyboard nav and the OS's
           own font stack, which matters for scripts the app font may not cover. */}
-      <section className="mb-8">
+      <section
+        id="settings-language-panel"
+        role="region"
+        aria-labelledby="settings-language"
+        hidden={panel !== 'language'}
+        className="mb-8"
+      >
         <h2 className={SECTION_HEADING}>{t('settings.language.heading')}</h2>
         <div className="flex flex-col gap-3 sq sq-xl sq-ring rounded-xl border border-border bg-surface p-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0">
@@ -303,12 +498,24 @@ export default function Settings(): JSX.Element {
         </div>
       </section>
 
-      <section className="mb-8">
+      <section
+        id="settings-notifications-panel"
+        role="region"
+        aria-labelledby="settings-notifications"
+        hidden={panel !== 'notifications'}
+        className="mb-8"
+      >
         <h2 className={SECTION_HEADING}>{t('settings.notifications.heading')}</h2>
         <NotificationSettings />
       </section>
 
-      <section className="mb-8">
+      <section
+        id="settings-worktrees-panel"
+        role="region"
+        aria-labelledby="settings-worktrees"
+        hidden={panel !== 'worktrees'}
+        className="mb-8"
+      >
         <h2 className={SECTION_HEADING}>{t('settings.workstreams.heading')}</h2>
         <div className="flex flex-col gap-3 sq sq-xl sq-ring rounded-xl border border-border bg-surface p-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0">
@@ -332,7 +539,7 @@ export default function Settings(): JSX.Element {
           <p className="mt-0.5 text-xs text-text-muted">
             <Trans i18nKey="settings.workstreams.prefixDescription" />
           </p>
-          <div className="mt-3 flex items-center gap-2">
+          <div className="mt-3 flex flex-wrap items-center gap-2">
             <input
               value={prefix}
               onChange={(e) => setPrefix(e.target.value)}
@@ -343,7 +550,7 @@ export default function Settings(): JSX.Element {
               placeholder={t('settings.workstreams.prefixPlaceholder')}
               aria-label={t('settings.workstreams.prefixAriaLabel')}
               className={cn(
-                'w-48 sq sq-lg sq-ring rounded-lg border bg-surface-2 px-3 py-1.5 text-sm text-text outline-none placeholder:text-text-subtle',
+                'w-48 max-w-full sq sq-lg sq-ring rounded-lg border bg-surface-2 px-3 py-1.5 text-sm text-text outline-none placeholder:text-text-subtle',
                 prefixError
                   ? 'border-danger [--sq-ring:var(--color-danger)]'
                   : 'border-border focus:border-border-strong focus:[--sq-ring:var(--color-border-strong)]'
@@ -372,7 +579,13 @@ export default function Settings(): JSX.Element {
         </div>
       </section>
 
-      <section className="mb-8">
+      <section
+        id="settings-browser-panel"
+        role="region"
+        aria-labelledby="settings-browser"
+        hidden={panel !== 'browser'}
+        className="mb-8"
+      >
         <h2 className={SECTION_HEADING}>{t('settings.browser.heading')}</h2>
         <div className="flex flex-col gap-3 sq sq-xl sq-ring rounded-xl border border-border bg-surface p-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0">
@@ -430,16 +643,18 @@ export default function Settings(): JSX.Element {
       {/* Distinct from "Providers" above on purpose: that list is who runs the
           MODEL, this one is where the CODE lives. GitHub appears in both, as
           two unrelated accounts. */}
-      <section className="mb-8">
+      <section hidden={panel !== 'accounts'} className="mb-8">
         <h2 className={SECTION_HEADING}>{t('settings.codeHosts.heading')}</h2>
         <CodeHosts />
       </section>
-      <section className="mb-8">
-        <h2 className={SECTION_HEADING}>{t('settings.mcp.heading')}</h2>
-        <McpServers />
-      </section>
 
-      <section className="mb-8">
+      <section
+        id="settings-backup-panel"
+        role="region"
+        aria-labelledby="settings-backup"
+        hidden={panel !== 'backup'}
+        className="mb-8"
+      >
         <h2 className={SECTION_HEADING}>{t('settings.backup.heading')}</h2>
         <div className="flex flex-col gap-3 sq sq-xl sq-ring rounded-xl border border-border bg-surface p-4">
           <div className="min-w-0">
@@ -453,7 +668,13 @@ export default function Settings(): JSX.Element {
         </div>
       </section>
 
-      <section className="mb-8">
+      <section
+        id="settings-privacy-panel"
+        role="region"
+        aria-labelledby="settings-privacy"
+        hidden={panel !== 'privacy'}
+        className="mb-8"
+      >
         <h2 className={SECTION_HEADING}>{t('settings.privacy.heading')}</h2>
         <div className="flex flex-col gap-3 sq sq-xl sq-ring rounded-xl border border-border bg-surface p-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0">
@@ -466,7 +687,13 @@ export default function Settings(): JSX.Element {
           <Switch checked={telemetryEnabled} onChange={(v) => void setTelemetryEnabled(v)} />
         </div>
       </section>
-      <section>
+      <section
+        id="settings-about-panel"
+        role="region"
+        aria-labelledby="settings-about"
+        hidden={panel !== 'about'}
+        className="mb-8"
+      >
         <h2 className={SECTION_HEADING}>{t('settings.about.heading')}</h2>
         <div className="flex flex-col gap-3 sq sq-xl sq-ring rounded-xl border border-border bg-surface p-4">
           <div className="flex items-center justify-between gap-3">
@@ -504,7 +731,7 @@ export default function Settings(): JSX.Element {
         </div>
       </section>
 
-      <section className="mt-8">
+      <section hidden={panel !== 'about'} className="mt-8">
         <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-danger">
           {t('settings.danger.heading')}
         </h2>
