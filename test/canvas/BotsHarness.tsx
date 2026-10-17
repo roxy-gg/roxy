@@ -268,12 +268,12 @@ Object.assign(window.roxy, {
   })
 }
 
-// Production ChatView projects the saved launch + live delegate + late result.
+// Production ChatView renders batch children as independent main-column cards.
 ;(
   window as unknown as {
-    __taskFixture: (phase: 'running' | 'completed', continued?: boolean) => void
+    __taskFixture: (phase: 'running' | 'completed') => void
   }
-).__taskFixture = (phase, continued = false) => {
+).__taskFixture = (phase) => {
   const state = useRoxyStore.getState()
   const chatId = state.activeChatId!
   const owner = state.bots.find((bot) => bot.chatId === chatId)
@@ -283,14 +283,22 @@ Object.assign(window.roxy, {
     tool: 'task',
     callId: 'fixture-launch',
     subChatId: 'fixture-sub',
-    state: 'done',
+    state: phase === 'running' ? 'running' : 'done',
     title: 'Explore: provider research',
-    input: { background: true },
-    output: 'Started'
+    input: { description: 'provider research' },
+    output: phase === 'completed' ? 'Research complete.' : undefined,
+    children: [{ type: 'text', text: 'Live delegate progress is visible here.' }]
   }
-  const children: MessagePart[] = [
-    { type: 'text', text: 'Live delegate progress is visible here.' }
-  ]
+  const children = card.children!
+  const batch: Extract<MessagePart, { type: 'tool' }> = {
+    type: 'tool',
+    tool: 'task',
+    callId: 'fixture-batch',
+    state: phase === 'running' ? 'running' : 'done',
+    title: 'Investigate subtasks',
+    input: { tasks: [{ description: 'provider research', prompt: 'Investigate providers' }] },
+    children: [card]
+  }
   const subChat = {
     ...baseChat,
     id: 'fixture-sub',
@@ -316,49 +324,9 @@ Object.assign(window.roxy, {
       role: 'assistant',
       createdAt: 2,
       content: '',
-      parts: [card],
+      parts: [batch],
       ...author
-    },
-    ...(continued
-      ? Array.from(
-          { length: 12 },
-          (_, i): Message => ({
-            id: `fixture-followup-${i}`,
-            chatId,
-            role: i % 2 === 0 ? 'user' : 'assistant',
-            createdAt: 3 + i,
-            content: 'The parent conversation continued while the review was still running.',
-            parts: [
-              {
-                type: 'text',
-                text: 'The parent conversation continued while the review was still running.'
-              }
-            ],
-            ...(i % 2 ? author : {})
-          })
-        )
-      : []),
-    ...(phase === 'completed'
-      ? [
-          {
-            id: 'fixture-result',
-            chatId,
-            role: 'assistant' as const,
-            createdAt: 20,
-            content: '',
-            parts: [
-              {
-                ...card,
-                callId: 'fixture-result',
-                resultFor: card.callId,
-                output: 'Research complete.',
-                children
-              }
-            ],
-            ...author
-          }
-        ]
-      : [])
+    }
   ]
   messages.push(
     {
@@ -389,27 +357,11 @@ Object.assign(window.roxy, {
     chats: [...chats],
     messages: messages.filter((message) => message.chatId === chatId),
     messagesChatId: chatId,
-    streamingChats: {},
-    sendingChats: {},
+    streamingChats: phase === 'running' ? { [chatId]: [batch] } : {},
+    sendingChats: phase === 'running' ? { [chatId]: true } : {},
     runningAutomation: {},
     subagentPreviews: phase === 'running' ? { 'fixture-sub': children } : {},
-    runningSubagents: phase === 'running' ? { 'fixture-sub': true } : {},
-    runningTasks:
-      phase === 'running'
-        ? {
-            [chatId]: [
-              {
-                jobId: 'fixture-job',
-                sessionId: chatId,
-                subChatId: 'fixture-sub',
-                description: 'provider research',
-                subagentType: 'explore',
-                state: 'running',
-                startedAt: Date.now()
-              }
-            ]
-          }
-        : {}
+    runningSubagents: phase === 'running' ? { 'fixture-sub': true } : {}
   })
 }
 

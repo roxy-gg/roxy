@@ -18,7 +18,6 @@ import { HOST_USERNAME, isHostSpeaker } from '../../shared/bots'
 import { nextQueueItem } from '../../shared/queue'
 import { imageReferenceText, redactImageData } from '../../shared/attachments'
 import { omitMessageImages, validateForwardedImages } from './attachments'
-import { backgroundTaskRequest } from '../../shared/parallel'
 import * as repo from '../db/repo'
 import * as bots from '../db/bots'
 import { getDb } from '../db/database'
@@ -309,8 +308,7 @@ function history(
   budget: number,
   outputReserve: number,
   speaker?: ReturnType<typeof bots.getBot>,
-  asHost = false,
-  suppliedReports: ReadonlySet<string> = new Set()
+  asHost = false
 ): ChatMessage[] {
   const since = repo.getChat(chatId)?.contextSummaryAt ?? 0
   const self = asHost ? undefined : (speaker ?? bots.chatBot(chatId))
@@ -327,10 +325,7 @@ function history(
     .listMessages(chatId)
     .filter(
       (m) =>
-        (m.role === 'user' || m.role === 'assistant') &&
-        m.createdAt > since &&
-        !waiting.has(m.id) &&
-        !suppliedReports.has(m.id)
+        (m.role === 'user' || m.role === 'assistant') && m.createdAt > since && !waiting.has(m.id)
     )
     .map((m) => reconstructTurn(m, self))
     .filter((g) => g.length)
@@ -564,40 +559,13 @@ async function deliver(item: QueueItem): Promise<void> {
     if (!guest && !hostVisiting && estimated > budget * 0.8)
       await compactChat(item.chatId, provider.id, model, controller.signal)
     if (controller.signal.aborted) throw new Error('Stopped.')
-    // message_id anchors the first pending report. Later sibling reports are
-    // coalesced into this continuation even if compaction covered their rows.
-    const transcript = repo.listMessages(item.chatId)
-    const firstReport = transcript.findIndex(
-      (message) =>
-        message.id === previous.message_id &&
-        message.parts.some((part) => part.type === 'tool' && part.resultFor)
-    )
-    const reports =
-      firstReport < 0
-        ? []
-        : transcript
-            .slice(firstReport)
-            .filter(
-              (message) =>
-                message.botId === (previous.bot_id ?? undefined) &&
-                (!!message.botId || message.botUsername === (previous.bot_username ?? undefined)) &&
-                message.parts.some((part) => part.type === 'tool' && part.resultFor)
-            )
-    const requestMessage = transcript.find((m) => m.id === requestMessageId)
-    const previousMessages = history(
-      item.chatId,
-      budget,
-      info?.outputLimit ?? 4096,
-      guest,
-      asHost,
-      new Set(reports.map((message) => message.id))
-    )
+    const requestMessage = repo.listMessages(item.chatId).find((m) => m.id === requestMessageId)
+    const previousMessages = history(item.chatId, budget, info?.outputLimit ?? 4096, guest, asHost)
     const messages = withRequest(
       // Machine handoffs select their attachments explicitly. Shared history
       // must not re-add removed images or disclose unrelated old screenshots.
       item.sourceChatId ? previousMessages.map(omitMessageImages) : previousMessages,
-      (reports.length ? backgroundTaskRequest(reports, item.content) : item.content) +
-        (requestMessage ? imageReferenceText(requestMessage) : ''),
+      item.content + (requestMessage ? imageReferenceText(requestMessage) : ''),
       guest?.username ?? (previous.bot_id && !bot ? 'Roxy' : undefined),
       item.images
     )

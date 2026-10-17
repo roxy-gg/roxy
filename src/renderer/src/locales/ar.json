@@ -154,11 +154,7 @@
   },
   "chat": {
     "backTo": "العودة إلى {{title}}",
-    "backgroundRunning_one": "وكيل فرعي واحد {{count}} لا يزال قيد التشغيل",
-    "backgroundRunning_other": "{{count}} وكلاء فرعيين لا يزالون قيد التشغيل",
     "cancel": "إلغاء",
-    "cancelBackground_one": "إلغاء {{count}} وكيل فرعي في الخلفية",
-    "cancelBackground_other": "إلغاء {{count}} وكلاء فرعيين في الخلفية",
     "cancelSubagent": "إلغاء هذا الوكيل الفرعي",
     "copied": "تم النسخ",
     "copilotAuthenticate": "المصادقة على GitHub",

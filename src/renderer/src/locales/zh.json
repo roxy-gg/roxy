@@ -154,11 +154,7 @@
   },
   "chat": {
     "backTo": "返回 {{title}}",
-    "backgroundRunning_one": "{{count}} 个子代理仍在运行",
-    "backgroundRunning_other": "{{count}} 个子代理仍在运行",
     "cancel": "取消",
-    "cancelBackground_one": "取消 {{count}} 个后台子代理",
-    "cancelBackground_other": "取消 {{count}} 个后台子代理",
     "cancelSubagent": "取消此子代理",
     "copied": "已复制",
     "copilotAuthenticate": "在 GitHub 上进行身份验证",

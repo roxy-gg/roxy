@@ -154,11 +154,7 @@
   },
   "chat": {
     "backTo": "Zurück zu {{title}}",
-    "backgroundRunning_one": "{{count}} Subagent läuft noch",
-    "backgroundRunning_other": "{{count}} Subagents laufen noch",
     "cancel": "abbrechen",
-    "cancelBackground_one": "{{count}} Hintergrund-Subagent abbrechen",
-    "cancelBackground_other": "{{count}} Hintergrund-Subagenten abbrechen",
     "cancelSubagent": "Diesen Subagenten abbrechen",
     "copied": "Kopiert",
     "copilotAuthenticate": "Bei GitHub authentifizieren",

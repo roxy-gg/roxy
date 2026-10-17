@@ -182,7 +182,21 @@ export class PartsFold {
       sub = new Map()
       this.childIndex.set(event.callId, sub)
     }
-    const children = foldInto(parent.children ?? [], sub, event.event, MAX_CHILD_PARTS)
+    const child = event.event
+    if (child.type === 'tool-child') {
+      const childSlot = sub.get(child.callId)
+      const card = childSlot === undefined ? undefined : parent.children?.[childSlot]
+      if (card?.type !== 'tool') return this.parts
+      const nested = new PartsFold()
+      nested.seed(card.children ?? [])
+      const grandchildren = nested.apply(child.event)
+      const children = parent.children!.map((part, i) =>
+        i === childSlot ? { ...card, children: grandchildren } : part
+      )
+      this.parts = this.parts.map((part, i) => (i === idx ? { ...parent, children } : part))
+      return this.parts
+    }
+    const children = foldInto(parent.children ?? [], sub, child, MAX_CHILD_PARTS)
     if (children === parent.children) return this.parts
     this.parts = this.parts.map((p, i) => (i === idx ? { ...parent, children } : p))
     return this.parts

@@ -13,7 +13,6 @@ import {
 import { claimTurn, sessionBusy, stopTurn, resumeQueue } from '../services/turn-state'
 import { emitSessionsUpdated } from '../services/session-events'
 import { notifyTranscriptChanged } from '../services/remote'
-import { cancelSessionBackgroundJobs } from '../services/background-tasks'
 import { endSubagentRuns } from '../services/subagent-stream'
 import { killSessionBackground } from './tools'
 import { disposeSession } from '../services/browser'
@@ -97,7 +96,6 @@ export async function runBotTool(
           speakingElsewhere
         )
           throw new Error('Stop the bot before deleting it; a bot cannot delete itself mid-turn')
-        cancelSessionBackgroundJobs(bot.chatId)
         endSubagentRuns(bot.chatId)
         killSessionBackground(bot.chatId)
         disposeSession(bot.chatId)
@@ -224,7 +222,6 @@ export async function runBotTool(
         } else if (action === 'delete') {
           if (id === source || sessionBusy(id))
             throw new Error('Stop the session before deleting it')
-          cancelSessionBackgroundJobs(id)
           endSubagentRuns(id)
           killSessionBackground(id)
           disposeSession(id)

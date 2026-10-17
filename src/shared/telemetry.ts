@@ -284,8 +284,6 @@ export type FeatureId =
   | 'skill'
   /** The agent delegated to a subagent via `task`. */
   | 'subagent'
-  /** A detached background task was started. */
-  | 'background_task'
   /** A session ran in its own git worktree/workstream. */
   | 'worktree'
   /** The built-in browser was driven. */
@@ -304,7 +302,6 @@ export const FEATURE_IDS: FeatureId[] = [
   'mcp_server',
   'skill',
   'subagent',
-  'background_task',
   'worktree',
   'browser',
   'bot',

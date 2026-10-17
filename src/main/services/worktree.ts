@@ -25,7 +25,6 @@ import * as git from './git'
 import { discoverRepos } from './workspace'
 import { ensureDevPort } from './ports'
 import { startBackground, killSessionBackground } from '../harness'
-import { activeBackgroundSubChatIds, hasActiveBackgroundJobs } from './background-tasks'
 import { emitSessionsUpdated } from './session-events'
 import type { WorktreeIntent } from '../../shared/types'
 
@@ -650,19 +649,6 @@ export async function removeWorktreeForChat(
   // Shared with another session — never auto-remove (T3's mistake).
   const others = repo.chatsUsingWorktree(target).filter((c) => c.id !== chatId)
   if (others.length) return { ok: true, removed: false }
-
-  // A detached background subagent deliberately outlives the turn that launched
-  // it (see services/background-tasks.ts). Deleting the tree out from under one
-  // turns every tool call it makes into an ENOENT, so leave it be.
-  const busy = activeBackgroundSubChatIds()
-  const subIds = repo.listSubchats(chatId).map((c) => c.id)
-  if (hasActiveBackgroundJobs(chatId) || subIds.some((id) => busy.has(id))) {
-    return {
-      ok: false,
-      removed: false,
-      error: 'A background task is still running in this worktree, so it was left in place.'
-    }
-  }
 
   // Stop dev servers/watchers before git touches the directory. Awaited: the
   // kill has to have actually happened, not merely been requested.

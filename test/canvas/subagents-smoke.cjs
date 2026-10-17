@@ -62,16 +62,18 @@ async function run() {
   await evaluate('window.__taskFixture("running")')
   await settle()
   let current = await scene()
-  assert.equal(current.blocks.length, 2)
+  assert.equal(current.blocks.length, 3)
   assert.ok(
     current.blocks
       .flatMap((block) => block.regions)
-      .some((region) => region.action.type === 'cancel' && region.action.id === 'fixture-parent/0'),
-    'persisted detached launch offers per-task cancellation'
+      .some(
+        (region) => region.action.type === 'cancel' && region.action.id === '__streaming__/0/0'
+      ),
+    'live batch offers per-child cancellation'
   )
   assert.ok(
-    await evaluate(`return !!document.querySelector('header button[title*="background"]')`),
-    'private bot chat exposes detached-task controls'
+    !JSON.stringify(current).includes('Investigate subtasks'),
+    'batch wrapper stays hidden while the child card is visible'
   )
   const region = current.blocks
     .flatMap((block) => block.regions)
@@ -115,8 +117,8 @@ async function run() {
     'completed task no longer offers cancellation'
   )
   assert.ok(
-    !JSON.stringify(current).includes('fixture-result'),
-    'no separate background-done bubble'
+    !JSON.stringify(current).includes('Investigate subtasks'),
+    'completed batch still shows only the child card'
   )
   await evaluate('window.__taskFixture("running")')
   await settle()
@@ -136,70 +138,10 @@ async function run() {
   await settle()
   assert.ok(
     await evaluate('return window.__canvasTest.cancelled.includes("fixture-sub")'),
-    'cancel button addresses the detached delegate, not its parent'
+    'cancel button addresses the child delegate, not its parent'
   )
-  await evaluate(`document.querySelector('header button[title*="background"]').click()`)
-  assert.ok(
-    await evaluate('return window.__canvasTest.cancelled.includes("fixture-job")'),
-    'bot header cancels outstanding background tasks'
-  )
-  await evaluate('window.__taskFixture("running", true)')
+  await evaluate('window.__taskFixture("completed")')
   await settle()
-  assert.ok(
-    await evaluate(`
-    const status = document.querySelector('section[aria-label="1 subagent still running"]')
-    const r = status?.getBoundingClientRect()
-    return !!r && r.top >= 0 && r.bottom <= innerHeight && status.textContent.includes('provider research')
-  `),
-    'AFK return: the pending review stays visible beside the composer after later replies'
-  )
-  assert.ok(
-    await evaluate(
-      `return !!document.querySelector('textarea') && !document.querySelector('button[title="Stop (Esc)"]')`
-    ),
-    'background progress does not pretend the parent is still taking its turn'
-  )
-  await evaluate(
-    `document.querySelector('section[aria-label="1 subagent still running"] button[title="provider research"]').click()`
-  )
-  await settle()
-  assert.ok(
-    await evaluate(
-      'return document.querySelector("header").textContent.includes("Explore: provider research")'
-    ),
-    'the running-task strip opens the live delegate'
-  )
-  await evaluate(`document.querySelector('header button[title^="Back to"]').click()`)
-  await settle()
-  assert.ok(
-    await evaluate(
-      `return document.querySelector('section[aria-label="1 subagent still running"]') !== null`
-    ),
-    'returning to the parent retains the detached task status'
-  )
-  await evaluate(
-    `document.querySelector('section[aria-label="1 subagent still running"] button[aria-label="Cancel this subagent"]').click()`
-  )
-  assert.ok(
-    await evaluate(
-      'return window.__canvasTest.cancelled.filter(id => id === "fixture-job").length === 2'
-    ),
-    'the persistent strip can cancel just that background job'
-  )
-  assert.ok(
-    await evaluate(
-      `return !!document.querySelector('section[aria-label="1 subagent still running"]')`
-    ),
-    'a cancellation request cannot hide a task before its terminal update'
-  )
-  await evaluate('window.__taskFixture("completed", true)')
-  await settle()
-  assert.ok(
-    await evaluate(
-      `return !document.querySelector('section[aria-label="1 subagent still running"]')`
-    ),
-    'the pending strip disappears only when the detached result arrives'
-  )
   const retainedParent = (await scene()).blocks.map((block) => block.id)
   await evaluate(`const el = document.querySelector('[data-canvas-surface]'); el.scrollTop = 0`)
   await settle()
@@ -209,7 +151,9 @@ async function run() {
   if (!open) {
     const toggle = (await scene()).blocks
       .flatMap((block) => block.regions)
-      .find((region) => region.action.type === 'toggle' && region.action.id === 'fixture-parent/0')
+      .find(
+        (region) => region.action.type === 'toggle' && region.action.id === 'fixture-parent/0/0'
+      )
     const togglePoint = await evaluate(
       `const r = document.querySelector('[data-canvas-surface]').getBoundingClientRect(); return { x: r.x + ${toggle.x + 30}, y: r.y + ${toggle.y + toggle.h / 2} }`
     )

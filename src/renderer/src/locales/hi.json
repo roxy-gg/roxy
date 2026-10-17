@@ -154,11 +154,7 @@
   },
   "chat": {
     "backTo": "{{title}} पर वापस",
-    "backgroundRunning_one": "{{count}} सबएजेंट अभी भी चल रहा है",
-    "backgroundRunning_other": "{{count}} सबएजेंट अभी भी चल रहे हैं",
     "cancel": "रद्द करें",
-    "cancelBackground_one": "{{count}} बैकग्राउंड सबएजेंट रद्द करें",
-    "cancelBackground_other": "{{count}} बैकग्राउंड सबएजेंट रद्द करें",
     "cancelSubagent": "इस सबएजेंट को रद्द करें",
     "copied": "कॉपी किया गया",
     "copilotAuthenticate": "GitHub पर प्रमाणित करें",

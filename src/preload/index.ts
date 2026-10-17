@@ -5,7 +5,6 @@ import type {
   AutomationDelta,
   RoxyApi,
   LlmDelta,
-  TaskUpdate,
   BrowserState,
   BrowserTab,
   BrowserProxyConfig,
@@ -244,16 +243,6 @@ const roxy: RoxyApi = {
         callback(payload)
       ipcRenderer.on(CHANNELS.llmDelta, handler)
       return () => ipcRenderer.removeListener(CHANNELS.llmDelta, handler)
-    }
-  },
-  tasks: {
-    listRunning: (sessionId) => ipcRenderer.invoke(CHANNELS.tasksListRunning, sessionId),
-    cancel: (jobId) => ipcRenderer.invoke(CHANNELS.tasksCancel, jobId),
-    onUpdate: (callback) => {
-      const handler = (_event: Electron.IpcRendererEvent, update: TaskUpdate): void =>
-        callback(update)
-      ipcRenderer.on(CHANNELS.taskUpdate, handler)
-      return () => ipcRenderer.removeListener(CHANNELS.taskUpdate, handler)
     }
   },
   subagents: {

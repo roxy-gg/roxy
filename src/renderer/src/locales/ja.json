@@ -154,11 +154,7 @@
   },
   "chat": {
     "backTo": "{{title}}に戻る",
-    "backgroundRunning_one": "{{count}}個のサブエージェントがまだ実行中",
-    "backgroundRunning_other": "{{count}}個のサブエージェントがまだ実行中",
     "cancel": "キャンセル",
-    "cancelBackground_one": "バックグラウンドサブエージェントを{{count}}件キャンセル",
-    "cancelBackground_other": "バックグラウンドサブエージェントを{{count}}件キャンセル",
     "cancelSubagent": "このサブエージェントをキャンセル",
     "copied": "コピーしました",
     "copilotAuthenticate": "GitHubで認証",

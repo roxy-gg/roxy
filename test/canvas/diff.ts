@@ -919,6 +919,101 @@ check('activity timer sits below the copy and narrow copy still ellipsizes', () 
   assert.ok(elapsed.y > label.y)
   assert.ok(elapsed.x < scene.width)
 })
+check('subtask batches show independent cards at main transcript width', () => {
+  const children: MessagePart[] = [
+    {
+      type: 'tool',
+      tool: 'task',
+      state: 'running',
+      callId: 'child-0',
+      subChatId: 'sub-0',
+      title: 'Explore: Renderer',
+      children: [
+        { type: 'tool', tool: 'read', state: 'running', callId: 'read-0', title: 'renderer.ts' }
+      ]
+    },
+    {
+      type: 'tool',
+      tool: 'task',
+      state: 'done',
+      callId: 'child-1',
+      subChatId: 'sub-1',
+      title: 'Explore: Runtime',
+      output: 'Found the runtime.'
+    }
+  ]
+  const batch: MessagePart = {
+    type: 'tool',
+    tool: 'task',
+    state: 'running',
+    callId: 'batch',
+    title: 'Investigate subtasks',
+    input: { tasks: [{ description: 'Renderer', prompt: 'Inspect it' }] },
+    children
+  }
+  const message: Message = {
+    id: 'batch-message',
+    chatId: 'chat',
+    role: 'assistant',
+    content: '',
+    parts: [batch],
+    createdAt: 0
+  }
+  const emptyBatch = { ...batch, children: undefined }
+  const startup = layoutTranscript(
+    { ...longInput([]), streaming: [emptyBatch], viewport: undefined },
+    new BlockCache()
+  )
+  assert.equal(
+    startup.blocks[0].regions.filter((region) => region.action.type === 'toggle').length,
+    0,
+    'the batch wrapper does not flash before delegates start'
+  )
+  for (const windowed of [false, true]) {
+    const state = view()
+    const childId = windowed ? 'batch-message/0/0' : '__streaming__/0/0'
+    state.open.add(childId)
+    const scene = layoutTranscript(
+      {
+        ...longInput(windowed ? [...longMessages, message] : [message], state),
+        streaming: windowed ? null : [batch],
+        viewport: windowed ? { top: 0, height: 600, tail: true } : undefined,
+        subagentIds: new Set(['sub-0', 'sub-1'])
+      },
+      new BlockCache()
+    )
+    const block = scene.blocks.at(-1)!
+    const toggles = block.regions.filter(
+      (region) =>
+        region.action.type === 'toggle' &&
+        (region.action.id === `${windowed ? 'batch-message' : '__streaming__'}/0/0` ||
+          region.action.id === `${windowed ? 'batch-message' : '__streaming__'}/0/1`)
+    )
+    assert.deepEqual(
+      toggles.map((region) => region.action),
+      [
+        { type: 'toggle', id: windowed ? 'batch-message/0/0' : '__streaming__/0/0' },
+        { type: 'toggle', id: windowed ? 'batch-message/0/1' : '__streaming__/0/1' }
+      ]
+    )
+    assert.equal(toggles[0].w, toggles[1].w, 'siblings share the main column width')
+    assert.ok(
+      block.regions.some(
+        (region) => region.action.type === 'session' && region.action.id === 'sub-0'
+      ),
+      'expanded child still opens its own session'
+    )
+    assert.ok(JSON.stringify(block.nodes).includes('renderer.ts'), 'expanded child keeps its work')
+    assert.ok(!JSON.stringify(block.nodes).includes('Investigate subtasks'))
+    assert.ok(
+      block.regions.some(
+        (region) =>
+          region.action.type === 'cancel' &&
+          region.action.id === (windowed ? 'batch-message/0/0' : '__streaming__/0/0')
+      )
+    )
+  }
+})
 check('live reasoning starts collapsed and can be toggled closed again', () => {
   const state = view()
   const input = {

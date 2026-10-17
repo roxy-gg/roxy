@@ -395,6 +395,28 @@ export function layoutParts(
     const id = `${idPrefix}${firstIndex + i}`
 
     if (part.type === 'tool') {
+      // A batch is one model-facing call, but each delegate is its own visible
+      // activity. Nested IDs still address the correct child's controls.
+      if (
+        part.tool === 'task' &&
+        Array.isArray(part.input?.tasks) &&
+        (part.state === 'running' || part.children?.length)
+      ) {
+        cursor += layoutParts(
+          builder,
+          part.children ?? [],
+          x,
+          cursor,
+          width,
+          input,
+          streaming && part.state === 'running',
+          `${id}/`,
+          0,
+          false,
+          speakingAs
+        )
+        return
+      }
       const card: ToolCardInput = {
         part,
         id,

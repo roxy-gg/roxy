@@ -154,11 +154,7 @@
   },
   "chat": {
     "backTo": "Назад к {{title}}",
-    "backgroundRunning_one": "{{count}} субагент всё ещё работает",
-    "backgroundRunning_other": "{{count}} субагентов всё ещё работают",
     "cancel": "отмена",
-    "cancelBackground_one": "Отменить {{count}} фоновый подагент",
-    "cancelBackground_other": "Отменить {{count}} фоновых подагентов",
     "cancelSubagent": "Отменить этого подагента",
     "copied": "Скопировано",
     "copilotAuthenticate": "Авторизоваться на GitHub",

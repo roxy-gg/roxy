@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict'
 import type { Message } from '../src/shared/types'
 import type { MessagePart } from '../src/shared/types'
-import type { TaskUpdate } from '../src/shared/api'
 import { taskTranscript } from '../src/renderer/src/lib/task-transcript'
 import { taskPreview, CHILD_OUTPUT_CAP, MAX_CHILD_PARTS } from '../src/shared/parts'
 import {
@@ -66,11 +65,10 @@ console.log('optimistic messages: merge, attachments, stale loads, order and ded
 const task: Extract<MessagePart, { type: 'tool' }> = {
   type: 'tool',
   tool: 'task',
-  state: 'done',
+  state: 'running',
   callId: 'launch',
   subChatId: 'sub',
-  input: { description: 'Research', background: true },
-  output: 'Started',
+  input: { description: 'Research' },
   title: 'Explore: Research'
 }
 const launch: Message = {
@@ -82,29 +80,18 @@ const launch: Message = {
 const progress: MessagePart[] = [
   { type: 'tool', tool: 'read', callId: 'child-read', state: 'running' }
 ]
-const running: TaskUpdate[] = [
-  {
-    jobId: 'job',
-    subChatId: 'sub',
-    sessionId: 'chat',
-    description: 'Research',
-    subagentType: 'explore',
-    state: 'running',
-    startedAt: 1
-  }
-]
-const active = taskTranscript([launch], null, { sub: progress }, running)
+const active = taskTranscript([launch], null, { sub: progress })
 const activeCard = active.messages[0].parts[0] as typeof task
 assert.equal(
   activeCard.state,
   'running',
-  'a detached task stays visibly running after its parent ends'
+  'a running child stays visibly running while its parent waits'
 )
 assert.equal(activeCard.children, progress)
 assert.equal(activeCard.subChatId, 'sub', 'the running card retains its per-task cancel target')
 assert.equal(active.messages[0].botId, 'guest')
-assert.equal(task.state, 'done', 'projection never mutates replayable history')
-const live = taskTranscript([], [task], { sub: progress }, running)
+assert.equal(task.state, 'running', 'projection never mutates replayable history')
+const live = taskTranscript([], [task], { sub: progress })
 assert.equal((live.streaming?.[0] as typeof task).state, 'running')
 
 const finished: Message = {
@@ -169,8 +156,7 @@ const settled = taskTranscript([launch, finished], null, {}).messages[0].parts
 const unrelatedToken = taskTranscript(
   [launch, finished],
   [{ type: 'text', text: 'unrelated token' }],
-  { otherSub: progress },
-  running
+  { otherSub: progress }
 )
 assert.equal(
   unrelatedToken.messages[0].parts,
@@ -179,7 +165,7 @@ assert.equal(
 )
 const fork = { ...launch, id: 'fork-row', chatId: 'fork' }
 assert.equal(
-  taskTranscript([fork], null, { sub: progress }, running).messages[0],
-  fork,
-  'a fork never inherits running controls for the original conversation'
+  taskTranscript([fork], null, { sub: progress }).messages[0].parts[0].type,
+  'tool',
+  'a fork keeps its own task card without background controls'
 )

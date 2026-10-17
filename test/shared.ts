@@ -13,7 +13,6 @@ import {
   AGENTS,
   getAgent,
   isReadOnlyAgent,
-  isWriteCapableSubagent,
   PRIMARY_AGENTS,
   SUBAGENTS,
   DEFAULT_AGENT_ID
@@ -245,16 +244,7 @@ import {
   KEEP_RECENT_TOKENS,
   TOOL_OUTPUT_MAX_CHARS
 } from '../src/shared/context'
-import {
-  MAX_PARALLEL_SUBAGENTS,
-  mapWithConcurrency,
-  parseTaskInput,
-  partitionTasksByWriteCapability,
-  runTasksByWriteCapability,
-  partitionToolCalls,
-  renderBackgroundStarted,
-  renderTaskResult
-} from '../src/shared/parallel'
+import { parseTaskInput, partitionToolCalls } from '../src/shared/parallel'
 import {
   RpcDecoder,
   encodeRpcMessage,
@@ -1718,8 +1708,6 @@ check(
 )
 
 // ---- parallel + task planning (Phase 11) ----
-check('MAX_PARALLEL_SUBAGENTS is a positive cap', MAX_PARALLEL_SUBAGENTS >= 1)
-
 const partitioned = partitionToolCalls([
   { id: 'a', name: 'task' },
   { id: 'b', name: 'read' },
@@ -1740,64 +1728,30 @@ check(
 )
 
 const ti = parseTaskInput(
-  JSON.stringify({ description: 'do it', prompt: 'the ask', subagent_type: 'explore' })
+  JSON.stringify({
+    tasks: [
+      { description: 'one', prompt: 'first ask' },
+      { description: 'two', prompt: 'second ask' }
+    ]
+  })
 )
 check(
-  'parseTaskInput reads fields',
-  ti.description === 'do it' && ti.prompt === 'the ask' && ti.subagentType === 'explore'
+  'task batch preserves order',
+  ti.length === 2 && ti[0].prompt === 'first ask' && ti[1].description === 'two'
 )
-check('parseTaskInput defaults foreground', ti.background === false)
-check(
-  'parseTaskInput defaults subagent to general',
-  parseTaskInput('{}').subagentType === 'general'
-)
-check('parseTaskInput default description', parseTaskInput('{}').description === 'subtask')
-check(
-  'parseTaskInput background=true (bool)',
-  parseTaskInput(JSON.stringify({ background: true })).background === true
-)
-check(
-  'parseTaskInput background="true" (string)',
-  parseTaskInput(JSON.stringify({ background: 'true' })).background === true
-)
-check(
-  'parseTaskInput background="1"',
-  parseTaskInput(JSON.stringify({ background: '1' })).background === true
-)
-check(
-  'parseTaskInput other background string is false',
-  parseTaskInput(JSON.stringify({ background: 'nope' })).background === false
-)
-check(
-  'parseTaskInput task_id passthrough',
-  parseTaskInput(JSON.stringify({ task_id: 'sess_9' })).taskId === 'sess_9'
-)
-check('parseTaskInput task_id absent → undefined', parseTaskInput('{}').taskId === undefined)
-check(
-  'parseTaskInput tolerates malformed JSON',
-  parseTaskInput('{not json').subagentType === 'general'
-)
-
-const okRes = renderTaskResult('explore', 'completed', 'found it')
-check(
-  'renderTaskResult completed uses task_result',
-  okRes.includes('<task_result>') && okRes.includes('state="completed"')
-)
-check('renderTaskResult includes body', okRes.includes('found it'))
-const errRes = renderTaskResult('general', 'error', 'boom')
-check(
-  'renderTaskResult error uses task_error',
-  errRes.includes('<task_error>') && errRes.includes('state="error"')
-)
-check(
-  'renderTaskResult includes summary when given',
-  renderTaskResult('explore', 'completed', 'x', 'a summary').includes(
-    '<summary>a summary</summary>'
+for (const bad of ['{}', '{not json', '{"tasks":[]}', '{"tasks":[{"description":"x"}]}']) {
+  check(
+    `task batch rejects malformed input: ${bad}`,
+    (() => {
+      try {
+        parseTaskInput(bad)
+        return false
+      } catch {
+        return true
+      }
+    })()
   )
-)
-const started = renderBackgroundStarted('general', 'crunch data')
-check('renderBackgroundStarted names the task', started.includes('crunch data'))
-check('renderBackgroundStarted warns against polling', /DO NOT poll/i.test(started))
+}
 
 // ---- PartsFold: one fold for local / remote / main, incl. nested subagents ----
 {
@@ -2963,38 +2917,6 @@ console.log('\nremote workspace ipc parity\n')
 }
 
 async function main(): Promise<void> {
-  // mapWithConcurrency: empty input is a no-op empty array.
-  check(
-    'mapWithConcurrency([]) is empty',
-    (await mapWithConcurrency([], 4, async () => 1)).length === 0
-  )
-
-  // Results come back in INPUT order even when later items resolve first.
-  const orderOut = await mapWithConcurrency([30, 10, 20, 0], 4, async (ms, i) => {
-    await new Promise((r) => setTimeout(r, ms))
-    return `${i}:${ms}`
-  })
-  check('mapWithConcurrency preserves input order', orderOut.join() === '0:30,1:10,2:20,3:0')
-
-  // Bounded: never more than `limit` run at once, and it genuinely parallelizes.
-  let active = 0
-  let peak = 0
-  const items = Array.from({ length: 12 }, (_, i) => i)
-  const out = await mapWithConcurrency(items, 3, async (i) => {
-    active++
-    peak = Math.max(peak, active)
-    await new Promise((r) => setTimeout(r, 5))
-    active--
-    return i * 2
-  })
-  check('mapWithConcurrency respects the limit', peak <= 3)
-  check('mapWithConcurrency actually parallelizes', peak >= 2)
-  check('mapWithConcurrency maps every value', out.join() === items.map((i) => i * 2).join())
-
-  // A limit larger than the batch is clamped (no idle workers, all run).
-  const small = await mapWithConcurrency([1, 2], 10, async (n) => n + 1)
-  check('mapWithConcurrency clamps limit to batch size', small.join() === '2,3')
-
   // --- session slugs (npm-style random three-word session names) ---
   const slugs = Array.from({ length: 500 }, () => randomSlug())
   check(
@@ -3146,167 +3068,34 @@ async function main(): Promise<void> {
   check('portable: safe path rejects a drive letter', !isSafeSkillFilePath('C:/x'))
   check('portable: safe path rejects backslashes', !isSafeSkillFilePath('a\\b'))
 
-  // ---- subagent concurrency: readers parallel, writers serialized ----
-  // Two write-capable subagents share their parent's cwd, so running them at
-  // once is a file race inside one session. These assert real OVERLAP, not a
-  // reimplementation of the rule.
+  // ---- subagent batch contract ----
+  // Children run concurrently and the parent joins every result in input order.
   {
-    check('explore is not write-capable', isWriteCapableSubagent('explore') === false)
-    check('general IS write-capable', isWriteCapableSubagent('general') === true)
-    // Fail closed: the default subagent is `general`, so an unknown name must
-    // never be optimistically treated as safe to parallelize.
     check(
-      'an unknown subagent is treated as write-capable',
-      isWriteCapableSubagent('nope') === true
+      'only Explore is available as a subagent',
+      SUBAGENTS.length === 1 && SUBAGENTS[0].id === 'explore'
     )
-    check('an empty subagent name is write-capable', isWriteCapableSubagent('') === true)
+    check('Explore has full tools', SUBAGENTS[0].tools === 'all')
 
-    const part = partitionTasksByWriteCapability(
-      ['explore', 'general', 'explore', 'general'],
-      (t) => isWriteCapableSubagent(t)
-    )
-    check(
-      'partition splits readers from writers',
-      part.readers.length === 2 && part.writers.length === 2
-    )
-
-    /**
-     * Run tasks, recording the max number of the SAME KIND in flight at once.
-     * Per-kind matters: the rule is "no two writers overlap", not "a writer
-     * never overlaps anything" — writers are expected to run alongside readers.
-     */
-    const trace = async (kinds: string[]) => {
-      const live = new Map<string, number>()
-      const peak = new Map<string, number>()
-      const order: string[] = []
-      const results = await runTasksByWriteCapability(kinds, {
-        isWriteCapable: (t) => isWriteCapableSubagent(t),
-        limit: 4,
-        run: async (t) => {
-          const now = (live.get(t) ?? 0) + 1
-          live.set(t, now)
-          peak.set(t, Math.max(peak.get(t) ?? 0, now))
-          order.push(t)
-          await new Promise((r) => setTimeout(r, 20))
-          live.set(t, now - 1)
-          return `done:${t}`
-        }
+    let running = 0
+    let peak = 0
+    const started: number[] = []
+    const settled = await Promise.allSettled(
+      Array.from({ length: 8 }, async (_, i) => {
+        started.push(i)
+        peak = Math.max(peak, ++running)
+        await new Promise((resolve) => setTimeout(resolve, i === 0 ? 30 : 5))
+        running--
+        if (i === 2) throw new Error('one failure')
+        return i
       })
-      return { peak, order, results }
-    }
-
-    // Writers must never overlap...
-    const w = await trace(['general', 'general', 'general'])
-    check(
-      'two write-capable subagents never overlap',
-      (w.peak.get('general') ?? 0) === 1,
-      String(w.peak.get('general'))
     )
-    check('...and all of them still run', w.results.length === 3)
-    check('...in their original order', w.order.join(',') === 'general,general,general')
-
-    // ...while readers still do.
-    const r = await trace(['explore', 'explore', 'explore'])
+    check('all children start without an application cap', started.length === 8 && peak === 8)
     check(
-      'read-only subagents DO overlap',
-      (r.peak.get('explore') ?? 0) > 1,
-      String(r.peak.get('explore'))
-    )
-    check('...and all of them run', r.results.length === 3)
-
-    // Mixed: readers fan out, the single writer is unaffected.
-    const m = await trace(['explore', 'general', 'explore', 'general'])
-    check('mixed turn: readers still overlap', (m.peak.get('explore') ?? 0) > 1)
-    check('mixed turn: writers still do not', (m.peak.get('general') ?? 0) === 1)
-    // Writers are not blocked BY readers — serialization is writer-vs-writer
-    // only, so a slow explore never stalls the editing work.
-    {
-      let liveReaders = 0
-      let sawOverlap = false
-      await runTasksByWriteCapability(['explore', 'explore', 'general', 'general'], {
-        isWriteCapable: (t) => isWriteCapableSubagent(t),
-        limit: 4,
-        run: async (t) => {
-          const reader = t === 'explore'
-          if (reader) liveReaders++
-          else if (liveReaders > 0) sawOverlap = true
-          await new Promise((r) => setTimeout(r, 20))
-          if (reader) liveReaders--
-          return t
-        }
-      })
-      check('mixed turn: a writer runs while readers are still in flight', sawOverlap)
-    }
-    check('mixed turn: every task returns a result', m.results.length === 4)
-    check(
-      'mixed turn: results carry their task back',
-      m.results.every((x) => x.result === `done:${x.task}`)
-    )
-
-    // Abort stops LAUNCHING more writers, but keeps what already finished so the
-    // caller can still pair every tool_call with a tool result.
-    {
-      let ran = 0
-      let abort = false
-      const out = await runTasksByWriteCapability(['general', 'general', 'general'], {
-        isWriteCapable: () => true,
-        limit: 4,
-        aborted: () => abort,
-        run: async () => {
-          ran++
-          abort = true // cancel the turn after the first one
-          return ran
-        }
-      })
-      check('abort stops launching further writers', ran === 1, String(ran))
-      check('...but keeps the result that already completed', out.length === 1)
-    }
-
-    // Readers honor the abort too. They used to be launched unconditionally, so
-    // stopping a fanned-out turn still started every explore subagent that had
-    // not been picked up yet.
-    {
-      let ran = 0
-      let abort = false
-      const out = await runTasksByWriteCapability(['explore', 'explore', 'explore', 'explore'], {
-        isWriteCapable: () => false,
-        limit: 1, // one at a time, so the abort lands between items
-        aborted: () => abort,
-        run: async () => {
-          ran++
-          abort = true
-          return ran
-        }
-      })
-      check('abort stops launching further readers', ran === 1, String(ran))
-      check('...and leaves no undefined holes in the results', out.length === 1)
-      check(
-        '...with the completed result intact',
-        out.every((r) => r !== undefined && r.result !== undefined)
-      )
-    }
-
-    // A reader batch that is aborted before ANY item starts yields nothing at
-    // all rather than an array of holes.
-    {
-      const out = await runTasksByWriteCapability(['explore', 'explore'], {
-        isWriteCapable: () => false,
-        limit: 4,
-        aborted: () => true,
-        run: async () => 1
-      })
-      check('an already-aborted turn launches no readers', out.length === 0)
-    }
-
-    check(
-      'no tasks -> no results',
-      (
-        await runTasksByWriteCapability([], {
-          isWriteCapable: () => true,
-          limit: 4,
-          run: async () => 1
-        })
-      ).length === 0
+      'all outcomes retain input order',
+      settled[0].status === 'fulfilled' &&
+        settled[2].status === 'rejected' &&
+        settled[7].status === 'fulfilled'
     )
   }
 

@@ -67,11 +67,6 @@ import type { ForgeKind } from '../../shared/forge'
 import { pruneWorktrees, removeWorktreeForChat, renameWorkstreamBranch } from '../services/worktree'
 import { checkForUpdates, quitAndInstall, getUpdateState } from '../services/updater'
 import {
-  cancelBackgroundJob,
-  cancelSessionBackgroundJobs,
-  listRunningBackgroundJobs
-} from '../services/background-tasks'
-import {
   endSubagentRuns,
   listRunningSubagents,
   subagentSnapshot,
@@ -394,9 +389,6 @@ export function registerIpc(): void {
   ipcMain.handle(CHANNELS.chatsRemove, (_e, id: string) => {
     if (bots.chatBot(id)) throw new Error('Delete bots from their settings, not from a project')
     abortSession(id)
-    // Cancel any background subagents this session launched before it's deleted,
-    // so detached work doesn't keep running against a gone parent.
-    cancelSessionBackgroundJobs(id)
     // Drop any live subagent stream for this session (and, when a parent goes,
     // for its delegates too). The run itself is cancelled above or dies with the
     // parent turn; this just stops a gone session pinning a registry entry that
@@ -899,7 +891,6 @@ export function registerIpc(): void {
     const bot = bots.getBot(id)
     if (bot && sessionBusy(bot.chatId)) throw new Error('Stop the bot before deleting it')
     if (bot) {
-      cancelSessionBackgroundJobs(bot.chatId)
       endSubagentRuns(bot.chatId)
       killSessionBackground(bot.chatId)
       browser.disposeSession(bot.chatId)
@@ -1125,12 +1116,6 @@ export function registerIpc(): void {
     // otherwise keep running with nobody left to read its result.
     cancelToolCallsFor(sessionId)
   })
-
-  // ---- background subagent tasks (Phase 11) ----
-  ipcMain.handle(CHANNELS.tasksListRunning, (_e, sessionId?: string) =>
-    listRunningBackgroundJobs(sessionId)
-  )
-  ipcMain.handle(CHANNELS.tasksCancel, (_e, jobId: string) => cancelBackgroundJob(jobId))
 
   // ---- subagent live sessions ----
   // A subagent's own session streams like any other chat: `subagent:delta` is
