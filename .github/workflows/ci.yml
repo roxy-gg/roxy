@@ -171,7 +171,8 @@ jobs:
         if: runner.os == 'Linux'
         env:
           ELECTRON_DISABLE_SANDBOX: '1'
-        run: xvfb-run --auto-servernum npm run smoke:background-ui
+        # The suite opens a 1440px window; Xvfb's default screen is only 1280px wide.
+        run: xvfb-run --auto-servernum --server-args="-screen 0 1920x1080x24" npm run smoke:background-ui
 
       - name: Bot strip ordering (real Chromium drag and keyboard)
         if: runner.os == 'Linux'

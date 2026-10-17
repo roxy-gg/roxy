@@ -23,7 +23,7 @@ import type {
   RemoteDelta,
   RemoteState,
   SessionsUpdated,
-  SubagentDelta,
+  SubagentDelta
 } from '@shared/api'
 import { selectPromptName, buildEnvironment, assembleSystemPrompt } from '@shared/prompt'
 import { PROMPT_TEXT, AGENT_PROMPT_TEXT } from '@shared/prompt-text'
