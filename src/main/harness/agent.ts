@@ -618,6 +618,11 @@ function buildSystemMessage(
   const agentPrompt = agent?.promptFile ? agentPromptText[agent.promptFile] : undefined
   const extra = [
     ...instructions,
+    ...(agent && !isReadOnlyAgent(agent)
+      ? [
+          'Whenever you need to investigate multiple independent topics or carry out multiple independent tasks, use the task tool to spin up at least two subtasks in one parallel batch. Use it freely without asking permission. Keep a single focused task in the parent, wait for prerequisites before delegating dependent work, and give each child a self-contained assignment that avoids overlapping edits.'
+        ]
+      : []),
     ...(skillInfo ? [skillInfo] : []),
     ...(mcpInfo ? [mcpInfo] : []),
     ...(agentPrompt ? [agentPrompt] : [])
@@ -1128,11 +1133,11 @@ type ToolSchema = ReturnType<typeof fn>
 /** The delegation tool — lets a primary agent spawn a focused subagent. */
 const TASK_SCHEMA = fn(
   'task',
-  'Run independent investigations or side quests in parallel. Supply complete context in each prompt: Explore subagents do not inherit this conversation. They have full tools but share this workspace, so coordinated edits are not recommended. There is no task-count or concurrency limit. This call waits until every subtask completes, fails, or is cancelled, then returns every result in input order. No other parent tools run while the batch is active. This is not a persistent bot handoff.',
+  'Whenever you have multiple independent things to investigate or do, use this tool freely to spin up at least two subtasks in one parallel batch. Keep single focused tasks in the parent; wait for prerequisites before delegating dependent work. Supply complete context in each prompt: Explore subagents do not inherit this conversation. They have full tools but share this workspace, so avoid overlapping edits. There is no maximum task count or concurrency limit. This call waits until every subtask completes, fails, or is cancelled, then returns every result in input order. No other parent tools run while the batch is active. This is not a persistent bot handoff.',
   {
     tasks: {
       type: 'array',
-      minItems: 1,
+      minItems: 2,
       items: {
         type: 'object',
         properties: {

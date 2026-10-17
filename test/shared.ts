@@ -1764,7 +1764,14 @@ check(
   'task batch preserves order',
   ti.length === 2 && ti[0].prompt === 'first ask' && ti[1].description === 'two'
 )
-for (const bad of ['{}', '{not json', '{"tasks":[]}', '{"tasks":[{"description":"x"}]}']) {
+for (const bad of [
+  '{}',
+  '{not json',
+  '{"tasks":[]}',
+  '{"tasks":[{"description":"one","prompt":"first ask"}]}',
+  '{"tasks":[{"description":"one","prompt":"first ask"},{"description":"two"}]}',
+  '{"tasks":[{"description":"one","prompt":"first ask"},{"description":"two","prompt":"   "}]}'
+]) {
   check(
     `task batch rejects malformed input: ${bad}`,
     (() => {

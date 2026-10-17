@@ -36,13 +36,13 @@ export function parseTaskInput(rawArgs: string): TaskInput[] {
   try {
     input = JSON.parse(rawArgs)
   } catch {
-    throw new Error('Expected a JSON object with a non-empty tasks array.')
+    throw new Error('Expected a JSON object with a tasks array containing at least two tasks.')
   }
   if (!input || typeof input !== 'object' || Array.isArray(input))
-    throw new Error('Expected a JSON object with a non-empty tasks array.')
+    throw new Error('Expected a JSON object with a tasks array containing at least two tasks.')
   const tasks = (input as { tasks?: unknown }).tasks
-  if (!Array.isArray(tasks) || tasks.length === 0)
-    throw new Error('Expected a non-empty tasks array.')
+  if (!Array.isArray(tasks) || tasks.length < 2)
+    throw new Error('Expected a tasks array containing at least two tasks.')
   return tasks.map((task, index) => {
     if (!task || typeof task !== 'object' || Array.isArray(task))
       throw new Error(`Task ${index + 1} must have a description and prompt.`)

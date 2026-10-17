@@ -22,7 +22,12 @@ app.on('window-all-closed', () => undefined)
 interface Request {
   model: string
   messages: ChatMessage[]
-  tools?: { function: { name: string } }[]
+  tools?: {
+    function: {
+      name: string
+      parameters?: { properties?: { tasks?: { minItems?: number } } }
+    }
+  }[]
 }
 
 function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
@@ -117,7 +122,23 @@ async function main(): Promise<void> {
             })
           return children[child].promise
         }
-        if (++parentCalls === 1)
+        if (++parentCalls === 1) {
+          assert.equal(
+            body.tools?.find((tool) => tool.function.name === 'task')?.function.parameters
+              ?.properties?.tasks?.minItems,
+            2,
+            'task schema requires at least two subtasks'
+          )
+          assert.ok(
+            body.messages.some(
+              (message) =>
+                message.role === 'system' &&
+                String(message.content).includes(
+                  'use the task tool to spin up at least two subtasks'
+                )
+            ),
+            'parent prompt encourages parallel subtasks for independent work'
+          )
           return response({
             tool_calls: [
               {
@@ -136,6 +157,7 @@ async function main(): Promise<void> {
               }
             ]
           })
+        }
         assert.ok(
           body.messages.some(
             (message) =>
