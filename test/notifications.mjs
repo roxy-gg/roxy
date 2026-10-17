@@ -361,21 +361,22 @@ const pending = { state: 'pending', notBefore: 0 }
   await flush()
   assert.deepEqual(d.notified, ['c1'], 'an idle session notifies once')
 }
-for (const [label, head] of [
-  ['a due pending head', pending],
-  ['a running head', { state: 'running' }]
+for (const [label, queue] of [
+  ['a due pending head', [pending]],
+  ['a running head', [{ state: 'running' }]],
+  ['a failed attempt before fresh user work', [{ state: 'failed', error: 'boom' }, pending]]
 ]) {
-  const d = decisions({ queue: [head] })
+  const d = decisions({ queue })
   d.turn('running')
   d.turn('idle')
   await flush()
   assert.equal(d.notified.length, 0, `${label} means more work is next`)
 }
-for (const [label, head] of [
-  ['a failed head blocks the FIFO', { state: 'failed', error: 'boom' }],
-  ['a future head is not next', { state: 'pending', notBefore: Date.now() + 60_000 }]
+for (const [label, queue] of [
+  ['a failed attempt alone is idle', [{ state: 'failed', error: 'boom' }]],
+  ['a future head is not next', [{ state: 'pending', notBefore: Date.now() + 60_000 }, pending]]
 ]) {
-  const d = decisions({ queue: [head, pending] })
+  const d = decisions({ queue })
   d.turn('running')
   d.turn('idle')
   await flush()
