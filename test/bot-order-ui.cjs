@@ -184,6 +184,36 @@ async function run() {
     `document.querySelector('button[aria-label="@a10"]').dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: botDrag }))`
   )
   await until(`return contract.store.getState().bots.at(-1)?.id === 'a1'`)
+  await evaluate(`document.querySelector('button[title="Collapse sidebar"]').click()`)
+  await until(`return !!document.querySelector('.sidebar-rail')`)
+  // The selection ring extends 4px past the avatar, including its offset.
+  // Check both a scrolling list and a short list with no scrollbar.
+  for (const count of [10, 2]) {
+    await evaluate(`
+      contract.bots = contract.bots.slice(0, ${count})
+      await contract.store.getState().refreshBots()
+      contract.store.setState({ activeChatId: contract.bots[0].chatId })
+    `)
+    await until(
+      `return document.querySelectorAll('.sidebar-rail button[aria-pressed]').length === ${count}`
+    )
+    const bounds = await evaluate(`
+      const bot = document.querySelector('.sidebar-rail button[aria-pressed="true"]')
+      const list = bot.parentElement
+      const rect = bot.getBoundingClientRect()
+      const clip = list.getBoundingClientRect()
+      return {
+        left: rect.left - 4 - (clip.left + list.clientLeft),
+        right: clip.left + list.clientLeft + list.clientWidth - (rect.right + 4),
+        scrollable: list.scrollHeight > list.clientHeight
+      }
+    `)
+    assert.ok(
+      bounds.left >= 0 && bounds.right >= 0,
+      'collapsed bot selection ring must not be clipped: ' + JSON.stringify(bounds)
+    )
+    assert.equal(bounds.scrollable, count === 10)
+  }
   assert.deepEqual(errors, [])
   console.log(
     'BOT ORDER UI OK: drag, click isolation, keyboard focus, context-menu moves and persisted refresh'
