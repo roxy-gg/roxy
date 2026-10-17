@@ -1,27 +1,14 @@
-import { memo, type CSSProperties } from 'react'
-import { useBackground } from '../lib/background'
+import { memo } from 'react'
 import { Sidebar } from '../components/Sidebar'
 import { ChatView } from '../components/ChatView'
-import { BackgroundMedia } from '../components/BackgroundMedia'
+import { BackgroundFrame } from '../components/BackgroundFrame'
 
 function Chat(): JSX.Element {
-  const background = useBackground()
-  const shared = !!background.rendered && background.settings.sidebarStyle !== 'default'
   return (
-    <div
-      className="relative isolate flex h-full w-full"
-      data-sidebar-style={shared ? background.settings.sidebarStyle : undefined}
-      style={{ '--sidebar-opacity': `${background.settings.sidebarOpacity}%` } as CSSProperties}
-    >
-      {shared && (
-        <div className="chat-wallpaper-shared">
-          <BackgroundMedia effect={background.settings.effect} />
-          {background.settings.effect === 'haze' && <div className="chat-wallpaper-haze" />}
-        </div>
-      )}
+    <BackgroundFrame>
       <Sidebar />
       <ChatView />
-    </div>
+    </BackgroundFrame>
   )
 }
 

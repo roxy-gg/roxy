@@ -81,7 +81,7 @@ export function BackgroundSettings(): JSX.Element {
       <div className="overflow-hidden rounded-xl border border-border bg-surface">
         <div className="p-4">
           <div
-            className="chat-background-host relative isolate flex h-60 overflow-hidden rounded-lg border border-border bg-bg"
+            className="background-preview-host relative isolate flex h-60 overflow-hidden rounded-lg border border-border bg-bg"
             data-glass={(draft.glass && !!background.image) || undefined}
             style={{ '--sidebar-opacity': `${draft.sidebarOpacity}%` } as CSSProperties}
           >

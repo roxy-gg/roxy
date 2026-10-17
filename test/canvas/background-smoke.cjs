@@ -778,6 +778,105 @@ async function run() {
   await click('#settings-background-panel button:has(.lucide-image-plus)')
   await until(`!!document.querySelector('#settings-background-panel .chat-wallpaper')`)
   const wallpaper = await evaluate(`return (await window.roxy.background.get()).image`)
+  const settingsHost = '#appearance-page .chat-background-host'
+  assert.equal(
+    await evaluate(
+      `return getComputedStyle(document.querySelector('${settingsHost} > .chat-wallpaper')).opacity`
+    ),
+    '0.58',
+    'Settings uses the saved empty-page opacity outside the preview'
+  )
+  for (const style of ['glass', 'dimmed']) {
+    await evaluate(
+      `await window.roxy.background.update({sidebarStyle:'${style}',sidebarOpacity:25,emptyOpacity:42,showOn:'empty',effect:'haze'})`
+    )
+    await until(`document.querySelector('#appearance-page [data-sidebar-style="${style}"]')`)
+    assert.deepEqual(
+      (await sidebarStyles())[0],
+      (await sidebarStyles())[1],
+      `${style} applies the same sidebar preferences in Settings and chat`
+    )
+    assert.equal(
+      await evaluate(
+        `return document.querySelectorAll('#appearance-page .chat-wallpaper-shared').length`
+      ),
+      1,
+      'one wallpaper spans the Settings sidebar and content'
+    )
+    assert.equal(
+      await evaluate(
+        `return getComputedStyle(document.querySelector('${settingsHost}'), '::before').opacity`
+      ),
+      '0.58',
+      'Settings dims content independently of sidebar opacity, including empty-only scope'
+    )
+    assert.equal(
+      await evaluate(
+        `return getComputedStyle(document.querySelector('#appearance-page aside'), '::before').backdropFilter`
+      ),
+      style === 'glass' ? 'blur(18px) saturate(1.2)' : 'none'
+    )
+    assert.equal(
+      await evaluate(
+        `return getComputedStyle(document.querySelector('#settings-background-panel .background-preview-host'), '::before').content`
+      ),
+      'none',
+      'shared page styling does not add an opaque overlay to the preview'
+    )
+    assert.equal(
+      await evaluate(
+        `return getComputedStyle(document.querySelector('#appearance-page .chat-wallpaper-shared img')).filter`
+      ),
+      'blur(12px) saturate(0.85)'
+    )
+    await click('#settings-activity')
+    assert.ok(
+      await evaluate(
+        `return document.querySelector('${settingsHost}').hasAttribute('data-wallpaper')`
+      )
+    )
+    await click('#settings-background')
+  }
+  await evaluate(`await window.roxy.background.update({sidebarStyle:'glass'})`)
+  await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', {
+    features: [{ name: 'prefers-reduced-transparency', value: 'reduce' }]
+  })
+  assert.equal(
+    await evaluate(
+      `return getComputedStyle(document.querySelector('#appearance-page aside'), '::before').backdropFilter`
+    ),
+    'none'
+  )
+  await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', {
+    features: [{ name: 'prefers-contrast', value: 'more' }]
+  })
+  assert.equal(
+    await evaluate(
+      `return getComputedStyle(document.querySelector('#appearance-page .chat-wallpaper-shared')).display`
+    ),
+    'none'
+  )
+  assert.equal(
+    await evaluate(
+      `return getComputedStyle(document.querySelector('${settingsHost}'), '::before').opacity`
+    ),
+    '1'
+  )
+  await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', {
+    features: [{ name: 'prefers-reduced-transparency', value: 'no-preference' }]
+  })
+  await evaluate(`await window.roxy.background.remove()`)
+  await until(`!document.querySelector('#appearance-page [data-sidebar-style]')`)
+  assert.equal(
+    await evaluate(
+      `return document.querySelectorAll('#appearance-page .chat-wallpaper, #appearance-page .chat-wallpaper-shared').length`
+    ),
+    0,
+    'removing the background restores solid Settings chrome'
+  )
+  await evaluate(
+    `await window.roxy.background.choose(); await window.roxy.background.update({sidebarStyle:'default',effect:'none',showOn:'all'})`
+  )
   await click('#settings-colors')
   assert.equal(
     await evaluate(`return document.querySelector('#settings-background-panel').checkVisibility()`),

@@ -2,6 +2,7 @@ import './BackgroundHarness'
 import { aggregateActivityDays } from '../../src/shared/activity'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { Sidebar } from '../../src/renderer/src/components/Sidebar'
+import { BackgroundFrame } from '../../src/renderer/src/components/BackgroundFrame'
 import Settings from '../../src/renderer/src/routes/Settings'
 import { useRoxyStore } from '../../src/renderer/src/lib/store'
 import { applyTheme } from '../../src/renderer/src/lib/theme'
@@ -126,7 +127,9 @@ function AppearancePages(): JSX.Element {
           pathname === '/' ? 'absolute inset-0' : 'invisible pointer-events-none absolute inset-0'
         }
       >
-        <Sidebar />
+        <BackgroundFrame>
+          <Sidebar />
+        </BackgroundFrame>
       </div>
       {pathname !== '/' && (
         <div id="appearance-page" className="absolute inset-0 bg-bg">

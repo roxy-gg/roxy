@@ -115,7 +115,8 @@
   backdrop-filter: blur(18px) saturate(1.2);
 }
 @media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
-  .chat-background-host {
+  .chat-background-host,
+  .background-preview-host {
     background: var(--color-bg);
   }
   [data-glass] .composer-panel::before,
