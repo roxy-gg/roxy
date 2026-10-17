@@ -214,7 +214,7 @@ export function enqueueDueJobs(now = Date.now()): string[] {
       const bot = getBot(job.botId)
       if (!bot) continue
       const queued = getDb()
-        .prepare('SELECT COUNT(*) AS n FROM queue WHERE chat_id = ?')
+        .prepare("SELECT COUNT(*) AS n FROM queue WHERE chat_id = ? AND state != 'failed'")
         .get(bot.chatId) as { n: number }
       if (queued.n >= 100) continue
       const next = nextBotRun(

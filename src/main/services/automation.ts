@@ -172,7 +172,7 @@ export function enqueuePrompt(
     throw new Error('not_before must be an epoch timestamp in milliseconds')
   }
   const count = getDb()
-    .prepare('SELECT COUNT(*) AS n FROM queue WHERE chat_id = ?')
+    .prepare("SELECT COUNT(*) AS n FROM queue WHERE chat_id = ? AND state != 'failed'")
     .get(chatId) as { n: number }
   if (count.n >= 100) throw new Error('This session already has 100 queued messages')
   const trimmed = content.trim()
@@ -228,9 +228,13 @@ export function startAutomation(): void {
   // Never replay uncertain tool side effects automatically after a crash.
   getDb()
     .prepare(
-      `UPDATE queue SET state = 'failed', error = 'Interrupted by app shutdown. Edit this message to retry.' WHERE state IN ('starting', 'running')`
+      `UPDATE queue SET state = 'failed', error = 'Interrupted by app shutdown. Retry this prompt to continue.' WHERE state IN ('starting', 'running')`
     )
     .run()
+  for (const row of getDb()
+    .prepare("SELECT id, error FROM queue WHERE state = 'failed' AND message_id IS NULL")
+    .all() as { id: string; error: string | null }[])
+    repo.failQueueItem(row.id, row.error ?? 'Model request failed')
   timer = setInterval(wakeAutomation, 1000)
   unsubscribeTurns = onTurnAvailable(requestAutomationWake)
   wakeAutomation()
@@ -426,9 +430,8 @@ async function deliver(item: QueueItem): Promise<void> {
   } catch (error) {
     release()
     // A persistent DB/claim error must not spin on the release wake forever.
-    getDb()
-      .prepare("UPDATE queue SET state = 'failed', error = ? WHERE id = ?")
-      .run(error instanceof Error ? error.message : String(error), item.id)
+    repo.failQueueItem(item.id, error instanceof Error ? error.message : String(error))
+    notifyTranscriptChanged(item.chatId)
     notifyAutomation(item.chatId)
     throw error
   }
@@ -530,9 +533,7 @@ async function deliver(item: QueueItem): Promise<void> {
       ? providers.find((p) => p.id === config.providerId)
       : providers[0]
     if (!provider)
-      throw new Error(
-        `Connect the provider selected for ${owner}, then edit the queued message to retry.`
-      )
+      throw new Error(`Connect the provider selected for ${owner}, then retry the prompt.`)
     const catalog = await listModels(provider.id).catch(() => [])
     const selected = config.providerId === provider.id ? config.model : null
     const model =
@@ -549,7 +550,7 @@ async function deliver(item: QueueItem): Promise<void> {
       validateForwardedImages(item.images)
       if (info?.imageInput !== true)
         throw new Error(
-          `Images were retained but not sent: ${model} ${info?.imageInput === false ? 'does not support image input' : 'has no verified image-input capability in the provider catalog'}. Choose a vision-capable model and retry, or remove the queued images to proceed without seeing them. No model was switched.`
+          `Images were retained but not sent: ${model} ${info?.imageInput === false ? 'does not support image input' : 'has no verified image-input capability in the provider catalog'}. Choose a vision-capable model and retry, or edit the prompt to remove its images. No model was switched.`
         )
     }
     const budget = contextBudgetFor(config.contextLimit, info?.contextLimit ?? 128000)
@@ -721,43 +722,43 @@ async function deliver(item: QueueItem): Promise<void> {
     }
   } catch (error) {
     const message = redactImageData(error instanceof Error ? error.message : String(error))
-    getDb()
-      .prepare(`UPDATE queue SET state = 'failed', error = ? WHERE id = ?`)
-      .run(message, item.id)
-    if (item.images?.length && !fold.parts.length && repo.getChat(item.chatId))
-      repo.addMessage({
-        chatId: item.chatId,
-        role: 'assistant',
-        content: `Image request could not finish: ${message}\nThe images remain in this session and its queue for retry.`,
-        ...returnAuthor
-      })
-    if (
-      item.replyToChatId &&
-      item.replyToChatId !== item.chatId &&
-      repo.getChat(item.replyToChatId)
-    ) {
-      repo.addMessage({
-        chatId: item.replyToChatId,
-        role: 'assistant',
-        content: `The delegated request could not finish: ${message}\nThe request remains in ${bot ? `@${bot.username}'s` : "the target session's"} queue for retry or removal.`,
-        ...returnAuthor
-      })
-      notifyAutomation(item.replyToChatId)
-      notifyTranscriptChanged(item.replyToChatId)
-    }
-    if (fold.parts.length && repo.getChat(item.chatId)) {
-      savedMessage = repo.addMessage({
-        chatId: item.chatId,
-        role: 'assistant',
-        content: partsToContent(fold.parts),
-        parts: fold.parts,
-        ...(bot
-          ? { botId: bot.id, botUsername: bot.username }
-          : hostVisiting
-            ? { botUsername: HOST_USERNAME }
-            : {})
-      })
-    }
+    getDb().transaction(() => {
+      if (item.images?.length && !fold.parts.length && repo.getChat(item.chatId))
+        savedMessage = repo.addMessage({
+          chatId: item.chatId,
+          role: 'assistant',
+          content: `Image request could not finish: ${message}\nThe images remain attached to the original prompt for retry.`,
+          ...returnAuthor
+        })
+      if (
+        item.replyToChatId &&
+        item.replyToChatId !== item.chatId &&
+        repo.getChat(item.replyToChatId)
+      ) {
+        repo.addMessage({
+          chatId: item.replyToChatId,
+          role: 'assistant',
+          content: `The delegated request could not finish: ${message}\nThe request remains in ${bot ? `@${bot.username}'s` : "the target session's"} queue for retry or removal.`,
+          ...returnAuthor
+        })
+        notifyAutomation(item.replyToChatId)
+        notifyTranscriptChanged(item.replyToChatId)
+      }
+      if (fold.parts.length && repo.getChat(item.chatId)) {
+        savedMessage = repo.addMessage({
+          chatId: item.chatId,
+          role: 'assistant',
+          content: partsToContent(fold.parts),
+          parts: fold.parts,
+          ...(bot
+            ? { botId: bot.id, botUsername: bot.username }
+            : hostVisiting
+              ? { botUsername: HOST_USERNAME }
+              : {})
+        })
+      }
+      repo.failQueueItem(item.id, message, savedMessage?.id)
+    })()
   } finally {
     live.delete(item.chatId)
     activityStartedAt.delete(item.chatId)

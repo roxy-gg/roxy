@@ -94,11 +94,15 @@ append to history and any continuation joins FIFO; they never own or release
 the source's current turn. Pending collaborator bubbles are not model context
 until their own delivery starts.
 
-Failed requests remain in the queue with an error until edited/retried or
-removed. Hidden failed or delayed automation blocks later automated work, but
-user prompts can pass it in user-queue order. Visible failed user requests still
-block later work until retried or removed. Automated failures appear separately
-under delivery issues, with retry/remove actions. Waiting user rows explain
+Failed attempts retain durable delivery records but appear on their original
+transcript prompt, never in the waiting queue. Edit/resend preserves the prompt
+and attachments and removes its explicitly linked previous response; external
+tool side effects are not undone. Legacy unlinked responses are preserved rather
+than guessing which history to delete. Failed user attempts do not block fresh
+user work. Failed or delayed automation blocks later automated work, but users
+can pass it in user-queue order. Failures whose anchors are projected away (such
+as task reports) remain under delivery issues with retry/remove actions.
+Waiting user rows explain
 pause, current session work, capacity, delay, or earlier-request blocking.
 Stop pauses draining. Interrupted starting/running deliveries
 are marked failed on startup rather than replaying potentially non-idempotent

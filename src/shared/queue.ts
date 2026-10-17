@@ -9,9 +9,9 @@ export function queueOrigin(item: QueueItem): QueueOrigin {
   return 'agent'
 }
 
-/** The composer queue contains only user prompts that have not started or need retrying. */
+/** Failed attempts belong to their transcript prompt, never the waiting queue. */
 export function isVisibleQueueItem(item: QueueItem): boolean {
-  return !isClaimedQueueItem(item) && queueOrigin(item) === 'user'
+  return (!item.state || item.state === 'pending') && queueOrigin(item) === 'user'
 }
 
 export function isClaimedQueueItem(item: Pick<QueueItem, 'state'>): boolean {
@@ -24,15 +24,16 @@ export function nextQueueItem(
   now = Date.now()
 ): QueueItem | undefined {
   if (items.some(isClaimedQueueItem)) return undefined
-  let item: QueueItem | undefined = items[0]
+  const waiting = items.filter((item) => item.state !== 'failed' || queueOrigin(item) !== 'user')
+  let item: QueueItem | undefined = waiting[0]
   // BOTS.md: hidden failed/delayed automation may not lock out user work.
-  // It still blocks later automation, and user failures/delays retain FIFO.
+  // It still blocks later automation; waiting user prompts retain FIFO.
   if (
     item &&
     queueOrigin(item) !== 'user' &&
     (item.state === 'failed' || (item.notBefore ?? 0) > now)
   ) {
-    item = items.find((entry) => queueOrigin(entry) === 'user')
+    item = waiting.find((entry) => queueOrigin(entry) === 'user')
   }
   return item && (!item.state || item.state === 'pending') && (item.notBefore ?? 0) <= now
     ? item

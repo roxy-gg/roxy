@@ -361,6 +361,9 @@ export interface QueueAddOptions {
 export interface QueueItem {
   id: string
   chatId: string
+  /** Original transcript prompt and the response owned by its failed attempt. */
+  messageId?: string
+  responseMessageId?: string
   content: string
   /** Images to send with the prompt when it's dequeued. */
   images?: QueueImage[]

@@ -43,6 +43,9 @@ export type HitAction =
   | { type: 'link'; href: string }
   | { type: 'cancel'; id: string }
   | { type: 'session'; id: string }
+  | { type: 'edit-prompt'; queueId: string }
+  | { type: 'resend-prompt'; queueId: string }
+  | { type: 'delete-prompt'; queueId: string }
   | { type: 'copy'; text: string }
   | { type: 'image'; src: string }
   | { type: 'diff'; id: string; command: DiffCommand; gap?: number }

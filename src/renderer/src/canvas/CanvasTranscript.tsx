@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { Message, MessagePart } from '@shared/types'
+import { useTranslation } from 'react-i18next'
+import type { Message, MessagePart, QueueItem } from '@shared/types'
 import { getTool } from '@shared/tools'
 import { streamSignature } from '@shared/parts'
 import { CanvasSurface, type CanvasLayoutContext } from './CanvasSurface'
@@ -10,6 +11,7 @@ import { ACTIVITY_PHRASE_ROTATION_MS } from './activity-status'
 import roxyLogo from '../assets/roxy.png'
 import { useRoxyStore } from '../lib/store'
 import { botAvatarUrl } from '../components/BotAvatar'
+import { QueuedMessage } from '../components/QueuedMessage'
 
 export type { CanvasProbe } from './CanvasSurface'
 
@@ -56,15 +58,23 @@ export function CanvasTranscript({
   onCancelTool,
   onScrollStateChange
 }: CanvasTranscriptProps): JSX.Element {
+  const { t } = useTranslation()
   const cache = useMemo(() => transcriptCache(chatId ?? ''), [chatId])
   const mounted = useRef(false)
   const [logo, setLogo] = useState(() => decodedLogo)
   const [clock, setClock] = useState(0)
+  const [editing, setEditing] = useState<QueueItem | null>(null)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
   const prompts = useMemo(() => promptEntries(messages), [messages])
   const bots = useRoxyStore((s) => s.bots)
   const chats = useRoxyStore((s) => s.chats)
   const selectChat = useRoxyStore((s) => s.selectChat)
   const queue = useRoxyStore((s) => s.queue)
+  const editQueued = useRoxyStore((s) => s.editQueued)
+  useEffect(() => {
+    setEditing(null)
+    setDeleteError(null)
+  }, [chatId])
   const activityStartedAt = useRoxyStore((s) => (chatId ? s.activityStartedAt[chatId] : undefined))
   // The queue is fetched with the messages, so it is only trustworthy once
   // this chat's transcript has landed.
@@ -153,6 +163,37 @@ export function CanvasTranscript({
   )
 
   const onAction = (action: HitAction): void => {
+    if (
+      action.type === 'edit-prompt' ||
+      action.type === 'resend-prompt' ||
+      action.type === 'delete-prompt'
+    ) {
+      const item = queue.find(
+        (item) => item.id === action.queueId && item.chatId === chatId && item.state === 'failed'
+      )
+      if (!item) return
+      if (action.type === 'edit-prompt') setEditing(item)
+      else if (action.type === 'delete-prompt') {
+        setDeleteError(null)
+        void useRoxyStore
+          .getState()
+          .removeQueued(item.id)
+          .catch(() => {
+            if (useRoxyStore.getState().activeChatId === chatId)
+              setDeleteError(t('transcript.deletePromptFailed'))
+          })
+      } else
+        void editQueued(
+          item.id,
+          item.content,
+          item.images?.map((image) => ({
+            ...image,
+            id: crypto.randomUUID(),
+            name: image.name ?? ''
+          }))
+        ).catch(() => setEditing(item))
+      return
+    }
     if (action.type === 'session') {
       void selectChat(action.id)
       return
@@ -171,15 +212,42 @@ export function CanvasTranscript({
   }
 
   return (
-    <CanvasSurface
-      transparent={transparent}
-      key={chatId ?? ''}
-      sceneKey={chatId ?? ''}
-      buildScene={buildScene}
-      pinSignal={pinSignal}
-      onAction={onAction}
-      onScrollStateChange={onScrollStateChange}
-      prompts={prompts}
-    />
+    <>
+      <CanvasSurface
+        transparent={transparent}
+        key={chatId ?? ''}
+        sceneKey={chatId ?? ''}
+        buildScene={buildScene}
+        pinSignal={pinSignal}
+        onAction={onAction}
+        onScrollStateChange={onScrollStateChange}
+        prompts={prompts}
+      />
+      {deleteError && (
+        <p role="alert" className="px-4 py-2 text-xs text-danger">
+          {deleteError}
+        </p>
+      )}
+      {editing && (
+        <dialog
+          ref={(node) => {
+            if (node && !node.open) node.showModal()
+          }}
+          onCancel={() => setEditing(null)}
+          aria-label={editing.content}
+          className="m-auto w-[min(36rem,calc(100vw-2rem))] rounded-xl border border-border bg-surface p-3 text-text backdrop:bg-black/60"
+        >
+          <ul>
+            <QueuedMessage
+              key={editing.id}
+              item={editing}
+              index={0}
+              total={1}
+              onDone={() => setEditing(null)}
+            />
+          </ul>
+        </dialog>
+      )}
+    </>
   )
 }

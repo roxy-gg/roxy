@@ -2706,7 +2706,23 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
   },
 
   removeQueued: async (id) => {
+    const item = get().queue.find((entry) => entry.id === id)
     await api.queue.remove(id)
+    if (item) {
+      const remaining = new Set((await api.messages.list(item.chatId)).map((message) => message.id))
+      set((s) => ({
+        optimisticMessages: {
+          ...s.optimisticMessages,
+          [item.chatId]: (s.optimisticMessages[item.chatId] ?? []).filter(
+            (message) =>
+              (message.id !== item.messageId && message.id !== item.responseMessageId) ||
+              remaining.has(message.id)
+          )
+        }
+      }))
+      await loadTranscript(item.chatId)
+      await get().refreshChats()
+    }
     await get().refreshQueue()
   },
 
@@ -2725,11 +2741,23 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
   },
 
   editQueued: async (id, content, images) => {
+    const item = get().queue.find((item) => item.id === id)
     await api.queue.update(
       id,
       content,
       images?.map(({ dataUrl, mediaType, name }) => ({ dataUrl, mediaType, name }))
     )
+    if (item?.state === 'failed') {
+      set((s) => ({
+        optimisticMessages: {
+          ...s.optimisticMessages,
+          [item.chatId]: (s.optimisticMessages[item.chatId] ?? []).filter(
+            (message) => message.id !== item.messageId && message.id !== item.responseMessageId
+          )
+        }
+      }))
+      await loadTranscript(item.chatId)
+    }
     await get().refreshQueue()
     await api.automation.wake()
   },

@@ -442,10 +442,10 @@ check(
   ) && moveVisibleQueueItem(queueItems, 'collaborator', 'down') === null
 )
 check(
-  'failed automated requests stay out of the composer queue; failed user requests remain',
+  'all failed requests stay out of the composer waiting queue',
   !isVisibleQueueItem({ ...queueItems[1], state: 'failed' }) &&
     !isVisibleQueueItem({ ...queueItems[4], state: 'failed' }) &&
-    isVisibleQueueItem({ ...queueItems[3], state: 'failed' })
+    !isVisibleQueueItem({ ...queueItems[3], state: 'failed' })
 )
 check(
   'motion: missing and unknown values fall back to On',

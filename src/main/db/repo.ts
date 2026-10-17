@@ -8,6 +8,7 @@ import { DEFAULT_LANGUAGE, normalizeLanguage } from '../../shared/i18n'
 import type { Language } from '../../shared/i18n'
 import { DEFAULT_MOTION, normalizeMotion, type MotionPreference } from '../../shared/motion'
 import { isVisibleQueueItem } from '../../shared/queue'
+import { sessionBusy } from '../services/turn-state'
 import type {
   AddMessageInput,
   AppSettings,
@@ -1381,6 +1382,8 @@ export function checkSession(id: string): SessionStatus | null {
 interface QueueRow {
   id: string
   chat_id: string
+  message_id: string | null
+  response_message_id: string | null
   content: string
   images: string | null
   created_at: number
@@ -1404,6 +1407,8 @@ export function listQueue(chatId: string): QueueItem[] {
   return rows.map((r) => ({
     id: r.id,
     chatId: r.chat_id,
+    messageId: r.message_id ?? undefined,
+    responseMessageId: r.response_message_id ?? undefined,
     content: r.content,
     ...(r.images ? { images: JSON.parse(r.images) as QueueImage[] } : {}),
     createdAt: r.created_at,
@@ -1434,13 +1439,13 @@ export function enqueue(chatId: string, content: string, images?: QueueImage[]):
 export function removeQueueItem(id: string): void {
   const db = getDb()
   db.transaction(() => {
-    const row = db
-      .prepare('SELECT state, chat_id, source_chat_id, message_id FROM queue WHERE id = ?')
-      .get(id) as
-      | { state: string; chat_id: string; source_chat_id: string | null; message_id: string | null }
+    const row = db.prepare('SELECT * FROM queue WHERE id = ?').get(id) as
+      | (QueueRow & { continue_reply: number })
       | undefined
     if (row?.state === 'running' || row?.state === 'starting')
       throw new Error('Stop the session before removing its running message')
+    if (row?.state === 'failed' && sessionBusy(row.chat_id))
+      throw new Error('Stop the session before deleting a failed prompt')
     // Send to @bot persists its user bubble before delivery. Cancelling that
     // pending request must remove it from history too, not just stop delivery.
     if (row?.state === 'pending' && row.source_chat_id === row.chat_id && row.message_id)
@@ -1448,7 +1453,58 @@ export function removeQueueItem(id: string): void {
         row.message_id,
         row.chat_id
       )
+    if (row?.state === 'failed') {
+      const prompt = db
+        .prepare('SELECT parts FROM messages WHERE id = ? AND chat_id = ?')
+        .get(row.message_id, row.chat_id) as { parts: string | null } | undefined
+      const reportAnchor =
+        prompt?.parts &&
+        (JSON.parse(prompt.parts) as MessagePart[]).some(
+          (part) => part.type === 'tool' && part.resultFor
+        )
+      // Continuations may point at an existing reply or a saved task report.
+      if (row.message_id && !row.continue_reply && !reportAnchor)
+        db.prepare('DELETE FROM messages WHERE id = ? AND chat_id = ?').run(
+          row.message_id,
+          row.chat_id
+        )
+      if (row.response_message_id)
+        db.prepare("DELETE FROM messages WHERE id = ? AND chat_id = ? AND role = 'assistant'").run(
+          row.response_message_id,
+          row.chat_id
+        )
+      db.prepare(
+        'UPDATE chats SET context_summary = NULL, context_summary_at = NULL WHERE id = ?'
+      ).run(row.chat_id)
+    }
     db.prepare(`DELETE FROM queue WHERE id = ? AND state NOT IN ('starting', 'running')`).run(id)
+  })()
+}
+
+/** Even setup/claim failures need a transcript prompt to own their error. */
+export function failQueueItem(id: string, error: string, responseMessageId?: string): void {
+  const db = getDb()
+  db.transaction(() => {
+    const row = db.prepare('SELECT * FROM queue WHERE id = ?').get(id) as QueueRow | undefined
+    if (!row) return
+    let messageId = row.message_id
+    if (!messageId) {
+      const images = row.images ? (JSON.parse(row.images) as QueueImage[]) : []
+      messageId = addMessage({
+        chatId: row.chat_id,
+        role: !row.from_user && row.source_chat_id === row.chat_id ? 'assistant' : 'user',
+        content: row.content,
+        parts: [
+          { type: 'text', text: row.content },
+          ...images.map((image) => ({ type: 'image' as const, ...image }))
+        ],
+        botId: row.bot_id ?? undefined,
+        botUsername: row.bot_username ?? undefined
+      }).id
+    }
+    db.prepare(
+      "UPDATE queue SET state = 'failed', error = ?, message_id = ?, response_message_id = COALESCE(?, response_message_id) WHERE id = ?"
+    ).run(error, messageId, responseMessageId ?? null, id)
   })()
 }
 
@@ -1464,8 +1520,9 @@ export function updateQueueItem(
   const db = getDb()
   const previous = db
     .prepare(
-      `SELECT content, images, message_id, state,
-      (SELECT role FROM messages WHERE id = queue.message_id) AS message_role
+      `SELECT content, images, message_id, response_message_id, continue_reply, chat_id, state,
+      (SELECT role FROM messages WHERE id = queue.message_id) AS message_role,
+      (SELECT parts FROM messages WHERE id = queue.message_id) AS message_parts
       FROM queue WHERE id = ?`
     )
     .get(id) as
@@ -1473,22 +1530,53 @@ export function updateQueueItem(
         content: string
         images: string | null
         message_id: string | null
+        response_message_id: string | null
+        continue_reply: number
+        chat_id: string
         message_role: string | null
+        message_parts: string | null
         state: string
       }
     | undefined
   if (previous?.state === 'running' || previous?.state === 'starting')
     throw new Error('This message is already running')
+  if (previous?.state === 'failed' && sessionBusy(previous.chat_id))
+    throw new Error('Stop the session before retrying a failed prompt')
+  const reportAnchor =
+    previous?.message_parts &&
+    (JSON.parse(previous.message_parts) as MessagePart[]).some(
+      (part) => part.type === 'tool' && part.resultFor
+    )
+  if (
+    previous?.state === 'failed' &&
+    reportAnchor &&
+    (previous.content !== content || previous.images !== imagesJson)
+  )
+    throw new Error(
+      'A background-task continuation can be resent, but its saved task report cannot be edited'
+    )
   // Pending collaborator prompts already have a user bubble. Edit that bubble
   // in place; detaching it leaves stale history and loses the user's authorship.
-  // Failed turns keep their history and append a correction when edited.
+  // A retry keeps the original prompt and replaces only its linked response.
   const changed = previous && (previous.content !== content || previous.images !== imagesJson)
   const editMessage =
     changed &&
-    previous.state === 'pending' &&
-    previous.message_role === 'user' &&
+    !previous.continue_reply &&
+    !reportAnchor &&
+    (previous.state === 'failed' || previous.message_role === 'user') &&
     previous.message_id
   db.transaction(() => {
+    if (previous?.state === 'failed') {
+      if (previous.response_message_id)
+        db.prepare("DELETE FROM messages WHERE id = ? AND chat_id = ? AND role = 'assistant'").run(
+          previous.response_message_id,
+          previous.chat_id
+        )
+      // A summary can contain the replaced response or the edited request.
+      db.prepare(
+        'UPDATE chats SET context_summary = NULL, context_summary_at = NULL WHERE id = ?'
+      ).run(previous.chat_id)
+    }
     if (editMessage)
       db.prepare('UPDATE messages SET content = ?, parts = ? WHERE id = ?').run(
         content,
@@ -1499,7 +1587,7 @@ export function updateQueueItem(
         editMessage
       )
     db.prepare(
-      `UPDATE queue SET content = ?, images = ?, state = 'pending', error = NULL,
+      `UPDATE queue SET content = ?, images = ?, state = 'pending', error = NULL, response_message_id = NULL,
     message_id = CASE WHEN ? THEN NULL ELSE message_id END WHERE id = ? AND state NOT IN ('starting', 'running')`
     ).run(content, imagesJson, Number(!!changed && !editMessage), id)
   })()

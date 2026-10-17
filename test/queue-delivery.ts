@@ -320,22 +320,156 @@ async function main(): Promise<void> {
   run.finish('completed')
   await idle(sub.id)
 
-  // Failed user heads retain FIFO; editing/deleting are deliberate recovery.
+  // Failed attempts live on their prompt and do not block fresh user work.
   fail = true
   const failed = enqueuePrompt(project.id, 'Failure fixture', images)
   await idle(project.id)
+  const failureItem = repo.listQueue(project.id).find((q) => q.id === failed.id)!
+  assert.equal(failureItem.state, 'failed')
+  assert.ok(failureItem.messageId)
+  assert.ok(failureItem.responseMessageId)
+  assert.ok(!isVisibleQueueItem(failureItem))
   fail = false
   const behind = enqueuePrompt(project.id, 'Behind failed user')
-  assert.equal(behind.state, 'pending')
-  assert.equal(deliveryQueue(project.id).find((q) => q.id === behind.id)?.waitReason, 'blocked')
+  await idle(project.id)
+  assert.ok(!repo.listQueue(project.id).some((q) => q.id === behind.id))
+  const laterReply = repo.listMessages(project.id).at(-1)!.id
+  repo.setChatSummary(project.id, 'summary includes failed response', Date.now())
   const retry = await runTool('queue_manage', { action: 'update', id: failed.id }, context)
   assert.ok(retry.ok, retry.output)
   await idle(project.id)
+  assert.ok(
+    !repo.listMessages(project.id).some((m) => m.id === failureItem.responseMessageId),
+    'retry removes its old response'
+  )
+  assert.ok(
+    repo.listMessages(project.id).some((m) => m.id === laterReply),
+    'retry keeps later replies'
+  )
+  assert.equal(repo.getChat(project.id)?.contextSummary, null)
   assert.equal(
     repo.listMessages(project.id).filter((m) => m.content === 'Failure fixture').length,
     1,
     'unchanged retry reuses its prompt'
   )
+  assert.deepEqual(
+    repo
+      .listMessages(project.id)
+      .find((m) => m.id === failureItem.messageId)
+      ?.parts.filter((part) => part.type === 'image')
+      .map(({ type: _type, ...image }) => image),
+    images
+  )
+
+  fail = true
+  const editedFailure = enqueuePrompt(project.id, 'Edit failed prompt', images)
+  await idle(project.id)
+  const editItem = repo.listQueue(project.id).find((q) => q.id === editedFailure.id)!
+  const releaseRetry = claimTurn(project.id, new AbortController())!
+  assert.throws(
+    () => repo.updateQueueItem(editItem.id, 'Cannot edit while running', images),
+    /Stop the session/
+  )
+  assert.ok(
+    repo.listMessages(project.id).some((message) => message.id === editItem.responseMessageId)
+  )
+  releaseRetry()
+  repo.updateQueueItem(editItem.id, 'Corrected failed prompt', images)
+  assert.equal(
+    repo.listMessages(project.id).find((message) => message.id === editItem.messageId)?.content,
+    'Corrected failed prompt'
+  )
+  assert.ok(
+    !repo.listMessages(project.id).some((message) => message.id === editItem.responseMessageId)
+  )
+  fail = false
+  wakeAutomation()
+  await idle(project.id)
+
+  const reportSession = repo.createChat({ title: 'Task report retry guard' })
+  const report = repo.addMessage({
+    chatId: reportSession.id,
+    role: 'assistant',
+    content: 'Task report',
+    parts: [
+      {
+        type: 'tool',
+        id: 'report',
+        tool: 'task',
+        input: '{}',
+        state: 'done',
+        output: 'Saved report',
+        resultFor: 'launch'
+      }
+    ]
+  })
+  const reportQueue = repo.enqueue(reportSession.id, 'Continue task report')
+  getDb()
+    .prepare("UPDATE queue SET state = 'failed', message_id = ? WHERE id = ?")
+    .run(report.id, reportQueue.id)
+  assert.throws(
+    () => repo.updateQueueItem(reportQueue.id, 'Replace report'),
+    /saved task report cannot be edited/
+  )
+  assert.deepEqual(repo.listMessages(reportSession.id)[0].parts, report.parts)
+  repo.updateQueueItem(reportQueue.id, reportQueue.content)
+  assert.deepEqual(repo.listMessages(reportSession.id)[0].parts, report.parts)
+  repo.removeQueueItem(reportQueue.id)
+  assert.deepEqual(repo.listMessages(reportSession.id)[0].parts, report.parts)
+
+  fail = true
+  const deleteSession = repo.createChat({ title: 'Delete failed prompt fixture' })
+  const deleteRequest = enqueuePrompt(deleteSession.id, 'Delete this failed prompt', images)
+  await idle(deleteSession.id)
+  const deleteItem = repo.listQueue(deleteSession.id)[0]
+  assert.ok(deleteItem.messageId)
+  assert.ok(deleteItem.responseMessageId)
+  const unrelated = repo.addMessage({
+    chatId: deleteSession.id,
+    role: 'assistant',
+    content: 'Keep this unrelated reply'
+  })
+  repo.setChatSummary(deleteSession.id, 'Contains deleted prompt', Date.now())
+  const releaseDelete = claimTurn(deleteSession.id, new AbortController())!
+  assert.throws(() => repo.removeQueueItem(deleteItem.id), /Stop the session/)
+  assert.ok(repo.listQueue(deleteSession.id).some((item) => item.id === deleteItem.id))
+  releaseDelete()
+  repo.removeQueueItem(deleteRequest.id)
+  assert.equal(repo.listQueue(deleteSession.id).length, 0)
+  assert.deepEqual(
+    repo.listMessages(deleteSession.id).map((message) => message.id),
+    [unrelated.id]
+  )
+  assert.equal(repo.getChat(deleteSession.id)?.contextSummary, null)
+  closeDb()
+  assert.deepEqual(
+    repo.listMessages(deleteSession.id).map((message) => message.id),
+    [unrelated.id]
+  )
+  fail = false
+  enqueuePrompt(deleteSession.id, 'Next prompt after deletion')
+  await idle(deleteSession.id)
+  assert.ok(!JSON.stringify(requests.at(-1)).includes('Delete this failed prompt'))
+  assert.ok(!JSON.stringify(requests.at(-1)).includes('Contains deleted prompt'))
+
+  const setupFailure = repo.createChat({ title: 'Missing provider fixture' })
+  repo.setChatConfig(setupFailure.id, {
+    providerId: 'disconnected-provider',
+    model: 'fixture',
+    agentId: 'build',
+    reasoningEffort: 'medium',
+    contextLimit: null
+  })
+  const setupItem = enqueuePrompt(setupFailure.id, 'Setup failure prompt')
+  await idle(setupFailure.id)
+  assert.ok(repo.listQueue(setupFailure.id)[0].messageId)
+  assert.equal(
+    repo.listMessages(setupFailure.id).filter((message) => message.role === 'user').length,
+    1
+  )
+  assert.ok(!isVisibleQueueItem(repo.listQueue(setupFailure.id)[0]))
+  repo.removeQueueItem(setupItem.id)
+  assert.equal(repo.listMessages(setupFailure.id).length, 0)
 
   // Pending collaborator bubbles must not steal the request being started.
   const releaseContext = claimTurn(project.id, new AbortController())!
@@ -515,7 +649,133 @@ async function main(): Promise<void> {
       await win.loadURL(process.env.DELIVERY_UI_URL)
       await win.webContents.executeJavaScript(`window.delivery.select(${JSON.stringify(id)})`)
     }
+    fail = true
+    const failedUI = enqueuePrompt(project.id, 'UI failure fixture', images)
+    await idle(project.id)
+    const failedUIItem = repo.listQueue(project.id).find((item) => item.id === failedUI.id)!
+    await win.webContents.executeJavaScript(`window.delivery.select(${JSON.stringify(project.id)})`)
+    const canvasAction = async (
+      type: 'edit-prompt' | 'resend-prompt' | 'delete-prompt',
+      queueId = failedUI.id
+    ): Promise<void> => {
+      await win.webContents.executeJavaScript(`(async () => {
+        for (let i = 0; i < 300; i++) {
+          const probe = window.__canvasTranscript;
+          const region = probe?.scene().blocks.flatMap(b => b.regions).find(r => r.action.type === ${JSON.stringify(type)} && r.action.queueId === ${JSON.stringify(queueId)});
+          const el = document.querySelector('[data-canvas-surface]');
+          if (region && el) {
+            el.scrollTop = Math.max(0, region.y - 100);
+            await new Promise(resolve => requestAnimationFrame(resolve));
+            const rect = el.getBoundingClientRect();
+            const options = { bubbles: true, button: 0, pointerId: 1, isPrimary: true, pointerType: 'touch', clientX: rect.x + region.x + region.w / 2, clientY: rect.y + region.y - el.scrollTop + region.h / 2 };
+            el.dispatchEvent(new PointerEvent('pointerdown', options));
+            el.dispatchEvent(new PointerEvent('pointerup', options));
+            return;
+          }
+          await new Promise(resolve => setTimeout(resolve, 10));
+        }
+        const probe=window.__canvasTranscript;
+        throw new Error('Missing inline failed-prompt action: '+JSON.stringify({ blocks:probe?.scene().blocks.map(b=>({id:b.id, regions:b.regions.map(r=>r.action)})), body:document.body.innerText.slice(-1200) }));
+      })()`)
+    }
+    await canvasAction('edit-prompt')
+    assert.ok(
+      await win.webContents.executeJavaScript(`(async () => {
+      for(let i=0;i<100;i++) { if(document.querySelector('dialog[open] textarea')) return true; await new Promise(r=>setTimeout(r,10)); } return false;
+    })()`)
+    )
+    assert.equal(
+      await win.webContents.executeJavaScript(`!!document.querySelector('[data-waiting-queue]')`),
+      false
+    )
+    assert.equal(
+      await win.webContents.executeJavaScript(
+        `document.querySelector('dialog[open] textarea').value`
+      ),
+      'UI failure fixture'
+    )
+    await win.webContents.executeJavaScript(
+      `document.querySelector('dialog[open]').dispatchEvent(new Event('cancel'))`
+    )
     win.setSize(390, 844)
+    await win.webContents.executeJavaScript(`new Promise(resolve => setTimeout(resolve,100))`)
+    await canvasAction('edit-prompt')
+    assert.ok(
+      await win.webContents.executeJavaScript(`(async () => {
+      for(let i=0;i<100;i++) {
+        const dialog=document.querySelector('dialog[open]');
+        if(dialog) { const rect=dialog.getBoundingClientRect(); const fits=rect.left>=0 && rect.right<=innerWidth && dialog.scrollWidth<=dialog.clientWidth+1; if(!fits) throw new Error('Narrow dialog overflow '+JSON.stringify({left:rect.left,right:rect.right,width:innerWidth,scroll:dialog.scrollWidth,client:dialog.clientWidth,html:dialog.outerHTML})); return fits; }
+        await new Promise(r=>setTimeout(r,10));
+      } return false;
+    })()`),
+      'inline retry editor fits narrow window'
+    )
+    await win.webContents.executeJavaScript(
+      `document.querySelector('dialog[open]').dispatchEvent(new Event('cancel'))`
+    )
+    fail = false
+    await canvasAction('resend-prompt')
+    await idle(project.id)
+    assert.ok(
+      !repo
+        .listMessages(project.id)
+        .some((message) => message.id === failedUIItem.responseMessageId)
+    )
+    assert.deepEqual(
+      repo
+        .listMessages(project.id)
+        .find((message) => message.id === failedUIItem.messageId)
+        ?.parts.filter((part) => part.type === 'image')
+        .map(({ type: _type, ...image }) => image),
+      images,
+      'canvas resend preserves images'
+    )
+    assert.ok(
+      await win.webContents.executeJavaScript(`(async () => {
+      for(let i=0;i<200;i++) {
+        const probe=window.__canvasTranscript;
+        if(probe && !probe.scene().blocks.some(block => block.id === ${JSON.stringify(failedUIItem.responseMessageId)})) return true;
+        await new Promise(r=>setTimeout(r,10));
+      } return false;
+    })()`),
+      'deleted response does not return from renderer optimism'
+    )
+    win.setSize(390, 844)
+    fail = true
+    await win.webContents.executeJavaScript(`window.delivery.send('Delete from canvas fixture')`)
+    await idle(project.id)
+    const deletedUI = repo
+      .listQueue(project.id)
+      .find((item) => item.content === 'Delete from canvas fixture')!
+    assert.ok(deletedUI?.messageId)
+    await canvasAction('delete-prompt', deletedUI.id)
+    assert.ok(
+      await win.webContents.executeJavaScript(`(async () => {
+        for (let i=0; i<200; i++) {
+          const probe=window.__canvasTranscript;
+          if (probe && !probe.scene().blocks.some(block => [${JSON.stringify(deletedUI.messageId)}, ${JSON.stringify(deletedUI.responseMessageId)}].includes(block.id)) && !document.querySelector('[data-prompt-id="${deletedUI.messageId}"]')) return true;
+          await new Promise(resolve=>setTimeout(resolve,10));
+        } return false;
+      })()`),
+      'canvas delete removes prompt, response and prompt-history marker'
+    )
+    assert.ok(!repo.listQueue(project.id).some((item) => item.id === deletedUI.id))
+    assert.ok(
+      !repo
+        .listMessages(project.id)
+        .some(
+          (message) =>
+            message.id === deletedUI.messageId || message.id === deletedUI.responseMessageId
+        )
+    )
+    await win.loadURL(process.env.DELIVERY_UI_URL)
+    await win.webContents.executeJavaScript(`window.delivery.select(${JSON.stringify(project.id)})`)
+    assert.ok(
+      await win.webContents.executeJavaScript(
+        `!JSON.stringify(window.__canvasTranscript.scene()).includes('Delete from canvas fixture')`
+      )
+    )
+    fail = false
     assert.ok(
       await win.webContents.executeJavaScript('document.documentElement.scrollWidth <= innerWidth')
     )

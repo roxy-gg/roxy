@@ -965,7 +965,7 @@ async function main(): Promise<void> {
           message_id: string | null
         }
       ).message_id,
-      null
+      stopped.messageId
     )
     holdReply = false
     registerIpc()
@@ -1307,8 +1307,8 @@ async function main(): Promise<void> {
     getDb().prepare("UPDATE queue SET state = 'failed' WHERE id = ?").run(failed.id)
     repo.removeQueueItem(failed.id)
     assert.ok(
-      repo.listMessages(cancelledChat.id).some((message) => message.id === failedMessage.id),
-      'removing a failed turn preserves its transcript'
+      !repo.listMessages(cancelledChat.id).some((message) => message.id === failedMessage.id),
+      'deleting a failed prompt removes it from the transcript'
     )
 
     const hostFirst = repo.createChat({
@@ -1939,7 +1939,7 @@ async function main(): Promise<void> {
       }
     }
 
-    // Visible failures, including user-requested guest turns, still require explicit retry.
+    // Failed attempts require explicit retry but no longer block fresh user work.
     for (const fromUser of [false, true]) {
       const hidden = enqueuePrompt(memoryBot.chatId, 'Hidden failed continuation', undefined, {
         sourceChatId: session.id
@@ -1956,12 +1956,12 @@ async function main(): Promise<void> {
       enqueuePrompt(memoryBot.chatId, 'Do not bypass a visible failure')
       const before = requests.length
       wakeAutomation()
-      assert.equal(requests.length, before)
-      assert.ok(!sessionBusy(memoryBot.chatId))
+      await settle(memoryBot.chatId)
+      assert.equal(requests.length, before + 1)
       repo.updateQueueItem(failedUser.id, 'Retried user request')
       wakeAutomation()
       await settle(memoryBot.chatId)
-      assert.equal(requests.length, before + 1)
+      assert.equal(requests.length, before + 2)
       assert.equal(
         repo.listMessages(memoryBot.chatId).at(-1)?.botId,
         fromUser ? worker.id : memoryBot.id

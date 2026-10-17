@@ -994,7 +994,7 @@ const BASE_SCHEMAS = [
   ),
   fn(
     'queue_manage',
-    'Create, list, read, edit/retry, or delete queued prompts on yourself, another bot chat, or any project session. Running items cannot be edited/deleted. Failed items block the queue until edited or removed.',
+    'Create, list, read, edit/retry, or delete queued prompts on yourself, another bot chat, or any project session. Running items cannot be edited/deleted. Failed attempts require explicit retry. Failed user prompts appear on the original transcript message and do not block fresh user work; failed automation blocks later automation.',
     {
       action: { type: 'string', enum: ['list', 'create', 'read', 'update', 'delete'] },
       id: str('Queue item ID.'),

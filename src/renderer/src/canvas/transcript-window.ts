@@ -7,6 +7,7 @@ import {
   messageBotUsername,
   layoutParts,
   layoutUserBody,
+  layoutPromptFailure,
   partsText,
   type LayoutInput
 } from './transcript'
@@ -93,7 +94,10 @@ export class TranscriptWindow {
               createdAt: 0
             }
           ]
-    const format = `${x}:${width}:${input.theme.epoch}:${input.language ?? ''}:${input.t('transcript.assistant')}:${input.t('transcript.reasoning')}`
+    const failures = input.queue
+      ?.filter((item) => item.state === 'failed')
+      .map((item) => [item.id, item.messageId, item.error])
+    const format = `${x}:${width}:${input.theme.epoch}:${input.language ?? ''}:${input.t('transcript.assistant')}:${input.t('transcript.reasoning')}:${JSON.stringify(failures)}`
     // A new host resets disclosures. Retain text measurements, not expanded tool geometry.
     if (this.view !== input.view) {
       for (const [id, entry] of this.entries) {
@@ -302,6 +306,7 @@ export class TranscriptWindow {
             height = layoutUserBody(builder, message.parts, bodyX, 0, bodyWidth)
           else if (item.kind === 'end')
             height =
+              layoutPromptFailure(builder, message, bodyX, 0, bodyWidth, input) +
               SPACE.messagePadY +
               (live && !message.parts.length
                 ? layoutParts(

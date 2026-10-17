@@ -122,7 +122,7 @@ export function ChatView(): JSX.Element {
   // Only user requests appear here; automated handoffs and schedules stay hidden.
   const queue = useMemo(() => allQueued.filter(isVisibleQueueItem), [allQueued])
   const deliveryIssues = allQueued.filter(
-    (item) => !isVisibleQueueItem(item) && item.state === 'failed'
+    (item) => item.state === 'failed' && !messages.some((message) => message.id === item.messageId)
   )
   const newSession = useRoxyStore((s) => s.newSession)
   const selectChat = useRoxyStore((s) => s.selectChat)

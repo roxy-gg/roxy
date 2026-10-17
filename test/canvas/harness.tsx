@@ -13,6 +13,7 @@ import { PerformanceHarness } from './PerformanceHarness'
 import { AnimationHarness } from './AnimationHarness'
 import { startMotion } from '../../src/renderer/src/lib/motion'
 import { CopilotReconnect } from '../../src/renderer/src/components/CopilotReconnect'
+import { useRoxyStore } from '../../src/renderer/src/lib/store'
 
 const BotsHarness = lazy(() =>
   import('./BotsHarness').then((module) => ({ default: module.BotsHarness }))
@@ -89,6 +90,30 @@ function Harness(): JSX.Element {
     <>
       <AppContextMenu />
       <div className="bar">
+        <button
+          id="fail-prompt"
+          onClick={() =>
+            useRoxyStore.setState({
+              queue: [
+                {
+                  id: 'failed-fixture',
+                  chatId: `harness-${session}-${longHistory}-${terminalCards}`,
+                  content: messages[0].content,
+                  messageId: messages[0].id,
+                  createdAt: 1,
+                  state: 'failed',
+                  error: 'Fixture request failed'
+                }
+              ],
+              queueLoaded: true
+            })
+          }
+        >
+          Fail prompt
+        </button>
+        <button id="clear-failure" onClick={() => useRoxyStore.setState({ queue: [] })}>
+          Clear failure
+        </button>
         <button id="stream" onClick={() => setStreaming(!streaming)}>
           Streaming: {String(streaming)}
         </button>

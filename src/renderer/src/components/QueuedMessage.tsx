@@ -43,22 +43,28 @@ export function QueuedMessage({
   item,
   index,
   total,
-  pending = false
+  pending = false,
+  onDone
 }: {
   item: QueueItemType
   index: number
   total: number
   pending?: boolean
+  onDone?: () => void
 }): JSX.Element {
   const { t } = useTranslation()
   const editQueued = useRoxyStore((s) => s.editQueued)
+  const current = useRoxyStore((s) => s.queue.find((entry) => entry.id === item.id))
+  const conflict = !!onDone && (!current || current.state !== 'failed')
   const removeQueued = useRoxyStore((s) => s.removeQueued)
   const moveQueued = useRoxyStore((s) => s.moveQueued)
   const bots = useRoxyStore((s) => s.bots)
 
-  const [editing, setEditing] = useState(false)
-  const [draft, setDraft] = useState('')
-  const [draftImages, setDraftImages] = useState<ComposerImage[]>([])
+  const [editing, setEditing] = useState(!!onDone)
+  const [draft, setDraft] = useState(onDone ? item.content : '')
+  const [draftImages, setDraftImages] = useState<ComposerImage[]>(
+    onDone ? toComposerImages(item) : []
+  )
   const [dragging, setDragging] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -88,6 +94,7 @@ export function QueuedMessage({
 
   const cancelEditing = (): void => {
     setEditing(false)
+    onDone?.()
     setDraft('')
     setDraftImages([])
     setDragging(false)
@@ -101,6 +108,7 @@ export function QueuedMessage({
   }
 
   const save = async (): Promise<void> => {
+    if (conflict) return
     const text = draft.trim()
     // An empty edit would silently drop the item — treat clearing everything as
     // a removal instead (matches the × affordance), so nothing invisible remains.
@@ -159,6 +167,7 @@ export function QueuedMessage({
   if (editing) {
     return (
       <QueueItem className="flex-col items-stretch gap-0 !border-border-strong bg-surface p-0">
+        {conflict && <p className="p-2 text-xs text-danger">{t('transcript.retryConflict')}</p>}
         <div
           onDragOver={(e) => {
             if (e.dataTransfer.types.includes('Files')) {
@@ -232,7 +241,7 @@ export function QueuedMessage({
               <button
                 type="button"
                 onClick={() => void save()}
-                disabled={saving}
+                disabled={saving || conflict}
                 className="press-scale flex h-6 items-center gap-1 sq sq-md rounded-md bg-white px-2 text-[11px] font-medium text-black hover:bg-white/90 disabled:opacity-40"
               >
                 <Check className="h-3.5 w-3.5" /> {failed ? t('queue.saveRetry') : t('common.save')}

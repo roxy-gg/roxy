@@ -813,6 +813,22 @@ async function promptHistory() {
     (await win.webContents.capturePage()).toPNG()
   )
 
+  await clickDom('#fail-prompt')
+  await clickDom('#top')
+  check(
+    'failed prompt owns resend, edit and delete controls on canvas',
+    await probe(`
+    const regions=scene.blocks.flatMap(b=>b.regions);
+    return ['resend-prompt', 'edit-prompt', 'delete-prompt'].every(type=>regions.some(r=>r.action.type===type));
+  `)
+  )
+  await clickDom('#clear-failure')
+  check(
+    'clearing failure invalidates cached canvas controls',
+    await probe(`
+    return !scene.blocks.flatMap(b=>b.regions).some(r=>['edit-prompt','resend-prompt','delete-prompt'].includes(r.action.type));
+  `)
+  )
   await clickDom('#long-history')
   await wait(200)
   check(

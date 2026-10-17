@@ -87,7 +87,7 @@ export function layoutTranscript(input: LayoutInput, cache: BlockCache): Scene {
     [
       input.botUsername ?? '',
       input.bots?.map((bot) => `${bot.id}:${bot.username}`).join('|') ?? '',
-      input.queue?.map((item) => `${item.id}:${item.state ?? ''}`).join('|') ?? '',
+      JSON.stringify(input.queue?.map((item) => [item.id, item.state, item.messageId, item.error])),
       // Part of the identity: the same queue before and after it loads must not
       // reuse a block that rendered "replied" out of ignorance.
       input.queueLoaded === false ? 'q:loading' : 'q:loaded',
@@ -217,8 +217,74 @@ function layoutMessage(
       username
     )
   }
+  cursor = layoutPromptFailure(builder, message, body.x, cursor, body.width, input)
   const height = cursor - y + SPACE.messagePadY
   return { ...builder.finish(message.id, y, height), copyText: () => partsText(message.parts) }
+}
+
+/** Both retained and windowed layouts put failure controls on the original prompt. */
+export function layoutPromptFailure(
+  builder: Builder,
+  message: Message,
+  x: number,
+  y: number,
+  width: number,
+  input: LayoutInput
+): number {
+  const failure = input.queue?.find(
+    (item) => item.state === 'failed' && item.messageId === message.id
+  )
+  if (!failure) return y
+  const { palette } = builder
+  const labelFont = font(FONT_SIZE.small, 500)
+  const status = input.t(
+    failure.error === 'Stopped.'
+      ? 'transcript.promptStopped'
+      : failure.error?.startsWith('Interrupted')
+        ? 'transcript.promptInterrupted'
+        : 'transcript.promptFailed'
+  )
+  y += SPACE.headerGap
+  builder.icon(x, y + 2, 14, 'circleAlert', palette.danger)
+  builder.text(x + 20, y, status, labelFont, palette.danger, { maxWidth: width - 20 })
+  y += 24
+  if (failure.error && failure.error !== 'Stopped.') {
+    y += layoutPlainText(builder, failure.error, x, y, width, {
+      size: FONT_SIZE.small,
+      color: palette.textMuted
+    })
+    y += SPACE.headerGap
+  }
+  let actionX = x
+  for (const [label, type, icon] of [
+    [input.t('transcript.resendPrompt'), 'resend-prompt', 'rotateCcw'],
+    [input.t('transcript.editPrompt'), 'edit-prompt', 'pencil'],
+    [input.t('common.delete'), 'delete-prompt', 'trash']
+  ] as const) {
+    const w = Math.min(width, builder.metrics.measure(label, labelFont) + 40)
+    if (actionX > x && actionX + w > x + width) {
+      actionX = x
+      y += 38
+    }
+    const color = type === 'delete-prompt' ? palette.danger : palette.text
+    if (type === 'resend-prompt')
+      builder.rect(actionX, y, w, 32, 6, palette.surface2, palette.border)
+    builder.icon(actionX + 10, y + 9, 14, icon, color)
+    builder.text(actionX + 30, y + 7, label, labelFont, color, { maxWidth: w - 36 })
+    builder.region(
+      actionX,
+      y,
+      w,
+      32,
+      { type, queueId: failure.id },
+      {
+        title: type === 'delete-prompt' ? input.t('transcript.deletePromptHint') : label,
+        hover: 'subtle'
+      }
+    )
+    actionX += w + 6
+  }
+  return y + 36
 }
 
 export function messageBotUsername(input: LayoutInput, message: Message): string | undefined {

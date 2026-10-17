@@ -797,6 +797,14 @@
     "showReference": "Show reference"
   },
   "transcript": {
+    "promptFailed": "Failed",
+    "promptStopped": "Stopped",
+    "promptInterrupted": "Interrupted",
+    "editPrompt": "Edit",
+    "resendPrompt": "Resend",
+    "deletePromptHint": "Delete this prompt and its failed response from the conversation and future model context",
+    "deletePromptFailed": "Couldn't delete this prompt. Stop any running response, then try again.",
+    "retryConflict": "This request changed elsewhere. Your draft is kept here; close and reopen to retry.",
     "openSubagent": "Open subagent session",
     "promptHistory": "Your messages",
     "promptJump": "Jump to message {{number}}: {{text}}",
