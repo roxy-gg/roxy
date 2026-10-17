@@ -711,6 +711,72 @@ check('unfinished markdown boundaries always advance the parser', () => {
     assert.ok(Array.isArray(parsed))
   }
 })
+check('tables interrupt paragraphs without requiring a blank line', () => {
+  for (const newline of ['\n', '\r\n']) {
+    for (const outerPipes of [true, false]) {
+      const row = (cells: string): string => (outerPipes ? `| ${cells} |` : cells)
+      const table = [row('Item | Cart Quantity'), row('--- | ---:'), row('Limes | 5')]
+      const parsed = parseMarkdown(['**In Your Cart**', ...table].join(newline))
+      assert.deepEqual(
+        parsed.map((block) => block.type),
+        ['paragraph', 'table']
+      )
+      assert.equal(parsed[0].type === 'paragraph' && parsed[0].text, '**In Your Cart**')
+      const block = parsed[1]
+      assert.ok(block.type === 'table')
+      assert.deepEqual(block.align, ['l', 'r'])
+      assert.equal(block.header.length, 2)
+      assert.equal(block.rows.length, 1)
+    }
+  }
+})
+check('table boundaries survive streaming and nested block quotes', () => {
+  const intro = 'Your cart is updated.\nNo order has been placed.'
+  const table = '| Item | Quantity |\n| --- | --- |\n| Limes | 5 |'
+  const text = `${intro}\n${table}\n\nStill pending.\n${table}`
+  for (let end = 0; end <= text.length; end++) {
+    const parsed = parseMarkdown(text.slice(0, end))
+    if (end >= intro.length + '\n| Item | Quantity |\n| --- | --- |'.length) {
+      assert.ok(parsed.some((block) => block.type === 'table'))
+    }
+  }
+  assert.deepEqual(
+    parseMarkdown(text).map((block) => block.type),
+    ['paragraph', 'table', 'paragraph', 'table']
+  )
+  const quoted = parseMarkdown(
+    `> In your cart\n${table
+      .split('\n')
+      .map((line) => `> ${line}`)
+      .join('\n')}`
+  )
+  assert.ok(quoted[0].type === 'quote')
+  assert.deepEqual(
+    quoted[0].blocks.map((block) => block.type),
+    ['paragraph', 'table']
+  )
+  assert.equal(parseMarkdown(`In your cart\n${table.split('\n')[0]}`).length, 1)
+  assert.equal(parseMarkdown(`\`\`\`text\n${text}\n\`\`\``)[0].type, 'code')
+})
+check('a table after prose lays out cells rather than raw pipe syntax', () => {
+  const builder = new Builder(metrics, theme, { value: 0 }, t)
+  const height = layoutMarkdown(
+    builder,
+    '**In Your Cart**\n| Item | Cart Quantity |\n| --- | --- |\n| Limes | 5 |',
+    0,
+    0,
+    600,
+    { color: theme.palette.text, size: 14 }
+  )
+  const block = builder.finish('cart', 0, height)
+  const item = block.selectable.find((line) => line.text.trim() === 'Item')
+  const quantity = block.selectable.find((line) => line.text.trim() === 'Cart Quantity')
+  assert.ok(item && quantity)
+  assert.equal(item.y, quantity.y)
+  assert.ok(quantity.x > item.x)
+  assert.ok(block.nodes.some((node) => node.kind === 'hairline'))
+  assert.ok(block.selectable.every((line) => !line.text.includes('|')))
+})
 check('large markdown replies only lay out nearby sections', () => {
   const content = Array.from(
     { length: 400 },
