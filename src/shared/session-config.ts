@@ -50,7 +50,14 @@ export type SessionConfigSource = Pick<
 export const DEFAULT_REASONING_EFFORT: ReasoningEffort = 'high'
 
 /** The full ladder, weakest to strongest — the order the picker renders. */
-export const REASONING_EFFORTS: ReasoningEffort[] = ['low', 'medium', 'high', 'xhigh', 'max']
+export const REASONING_EFFORTS: ReasoningEffort[] = [
+  'none',
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+  'max'
+]
 
 /**
  * Narrow a chosen effort to one the model will actually accept.
@@ -81,7 +88,7 @@ export function clampReasoningEffort(
 
 /** Narrow an untrusted string (DB column, IPC payload) to a ReasoningEffort. */
 export function parseReasoningEffort(v: unknown): ReasoningEffort | null {
-  return v === 'low' || v === 'medium' || v === 'high' || v === 'xhigh' || v === 'max' ? v : null
+  return REASONING_EFFORTS.includes(v as ReasoningEffort) ? (v as ReasoningEffort) : null
 }
 
 /**
@@ -125,25 +132,22 @@ export function seedSessionConfig(settings: AppSettings | null | undefined): Ses
 }
 
 /**
- * The window a model can actually use.
- *
- * models.dev reports Claude's *base* 200K, but the model (and VS Code's Copilot
- * client) expose 1M — Anthropic via the `context-1m` beta, Copilot server-side.
- * Raise the ceiling for those large reasoning models so the picker offers what
- * they can really do. Shared so the picker, the meter, and the turn's budget
- * math all agree on the maximum.
+ * The advertised window is authoritative. Reasoning support does not imply
+ * access to a larger context tier on the signed-in account.
  */
 export function effectiveContextMax(info: { reasoning?: boolean; contextLimit?: number }): number {
-  const base = info.contextLimit ?? 0
-  if (info.reasoning && base >= 180_000 && base <= 264_000) return 1_000_000
-  return base
+  return info.contextLimit ?? 0
 }
 
 /**
  * The token budget a turn should build its window to, given the session's chosen
- * limit and the model's real ceiling. Defaults to 200K (or the model max, if
- * smaller) when the session has no explicit choice.
+ * limit and the model's real ceiling. Defaults to the provider's standard tier,
+ * or 200K (capped to the model max) if the provider has no advertised default.
  */
-export function contextBudgetFor(chosen: number | null, modelContext: number): number {
-  return Math.min(chosen ?? Math.min(modelContext, 200_000), modelContext)
+export function contextBudgetFor(
+  chosen: number | null,
+  modelContext: number,
+  modelDefault?: number
+): number {
+  return Math.min(chosen ?? modelDefault ?? Math.min(modelContext, 200_000), modelContext)
 }

@@ -117,12 +117,7 @@ export function getSettings(): AppSettings {
     activeProviderId: map.get('active_provider_id') ?? null,
     activeModel: map.get('active_model') ?? null,
     activeAgentId: map.get('active_agent_id') ?? null,
-    reasoningEffort: ((): ReasoningEffort => {
-      const v = map.get('reasoning_effort')
-      return v === 'low' || v === 'medium' || v === 'high' || v === 'xhigh' || v === 'max'
-        ? v
-        : 'high'
-    })(),
+    reasoningEffort: parseReasoningEffort(map.get('reasoning_effort')) ?? 'high',
     contextLimit: map.get('context_limit') ? Number(map.get('context_limit')) : null,
     // Defaults ON, so the absence of a row means enabled. Written only when
     // someone turns it OFF ('0'), which keeps existing installs opted in

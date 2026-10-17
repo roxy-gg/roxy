@@ -10,8 +10,10 @@
  * base URL directly.
  */
 import * as repo from '../db/repo'
+import { randomUUID } from 'node:crypto'
 import { refreshGitHubCredential } from './copilot'
-import { ModelHttpError } from './model-http-error'
+import { assertModelStreamEvent, ModelHttpError } from './model-http-error'
+import { clampReasoningEffort } from '../../shared/session-config'
 export { ModelHttpError } from './model-http-error'
 import type { ChatMessage } from '../../shared/api'
 import type { ReasoningEffort } from '../../shared/types'
@@ -327,6 +329,8 @@ function copilotHeaders(token: string, vision = false): Record<string, string> {
     'Content-Type': 'application/json',
     ...COPILOT_EDITOR_HEADERS,
     'Openai-Intent': 'conversation-panel',
+    'X-GitHub-Api-Version': '2026-01-09',
+    'X-Request-Id': randomUUID(),
     ...(vision ? { 'Copilot-Vision-Request': 'true' } : {})
   }
 }
@@ -399,6 +403,7 @@ export async function openaiEndpoint(
 
 /** Anthropic/Gemini thinking budget (tokens) per effort level. */
 const THINK_BUDGET: Record<ReasoningEffort, number> = {
+  none: 0,
   low: 2048,
   medium: 8192,
   high: 16384,
@@ -430,6 +435,8 @@ export function openAiReasoning(
   effort?: ReasoningEffort
 ): { reasoning_effort?: ReasoningEffort } {
   if (!reasoning || !effort) return {}
+  if (effort === 'none' && !FULL_EFFORT_LADDER_PROVIDERS.has(repo.getProviderSeedId(providerId)))
+    return {}
   if (
     !FULL_EFFORT_LADDER_PROVIDERS.has(repo.getProviderSeedId(providerId)) &&
     (effort === 'xhigh' || effort === 'max')
@@ -454,6 +461,7 @@ export interface StreamChatOptions {
 
 /** A permissive shape covering the SSE payloads of every wire we support. */
 interface SseJson {
+  error?: { code?: string; message?: string } | string | null
   choices?: { delta?: { content?: string } }[]
   type?: string
   delta?: { type?: string; text?: string }
@@ -474,17 +482,32 @@ export async function streamChat(opts: StreamChatOptions): Promise<void> {
   // GitHub Copilot: exchange the GitHub token, then an OpenAI-compatible endpoint.
   if (repo.getProviderSeedId(providerId) === 'github-copilot') {
     const sessionKey = repo.getCopilotSessionKey(providerId)
+    const { listModels } = await import('./models')
+    const info = (await listModels(providerId)).find((entry) => entry.id === model)
+    if (repo.getCopilotSessionKey(providerId) !== sessionKey) {
+      throw new ModelHttpError(409, 'GitHub Copilot account changed during the request. Try again.')
+    }
+    const effort =
+      reasoningEffort && info?.reasoningEfforts?.length
+        ? clampReasoningEffort(reasoningEffort, info.reasoningEfforts)
+        : undefined
+    const outputLimit =
+      info?.outputLimit && Number.isSafeInteger(info.outputLimit) && info.outputLimit > 0
+        ? info.outputLimit
+        : undefined
     const vision = messagesHaveImages(messages)
     const body = JSON.stringify({
       model,
       messages: messages.map((m) => ({ role: m.role, content: openAiContent(m) })),
-      ...openAiReasoning('github-copilot', reasoning, reasoningEffort),
+      ...openAiReasoning('github-copilot', reasoning, effort),
+      max_tokens: outputLimit,
       stream: true
     })
     const send = async (
       recordAuthorization: (authorization: string) => void
     ): Promise<Response> => {
       const { url, headers } = await copilotEndpoint('/chat/completions', vision, providerId)
+      headers['X-Initiator'] = 'user'
       recordAuthorization(headers.Authorization)
       return fetch(url, {
         method: 'POST',
@@ -496,9 +519,25 @@ export async function streamChat(opts: StreamChatOptions): Promise<void> {
     // Responses-only models (GPT-5.x) 400 on /chat/completions. Skip straight to
     // the Responses API once we've learned that for this model; otherwise try
     // chat and fall back on that specific error. Claude stays on chat throughout.
-    if (!isResponsesOnly(providerId, model)) {
+    if (
+      !(
+        info?.supportedEndpoints?.includes('/responses') &&
+        !info.supportedEndpoints.includes('/chat/completions')
+      ) &&
+      !isResponsesOnly(providerId, model)
+    ) {
       const res = await withCopilotRetry(true, send, signal, providerId)
-      if (res.ok) return readSse(res, (j) => emitOpenAi(j, onDelta))
+      if (res.ok) {
+        let emitted = false
+        await readSse(res, (j) =>
+          emitOpenAi(j, (text) => {
+            emitted = true
+            onDelta(text)
+          })
+        )
+        if (!emitted) throw new Error('GitHub Copilot returned an empty response. Try again.')
+        return
+      }
       const errBody = await res.text().catch(() => '')
       if (!isChatUnsupported(res.status, errBody)) {
         throw new ModelHttpError(
@@ -522,7 +561,8 @@ export async function streamChat(opts: StreamChatOptions): Promise<void> {
       signal,
       onDelta,
       reasoning,
-      reasoningEffort
+      reasoningEffort: effort,
+      outputLimit
     })
   }
 
@@ -614,6 +654,7 @@ async function streamCopilotResponses(opts: {
   onDelta: (t: string) => void
   reasoning?: boolean
   reasoningEffort?: ReasoningEffort
+  outputLimit?: number
 }): Promise<void> {
   const body = JSON.stringify({
     model: opts.model,
@@ -621,10 +662,13 @@ async function streamCopilotResponses(opts: {
       opts.messages.map((m) => ({ role: m.role, content: openAiContent(m) }))
     ),
     ...toResponsesReasoning(opts.reasoning, opts.reasoningEffort),
+    store: false,
+    max_output_tokens: opts.outputLimit,
     stream: true
   })
   const send = async (recordAuthorization: (authorization: string) => void): Promise<Response> => {
     const { url, headers } = await copilotEndpoint('/responses', opts.vision, opts.providerId)
+    headers['X-Initiator'] = 'user'
     recordAuthorization(headers.Authorization)
     return fetch(url, {
       method: 'POST',
@@ -634,11 +678,15 @@ async function streamCopilotResponses(opts: {
     })
   }
   const res = await withCopilotRetry(true, send, opts.signal, opts.providerId)
-  return readResponsesSse(res, opts.onDelta)
+  return readResponsesSse(res, opts.onDelta, { model: opts.model, outputLimit: opts.outputLimit })
 }
 
 /** Read a Responses SSE body, forwarding text deltas. */
-async function readResponsesSse(res: Response, onDelta: (t: string) => void): Promise<void> {
+async function readResponsesSse(
+  res: Response,
+  onDelta: (t: string) => void,
+  context: { model: string; outputLimit?: number }
+): Promise<void> {
   if (!res.ok || !res.body) {
     const body = await res.text().catch(() => '')
     throw new ModelHttpError(
@@ -649,16 +697,35 @@ async function readResponsesSse(res: Response, onDelta: (t: string) => void): Pr
   const reader = res.body.getReader()
   const decoder = new TextDecoder()
   let buffer = ''
+  let emitted = false
+  const finish = (): void => {
+    if (!emitted) throw new Error('GitHub Copilot returned an empty response. Try again.')
+  }
   const handleLine = (line: string): boolean => {
     const trimmed = line.trim()
     if (!trimmed.startsWith('data:')) return false
     const payload = trimmed.slice(5).trim()
     if (payload === '[DONE]') return true
+    let event: ResponsesEvent
     try {
-      return applyResponsesEvent(JSON.parse(payload) as ResponsesEvent, { onText: onDelta })
+      event = JSON.parse(payload) as ResponsesEvent
     } catch {
       return false
     }
+    return applyResponsesEvent(
+      event,
+      {
+        onText: (text) => {
+          emitted = true
+          onDelta(text)
+        }
+      },
+      {
+        ...context,
+        requestId:
+          res.headers.get('x-request-id') ?? res.headers.get('x-github-request-id') ?? undefined
+      }
+    )
   }
   for (;;) {
     const { done, value } = await reader.read()
@@ -667,13 +734,14 @@ async function readResponsesSse(res: Response, onDelta: (t: string) => void): Pr
     const lines = buffer.split('\n')
     buffer = lines.pop() ?? ''
     for (const line of lines) {
-      if (handleLine(line)) return
+      if (handleLine(line)) return finish()
     }
   }
   buffer += decoder.decode()
   for (const line of buffer.split('\n')) {
-    if (handleLine(line)) return
+    if (handleLine(line)) return finish()
   }
+  finish()
 }
 
 function emitOpenAi(j: SseJson, onDelta: (t: string) => void): void {
@@ -816,11 +884,15 @@ async function readSse(res: Response, onJson: (json: SseJson) => void): Promise<
     if (!trimmed.startsWith('data:')) return false
     const payload = trimmed.slice(5).trim()
     if (payload === '[DONE]') return true
+    let json: SseJson
     try {
-      onJson(JSON.parse(payload) as SseJson)
+      json = JSON.parse(payload) as SseJson
     } catch {
       // keep-alive lines / partial JSON
+      return false
     }
+    assertModelStreamEvent(json)
+    onJson(json)
     return false
   }
   for (;;) {

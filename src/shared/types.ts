@@ -423,7 +423,7 @@ export interface SkillDef {
 // ---- Settings ----------------------------------------------------------------
 
 /** Thinking/reasoning effort, mapped per provider (reasoning models only). */
-export type ReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+export type ReasoningEffort = 'none' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 
 /**
  * Global app settings.

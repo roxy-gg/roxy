@@ -19,6 +19,7 @@
  */
 import type { OpenAiContentPart } from './llm'
 import type { ReasoningEffort } from '../../shared/types'
+import { assertModelStreamEvent } from './model-http-error'
 
 /** The API-code Copilot/OpenAI return when a model is Responses-only. */
 const UNSUPPORTED_API = 'unsupported_api_for_model'
@@ -127,16 +128,16 @@ export function toResponsesInput(messages: ChatLikeMessage[]): unknown[] {
 
 /** Flatten chat tool schemas into the shape Responses expects (no `function` wrapper). */
 export function toResponsesTools(tools: ChatToolSchema[]): unknown[] {
-  return tools.map((t) => ({ type: 'function', ...t.function }))
+  return tools.map((t) => ({ type: 'function', ...t.function, strict: false }))
 }
 
 /** Responses nests effort under `reasoning` instead of a flat `reasoning_effort`. */
 export function toResponsesReasoning(
   reasoning?: boolean,
   effort?: ReasoningEffort
-): { reasoning?: { effort: ReasoningEffort } } {
+): { reasoning?: { effort: ReasoningEffort; summary: 'auto' } } {
   if (!reasoning || !effort) return {}
-  return { reasoning: { effort } }
+  return { reasoning: { effort, summary: 'auto' } }
 }
 
 // ---- Stream translation ------------------------------------------------------
@@ -144,10 +145,16 @@ export function toResponsesReasoning(
 /** A Responses SSE event (only the fields we consume). */
 export interface ResponsesEvent {
   type?: string
+  code?: string
+  message?: string
+  error?: { code?: string; message?: string } | string | null
   delta?: string
   output_index?: number
   item?: { type?: string; call_id?: string; name?: string; arguments?: string }
   response?: {
+    max_output_tokens?: number | null
+    error?: { code?: string; message?: string } | null
+    incomplete_details?: { reason?: string } | null
     usage?: {
       input_tokens?: number
       output_tokens?: number
@@ -155,7 +162,6 @@ export interface ResponsesEvent {
       output_tokens_details?: { reasoning_tokens?: number }
     }
   }
-  message?: string
 }
 
 export interface ResponsesUsage {
@@ -179,7 +185,12 @@ export interface ResponsesHandlers {
  * Apply one Responses event to the handlers. Returns true on a terminal event so
  * the reader can stop (the stream has no `[DONE]` sentinel of its own).
  */
-export function applyResponsesEvent(ev: ResponsesEvent, h: ResponsesHandlers): boolean {
+export function applyResponsesEvent(
+  ev: ResponsesEvent,
+  h: ResponsesHandlers,
+  context?: { model?: string; outputLimit?: number; requestId?: string }
+): boolean {
+  assertModelStreamEvent(ev, context)
   switch (ev.type) {
     case 'response.output_text.delta':
       if (ev.delta) h.onText(ev.delta)
@@ -219,10 +230,6 @@ export function applyResponsesEvent(ev: ResponsesEvent, h: ResponsesHandlers): b
       }
       return true
     }
-    case 'response.failed':
-    case 'response.incomplete':
-    case 'error':
-      return true
     default:
       return false
   }

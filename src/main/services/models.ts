@@ -42,13 +42,25 @@ interface CopilotModel {
   id: string
   name?: string
   model_picker_enabled?: boolean
+  model_picker_category?: string
   is_chat_default?: boolean
   policy?: { state?: string }
   supported_endpoints?: string[]
-  billing?: { is_premium?: boolean; multiplier?: number; token_prices?: unknown }
+  billing?: {
+    is_premium?: boolean
+    multiplier?: number
+    token_prices?: {
+      default?: { max_prompt_tokens?: number; context_max?: number }
+      long_context?: { max_prompt_tokens?: number; context_max?: number }
+    }
+  }
   capabilities?: {
     type?: string
-    limits?: { max_context_window_tokens?: number; max_output_tokens?: number }
+    limits?: {
+      max_context_window_tokens?: number
+      max_prompt_tokens?: number
+      max_output_tokens?: number
+    }
     supports?: {
       tool_calls?: boolean
       thinking?: boolean
@@ -97,6 +109,7 @@ async function listCopilotModels(connectionId: string): Promise<ModelInfo[]> {
             throw new Error('GitHub Copilot account changed.')
           }
           const { url, headers } = await copilotEndpoint('/models', false, connectionId)
+          headers['Openai-Intent'] = 'model-access'
           recordAuthorization(headers.Authorization)
           return fetch(url, { headers: { ...headers, Accept: 'application/json' }, signal })
         },
@@ -107,13 +120,17 @@ async function listCopilotModels(connectionId: string): Promise<ModelInfo[]> {
       const body = (await res.json()) as { data?: CopilotModel[] }
       if (!Array.isArray(body.data)) throw new Error('Invalid GitHub Copilot model list.')
 
+      // Individual plans can advertise access while disabling the old picker flag.
+      // Keep policy checks and exclude uncategorized internal/utility models.
       const models = body.data
         .filter(
           (m) =>
             typeof m?.id === 'string' &&
             m.id.length > 0 &&
             m.capabilities?.type === 'chat' &&
-            m.model_picker_enabled === true &&
+            (m.model_picker_enabled === true ||
+              Boolean(m.model_picker_category?.trim()) ||
+              m.policy?.state === 'enabled') &&
             (!m.policy || m.policy.state === 'enabled') &&
             (!m.supported_endpoints ||
               m.supported_endpoints.some((p) => p === '/chat/completions' || p === '/responses'))
@@ -125,6 +142,22 @@ async function listCopilotModels(connectionId: string): Promise<ModelInfo[]> {
           const multiplier = m.billing?.multiplier
           // Usage-based plans price every token; this is what the account is billed.
           const cost = copilotTokenCost(m.billing)
+          // VS Code builds its tier picker from billing prompt limits, not the
+          // shared input+output context window.
+          const prices = m.billing?.token_prices
+          const positive = (n: number | undefined): number | undefined =>
+            n && Number.isSafeInteger(n) && n > 0 ? n : undefined
+          const standard = positive(
+            prices?.default?.max_prompt_tokens ?? prices?.default?.context_max
+          )
+          const long = positive(
+            prices?.long_context?.max_prompt_tokens ?? prices?.long_context?.context_max
+          )
+          const inputMax =
+            Math.max(positive(m.capabilities?.limits?.max_prompt_tokens) ?? 0, long ?? 0) ||
+            positive(m.capabilities?.limits?.max_context_window_tokens)
+          const tiers =
+            standard && inputMax && standard < inputMax ? [standard, inputMax] : undefined
           return {
             ...(typeof multiplier === 'number' && Number.isFinite(multiplier) && multiplier >= 0
               ? { premiumMultiplier: multiplier }
@@ -135,8 +168,17 @@ async function listCopilotModels(connectionId: string): Promise<ModelInfo[]> {
             reasoning: supports?.thinking === true || Boolean(supports?.reasoning_effort?.length),
             toolCall: supports?.tool_calls === true,
             imageInput: typeof supports?.vision === 'boolean' ? supports.vision : undefined,
-            ...(efforts.length ? { reasoningEfforts: efforts } : {}),
-            contextLimit: m.capabilities?.limits?.max_context_window_tokens,
+            reasoningEfforts: efforts,
+            contextLimit: inputMax,
+            ...(tiers
+              ? {
+                  contextOptions: tiers
+                }
+              : {}),
+            ...(standard && inputMax
+              ? { defaultContextLimit: prices?.long_context ? standard : inputMax }
+              : {}),
+            supportedEndpoints: m.supported_endpoints,
             outputLimit: m.capabilities?.limits?.max_output_tokens
           }
         })
@@ -226,9 +268,8 @@ function roxyCost(p: RoxyModel['pricing']): ModelCost | undefined {
 /**
  * The model's effort ladder, narrowed to the levels Roxy's picker has.
  *
- * The gateway also reports `minimal` and `none`, which sit below our
- * weakest rung and have no UI - they are dropped rather than folded into
- * `low`, since
+ * The gateway also reports `minimal`, which has no UI and is dropped rather than
+ * folded into `low`, since
  * silently spending more thinking than the model was told to is worse than
  * offering one fewer level. An empty result means "no usable ladder", which
  * reads as unknown so the full range stays available.

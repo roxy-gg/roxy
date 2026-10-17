@@ -231,6 +231,8 @@ async function main(): Promise<void> {
   check('setAutoWorkstream(true) restores the default', repo.getSettings().autoWorkstream === true)
 
   check('reasoning effort default high', repo.getSettings().reasoningEffort === 'high')
+  repo.setReasoningEffort('none')
+  check('setReasoningEffort persists None', repo.getSettings().reasoningEffort === 'none')
   repo.setReasoningEffort('low')
   check('setReasoningEffort persists', repo.getSettings().reasoningEffort === 'low')
   repo.setReasoningEffort('max')
@@ -3897,8 +3899,8 @@ async function main(): Promise<void> {
         { ...enabled, id: 'blocked', policy: { state: 'disabled' } },
         { ...enabled, id: 'unconfigured', policy: {} },
         { ...enabled, id: 'future-policy', policy: { state: 'pending' } },
-        { ...enabled, id: 'hidden', model_picker_enabled: false },
-        { ...enabled, id: 'internal', model_picker_enabled: undefined },
+        { ...enabled, id: 'hidden', model_picker_enabled: false, policy: undefined },
+        { ...enabled, id: 'internal', model_picker_enabled: undefined, policy: undefined },
         { ...enabled, id: 'embedding', capabilities: { type: 'embeddings' } },
         { ...enabled, id: 'wrong-api', supported_endpoints: ['/messages'] },
         { ...enabled, id: 'no-policy', policy: undefined, is_chat_default: true },
@@ -3982,7 +3984,7 @@ async function main(): Promise<void> {
           requests[0].auth === 'Bearer copilot-test-account-a'
       )
       check(
-        'Copilot: only enabled, picker-visible chat models on supported APIs survive',
+        'Copilot: only advertised, policy-allowed chat models on supported APIs survive',
         models.map((m) => m.id).join(',') === 'no-policy,test-new-model,plain-chat'
       )
       check(

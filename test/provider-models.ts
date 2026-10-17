@@ -6,9 +6,15 @@ import { join } from 'node:path'
 import { app } from 'electron'
 import * as repo from '../src/main/db/repo'
 import { closeDb, getDb } from '../src/main/db/database'
-import { listModelCatalog, listModels, modelCost } from '../src/main/services/models'
+import {
+  invalidateCopilotModels,
+  listModelCatalog,
+  listModels,
+  modelCost
+} from '../src/main/services/models'
 import { openaiEndpoint, openAiReasoning, streamChat } from '../src/main/services/llm'
-import { isResponsesOnly } from '../src/main/services/responses'
+import { isResponsesOnly, markResponsesOnly } from '../src/main/services/responses'
+import { streamTurn } from '../src/main/harness/agent'
 import { accountIdentity } from '../src/main/services/copilot'
 import { CODEX_PROVIDER_ID } from '../src/shared/cliproxy'
 import { SEED_PROVIDERS } from '../src/shared/providers'
@@ -361,10 +367,383 @@ void app
         (await listModels(copilot.id)).map((m) => m.imageInput),
         [true, false, undefined]
       )
+
+      // Personal accounts now return categories with the legacy picker flag false.
+      // Policies still win, and internal/utility models must not leak into the picker.
+      invalidateCopilotModels(copilot.id)
+      globalThis.fetch = async (url) => {
+        assert.ok(String(url).endsWith('/models'))
+        return Response.json({
+          data: [
+            { id: 'legacy', model_picker_enabled: true },
+            {
+              id: 'individual',
+              model_picker_enabled: false,
+              model_picker_category: 'versatile',
+              policy: { state: 'enabled' }
+            },
+            { id: 'category-only', model_picker_category: 'lightweight' },
+            { id: 'policy-only', model_picker_enabled: false, policy: { state: 'enabled' } },
+            { id: 'revoked', model_picker_category: 'powerful', policy: { state: 'disabled' } },
+            {
+              id: 'unconfigured',
+              model_picker_category: 'powerful',
+              policy: { state: 'unconfigured' }
+            },
+            { id: 'internal', model_picker_enabled: false },
+            { id: 'empty-category', model_picker_category: '  ' },
+            {
+              id: 'wrong-endpoint',
+              model_picker_category: 'versatile',
+              supported_endpoints: ['/embeddings']
+            }
+          ].map((model) => ({
+            capabilities: { type: 'chat', supports: { tool_calls: true } },
+            ...model
+          }))
+        })
+      }
+      assert.deepEqual(
+        (await listModels(copilot.id)).map((model) => model.id),
+        ['legacy', 'individual', 'category-only', 'policy-only']
+      )
+
+      const stream = (events: unknown[], trailingNewline = true): Response =>
+        new Response(
+          events
+            .map((event) => `data: ${typeof event === 'string' ? event : JSON.stringify(event)}`)
+            .join('\n\n') + (trailingNewline ? '\n\n' : ''),
+          { headers: { 'Content-Type': 'text/event-stream' } }
+        )
+      const personal = repo.storeCopilotCredential({ accessToken: 'individual-stream' })
+      const enterprise = repo.storeCopilotCredential({ accessToken: 'enterprise-stream' })
+      const model = 'stream-regression'
+      const messages = [{ role: 'user' as const, content: 'hello' }]
+      let events: unknown[] = []
+      let newline = true
+      let sends = 0
+      let recoverAfterZero = false
+      let advertiseEfforts = true
+      let advertisedEndpoints: string[] | undefined
+      let requestedEffort: 'max' | 'none' = 'max'
+      globalThis.fetch = async (url, init) => {
+        const headers = new Headers(init?.headers)
+        if (String(url).endsWith('/copilot_internal/v2/token')) {
+          const tier =
+            headers.get('Authorization') === 'token individual-stream' ? 'individual' : 'enterprise'
+          return Response.json({
+            token: tier,
+            expires_at: Date.now() / 1000 + 3600,
+            endpoints: { api: `https://api.${tier}.githubcopilot.com` }
+          })
+        }
+        const tier = headers.get('Authorization')?.slice(7)
+        assert.ok(String(url).startsWith(`https://api.${tier}.githubcopilot.com/`))
+        assert.equal(headers.get('X-GitHub-Api-Version'), '2026-01-09')
+        assert.ok(headers.get('X-Request-Id'))
+        if (String(url).endsWith('/models')) {
+          assert.equal(headers.get('Openai-Intent'), 'model-access')
+          return Response.json({
+            data: [
+              {
+                id: model,
+                model_picker_enabled: true,
+                supported_endpoints: advertisedEndpoints,
+                billing: {
+                  token_prices: {
+                    default: { max_prompt_tokens: 64_000 },
+                    long_context: { max_prompt_tokens: tier === 'individual' ? 128_000 : 200_000 }
+                  }
+                },
+                capabilities: {
+                  type: 'chat',
+                  limits: {
+                    max_prompt_tokens: tier === 'individual' ? 128_000 : 200_000,
+                    max_output_tokens: tier === 'individual' ? 32_768 : 65_536
+                  },
+                  supports: {
+                    thinking: true,
+                    reasoning_effort: advertiseEfforts ? ['none', 'low', 'high'] : undefined
+                  }
+                }
+              }
+            ]
+          })
+        }
+        const payload = JSON.parse(String(init?.body))
+        const responses = String(url).endsWith('/responses')
+        if (advertisedEndpoints)
+          assert.ok(responses, 'route directly to the advertised Responses endpoint')
+        assert.equal(
+          headers.get('X-Initiator'),
+          payload.input?.at(-1)?.type === 'function_call_output' ? 'agent' : 'user'
+        )
+        if (responses) {
+          assert.equal(payload.store, false)
+          if (payload.reasoning) assert.equal(payload.reasoning.summary, 'auto')
+        }
+        assert.equal(
+          payload[responses ? 'max_output_tokens' : 'max_tokens'],
+          tier === 'individual' ? 32_768 : 65_536,
+          'send the account-advertised output budget'
+        )
+        assert.equal(
+          responses ? payload.reasoning?.effort : payload.reasoning_effort,
+          advertiseEfforts ? (requestedEffort === 'none' ? 'none' : 'high') : undefined,
+          'clamp effort to the live model ladder; omit it when unknown'
+        )
+        sends++
+        if (recoverAfterZero && sends > 1)
+          return stream([
+            { type: 'response.output_text.delta', delta: 'recovered' },
+            { type: 'response.completed' }
+          ])
+        return new Response(await stream(events, newline).text(), {
+          headers: { 'Content-Type': 'text/event-stream', 'x-request-id': 'copilot-test-request' }
+        })
+      }
+      for (const account of [personal, enterprise]) {
+        const info = (await listModels(account.id))[0]
+        assert.equal(info.contextLimit, account.id === personal.id ? 128_000 : 200_000)
+        assert.deepEqual(info.reasoningEfforts, ['none', 'low', 'high'])
+        assert.deepEqual(info.contextOptions, [
+          64_000,
+          account.id === personal.id ? 128_000 : 200_000
+        ])
+        assert.equal(info.defaultContextLimit, 64_000)
+        const plain = async (): Promise<string> => {
+          let text = ''
+          await streamChat({
+            providerId: account.id,
+            model,
+            reasoning: true,
+            reasoningEffort: requestedEffort,
+            messages,
+            signal: new AbortController().signal,
+            onDelta: (delta) => {
+              text += delta
+            }
+          })
+          return text
+        }
+        const agent = (
+          onText: (delta: string) => void = () => {},
+          history: Parameters<typeof streamTurn>[3] = messages
+        ): ReturnType<typeof streamTurn> =>
+          streamTurn(
+            account.id,
+            false,
+            model,
+            history,
+            new AbortController().signal,
+            true,
+            requestedEffort,
+            [],
+            onText,
+            () => {},
+            { delay: async () => {} }
+          )
+        for (const responses of [false, true]) {
+          if (responses) markResponsesOnly(account.id, model)
+          newline = false
+          events = responses
+            ? [
+                { type: 'response.output_text.delta', delta: 'hello' },
+                { type: 'response.completed' }
+              ]
+            : [{ choices: [{ delta: { content: 'hello' } }] }]
+          assert.equal(await plain(), 'hello', 'plain chat drains the final frame')
+          assert.equal((await agent()).text, 'hello', 'agent drains the final frame')
+          newline = true
+          events = responses
+            ? [
+                {
+                  type: 'response.output_item.added',
+                  output_index: 0,
+                  item: { type: 'function_call', call_id: 'c1', name: 'read', arguments: '' }
+                },
+                {
+                  type: 'response.function_call_arguments.delta',
+                  output_index: 0,
+                  delta: JSON.stringify({ path: 'a.ts' })
+                },
+                { type: 'response.completed' }
+              ]
+            : [
+                {
+                  choices: [
+                    {
+                      delta: {
+                        tool_calls: [
+                          {
+                            index: 0,
+                            id: 'c1',
+                            function: { name: 'read', arguments: JSON.stringify({ path: 'a.ts' }) }
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                },
+                '[DONE]'
+              ]
+          const toolCall = (await agent()).toolCalls[0]
+          assert.equal(toolCall?.name, 'read', 'tool-only turns are not empty')
+          assert.deepEqual(JSON.parse(toolCall.args), { path: 'a.ts' })
+
+          events = [
+            { error: { code: 'insufficient_quota', message: 'No credits remaining' } },
+            '[DONE]'
+          ]
+          await assert.rejects(plain(), /insufficient_quota/)
+          sends = 0
+          await assert.rejects(agent(), /insufficient_quota/)
+          assert.equal(sends, 1, 'streamed quota failures surface without retries')
+          if (responses) {
+            events = [
+              { type: 'error', code: 'insufficient_quota', message: 'Account limit reached' }
+            ]
+            await assert.rejects(plain(), /insufficient_quota/)
+            sends = 0
+            await assert.rejects(agent(), /insufficient_quota/)
+            assert.equal(sends, 1, 'Responses error codes survive top-level error events')
+            for (const type of ['response.failed', 'response.incomplete', 'error']) {
+              events = [
+                {
+                  type,
+                  response: {
+                    error: { code: 'insufficient_quota', message: 'No credits remaining' }
+                  }
+                }
+              ]
+              await assert.rejects(plain(), /insufficient_quota/)
+              await assert.rejects(agent(), /insufficient_quota/)
+            }
+            events = [
+              {
+                type: 'response.incomplete',
+                response: { incomplete_details: { reason: 'max_output_tokens' } }
+              }
+            ]
+            await assert.rejects(plain(), /max_output_tokens/)
+            sends = 0
+            await assert.rejects(agent(), /max_output_tokens/)
+            assert.equal(sends, 1, 'output exhaustion must not replay the same request')
+            events = [
+              {
+                type: 'response.incomplete',
+                response: {
+                  incomplete_details: { reason: 'max_output_tokens' },
+                  max_output_tokens: 128000,
+                  usage: {
+                    output_tokens: 128000,
+                    output_tokens_details: { reasoning_tokens: 128000 }
+                  }
+                }
+              }
+            ]
+            sends = 0
+            await assert.rejects(agent(), /output=128000, reasoning=128000, budget=128000/)
+            assert.equal(sends, 1, 'actual reasoning exhaustion must never replay')
+            events = [
+              {
+                type: 'response.incomplete',
+                response: {
+                  incomplete_details: { reason: 'max_output_tokens' },
+                  max_output_tokens: 128000,
+                  usage: { output_tokens: 0, output_tokens_details: { reasoning_tokens: 0 } }
+                }
+              }
+            ]
+            sends = 0
+            await assert.rejects(agent(), (error: Error) => {
+              assert.match(error.message, /output=0/)
+              assert.match(error.message, /reasoning=0/)
+              assert.match(error.message, /budget=128000/)
+              assert.match(error.message, /request=copilot-test-request/)
+              assert.match(error.message, /zero generated tokens/)
+              return true
+            })
+            assert.equal(sends, 2, 'zero-token truncation gets at most one clean replay')
+            sends = 0
+            recoverAfterZero = true
+            assert.equal((await agent()).text, 'recovered')
+            assert.equal(sends, 2)
+            recoverAfterZero = false
+            events = [{ type: 'response.output_text.delta', delta: 'partial' }, ...events]
+            sends = 0
+            await assert.rejects(agent(), /output=0/)
+            assert.equal(sends, 1, 'even a zero-token report cannot replay visible partial text')
+          }
+
+          events = [responses ? { type: 'response.completed' } : '[DONE]']
+          await assert.rejects(plain(), /empty response/)
+          await assert.rejects(agent(), /empty response/)
+          let partial = ''
+          events = [
+            responses
+              ? { type: 'response.output_text.delta', delta: 'partial' }
+              : { choices: [{ delta: { content: 'partial' } }] },
+            { error: { message: 'upstream failed' } }
+          ]
+          sends = 0
+          await assert.rejects(
+            agent((delta) => {
+              partial += delta
+            }),
+            /upstream failed/
+          )
+          assert.equal(partial, 'partial')
+          assert.equal(sends, 1, 'partial output must not be replayed')
+        }
+        advertiseEfforts = false
+        invalidateCopilotModels(account.id)
+        assert.deepEqual((await listModels(account.id))[0].reasoningEfforts, [])
+        events = [
+          { type: 'response.output_text.delta', delta: 'default effort' },
+          { type: 'response.completed' }
+        ]
+        assert.equal(await plain(), 'default effort')
+        assert.equal((await agent()).text, 'default effort')
+        advertiseEfforts = true
+        advertisedEndpoints = ['/responses', 'ws:/responses']
+        invalidateCopilotModels(account.id)
+        assert.deepEqual((await listModels(account.id))[0].supportedEndpoints, advertisedEndpoints)
+        requestedEffort = 'none'
+        events = [
+          { type: 'response.output_text.delta', delta: 'no thinking' },
+          { type: 'response.completed' }
+        ]
+        assert.equal(await plain(), 'no thinking')
+        assert.equal((await agent()).text, 'no thinking')
+        assert.equal(
+          (
+            await agent(undefined, [
+              ...messages,
+              {
+                role: 'assistant',
+                content: null,
+                tool_calls: [
+                  { id: 'read_1', type: 'function', function: { name: 'read', arguments: '{}' } }
+                ]
+              },
+              { role: 'tool', tool_call_id: 'read_1', content: 'file contents' }
+            ])
+          ).text,
+          'no thinking',
+          'tool follow-ups are classified as agent-initiated'
+        )
+        requestedEffort = 'max'
+        advertisedEndpoints = undefined
+      }
+      console.log(
+        'COPILOT STREAMS OK: personal/Enterprise catalogs, both wires, tool-only turns, quota failures, empty replies, and partial output'
+      )
       globalThis.fetch = async (url) => {
         if (String(url).endsWith('/copilot_internal/v2/token')) {
           return Response.json({ token: 'old-session', expires_at: Date.now() / 1000 + 3600 })
         }
+        if (String(url).endsWith('/models')) return Response.json({ data: [] })
         assert.ok(
           String(url).endsWith('/chat/completions'),
           'must not replay through Responses after reconnect'

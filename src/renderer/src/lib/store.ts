@@ -2524,7 +2524,11 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
       }
       const info = catalog.find((m) => m.id === model)
       const modelContext = info?.contextLimit ?? 128_000
-      const contextBudget = contextBudgetFor(config.contextLimit, modelContext)
+      const contextBudget = contextBudgetFor(
+        config.contextLimit,
+        modelContext,
+        info?.defaultContextLimit
+      )
       const agentId = config.agentId
       // Auto-compact before the window overflows the model's *real* budget:
       // trigger once used tokens pass contextBudget minus the larger of the

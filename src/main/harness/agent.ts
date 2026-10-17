@@ -88,6 +88,8 @@ import {
 import { streamViaAiSdk, usesAiSdk } from '../services/aisdk'
 import { APICallError } from 'ai'
 import { BOT_SYSTEM_PROMPT } from './bot-prompt'
+import { assertModelStreamEvent, ModelOutputLimitError } from '../services/model-http-error'
+import { clampReasoningEffort } from '../../shared/session-config'
 
 const MAX_SUBAGENT_DEPTH = 1
 
@@ -196,7 +198,7 @@ function modelErrorText(e: unknown): string {
   return String(e).slice(0, 2000)
 }
 
-/** Whether a model failure is a HARD billing/quota/credit wall that retrying
+/** Whether a model failure is an output-budget or HARD billing/quota/credit wall that retrying
  *  cannot fix (out of credits, quota exhausted, payment required). Unlike a plain
  *  rate-limit or 5xx (ride it out during a long run) or a generic 4xx (retry a
  *  few times in case it's a fluke), these surface IMMEDIATELY — hammering the
@@ -205,6 +207,7 @@ function modelErrorText(e: unknown): string {
  *  or by the provider's error text, so it catches an out-of-credits 429 that
  *  would otherwise look like an infinitely-retryable rate-limit. */
 export function isNonRetryableModelError(e: unknown): boolean {
+  if (e instanceof ModelOutputLimitError) return true
   if (e instanceof ModelHttpError && e.status === 402) return true
   if (APICallError.isInstance(e) && e.statusCode === 402) return true
   return QUOTA_BILLING_RE.test(modelErrorText(e))
@@ -322,6 +325,14 @@ export async function streamTurn(
       // only clean pre-stream failures (rate limits, 5xx, refused connections)
       // are safe to ride out.
       if (emitted) throw e
+      // A zero-token truncation did not exhaust a generation budget. Allow one
+      // clean replay for an upstream failure, without changing model or effort.
+      if (e instanceof ModelOutputLimitError && e.outputTokens === 0 && attempt === 0) {
+        deps.onRetry?.()
+        console.warn(`[agent] ${e.message} Retrying the same request once.`)
+        await delay(nextRetryDelay(0), signal)
+        continue
+      }
       // A hard billing / quota / out-of-credits wall won't heal by retrying —
       // surface it at once (not after minutes of pointless backoff) so the user
       // can top up or switch providers instead of watching the run silently spin.
@@ -1188,6 +1199,7 @@ interface ToolCallAccum {
 }
 
 interface StreamDelta {
+  error?: { code?: string; message?: string } | string | null
   choices?: {
     delta?: {
       content?: string
@@ -2255,11 +2267,28 @@ async function streamOnce(
   }
 
   const routedModel = await requestModel(providerId, model)
+  const info = isCopilot
+    ? (await listModels(providerId)).find((entry) => entry.id === model)
+    : undefined
+  if (isCopilot && repo.getCopilotSessionKey(providerId) !== copilotSession) {
+    throw new ModelHttpError(409, 'GitHub Copilot account changed during the request. Try again.')
+  }
+  if (isCopilot) {
+    effort =
+      effort && info?.reasoningEfforts?.length
+        ? clampReasoningEffort(effort, info.reasoningEfforts)
+        : undefined
+  }
+  const outputLimit =
+    info?.outputLimit && Number.isSafeInteger(info.outputLimit) && info.outputLimit > 0
+      ? info.outputLimit
+      : undefined
   const chatPayload = JSON.stringify({
     model: routedModel,
     messages,
     tools,
     tool_choice: 'auto',
+    max_tokens: outputLimit,
     // Via the shared helper, not a raw spread: it is what knows which providers
     // accept xhigh/max and which 400 on anything past high.
     ...openAiReasoning(providerId, reasoning, effort),
@@ -2278,6 +2307,8 @@ async function streamOnce(
       input: toResponsesInput(messages),
       tools: toResponsesTools(tools),
       tool_choice: 'auto',
+      max_output_tokens: outputLimit,
+      store: false,
       ...toResponsesReasoning(reasoning, effort),
       stream: true
     })
@@ -2285,9 +2316,13 @@ async function streamOnce(
   // re-exchanges the short-lived Copilot token as it nears expiry, so a long
   // agent loop (many tool calls) never sends a stale token — the root cause of
   // the intermittent "IDE token expired" 401.
-  let useResponses = isResponsesOnly(providerId, model)
+  let useResponses =
+    (info?.supportedEndpoints?.includes('/responses') &&
+      !info.supportedEndpoints.includes('/chat/completions')) ||
+    isResponsesOnly(providerId, model)
   const send = async (recordAuthorization: (authorization: string) => void): Promise<Response> => {
     const { url, headers } = await openaiEndpoint(providerId, { vision, responses: useResponses })
+    if (isCopilot) headers['X-Initiator'] = messages.at(-1)?.role === 'user' ? 'user' : 'agent'
     if (isCopilot) recordAuthorization(headers.Authorization)
     const body = useResponses ? responsesPayload() : chatPayload
     return fetch(url, { method: 'POST', headers, body, signal })
@@ -2342,13 +2377,16 @@ async function streamOnce(
     estimated: true
   })
   const finish = (): { text: string; toolCalls: ToolCallAccum[]; usage: TokenUsage } => {
-    const toolCalls = calls.filter(Boolean)
+    const toolCalls = calls.filter((c) => c?.name)
+    if (!text.trim() && toolCalls.length === 0) {
+      throw new Error('Model returned an empty response with no text or tool calls. Try again.')
+    }
     toolCalls.forEach((c, i) => {
       // Hyphen, not underscore: the fallback id must itself satisfy the strict
       // tool_use.id pattern (see sanitizeToolCallId) so it survives replay as-is.
       if (!c.id) c.id = `call-${i}`
     })
-    return { text, toolCalls: toolCalls.filter((c) => c.name), usage: usage ?? estimateUsage() }
+    return { text, toolCalls, usage: usage ?? estimateUsage() }
   }
 
   // The Responses wire carries the same information as semantic events rather
@@ -2365,22 +2403,31 @@ async function streamOnce(
     } catch {
       return false
     }
-    return applyResponsesEvent(ev, {
-      onText: (d) => {
-        text += d
-        onText(d)
+    return applyResponsesEvent(
+      ev,
+      {
+        onText: (d) => {
+          text += d
+          onText(d)
+        },
+        onReasoning,
+        onToolCall: (i, patch) => {
+          if (!calls[i]) calls[i] = { id: '', name: '', args: '' }
+          if (patch.id) calls[i].id = patch.id
+          if (patch.name) calls[i].name = patch.name
+          if (patch.args) calls[i].args += patch.args
+        },
+        onUsage: (u) => {
+          usage = u
+        }
       },
-      onReasoning,
-      onToolCall: (i, patch) => {
-        if (!calls[i]) calls[i] = { id: '', name: '', args: '' }
-        if (patch.id) calls[i].id = patch.id
-        if (patch.name) calls[i].name = patch.name
-        if (patch.args) calls[i].args += patch.args
-      },
-      onUsage: (u) => {
-        usage = u
+      {
+        model,
+        outputLimit,
+        requestId:
+          res.headers.get('x-request-id') ?? res.headers.get('x-github-request-id') ?? undefined
       }
-    })
+    )
   }
 
   const handleChatLine = (line: string): boolean => {
@@ -2394,6 +2441,7 @@ async function streamOnce(
     } catch {
       return false
     }
+    assertModelStreamEvent(json)
     // A usage chunk (final frame; its `choices` is usually empty) → real counts.
     if (json.usage) {
       const cached = json.usage.prompt_tokens_details?.cached_tokens ?? 0

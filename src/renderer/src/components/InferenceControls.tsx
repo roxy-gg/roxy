@@ -275,6 +275,7 @@ function BotSettingsPicker<T extends string>({
 // ---- Thinking effort ---------------------------------------------------------
 
 const EFFORTS = [
+  { value: 'none', labelKey: 'common.none' },
   { value: 'low', labelKey: 'inference.effort.low' },
   { value: 'medium', labelKey: 'inference.effort.medium' },
   { value: 'high', labelKey: 'inference.effort.high' },
@@ -293,9 +294,10 @@ export function ThinkingPicker(): JSX.Element | null {
   // Offer only the rungs this model accepts, when the provider says which.
   // A gateway like roxy.gg reports a per-model ladder, and several models
   // expose just one level - listing Max there would render a choice that 400s.
-  const efforts = info.reasoningEfforts?.length
+  const efforts = info.reasoningEfforts
     ? EFFORTS.filter((e) => info.reasoningEfforts!.includes(e.value))
-    : EFFORTS
+    : EFFORTS.filter((e) => e.value !== 'none')
+  if (!efforts.length) return null
   // What the session is SET to may not be what this model will run: a session
   // left on Max that switches to a high-only model sends `high`. Show the level
   // that will actually be used, so the footer never states a comfortable lie.
@@ -472,9 +474,9 @@ export function ContextPicker(): JSX.Element | null {
 
   const max = info ? effectiveContextMax(info) : 0
   if (!max) return null
-  const options = contextOptions(max)
-  const defaultBudget = Math.min(max, 200_000)
-  const current = config.contextLimit ?? defaultBudget
+  const options = info?.contextOptions ?? contextOptions(max)
+  const defaultBudget = contextBudgetFor(null, max, info?.defaultContextLimit)
+  const current = contextBudgetFor(config.contextLimit, max, info?.defaultContextLimit)
 
   return (
     <div ref={ref} className="relative">
@@ -561,9 +563,9 @@ export function BotInferenceFields({
   const setActiveAgent = useRoxyStore((s) => s.setActiveAgent)
 
   const efforts = info?.reasoning
-    ? info.reasoningEfforts?.length
+    ? info.reasoningEfforts
       ? EFFORTS.filter((e) => info.reasoningEfforts!.includes(e.value))
-      : EFFORTS
+      : EFFORTS.filter((e) => e.value !== 'none')
     : []
   const max = info ? effectiveContextMax(info) : 0
   const activeAgent = getAgent(activeAgentId) ?? getAgent(DEFAULT_AGENT_ID)!
@@ -638,10 +640,10 @@ export function BotInferenceFields({
             {t('inference.contextTitle')}
             <select
               className={selectClass}
-              value={config.contextLimit ?? Math.min(max, 200_000)}
+              value={contextBudgetFor(config.contextLimit, max, info?.defaultContextLimit)}
               onChange={(e) => void setContextLimit(Number(e.target.value))}
             >
-              {contextOptions(max).map((value) => (
+              {(info?.contextOptions ?? contextOptions(max)).map((value) => (
                 <option key={value} value={value}>
                   {formatTokens(value)}
                 </option>
@@ -719,7 +721,9 @@ export function ContextMeter(): JSX.Element {
   const used = messagesTokens + toolTokens + otherTokens + systemTokens + toolDefsTokens
 
   const modelCtx = info ? effectiveContextMax(info) : undefined
-  const total = modelCtx ? contextBudgetFor(config.contextLimit, modelCtx) : null
+  const total = modelCtx
+    ? contextBudgetFor(config.contextLimit, modelCtx, info?.defaultContextLimit)
+    : null
   const reserve = total ? Math.min(info?.outputLimit ?? 4096, Math.round(total * 0.25)) : 0
   const pct = total ? Math.min(100, Math.round((used / total) * 100)) : 0
   const reservePct = total ? Math.min(100 - pct, Math.round((reserve / total) * 100)) : 0

@@ -4935,7 +4935,8 @@ async function main(): Promise<void> {
   // parseReasoningEffort guards the DB column + IPC payloads.
   check(
     'session config: parseReasoningEffort accepts the ladder',
-    parseReasoningEffort('low') === 'low' &&
+    parseReasoningEffort('none') === 'none' &&
+      parseReasoningEffort('low') === 'low' &&
       parseReasoningEffort('xhigh') === 'xhigh' &&
       parseReasoningEffort('max') === 'max'
   )
@@ -4971,10 +4972,13 @@ async function main(): Promise<void> {
       clampReasoningEffort('low', ['high']) === 'high'
   )
 
-  // Claude reports a 200K base but really exposes 1M - the picker's ceiling.
   check(
-    'context max: a large reasoning model is raised to 1M',
-    effectiveContextMax({ reasoning: true, contextLimit: 200_000 }) === 1_000_000
+    'context max: reasoning does not inflate the advertised account window',
+    effectiveContextMax({ reasoning: true, contextLimit: 200_000 }) === 200_000
+  )
+  check(
+    'context max: a provider-advertised 1M window is retained',
+    effectiveContextMax({ reasoning: true, contextLimit: 1_000_000 }) === 1_000_000
   )
   check(
     'context max: a non-reasoning model keeps its real window',
@@ -4995,6 +4999,14 @@ async function main(): Promise<void> {
   )
 
   // ---- attachment hover-preview geometry (renderer/lib/anchor) ----------------
+  check(
+    'context budget: account default tier is used when unset',
+    contextBudgetFor(null, 1_000_000, 272_000) === 272_000
+  )
+  check(
+    'context budget: explicit session budget still wins over account default',
+    contextBudgetFor(200_000, 1_000_000, 272_000) === 200_000
+  )
   // A thumbnail's floating preview must never leave the viewport and never cover
   // the thumbnail that opened it, at any window size or aspect ratio.
   const thumb = (left: number, top: number, size = 36): Rect => ({
@@ -5677,11 +5689,12 @@ async function main(): Promise<void> {
   // Tools flatten (no nested `function`) and effort nests. Both are 400s if wrong.
   const flatTools = toResponsesTools([
     { type: 'function', function: { name: 'bash', description: 'run', parameters: {} } }
-  ]) as { type?: string; name?: string; function?: unknown }[]
+  ]) as { type?: string; name?: string; function?: unknown; strict?: boolean }[]
   check(
     'responses: tool schema flattened',
     flatTools[0].type === 'function' &&
       flatTools[0].name === 'bash' &&
+      flatTools[0].strict === false &&
       flatTools[0].function === undefined
   )
   check(
@@ -5742,11 +5755,15 @@ async function main(): Promise<void> {
     JSON.stringify(rUsage)
   )
   check('responses: response.completed terminates the stream', terminated)
-  check(
-    'responses: failure events terminate the stream',
-    applyResponsesEvent({ type: 'response.failed' }, { onText: () => {} }) &&
-      applyResponsesEvent({ type: 'error' }, { onText: () => {} })
-  )
+  for (const type of ['response.failed', 'response.incomplete', 'error']) {
+    let failure = ''
+    try {
+      applyResponsesEvent({ type }, { onText: () => {} })
+    } catch (error) {
+      failure = String(error)
+    }
+    check(`responses: ${type} throws instead of completing successfully`, failure.includes(type))
+  }
   check(
     'responses: unknown events are ignored',
     !applyResponsesEvent({ type: 'response.in_progress' }, { onText: () => {} })

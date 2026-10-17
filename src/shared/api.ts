@@ -515,7 +515,7 @@ export interface SessionsUpdated {
   statusKey?: string | null
 }
 
-/** A model offered by a provider (from models.dev). */
+/** A model offered by a provider, from its live catalog or models.dev. */
 export interface ModelInfo {
   id: string
   name: string
@@ -528,10 +528,15 @@ export interface ModelInfo {
    * Undefined = unknown, so the full Low..Max ladder is offered and clamping
    * falls back to per-provider rules. An explicit list lets the picker hide
    * levels the model would reject, and lets the wire send one it accepts.
+   * An empty list offers no effort override; Copilot then uses its server default.
    */
   reasoningEfforts?: ReasoningEffort[]
   /** Max input context window in tokens, when known. */
   contextLimit?: number
+  /** Account-advertised input-budget tiers and default (Copilot billing metadata). */
+  contextOptions?: number[]
+  defaultContextLimit?: number
+  supportedEndpoints?: string[]
   /** Max output tokens, when known. */
   outputLimit?: number
   /**
