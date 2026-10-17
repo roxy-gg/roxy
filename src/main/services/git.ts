@@ -288,11 +288,24 @@ export function _resetGitAvailability(): void {
 
 /** The repository root containing `cwd`, or null when it isn't in a repo. */
 export async function repoRoot(cwd: string, signal?: AbortSignal): Promise<string | null> {
-  if (!cwd) return null
+  return (await probeRepoRoot(cwd, signal)).root
+}
+
+/** A timed-out read must not be mistaken for a repository disappearing. */
+export async function probeRepoRoot(
+  cwd: string,
+  signal?: AbortSignal
+): Promise<{ root: string | null; unavailable: boolean }> {
+  if (!cwd) return { root: null, unavailable: false }
   const r = await git(['rev-parse', '--show-toplevel'], cwd, undefined, signal)
-  if (!r.ok) return null
+  if (!r.ok) {
+    return {
+      root: null,
+      unavailable: !/not a git repository|ENOENT|cannot change to .*No such file/i.test(r.stderr)
+    }
+  }
   const out = r.stdout.trim()
-  return out ? canonicalPath(out) : null
+  return { root: out ? canonicalPath(out) : null, unavailable: false }
 }
 
 /** The checked-out branch, or null when detached / not a repo. */

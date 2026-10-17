@@ -305,6 +305,7 @@ import {
   forgeKindForHost,
   detectHost,
   branchLifecycle,
+  sidebarGitDot,
   isPullRequestPhase,
   type LifecyclePhase,
   type LifecycleAction,
@@ -4772,6 +4773,45 @@ async function main(): Promise<void> {
         (sync) => !isPullRequestPhase(branchLifecycle({ sync, pr: null, forgeKnown: true }).phase)
       )
   )
+
+  for (const [phase, expected] of [
+    ['merged', 'merged'],
+    ['draft', 'pending'],
+    ['open', 'pending'],
+    ['closed', 'closed'],
+    ['synced', null],
+    ['unpublished', null],
+    ['behind', null],
+    [undefined, null]
+  ] as const) {
+    check(
+      `sidebar dot: ${phase} maps to ${expected}`,
+      sidebarGitDot({ phase, dirty: false, ahead: 0 }) === expected
+    )
+  }
+  check(
+    'sidebar dot: merged PR stays green with local edits',
+    sidebarGitDot({ phase: 'merged', dirty: true, ahead: 0 }) === 'merged'
+  )
+  check(
+    'sidebar dot: unpushed commits are pending without a PR',
+    sidebarGitDot({ phase: 'ahead', dirty: false, ahead: 2 }) === 'local'
+  )
+  check(
+    'sidebar dot: merged outranks stale ahead count',
+    sidebarGitDot({ phase: 'merged', dirty: false, ahead: 2 }) === 'merged'
+  )
+  check(
+    'sidebar dot: local edits work before the forge answers',
+    sidebarGitDot({ phase: undefined, dirty: true, ahead: 0 }) === 'local'
+  )
+  for (const phase of ['draft', 'open', 'closed'] as const) {
+    check(
+      `sidebar dot: ${phase} PR outranks local work`,
+      sidebarGitDot({ phase, dirty: true, ahead: 2 }) ===
+        (phase === 'closed' ? 'closed' : 'pending')
+    )
+  }
 
   // ---- forge: unknown hosts + user override -------------------------------
   // The separation that matters: a LOCAL path is "no host, show nothing", while

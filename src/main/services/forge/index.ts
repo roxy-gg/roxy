@@ -104,6 +104,18 @@ export async function forgeStatus(
     dirty: st?.dirty ?? false
   }
 
+  if (!st) {
+    return {
+      remote: null,
+      pull: null,
+      lifecycle: branchLifecycle({ sync, pr: null, forgeKnown: false }),
+      syncTarget: null,
+      error: { reason: 'network', message: 'Could not read repository status.' },
+      refreshing: false,
+      unknownHost: null
+    }
+  }
+
   // With an upstream this is computed from the status we already have - no
   // extra git spawn, so it rides the 5s poll for free.
   //
@@ -220,7 +232,12 @@ function refresh(key: string, remote: ForgeRemote, branch: string): Promise<void
       })
     })
     .catch(() => {
-      cache.set(key, { ...base, at: Date.now(), inflight: null })
+      cache.set(key, {
+        ...base,
+        error: { reason: 'network', message: 'Could not refresh pull request status.' },
+        at: Date.now(),
+        inflight: null
+      })
     })
 
   cache.set(key, { ...base, inflight: job })

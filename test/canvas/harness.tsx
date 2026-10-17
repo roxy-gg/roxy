@@ -27,6 +27,10 @@ const AppearanceHarness = lazy(() =>
   import('./AppearanceHarness').then((module) => ({ default: module.AppearanceHarness }))
 )
 
+const SidebarHarness = lazy(() =>
+  import('./SidebarHarness').then((module) => ({ default: module.SidebarHarness }))
+)
+
 document.documentElement.dataset.platform = 'win32'
 const stopMotion = startMotion()
 import.meta.hot?.dispose(stopMotion)
@@ -215,7 +219,11 @@ function CopilotHarness(): JSX.Element {
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    {new URLSearchParams(location.search).has('appearance') ? (
+    {new URLSearchParams(location.search).has('sidebar') ? (
+      <Suspense>
+        <SidebarHarness />
+      </Suspense>
+    ) : new URLSearchParams(location.search).has('appearance') ? (
       <Suspense>
         <AppearanceHarness />
       </Suspense>

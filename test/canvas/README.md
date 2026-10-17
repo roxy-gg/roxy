@@ -1,5 +1,6 @@
 # Canvas Regression Harness
 
+- `npx electron test/canvas/sidebar-smoke.cjs` checks sidebar Git dots, centered multi-repo clusters, hover/focus/delete, restart cache hydration, failed lookups, and successful refreshes on port 3105. Uses isolated temporary app data; `CANVAS_TEST_URL` can point at an existing harness server.
 - `npm run canvas` opens interactive transcript, diff, and prompt-navigation fixtures on port 3114.
 - `npm run smoke:canvas` starts that server and checks real Electron mouse/keyboard behavior, composer sizing, and mention interactions with temporary user data.
 - `npm run smoke:animation` verifies the saved On/System/Reduced motion preference, progress pixels changing over time, hide/show recovery, and streamed-text cadence with Chromium's normal throttling enabled. Uses temporary SQLite/user data, never your app settings.

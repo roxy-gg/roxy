@@ -57,6 +57,7 @@ import type {
 } from '@shared/api'
 import { aggregateLifecycle, aggregateRepoStatus, describeCompositeLifecycle } from '@shared/repos'
 import type { ForgeStatusView } from '@shared/forge'
+import { loadRepoStatusCache, retainForgeStatus, saveRepoStatusCache } from './repo-status-cache'
 import type { Bot } from '@shared/bots'
 
 interface RoxyStore {
@@ -784,7 +785,21 @@ async function pollStatusInto(
   // that case to the project's own checkouts; an empty array still means "not
   // multi-repo", so a single-repo session falls straight through.
   if (owner?.repos?.length || (owner?.workspacePath && projectRepos[owner.workspacePath])) {
-    const repos = await api.git.statusMulti(owner.id)
+    const fresh = await api.git.statusMulti(owner.id)
+    const previous = useRoxyStore.getState().repoStatus[key] ?? []
+    const repos = fresh.map((repo) => {
+      const old = previous.find((r) => r.worktreePath === repo.worktreePath)
+      if (repo.unavailable && old) return old
+      return {
+        ...repo,
+        forge: retainForgeStatus(
+          old?.forge ?? undefined,
+          repo.forge,
+          repo,
+          old?.branch === repo.branch
+        )
+      }
+    })
     // Empty means the session isn't composite after all (its links were
     // cleared) - leave the last known state rather than blanking the row.
     if (repos.length) {
@@ -847,10 +862,23 @@ async function pollStatusInto(
   // One round trip for both. `forge.status` is cheap by construction: it
   // returns local git state immediately and refreshes pull-request data in the
   // background, so putting it on the 5s poll costs no network traffic.
-  const [status, forge] = await Promise.all([api.git.status(key), api.forge.status(key)])
+  const [status, freshForge] = await Promise.all([
+    api.git.status(key),
+    api.forge.status(key).catch(() => null)
+  ])
+  if (status.unavailable) return
+  const previous = useRoxyStore.getState()
+  const forge = retainForgeStatus(
+    previous.forgeStatus[key],
+    freshForge,
+    status,
+    previous.gitStatus[key]?.branch === status.branch
+  )
   set((s) => ({
     gitStatus: { ...s.gitStatus, [key]: status },
-    forgeStatus: forge ? { ...s.forgeStatus, [key]: forge } : s.forgeStatus
+    forgeStatus: forge
+      ? { ...s.forgeStatus, [key]: forge }
+      : Object.fromEntries(Object.entries(s.forgeStatus).filter(([path]) => path !== key))
   }))
 }
 
@@ -956,10 +984,11 @@ async function applySessionsUpdated(payload: SessionsUpdated): Promise<void> {
     if (!store.gitStatus[key]) {
       try {
         const [status, forge] = await Promise.all([api.git.status(key), api.forge.status(key)])
-        useRoxyStore.setState((s) => ({
-          gitStatus: { ...s.gitStatus, [key]: status },
-          forgeStatus: forge ? { ...s.forgeStatus, [key]: forge } : s.forgeStatus
-        }))
+        if (!status.unavailable)
+          useRoxyStore.setState((s) => ({
+            gitStatus: { ...s.gitStatus, [key]: status },
+            forgeStatus: forge ? { ...s.forgeStatus, [key]: forge } : s.forgeStatus
+          }))
       } catch {
         // Best-effort: the 5s poll picks it up. Must never block the refresh
         // below, which is what actually clears the stale "pending" label.
@@ -1220,9 +1249,7 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
   remote: { phase: 'idle', guests: 0, rev: 0 },
   services: [],
   gitAvailable: null,
-  gitStatus: {},
-  forgeStatus: {},
-  repoStatus: {},
+  ...loadRepoStatusCache(),
   projectRepos: {},
   worktrees: {},
   gitBranches: {},
@@ -2813,6 +2840,17 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
     }
   }
 }))
+
+useRoxyStore.subscribe((state, previous) => {
+  if (
+    state.gitStatus !== previous.gitStatus ||
+    state.forgeStatus !== previous.forgeStatus ||
+    state.repoStatus !== previous.repoStatus ||
+    state.chats !== previous.chats
+  ) {
+    saveRepoStatusCache(state, state.chats)
+  }
+})
 
 /**
  * The model-tuned system prompt for a chat, used for token estimation (the context

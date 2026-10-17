@@ -174,6 +174,8 @@ export interface ServiceView {
  * renders nothing at all.
  */
 export interface GitStatusView {
+  /** A failed read is not proof that the repository or its changes disappeared. */
+  unavailable?: boolean
   isRepo: boolean
   /** The repository root, when `cwd` is inside one. */
   root: string | null
@@ -199,6 +201,7 @@ export interface WorktreeView {
 
 /** One repo inside a multi-repo session's composite worktree, with its status. */
 export interface RepoStatusView {
+  unavailable?: boolean
   /** Folder name under the composite root, e.g. `backend`. */
   name: string
   /** The repo's own worktree for this session (`<composite>/<name>`). */

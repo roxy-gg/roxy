@@ -29,15 +29,13 @@ import {
 } from 'lucide-react'
 import { MorphIcon } from 'morphicons/react'
 import type { Chat } from '@shared/types'
-import type { LifecycleView } from '@shared/forge'
-import { isPullRequestPhase } from '@shared/forge'
+import { sidebarGitDot, type SidebarGitDotState } from '@shared/forge'
 import { statusKeyForSession } from '@shared/workstream'
 import { repoCountBadge } from '@shared/repos'
 import { useRoxyStore } from '../lib/store'
 import { api } from '../lib/api'
 import { cn } from '../lib/cn'
 import { ContextMenuRow, ContextMenuSurface, CONTEXT_MENU_PAD, CONTEXT_ROW_H } from './ContextMenu'
-import { TONE_BG, TONE_TEXT_STATIC } from '../lib/lifecycle'
 import { BotsSection } from './BotsSection'
 import { RemoteWorkspaceDialog } from './RemoteWorkspaceDialog'
 import { BrailleSpinner } from './ThinkingIndicator'
@@ -57,6 +55,12 @@ import roxy from '../assets/roxy.png'
 const SWEEP_MS = 30_000
 const RAIL_COLLAPSED_KEY = 'roxy.sidebar.collapsed'
 const COLLAPSED_PROJECTS_KEY = 'roxy.sidebar.projects.v1'
+const GIT_DOT_COLOR = {
+  local: 'bg-text-muted',
+  pending: 'bg-warning',
+  merged: 'bg-success',
+  closed: 'bg-danger'
+} as const satisfies Record<SidebarGitDotState, string>
 
 const storedCollapsedProjects = (): Set<string> => {
   try {
@@ -75,22 +79,8 @@ interface Project {
   sessions: Chat[]
 }
 
-/**
- * The row's hover text: title, branch, and whatever the row could not say in
- * the space it had.
- *
- * The badge is ~40px of `merged` or `#42`, so the full sentence the lifecycle
- * already computed (`#42 merged into main`, `#42 -> main - checks failing`)
- * has nowhere to live on the row itself. It lives here, on the tooltip that
- * covers the WHOLE row - which is also why the dirty dot has no `title` of its
- * own: a 4px target is too small to hover deliberately.
- */
-function sessionRowTitle(
-  chat: Chat,
-  dirty: boolean,
-  pull: LifecycleView | undefined,
-  t: TFunction
-): string {
+/** Keep per-repo details on the whole row, not on tiny individual dots. */
+function sessionRowTitle(chat: Chat, statuses: string[], t: TFunction): string {
   const bits = [chat.title]
   if (chat.branch) bits.push(chat.branch)
   // Multi-repo: name the repos. "uncommitted changes" is not actionable when a
@@ -104,9 +94,7 @@ function sessionRowTitle(
       })
     )
   }
-  if (pull) bits.push(pull.title)
-  if (dirty) bits.push(t('sidebar.rowDirty'))
-  return bits.join(' - ')
+  return [...bits, ...statuses].join(' - ')
 }
 
 /** Lucide's `folder` and `folder-open`, as data rather than components.
@@ -160,6 +148,7 @@ export function Sidebar(): JSX.Element {
   const selectChat = useRoxyStore((s) => s.selectChat)
   const gitStatus = useRoxyStore((s) => s.gitStatus)
   const forgeStatus = useRoxyStore((s) => s.forgeStatus)
+  const repoStatus = useRoxyStore((s) => s.repoStatus)
   const refreshAllGitStatus = useRoxyStore((s) => s.refreshAllGitStatus)
   const runningSubagents = useRoxyStore((s) => s.runningSubagents)
   const newSession = useRoxyStore((s) => s.newSession)
@@ -384,17 +373,43 @@ export function Sidebar(): JSX.Element {
     void reorderProjects(paths)
   }
 
-  // Which sessions have uncommitted changes, from the git status the strip
-  // already polls (keyed by worktree path). No extra polling here — N sessions
-  // sharing a worktree share one entry.
-  const dirtyById = useMemo(() => {
-    const ids = new Set<string>()
+  // Shared project checkouts cannot attribute a PR to any one conversation.
+  const statusById = useMemo(() => {
+    const map = new Map<
+      string,
+      { dots: { key: string; state: SidebarGitDotState }[]; titles: string[] }
+    >()
     for (const c of chats) {
       const key = c.worktreePath
-      if (key && gitStatus[key]?.dirty) ids.add(c.id)
+      if (!key) continue
+      // Never let the composite summary speak for each of its repositories.
+      const repos = c.repos?.length
+        ? (repoStatus[key] ?? [])
+        : [{ ...gitStatus[key], name: '', worktreePath: key, forge: forgeStatus[key] }]
+      const dots: { key: string; state: SidebarGitDotState }[] = []
+      const titles: string[] = []
+      for (const repo of repos) {
+        if (!repo.isRepo) continue
+        const lifecycle = repo.forge?.lifecycle
+        const state = sidebarGitDot({
+          dirty: repo.dirty,
+          ahead: repo.ahead,
+          phase: lifecycle?.phase
+        })
+        const details = [
+          lifecycle?.title ??
+            (repo.ahead > 0 ? t('workstream.ahead', { count: repo.ahead }) : null),
+          repo.dirty ? t('sidebar.rowDirty') : null
+        ]
+          .filter(Boolean)
+          .join(' - ')
+        if (details) titles.push(repo.name ? `${repo.name}: ${details}` : details)
+        if (state) dots.push({ key: repo.worktreePath, state })
+      }
+      map.set(c.id, { dots, titles })
     }
-    return ids
-  }, [chats, gitStatus])
+    return map
+  }, [chats, gitStatus, forgeStatus, repoStatus, t])
 
   // How many repos each multi-repo session spans, for the row badge. Absent for
   // a single-repo session (`repoCountBadge` returns null at 1), so the map is
@@ -407,27 +422,6 @@ export function Sidebar(): JSX.Element {
     }
     return map
   }, [chats])
-
-  // The PR badge on a row, when that row's branch HAS a pull request. Anything
-  // earlier in the lifecycle (`local`, `up-3`, `pushed`) is filtered out by
-  // `isPullRequestPhase`: those are true of most rows most of the time, and a
-  // column of them would bury the one row that says `merged`.
-  //
-  // Keyed by WORKTREE path only, matching `dirtyById` above, and for the same
-  // reason: sessions without a worktree share the project checkout with each
-  // other and with the user's editor, so a PR found there belongs to the branch
-  // rather than to any one of those sessions. The strip still shows it for
-  // whichever session is open, where there is exactly one and no ambiguity.
-  const pullById = useMemo(() => {
-    const map = new Map<string, LifecycleView>()
-    for (const c of chats) {
-      const key = c.worktreePath
-      if (!key) continue
-      const lifecycle = forgeStatus[key]?.lifecycle
-      if (lifecycle && isPullRequestPhase(lifecycle.phase)) map.set(c.id, lifecycle)
-    }
-    return map
-  }, [chats, forgeStatus])
 
   // Keep every row's status current, not just the open session's - the whole
   // point is answering "what happened to my PR?" without clicking into each one.
@@ -695,8 +689,11 @@ export function Sidebar(): JSX.Element {
                             // right now — so a COLLAPSED parent still shows that
                             // something is happening underneath it.
                             const liveSubs = subs.filter((x) => runningSubagents[x.id]).length
-                            // Undefined until this branch has a PR on the host.
-                            const pull = pullById.get(chat.id)
+                            const status = statusById.get(chat.id)
+                            const dotColumns = Math.ceil(Math.sqrt(status?.dots.length ?? 0))
+                            const dotSize =
+                              status?.dots.length === 1 ? 6 : Math.min(3, 12 / dotColumns)
+                            const dotGap = (dotSize * 2) / 3
                             return (
                               <li
                                 key={chat.id}
@@ -774,7 +771,7 @@ export function Sidebar(): JSX.Element {
                                     <button
                                       onClick={() => selectChat(chat.id)}
                                       onDoubleClick={() => beginRename(chat)}
-                                      title={sessionRowTitle(chat, dirtyById.has(chat.id), pull, t)}
+                                      title={sessionRowTitle(chat, status?.titles ?? [], t)}
                                       className="min-w-0 flex-1 text-left"
                                     >
                                       <span className="block truncate">{chat.title}</span>
@@ -790,47 +787,6 @@ export function Sidebar(): JSX.Element {
                                           {repoCountById.get(chat.id) && (
                                             <span className="shrink-0 rounded bg-white/8 px-0.5 text-[9px] leading-3 text-text-subtle">
                                               {repoCountById.get(chat.id)}
-                                            </span>
-                                          )}
-                                          {/* Uncommitted work. The label lives on the row
-                                              tooltip above, not here: a 4px dot is too small
-                                              to hover deliberately, so its own `title` would
-                                              never be seen. */}
-                                          {dirtyById.has(chat.id) && (
-                                            <span className="h-1 w-1 shrink-0 rounded-full bg-warning" />
-                                          )}
-                                          {/* Where the branch ended up on the host: `#42`,
-                                              `#42 draft`, `merged`, `closed`. Same dot-plus-label
-                                              grammar and the same colours as the strip's chip, from
-                                              the one shared tone map.
-
-                                              `ml-auto` parks it in a column down the right edge so
-                                              the states are scannable vertically, instead of landing
-                                              at a different x on every row. `shrink-0` is the
-                                              load-bearing part: a status that gets truncated away
-                                              behind a long branch name is one you can't rely on, and
-                                              an unreliable status is worse than none. The branch
-                                              name yields instead - it's the thing you can still
-                                              recover from the tooltip.
-
-                                              Deliberately NOT a link. It sits inside the row's
-                                              button, so a nested button would be invalid HTML and
-                                              would swallow the click that opens the session; the
-                                              strip's chip is where "view on the web" lives. */}
-                                          {pull && (
-                                            <span
-                                              className={cn(
-                                                'ml-auto flex shrink-0 items-center gap-1',
-                                                TONE_TEXT_STATIC[pull.tone]
-                                              )}
-                                            >
-                                              <span
-                                                className={cn(
-                                                  'h-1.5 w-1.5 rounded-full',
-                                                  TONE_BG[pull.tone]
-                                                )}
-                                              />
-                                              <span className="tabular-nums">{pull.label}</span>
                                             </span>
                                           )}
                                         </span>
@@ -877,17 +833,8 @@ export function Sidebar(): JSX.Element {
                                       {subs.length}
                                     </button>
                                   )}
-                                  {/* The row's one action slot - and WHICH action it holds is
-                                      the guard. While the turn streams the slot is Stop, so the
-                                      trash is not disabled, it is simply not there: "you can't
-                                      delete a session mid-run" needs no error message to say it,
-                                      and there is no dead grey button to poke at.
-
-                                      This is also where the spinner went. It used to sit on the
-                                      left as a status dot, which billed every row a permanent
-                                      column to report "idle" nearly all of the time. Both
-                                      controls are h-6 w-6 and both always occupy the slot (the
-                                      trash only fades), so the swap costs no reflow. */}
+                                  {/* Activity, Git state, and actions share one fixed slot.
+                                      Running rows keep Stop rather than allowing mid-turn deletion. */}
                                   {sending ? (
                                     // Stop THAT session. `store.stop()` only ever knew the
                                     // active chat, so a session streaming in the background
@@ -901,13 +848,43 @@ export function Sidebar(): JSX.Element {
                                       <Square className="hidden h-2.5 w-2.5 fill-current group-hover/stop:block" />
                                     </button>
                                   ) : (
-                                    <button
-                                      onClick={() => deleteChat(chat.id)}
-                                      title={t('sidebar.deleteSession')}
-                                      className="flex h-6 w-6 shrink-0 items-center justify-center sq sq-md rounded-md text-text-subtle opacity-0 transition-[opacity,color,background-color] hover:bg-white/5 hover:text-danger group-hover:opacity-100"
-                                    >
-                                      <Trash2 className="h-3.5 w-3.5" />
-                                    </button>
+                                    <div className="relative flex h-6 w-6 shrink-0 items-center justify-center">
+                                      {!!status?.dots.length && (
+                                        <span
+                                          role="img"
+                                          aria-label={status.titles.join(' - ')}
+                                          className="pointer-events-none flex h-full w-full items-center justify-center group-hover:invisible group-focus-within:invisible"
+                                        >
+                                          <span
+                                            className="flex flex-wrap justify-center"
+                                            style={{
+                                              width:
+                                                dotColumns * dotSize + (dotColumns - 1) * dotGap,
+                                              gap: dotGap
+                                            }}
+                                          >
+                                            {status.dots.map((dot) => (
+                                              <span
+                                                key={dot.key}
+                                                data-git-status={dot.state}
+                                                style={{ width: dotSize, height: dotSize }}
+                                                className={cn(
+                                                  'shrink-0 rounded-full',
+                                                  GIT_DOT_COLOR[dot.state]
+                                                )}
+                                              />
+                                            ))}
+                                          </span>
+                                        </span>
+                                      )}
+                                      <button
+                                        onClick={() => deleteChat(chat.id)}
+                                        title={t('sidebar.deleteSession')}
+                                        className="absolute inset-0 flex items-center justify-center sq sq-md rounded-md text-text-subtle opacity-0 transition-[opacity,color,background-color] hover:bg-white/5 hover:text-danger group-hover:opacity-100 group-focus-within:opacity-100"
+                                      >
+                                        <Trash2 className="h-3.5 w-3.5" />
+                                      </button>
+                                    </div>
                                   )}
                                 </div>
                                 {subsOpen && subs.length > 0 && (

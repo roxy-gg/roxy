@@ -584,18 +584,6 @@ function openTitle(pr: PullRequestView): string {
 /**
  * Does this phase mean a pull request actually exists on the server?
  *
- * This is the line the SIDEBAR draws. The strip describes one session and can
- * afford to be complete; the sidebar prints a badge on every row at once, so it
- * can only afford the states worth interrupting for - and those are exactly the
- * ones that answer "what happened to my PR?".
- *
- * The pre-PR phases are deliberately left out. `local`, `up-3` and `pushed` are
- * true of nearly every row nearly all of the time, so rendering them N times
- * down the list would bury the one row that says `merged` under a column of
- * noise - the opposite of what a status column is for. Uncommitted work already
- * has its own dot there, and the strip still shows the full ladder for the
- * session you actually have open.
- *
  * Written as an exhaustive switch on purpose: a new `LifecyclePhase` fails to
  * compile here until someone decides which side of the line it belongs on.
  */
@@ -612,6 +600,28 @@ export function isPullRequestPhase(phase: LifecyclePhase): boolean {
     case 'diverged':
     case 'synced':
       return false
+  }
+}
+
+/** Compact sidebar status, independent of the detail strip's CI/review tones. */
+export type SidebarGitDotState = 'local' | 'pending' | 'merged' | 'closed'
+
+export function sidebarGitDot(input: {
+  dirty: boolean
+  ahead: number
+  phase: LifecyclePhase | undefined
+}): SidebarGitDotState | null {
+  // Remote PR state takes priority; gray is reserved for local-only work.
+  switch (input.phase) {
+    case 'merged':
+      return 'merged'
+    case 'draft':
+    case 'open':
+      return 'pending'
+    case 'closed':
+      return 'closed'
+    default:
+      return input.dirty || input.ahead > 0 ? 'local' : null
   }
 }
 
