@@ -6103,11 +6103,38 @@ async function main(): Promise<void> {
   )
   check(
     'theme: every built-in is internally valid',
-    BUILT_IN_THEMES.every((t) => parseTheme(serializeTheme(t)).ok),
-    BUILT_IN_THEMES.filter((t) => !parseTheme(serializeTheme(t)).ok)
+    BUILT_IN_THEMES.every((t) => {
+      const parsed = parseTheme(serializeTheme(t))
+      return parsed.ok && parsed.warnings.length === 0
+    }),
+    BUILT_IN_THEMES.filter((t) => {
+      const parsed = parseTheme(serializeTheme(t))
+      return !parsed.ok || parsed.warnings.length > 0
+    })
       .map((t) => t.id)
       .join(',')
   )
+  check(
+    'theme: every built-in has a unique id',
+    new Set(BUILT_IN_THEMES.map((t) => t.id)).size === BUILT_IN_THEMES.length
+  )
+  for (const [id, appearance] of [
+    ['claude-code-dark', 'dark'],
+    ['claude-code-light', 'light'],
+    ['codex-dark', 'dark'],
+    ['codex-light', 'light'],
+    ['minimalist-dark', 'dark'],
+    ['minimalist-light', 'light'],
+    ['onyx-absolute-black', 'dark'],
+    ['tokyo-midnight', 'dark'],
+    ['cyberpunk', 'dark']
+  ]) {
+    const theme = getBuiltInTheme(id)
+    check(
+      `theme: ${id} is available with the right appearance`,
+      !!theme && resolveTheme(theme).appearance === appearance
+    )
+  }
   check(
     'theme: every built-in defines the full palette (no inherited gaps)',
     BUILT_IN_THEMES.every((t) =>
@@ -6122,6 +6149,49 @@ async function main(): Promise<void> {
       .filter((s) => !s.endsWith(':'))
       .join(' ')
   )
+  {
+    // Built-in palettes use opaque hex so WCAG luminance can be checked without a DOM.
+    const luminance = (hex: string): number => {
+      const rgb = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex)
+      if (!rgb) return NaN
+      const [r, g, b] = rgb.slice(1).map((channel) => {
+        const s = parseInt(channel, 16) / 255
+        return s <= 0.04045 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4
+      })
+      return 0.2126 * r + 0.7152 * g + 0.0722 * b
+    }
+    const contrast = (a: number, b: number): number =>
+      (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05)
+    for (const theme of BUILT_IN_THEMES) {
+      const colors = resolveTheme(theme).vars
+      const lum = (key: string): number => luminance(colors[`--color-${key}`])
+      check(
+        `theme: ${theme.id} keeps primary and muted text readable on every surface`,
+        ['bg', 'surface', 'surface-2', 'elevated'].every(
+          (key) =>
+            contrast(lum('text'), lum(key)) >= 4.5 && contrast(lum('text-muted'), lum(key)) >= 3
+        )
+      )
+      check(
+        `theme: ${theme.id} has a readable primary button and matching polarity`,
+        contrast(lum('white'), lum('black')) >= 4.5 &&
+          (theme.appearance === 'light'
+            ? lum('white') < lum('black') && lum('bg') > 0.5
+            : lum('white') > lum('black') && lum('bg') < 0.1)
+      )
+      check(
+        `theme: ${theme.id} shifts accent hover toward stronger contrast`,
+        theme.appearance === 'light'
+          ? lum('accent-hover') < lum('accent')
+          : lum('accent-hover') > lum('accent')
+      )
+    }
+    const onyx = getBuiltInTheme('onyx-absolute-black')
+    check(
+      'theme: Onyx keeps the window and sidebar absolutely black',
+      onyx?.colors?.bg === '#000000' && onyx.colors.surface === '#000000'
+    )
+  }
   check(
     'theme: the starter theme a user gets is valid',
     parseTheme(serializeTheme(starterTheme('mine', 'Mine'))).ok
