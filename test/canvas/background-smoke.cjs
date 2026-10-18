@@ -738,6 +738,7 @@ async function run() {
       'Accounts',
       'Browser',
       'Language',
+      'Voice Translation',
       'Worktree configuration',
       'Notifications',
       'Remote',
