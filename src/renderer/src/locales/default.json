@@ -618,6 +618,7 @@
       "addOns": "Add-Ons",
       "general": "General",
       "colors": "Colors",
+      "sidebar": "Sidebar",
       "accounts": "Accounts",
       "worktrees": "Worktree configuration",
       "activity": "Activity",
@@ -879,6 +880,7 @@
   },
   "background": {
     "title": "Chat background",
+    "sidebarDescription": "Adjust image effects, sidebar style, and chat visibility. Choose or upload a background in Background.",
     "description": "Add an image, looping GIF, or video to your chats. Your theme colors follow along. Backgrounds are never sent with messages. Local uploads stay private unless you choose Submit for review.",
     "preview": "Live preview",
     "emptyPreview": "Empty chat",
@@ -948,8 +950,9 @@
   "wallpapers": {
     "title": "Wallpaper Workshop",
     "description": "Browse lightweight thumbnails. Full images and silent videos download only when you use a background. An anonymous wallpaper-device ID reports your current catalog selection to rank active use.",
-    "browse": "Browse wallpapers",
-    "close": "Hide catalog",
+    "addCustom": "Add Custom Background",
+    "addOwn": "Add your own",
+    "customHint": "Your image, GIF, or video",
     "search": "Search titles and tags",
     "type": "Wallpaper type",
     "dimensions": "{{kind}} / {{width}} x {{height}}",
@@ -971,14 +974,29 @@
     "submit": "Submit for review",
     "send": "Send for review",
     "publishHint": "Made something worth sharing? Submit your current background for the community catalog.",
+    "generateTags": "Generate tags",
+    "removeTag": "Remove tag {{tag}}",
+    "tagPlaceholder": "Add a tag...",
+    "tagsHint": "Tags are created locally from your title and media type. Edit them, or press Enter or comma to add your own. Paste a comma-separated list to add several.",
+    "tagsTooLong": "Keep all tags under 200 characters in total.",
+    "permission": "Permission details and original source",
+    "licenseHint": "Choose only a license you are authorized to offer. Selecting a license does not grant rights to someone else's work. Include any attribution it requires.",
+    "licenses": {
+      "placeholder": "Select a license...",
+      "CC0-1.0": "CC0 1.0 - Public domain dedication",
+      "CC-BY-4.0": "CC BY 4.0 - Attribution",
+      "CC-BY-SA-4.0": "CC BY-SA 4.0 - Attribution, share alike",
+      "CC-BY-NC-4.0": "CC BY-NC 4.0 - Attribution, non-commercial",
+      "other": "Other / I have permission"
+    },
     "privacy": "This uploads your current original background and the details below to Roxy, without an account or public submitter identity. Network addresses may be processed to prevent abuse. Videos and GIFs become silent MP4s, up to 60 seconds; source metadata is removed. Only approved submissions are public.",
     "consent": "I own this work or have permission from all rights holders to let Roxy host and distribute it publicly, including any required creator credit. I consent to uploading it for review.",
     "fields": {
       "title": "Wallpaper title",
       "description": "Description (optional)",
-      "tags": "Tags, separated by commas (optional)",
-      "credit": "Required creator credit (if any)",
-      "license": "License / permission and original source"
+      "tags": "Tags (optional)",
+      "credit": "Author / creator credit (optional)",
+      "license": "License"
     },
     "submitted": "Submitted for staff review. Reference: {{id}}. Your local background has not changed.",
     "errors": {

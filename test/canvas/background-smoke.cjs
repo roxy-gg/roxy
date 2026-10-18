@@ -2,6 +2,7 @@ const assert = require('node:assert/strict')
 const { app, BrowserWindow } = require('electron')
 const path = require('node:path')
 const fs = require('node:fs')
+const port = Number(process.env.ROXY_TEST_PORT || 3101)
 const temp = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'roxy-background-ui-'))
 app.setPath('userData', temp)
 let win, server
@@ -23,8 +24,21 @@ const sidebarStyles = () =>
     return [s.width,s.backgroundColor,s.borderRightColor,s.borderRightWidth];
   })`)
 const click = async (selector) => {
+  if (selector === '#wallpaper-settings button[aria-label="Add Custom Background"]') {
+    await evaluate(`document.querySelector('#background-background-tab').click()`)
+  } else if (
+    selector.startsWith('[aria-label="Sidebar background"]') ||
+    selector.startsWith('[aria-labelledby="background-effect-label"]') ||
+    selector === '#background-glass'
+  ) {
+    await evaluate(`document.querySelector('#background-sidebar-tab').click()`)
+  }
   await evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`)
   await wait()
+  if (selector === '#wallpaper-settings button[aria-label="Add Custom Background"]') {
+    await evaluate(`document.querySelector('#background-sidebar-tab').click()`)
+    await wait()
+  }
 }
 const until = async (code) => {
   for (let n = 0; n < 100; n++) {
@@ -34,6 +48,9 @@ const until = async (code) => {
   throw Error(`Timed out: ${code}`)
 }
 const setInput = async (selector, value, type = 'HTMLInputElement') => {
+  if (selector.startsWith('#background-') && selector !== '#background-theme') {
+    await evaluate(`document.querySelector('#background-sidebar-tab').click()`)
+  }
   await evaluate(`const el = document.querySelector(${JSON.stringify(selector)});
     Object.getOwnPropertyDescriptor(${type}.prototype, 'value').set.call(el, ${JSON.stringify(value)});
     el.dispatchEvent(new Event('input', {bubbles:true})); el.dispatchEvent(new Event('change', {bubbles:true}));`)
@@ -59,10 +76,10 @@ async function run() {
     const { createServer } = await import('vite')
     server = await createServer({
       configFile: path.join(__dirname, 'vite.config.mjs'),
-      server: { host: '127.0.0.1', port: 3101, strictPort: true }
+      server: { host: '127.0.0.1', port, strictPort: true }
     })
     await server.listen()
-    url = 'http://127.0.0.1:3101/'
+    url = `http://127.0.0.1:${port}/`
   }
   win = new BrowserWindow({
     width: 1440,
@@ -84,10 +101,10 @@ async function run() {
     features: [{ name: 'prefers-reduced-transparency', value: 'no-preference' }]
   })
   await until(
-    `!!document.querySelector('.composer-panel') && !document.querySelector('#wallpaper-settings button:has(.lucide-image-plus)').disabled`
+    `!!document.querySelector('.composer-panel') && !document.querySelector('#wallpaper-settings button[aria-label="Add Custom Background"]').disabled`
   )
   assert.equal(await evaluate(`return document.querySelectorAll('.chat-wallpaper').length`), 0)
-  await click('#wallpaper-settings button:has(.lucide-image-plus)')
+  await click('#wallpaper-settings button[aria-label="Add Custom Background"]')
   await until(`document.querySelectorAll('.chat-wallpaper').length === 2`)
   assert.equal(
     await evaluate(
@@ -237,7 +254,7 @@ async function run() {
   await evaluate(`await window.roxy.settings.setMotion('system')`)
   for (const format of ['mp4', 'mov']) {
     await evaluate(`location.hash = '#${format}'`)
-    await click('#wallpaper-settings button:has(.lucide-image-plus)')
+    await click('#wallpaper-settings button[aria-label="Add Custom Background"]')
     await until(
       `document.querySelector('#main-sidebar-harness video')?.readyState >= 2 && !document.querySelector('#main-sidebar-harness video').paused`
     )
@@ -320,7 +337,7 @@ async function run() {
     'motion bootstrap does not discard initial media load'
   )
   await evaluate(`await window.roxy.settings.setMotion('on'); location.hash='#gif'`)
-  await click('#wallpaper-settings button:has(.lucide-image-plus)')
+  await click('#wallpaper-settings button[aria-label="Add Custom Background"]')
   await evaluate(`await window.roxy.settings.setMotion('system')`)
   await until(
     `document.querySelector('#main-sidebar-harness .chat-wallpaper img')?.src.startsWith('data:image/gif;')`
@@ -418,7 +435,7 @@ async function run() {
   await evaluate(`location.hash=''`)
   await evaluate(`await window.roxy.settings.setMotion('on')`)
   await evaluate(`await window.roxy.background.update({ sidebarOpacity:25 })`)
-  await click('#wallpaper-settings button:has(.lucide-image-plus)')
+  await click('#wallpaper-settings button[aria-label="Add Custom Background"]')
   await until(
     `document.querySelector('#main-sidebar-harness .chat-wallpaper img')?.src === ${JSON.stringify(original)}`
   )
@@ -568,7 +585,7 @@ async function run() {
     features: [{ name: 'prefers-reduced-transparency', value: 'no-preference' }]
   })
   await evaluate(`location.hash = 'cancel'`)
-  await click('#wallpaper-settings button:has(.lucide-image-plus)')
+  await click('#wallpaper-settings button[aria-label="Add Custom Background"]')
   assert.equal(
     await evaluate(`return (await window.roxy.background.get()).image`),
     original,
@@ -658,6 +675,7 @@ async function run() {
   )
   win.setSize(1440, 1000)
   await wait()
+  await click('#background-sidebar-tab')
   await evaluate(
     `const button=[...document.querySelectorAll('#wallpaper-settings button')].find(b=>b.textContent==='Remove');button.click()`
   )
@@ -730,6 +748,7 @@ async function run() {
     await evaluate(`return [...document.querySelectorAll('nav button')].map(b => b.textContent)`),
     [
       'Background',
+      'Sidebar',
       'Colors',
       'Motion',
       'Skills',
@@ -763,6 +782,41 @@ async function run() {
     ),
     'menu sits on the left'
   )
+  assert.equal(
+    await evaluate(
+      `return !!document.querySelector('#settings-background-panel [aria-labelledby="background-effect-label"]')`
+    ),
+    false,
+    'Background has no sidebar appearance controls'
+  )
+  assert.ok(
+    await evaluate(`const panel=document.querySelector('#settings-background-panel');
+      return !!panel.querySelector('button[aria-label="Add Custom Background"]')`),
+    'Background retains upload'
+  )
+  await click('#settings-background-panel button[aria-label="Add Custom Background"]')
+  await until(
+    `[...document.querySelectorAll('#settings-background-panel button')].some(button=>button.textContent.trim()==='Submit for review')`
+  )
+  await click('#settings-sidebar')
+  assert.equal(
+    await evaluate(
+      `return document.querySelector('#settings-sidebar').getAttribute('aria-current')`
+    ),
+    'page'
+  )
+  assert.ok(
+    await evaluate(`const panel=document.querySelector('#settings-sidebar-panel');
+      return panel.checkVisibility() && !!panel.querySelector('fieldset') &&
+        !panel.querySelector('button[aria-label="Add Custom Background"]') &&
+        !panel.querySelector('#wallpaper-workshop-heading') &&
+        ![...panel.querySelectorAll('button')].some(button=>button.textContent.trim()==='Submit for review')`),
+    'Sidebar owns appearance controls without upload, catalog, or submission'
+  )
+  assert.equal(
+    await evaluate(`return document.querySelector('#settings-background-panel').checkVisibility()`),
+    false
+  )
   // Remote is reachable from Settings without losing the page on dialog close.
   await click('#settings-remote')
   await click('#settings-remote-panel button')
@@ -776,9 +830,35 @@ async function run() {
   await click('[role="dialog"][aria-modal="true"] button:has(.lucide-x)')
   assert.equal(await evaluate(`return !!document.querySelector('#appearance-page')`), true)
   await click('#settings-background')
-  await click('#settings-background-panel button:has(.lucide-image-plus)')
-  await until(`!!document.querySelector('#settings-background-panel .chat-wallpaper')`)
+  await click('#settings-background-panel button[aria-label="Add Custom Background"]')
+  await until(`window.roxy.background.get().then(state=>!!state.image)`)
   const wallpaper = await evaluate(`return (await window.roxy.background.get()).image`)
+  await click('#settings-sidebar')
+  await click(
+    '#settings-sidebar-panel [aria-labelledby="background-effect-label"] button:nth-child(6)'
+  )
+  await click('#settings-sidebar-panel [aria-label="Sidebar background"] button:nth-child(2)')
+  await until(
+    `window.roxy.background.get().then(s=>s.settings.effect==='haze' && s.settings.sidebarStyle==='glass')`
+  )
+  await click('#settings-background')
+  assert.equal(
+    await evaluate(
+      `return document.querySelector('#settings-sidebar-panel .background-sidebar-glass') !== null`
+    ),
+    true,
+    'Sidebar edits update the Sidebar preview'
+  )
+  await click('#settings-sidebar')
+  assert.equal(
+    await evaluate(
+      `return document.querySelector('#settings-sidebar-panel [aria-labelledby="background-effect-label"] button:nth-child(6)').getAttribute('aria-pressed')`
+    ),
+    'true',
+    'Sidebar preferences survive navigation'
+  )
+  await click('#settings-background')
+  await evaluate(`await window.roxy.background.update({sidebarStyle:'default',effect:'none'})`)
   const settingsHost = '#appearance-page .chat-background-host'
   assert.equal(
     await evaluate(
@@ -819,7 +899,7 @@ async function run() {
     )
     assert.equal(
       await evaluate(
-        `return getComputedStyle(document.querySelector('#settings-background-panel .background-preview-host'), '::before').content`
+        `return getComputedStyle(document.querySelector('#settings-sidebar-panel .background-preview-host'), '::before').content`
       ),
       'none',
       'shared page styling does not add an opaque overlay to the preview'
@@ -905,7 +985,7 @@ async function run() {
   await click('#settings-background')
   assert.ok(
     await evaluate(
-      `return document.querySelector('#background-heading').getBoundingClientRect().top < 130`
+      `return document.querySelector('#wallpaper-workshop-heading').getBoundingClientRect().top < 130`
     ),
     'switching shows the top of the selected panel'
   )
@@ -999,6 +1079,7 @@ async function run() {
     await wait()
     for (const panel of [
       'background',
+      'sidebar',
       'colors',
       'motion',
       'skills',
@@ -1016,10 +1097,10 @@ async function run() {
     ]) {
       if (width < 640) await setInput('#settings-section', panel, 'HTMLSelectElement')
       else await click(`#settings-${panel}`)
-      if (panel === 'background') {
+      if (panel === 'sidebar') {
         assert.ok(
-          await evaluate(`const tracks = [...document.querySelectorAll('#settings-background-panel input[type="range"]')].map(el => el.getBoundingClientRect());
-            const labels = [...document.querySelectorAll('#settings-background-panel output')].map(el => el.getBoundingClientRect());
+          await evaluate(`const tracks = [...document.querySelectorAll('#settings-sidebar-panel input[type="range"]')].map(el => el.getBoundingClientRect());
+            const labels = [...document.querySelectorAll('#settings-sidebar-panel output')].map(el => el.getBoundingClientRect());
             return tracks.length === 3 && tracks.every(box => Math.abs(box.width - tracks[0].width) < 1 && Math.abs(box.x - tracks[0].x) < 1)
               && labels.every(box => Math.abs(box.x - labels[0].x) < 1 && Math.abs(box.width - labels[0].width) < 1);`),
           `slider tracks and percentage labels align at ${width}px`

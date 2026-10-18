@@ -15,6 +15,7 @@ import {
   MonitorSmartphone,
   Mic,
   Palette,
+  PanelLeft,
   Plug,
   Plus,
   Shield,
@@ -60,6 +61,7 @@ const SETTINGS_GROUPS = [
     label: 'settings.navigation.theme',
     items: [
       { id: 'background', label: 'appearance.background', icon: Image },
+      { id: 'sidebar', label: 'settings.navigation.sidebar', icon: PanelLeft },
       { id: 'colors', label: 'settings.navigation.colors', icon: Palette },
       { id: 'motion', label: 'settings.motion.label', icon: Sparkles }
     ]
@@ -310,6 +312,16 @@ export default function Settings(): JSX.Element {
       >
         {(visited.has('background') || panel === 'background') && (
           <BackgroundSettings active={panel === 'background'} />
+        )}
+      </div>
+      <div
+        id="settings-sidebar-panel"
+        role="region"
+        aria-labelledby="settings-sidebar"
+        hidden={panel !== 'sidebar'}
+      >
+        {(visited.has('sidebar') || panel === 'sidebar') && (
+          <BackgroundSettings section="sidebar" active={panel === 'sidebar'} />
         )}
       </div>
       <div

@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react'
-import { Search, Play, Upload } from 'lucide-react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { Search, Play, Plus, Upload, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import type {
   Wallpaper,
@@ -10,19 +10,42 @@ import type {
 import { api } from '../lib/api'
 import { Button } from './ui'
 
+const LICENSES = ['CC0-1.0', 'CC-BY-4.0', 'CC-BY-SA-4.0', 'CC-BY-NC-4.0', 'other'] as const
+
+function parseTags(value: string): string[] {
+  return [
+    ...new Set(
+      value
+        .split(/[,\n]/)
+        .map((tag) =>
+          tag
+            .replace(/[\x00-\x1f\x7f]/g, '')
+            .trim()
+            .replace(/^#+/, '')
+            .replace(/\s+/g, ' ')
+            .toLowerCase()
+        )
+        .filter(Boolean)
+    )
+  ]
+}
+
 export function WallpaperWorkshop({
   image,
   disabled,
   active = true,
-  mode = 'browse'
+  mode = 'browse',
+  onAddCustom,
+  children
 }: {
   image: string | null
   disabled: boolean
   active?: boolean
   mode?: 'browse' | 'submit'
+  onAddCustom?: () => void
+  children?: ReactNode
 }): JSX.Element {
   const { t } = useTranslation()
-  const [open, setOpen] = useState(true)
   const [query, setQuery] = useState('')
   const [kind, setKind] = useState<WallpaperQuery['kind']>('all')
   const [sort, setSort] = useState<WallpaperQuery['sort']>('mostUsed')
@@ -35,6 +58,9 @@ export function WallpaperWorkshop({
   const [notice, setNotice] = useState('')
   const [retry, setRetry] = useState(0)
   const [submitOpen, setSubmitOpen] = useState(false)
+  const [tagInput, setTagInput] = useState('')
+  const [licenseChoice, setLicenseChoice] = useState('')
+  const tagsEdited = useRef(false)
   const [form, setForm] = useState<WallpaperSubmission>({
     title: '',
     description: '',
@@ -48,15 +74,50 @@ export function WallpaperWorkshop({
   const activeImage = useRef(image)
   const consentImage = useRef<string | null>(null)
   activeImage.current = image
+  const mediaTag = image?.startsWith('data:video/')
+    ? 'video'
+    : image?.startsWith('data:image/gif;')
+      ? 'gif'
+      : 'image'
+  const suggestedTags = (title: string): string[] =>
+    parseTags(
+      [
+        mediaTag,
+        ...(title.toLowerCase().match(/[\p{L}\p{N}]+(?:-[\p{L}\p{N}]+)*/gu) ?? [])
+          .filter(
+            (word) =>
+              word.length > 2 &&
+              !['the', 'and', 'for', 'with', 'from', 'this', 'that'].includes(word)
+          )
+          .slice(0, 8)
+      ].join(', ')
+    )
+  const tags = parseTags(form.tags)
+  const submittedTags = parseTags([form.tags, tagInput].join(', ')).join(', ')
+  const tagsTooLong = submittedTags.length > 200
+  const commitTags = (value = tagInput): void => {
+    if (!value.trim()) return
+    tagsEdited.current = true
+    const next = parseTags([form.tags, value].join(', ')).join(', ')
+    if (next.length > 200) return
+    setForm((previous) => ({ ...previous, tags: next }))
+    setTagInput('')
+  }
   useEffect(() => {
-    setForm((previous) => ({ ...previous, rightsConsent: false }))
+    tagsEdited.current = false
+    setTagInput('')
+    setForm((previous) => ({
+      ...previous,
+      tags: suggestedTags(previous.title).join(', '),
+      rightsConsent: false
+    }))
     consentImage.current = null
     setNotice('')
   }, [image])
 
   useEffect(() => {
     const version = ++request.current
-    if (!open || !active || mode !== 'browse') return
+    if (!active || mode !== 'browse') return
     setLoading(true)
     setError('')
     setSelected(null)
@@ -81,10 +142,10 @@ export function WallpaperWorkshop({
       clearTimeout(timer)
       request.current++
     }
-  }, [open, active, mode, query, kind, sort, retry, t])
+  }, [active, mode, query, kind, sort, retry, t])
 
   useEffect(() => {
-    if (!active || !open || mode !== 'browse') return
+    if (!active || mode !== 'browse') return
     let disposed = false
     for (const item of page.entries) {
       const key = `${item.id}:${item.sha256}`
@@ -104,7 +165,7 @@ export function WallpaperWorkshop({
       disposed = true
     }
     // Requests are keyed by the page; completed thumbnails must not restart sibling requests.
-  }, [page, active, open, mode, t])
+  }, [page, active, mode, t])
 
   const more = async (): Promise<void> => {
     if (loading || !page.nextCursor) return
@@ -147,12 +208,17 @@ export function WallpaperWorkshop({
     try {
       if (submit) {
         const snapshot = consentImage.current
-        if (!snapshot || activeImage.current !== snapshot || !form.rightsConsent) return
+        if (!snapshot || activeImage.current !== snapshot || !form.rightsConsent || tagsTooLong)
+          return
         const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(snapshot))
         const expectedImageHash = Array.from(new Uint8Array(digest), (byte) =>
           byte.toString(16).padStart(2, '0')
         ).join('')
-        const result = await api.background.submit({ ...form, expectedImageHash })
+        const result = await api.background.submit({
+          ...form,
+          tags: submittedTags,
+          expectedImageHash
+        })
         if (result.ok) {
           setNotice(t('wallpapers.submitted', { id: result.value.id }))
           setSubmitOpen(false)
@@ -192,11 +258,17 @@ export function WallpaperWorkshop({
               </h3>
               <p className="mt-1 max-w-lg text-xs text-text-muted">{t('wallpapers.description')}</p>
             </div>
-            <Button size="sm" aria-expanded={open} onClick={() => setOpen(!open)}>
-              {t(open ? 'wallpapers.close' : 'wallpapers.browse')}
+            <Button
+              size="sm"
+              disabled={disabled || working || !active || !onAddCustom}
+              onClick={onAddCustom}
+            >
+              <Plus aria-hidden className="h-3.5 w-3.5" />
+              {t('wallpapers.addCustom')}
             </Button>
+            {children}
           </div>
-          {open && active && (
+          {active && (
             <div className="space-y-4 border-t border-border p-4">
               <div className="flex flex-wrap gap-2">
                 <label className="relative min-w-40 flex-1">
@@ -240,6 +312,23 @@ export function WallpaperWorkshop({
                 aria-busy={loading}
                 className="grid grid-cols-2 gap-2 @min-[560px]:grid-cols-3 @min-[800px]:grid-cols-4"
               >
+                <button
+                  type="button"
+                  aria-label={t('wallpapers.addCustom')}
+                  disabled={disabled || working || !onAddCustom}
+                  onClick={onAddCustom}
+                  className="press-scale group overflow-hidden rounded-lg border border-dashed border-text-subtle/50 bg-bg text-center hover:border-accent hover:bg-accent/5 focus-visible:outline-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <span className="flex aspect-video flex-col items-center justify-center gap-2 px-2">
+                    <span className="flex h-9 w-9 items-center justify-center rounded-full border border-border bg-surface-2 text-text-muted group-hover:text-accent">
+                      <Plus aria-hidden className="h-5 w-5" />
+                    </span>
+                    <span className="text-[10px] text-text-muted">
+                      {t('wallpapers.customHint')}
+                    </span>
+                  </span>
+                  <span className="block p-2 text-xs font-medium">{t('wallpapers.addOwn')}</span>
+                </button>
                 {page.entries.map((item) => (
                   <button
                     type="button"
@@ -272,19 +361,7 @@ export function WallpaperWorkshop({
                         />
                       )}
                     </div>
-                    <span className="block truncate px-2 pt-2 text-xs font-medium">
-                      {item.title}
-                    </span>
-                    <span className="block truncate px-2 pt-1 pb-2 text-[10px] text-text-muted">
-                      {t('wallpapers.dimensions', {
-                        kind: t(`wallpapers.kinds.${item.kind}`),
-                        width: item.width,
-                        height: item.height
-                      })}
-                    </span>
-                    <span className="block px-2 pb-2 text-[10px] text-text-subtle">
-                      {t('wallpapers.activeUses', { count: item.activeUses })}
-                    </span>
+                    <span className="block truncate p-2 text-xs font-medium">{item.title}</span>
                   </button>
                 ))}
               </div>
@@ -347,11 +424,11 @@ export function WallpaperWorkshop({
           )}
         </>
       )}
-      {mode === 'submit' && (
+      {mode === 'submit' && image && (
         <>
           <Button
             size="sm"
-            disabled={!image || disabled || working}
+            disabled={disabled || working || !active}
             title={t('wallpapers.publishHint')}
             aria-expanded={submitOpen}
             onClick={() => setSubmitOpen(!submitOpen)}
@@ -368,47 +445,194 @@ export function WallpaperWorkshop({
               }}
             >
               <p className="text-xs text-text-muted">{t('wallpapers.privacy')}</p>
-              {(['title', 'description', 'tags', 'credit', 'license'] as const).map((key) => (
-                <label key={key} className="block space-y-1 text-xs">
-                  <span>{t(`wallpapers.fields.${key}`)}</span>
+              <fieldset
+                disabled={working || disabled || !active}
+                className="min-w-0 space-y-3 disabled:opacity-50"
+              >
+                {(['title', 'description'] as const).map((key) => (
+                  <label key={key} className="block space-y-1 text-xs">
+                    <span>{t(`wallpapers.fields.${key}`)}</span>
+                    <input
+                      name={key}
+                      className={inputClass}
+                      required={key === 'title'}
+                      maxLength={key === 'title' ? 100 : 500}
+                      value={form[key]}
+                      onChange={(event) => {
+                        const value = event.target.value
+                        setForm((previous) => ({
+                          ...previous,
+                          [key]: value,
+                          ...(key === 'title' && !tagsEdited.current
+                            ? { tags: suggestedTags(value).join(', ') }
+                            : {})
+                        }))
+                      }}
+                    />
+                  </label>
+                ))}
+                <div className="space-y-1 text-xs">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <label htmlFor="wallpaper-tags">{t('wallpapers.fields.tags')}</label>
+                    <button
+                      type="button"
+                      className="rounded px-1 py-1 text-xs text-text-muted hover:text-text focus-visible:outline-2 focus-visible:outline-accent"
+                      onClick={() => {
+                        tagsEdited.current = true
+                        const next = parseTags(
+                          [...tags, ...suggestedTags(form.title)].join(', ')
+                        ).join(', ')
+                        if (next.length <= 200) setForm((previous) => ({ ...previous, tags: next }))
+                      }}
+                    >
+                      {t('wallpapers.generateTags')}
+                    </button>
+                  </div>
+                  <div className="flex min-w-0 flex-wrap items-center gap-1.5 rounded-lg border border-border bg-bg p-2 focus-within:border-accent">
+                    {tags.map((tag) => (
+                      <span
+                        key={tag}
+                        className="inline-flex max-w-full items-center gap-1 rounded-md border border-border bg-surface-2 py-1 pr-1 pl-2"
+                      >
+                        <span className="min-w-0 break-words">{tag}</span>
+                        <button
+                          type="button"
+                          aria-label={t('wallpapers.removeTag', { tag })}
+                          className="shrink-0 rounded p-1 text-text-muted hover:text-text focus-visible:outline-2 focus-visible:outline-accent"
+                          onClick={() => {
+                            tagsEdited.current = true
+                            setForm((previous) => ({
+                              ...previous,
+                              tags: tags.filter((value) => value !== tag).join(', ')
+                            }))
+                          }}
+                        >
+                          <X aria-hidden className="h-3 w-3" />
+                        </button>
+                      </span>
+                    ))}
+                    <input
+                      id="wallpaper-tags"
+                      name="tags"
+                      value={tagInput}
+                      maxLength={200}
+                      placeholder={t('wallpapers.tagPlaceholder')}
+                      aria-describedby="wallpaper-tags-hint"
+                      aria-invalid={tagsTooLong}
+                      className="min-w-0 flex-1 basis-32 bg-transparent px-1 py-1.5 text-xs outline-none"
+                      onChange={(event) => {
+                        tagsEdited.current = true
+                        setTagInput(event.target.value)
+                      }}
+                      onBlur={() => commitTags()}
+                      onKeyDown={(event) => {
+                        if (event.nativeEvent.isComposing) return
+                        if (event.key === 'Enter' || event.key === ',') {
+                          event.preventDefault()
+                          commitTags()
+                        } else if (event.key === 'Backspace' && !tagInput) {
+                          tagsEdited.current = true
+                          setForm((previous) => ({
+                            ...previous,
+                            tags: tags.slice(0, -1).join(', ')
+                          }))
+                        }
+                      }}
+                      onPaste={(event) => {
+                        const value = event.clipboardData.getData('text')
+                        if (!/[,\n]/.test(value)) return
+                        event.preventDefault()
+                        const next = tagInput + value
+                        if (parseTags([form.tags, next].join(', ')).join(', ').length > 200) {
+                          setTagInput(next)
+                        } else commitTags(next)
+                      }}
+                    />
+                  </div>
+                  <p
+                    id="wallpaper-tags-hint"
+                    className={tagsTooLong ? 'text-danger' : 'text-text-muted'}
+                  >
+                    {t(tagsTooLong ? 'wallpapers.tagsTooLong' : 'wallpapers.tagsHint')}
+                  </p>
+                </div>
+                <label className="block space-y-1 text-xs">
+                  <span>{t('wallpapers.fields.credit')}</span>
                   <input
+                    name="credit"
                     className={inputClass}
-                    required={key === 'title' || key === 'license'}
-                    maxLength={
-                      { title: 100, description: 500, tags: 200, credit: 100, license: 500 }[key]
-                    }
-                    value={form[key]}
-                    onChange={(event) => setForm({ ...form, [key]: event.target.value })}
+                    maxLength={100}
+                    value={form.credit}
+                    onChange={(event) => setForm({ ...form, credit: event.target.value })}
                   />
                 </label>
-              ))}
-              <label className="flex items-start gap-2 text-xs text-text-muted">
-                <input
-                  type="checkbox"
-                  className="mt-0.5 accent-accent"
-                  checked={form.rightsConsent}
-                  onChange={(event) => {
-                    consentImage.current = event.target.checked ? image : null
-                    setForm({ ...form, rightsConsent: event.target.checked })
-                  }}
-                  required
-                />
-                <span>{t('wallpapers.consent')}</span>
-              </label>
-              <Button
-                size="sm"
-                type="submit"
-                disabled={
-                  working ||
-                  disabled ||
-                  !image ||
-                  !form.rightsConsent ||
-                  !form.title.trim() ||
-                  !form.license.trim()
-                }
-              >
-                {t(working ? 'wallpapers.working' : 'wallpapers.send')}
-              </Button>
+                <label className="block space-y-1 text-xs">
+                  <span>{t('wallpapers.fields.license')}</span>
+                  <select
+                    name="license"
+                    className={`${inputClass} min-w-0`}
+                    required
+                    value={licenseChoice}
+                    onChange={(event) => {
+                      const value = event.target.value
+                      setLicenseChoice(value)
+                      setForm({ ...form, license: value === 'other' ? '' : value })
+                    }}
+                  >
+                    <option value="" disabled>
+                      {t('wallpapers.licenses.placeholder')}
+                    </option>
+                    {LICENSES.map((license) => (
+                      <option key={license} value={license}>
+                        {t(`wallpapers.licenses.${license}`)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {licenseChoice === 'other' && (
+                  <label className="block space-y-1 text-xs">
+                    <span>{t('wallpapers.permission')}</span>
+                    <input
+                      name="permission"
+                      className={inputClass}
+                      required
+                      maxLength={500}
+                      value={form.license}
+                      onChange={(event) => setForm({ ...form, license: event.target.value })}
+                    />
+                  </label>
+                )}
+                <p className="text-xs text-text-muted">{t('wallpapers.licenseHint')}</p>
+                <label className="flex items-start gap-2 text-xs text-text-muted">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 accent-accent"
+                    checked={form.rightsConsent}
+                    onChange={(event) => {
+                      consentImage.current = event.target.checked ? image : null
+                      setForm({ ...form, rightsConsent: event.target.checked })
+                    }}
+                    required
+                  />
+                  <span>{t('wallpapers.consent')}</span>
+                </label>
+                <Button
+                  size="sm"
+                  type="submit"
+                  disabled={
+                    working ||
+                    disabled ||
+                    !image ||
+                    !active ||
+                    tagsTooLong ||
+                    !form.rightsConsent ||
+                    !form.title.trim() ||
+                    !form.license.trim()
+                  }
+                >
+                  {t(working ? 'wallpapers.working' : 'wallpapers.send')}
+                </Button>
+              </fieldset>
             </form>
           )}
         </>

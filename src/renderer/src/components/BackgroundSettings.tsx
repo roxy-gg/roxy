@@ -16,7 +16,13 @@ import { Button } from './ui'
 import { ChatBackground } from './ChatBackground'
 import { WallpaperWorkshop } from './WallpaperWorkshop'
 
-export function BackgroundSettings({ active = true }: { active?: boolean }): JSX.Element {
+export function BackgroundSettings({
+  active = true,
+  section = 'background'
+}: {
+  active?: boolean
+  section?: 'background' | 'sidebar'
+}): JSX.Element {
   const { t } = useTranslation()
   const background = useBackground()
   const [edits, setEdits] = useState<Partial<Settings>>({})
@@ -26,13 +32,6 @@ export function BackgroundSettings({ active = true }: { active?: boolean }): JSX
   const [empty, setEmpty] = useState(true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
-  const [saving, setSaving] = useState(false)
-  const [saved, setSaved] = useState<{ image: string | null; settings: Settings } | null>(null)
-  const isSaved =
-    saved?.image === background.image &&
-    (Object.keys(DEFAULT_BACKGROUND) as (keyof Settings)[]).every(
-      (key) => saved?.settings[key] === draft[key]
-    )
 
   const run = async (
     operation: () => Promise<BackgroundResult | null>,
@@ -81,26 +80,39 @@ export function BackgroundSettings({ active = true }: { active?: boolean }): JSX
   }
   const disabled = busy || !background.ready || !api?.background
   const controlsDisabled = disabled || !background.image
-
-  const saveBackground = async (): Promise<void> => {
-    if (disabled || saving) return
-    const snapshot = { image: background.image, settings: { ...draft } }
-    setSaved(null)
-    setSaving(true)
-    try {
-      if (await run(() => api.background.update(snapshot.settings))) setSaved(snapshot)
-    } finally {
-      setSaving(false)
-    }
+  if (section === 'background') {
+    return (
+      <section className="@container mb-8" aria-labelledby="wallpaper-workshop-heading">
+        <WallpaperWorkshop
+          image={background.image}
+          disabled={disabled}
+          active={active}
+          onAddCustom={() => void run(() => api.background.choose())}
+        >
+          {background.image && !background.catalogId && (
+            <WallpaperWorkshop
+              image={background.image}
+              disabled={disabled}
+              active={active}
+              mode="submit"
+            />
+          )}
+        </WallpaperWorkshop>
+        {error && (
+          <p role="alert" className="mt-2 text-xs text-danger">
+            {error}
+          </p>
+        )}
+      </section>
+    )
   }
 
   return (
-    <section className="@container mb-8" aria-labelledby="background-heading">
-      <WallpaperWorkshop image={background.image} disabled={disabled} active={active} />
-      <h2 id="background-heading" className="text-sm font-medium text-text">
-        {t('background.title')}
+    <section className="@container mb-8" aria-labelledby="sidebar-heading">
+      <h2 id="sidebar-heading" className="text-sm font-medium text-text">
+        {t('settings.navigation.sidebar')}
       </h2>
-      <p className="mt-1 mb-3 text-xs text-text-muted">{t('background.description')}</p>
+      <p className="mt-1 mb-3 text-xs text-text-muted">{t('background.sidebarDescription')}</p>
       <div className="overflow-hidden rounded-xl border border-border bg-surface">
         <div className="p-4">
           <div
@@ -194,35 +206,12 @@ export function BackgroundSettings({ active = true }: { active?: boolean }): JSX
               </div>
             </div>
           </div>
-          <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
-            <p className="text-[11px] text-text-subtle">{t('background.formats')}</p>
-            <div className="flex gap-2">
-              {background.image && (
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  disabled={disabled}
-                  onClick={() => void run(() => api.background.remove())}
-                >
-                  {t('background.remove')}
-                </Button>
-              )}
-              <Button
-                size="sm"
-                disabled={disabled}
-                onClick={() => void run(() => api.background.choose())}
-              >
-                <ImagePlus aria-hidden className="h-3.5 w-3.5" />
-                {t(background.image ? 'background.change' : 'background.choose')}
-              </Button>
-            </div>
-          </div>
         </div>
         <fieldset
           disabled={controlsDisabled}
           className="min-w-0 border-t border-border disabled:opacity-50"
         >
-          <legend className="sr-only">{t('background.title')}</legend>
+          <legend className="sr-only">{t('settings.navigation.sidebar')}</legend>
           <div className="p-4">
             <div className="mb-3 flex items-center justify-between gap-2">
               <span id="background-effect-label" className="text-xs font-medium text-text">
@@ -380,8 +369,18 @@ export function BackgroundSettings({ active = true }: { active?: boolean }): JSX
         </fieldset>
         <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border px-4 py-3">
           <p role="status" className="min-w-0 flex-1 text-[11px] text-text-subtle">
-            {t(isSaved && !busy ? 'background.savedLocally' : 'background.autoSave')}
+            {t('background.autoSave')}
           </p>
+          {background.image && (
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={disabled}
+              onClick={() => void run(() => api.background.remove())}
+            >
+              {t('background.remove')}
+            </Button>
+          )}
           <Button
             size="sm"
             variant="ghost"
@@ -390,20 +389,6 @@ export function BackgroundSettings({ active = true }: { active?: boolean }): JSX
           >
             {t('background.reset')}
           </Button>
-          <Button
-            size="sm"
-            variant="primary"
-            disabled={disabled}
-            onClick={() => void saveBackground()}
-          >
-            {t(saving ? 'background.saving' : 'background.save')}
-          </Button>
-          <WallpaperWorkshop
-            image={background.image}
-            disabled={disabled}
-            active={active}
-            mode="submit"
-          />
         </div>
       </div>
       {(error || background.failed) && (

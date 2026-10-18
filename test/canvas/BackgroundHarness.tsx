@@ -32,7 +32,7 @@ ctx.arc(860, 180, 95, 0, Math.PI * 2)
 ctx.fill()
 const image = canvas.toDataURL()
 const callbacks = new Set<(state: BackgroundState) => void>()
-const actions = { updates: 0, submissions: 0 }
+const actions = { updates: 0, submissions: 0, choices: 0 }
 ;(window as unknown as { __backgroundActions: typeof actions }).__backgroundActions = actions
 let state: BackgroundState = JSON.parse(localStorage.getItem('roxy.test.background') || 'null') ?? {
   image: null,
@@ -60,7 +60,10 @@ const delayed = (
 window.roxy.background = {
   thumbnail: async () => ({ ok: true, value: image }),
   search: async () => ({ ok: true, value: { entries: [], nextCursor: null } }),
-  applyCatalog: async () => ({ ok: true, value: commit({ settings: state.settings, image }) }),
+  applyCatalog: async (catalogId) => ({
+    ok: true,
+    value: commit({ settings: state.settings, image, catalogId })
+  }),
   submit: async () => {
     actions.submissions++
     return { ok: true, value: { id: '00000000-0000-4000-8000-000000000001' } }
@@ -71,6 +74,7 @@ window.roxy.background = {
     return state
   },
   choose: async () => {
+    actions.choices++
     if (location.hash === '#cancel') return null
     const mediaUrl = { '#mp4': mp4Url, '#mov': movUrl, '#gif': gifUrl }[location.hash]
     if (mediaUrl) {
@@ -112,6 +116,7 @@ installSquircle()
 export function BackgroundHarness(): JSX.Element {
   const [theme, setTheme] = useState(0)
   const [settings, setSettings] = useState(true)
+  const [section, setSection] = useState<'background' | 'sidebar'>('background')
   return (
     <>
       <div className="bar">
@@ -137,6 +142,12 @@ export function BackgroundHarness(): JSX.Element {
         </button>
         <button id="background-settings" onClick={() => setSettings(!settings)}>
           Settings
+        </button>
+        <button id="background-background-tab" onClick={() => setSection('background')}>
+          Background
+        </button>
+        <button id="background-sidebar-tab" onClick={() => setSection('sidebar')}>
+          Sidebar
         </button>
         <button
           id="background-messages"
@@ -193,7 +204,7 @@ export function BackgroundHarness(): JSX.Element {
             id="wallpaper-settings"
             className="w-full shrink-0 overflow-auto bg-bg p-4 md:w-[380px]"
           >
-            <BackgroundSettings />
+            <BackgroundSettings section={section} />
           </div>
         )}
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">

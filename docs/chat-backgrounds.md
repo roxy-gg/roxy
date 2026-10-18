@@ -2,9 +2,9 @@
 
 For the optional community catalog and explicit Submit for review flow, see [Wallpaper Workshop](wallpaper-workshop.md). Local uploads still save automatically; publishing is separate and opt-in.
 
-Open **Settings > Appearance** (or **Appearance** from the chat sidebar). The left menu opens **Background** first, with **Color Theme** second. Switching panels preserves unsaved theme JSON; in narrow windows the menu sits above the content.
+Open **Settings > Background** to browse wallpapers or add a custom background. **Sidebar** sits directly below **Background** in the Theme settings group, followed by **Colors** and **Motion**. Switching panels preserves unsaved theme JSON; in narrow windows the menu sits above the content.
 
-Choose a local image in **Background**. Changes save automatically. Use **Empty chats only** for a quiet transcript, or **All conversations** with a lower conversation visibility. The preview can show either state.
+Choose local media using **Add Custom Background** or the first **Add your own** tile in **Background**. Uploads save automatically; this page has no duplicate preview/upload/save section. **Submit for review** appears as a secondary action after a custom upload and opens the optional publication form. Open **Sidebar** for the live preview and appearance controls. Use **Empty chats only** for a quiet transcript, or **All conversations** with a lower conversation visibility. The preview can show either state.
 
 - **None** uses the image without an effect.
 - **Dither** quantizes the image with ordered Bayer thresholds.

@@ -43,10 +43,11 @@ const state = {
   thumbnails: [] as string[],
   applied: [] as string[],
   submissions: [] as unknown[],
+  customAdds: 0,
   fail: false
 }
 ;(window as any).__wallpapers = state
-let change: (image: string) => void = () => {}
+let change: (image: string, catalog: boolean) => void = () => {}
 window.roxy.background = {
   get: async () => ({
     image: null,
@@ -69,7 +70,7 @@ window.roxy.background.search = async (input) => {
   return {
     ok: true,
     value: {
-      entries: Array.from({ length: 10 }, (_, index) => ({
+      entries: Array.from({ length: input.q === 'empty' ? 0 : 10 }, (_, index) => ({
         ...item,
         id: `00000000-0000-4000-8000-${String(index + Number(input.cursor || 0) + 1).padStart(12, '0')}`,
         title: index === 0 ? input.q || item.title : `Silent Drift ${index}`,
@@ -86,7 +87,7 @@ window.roxy.background.thumbnail = async (id) => {
 }
 window.roxy.background.applyCatalog = async (id) => {
   state.applied.push(id)
-  change(image)
+  change(image, true)
   return { ok: true, value: { ok: true, state: await window.roxy.background.get() } }
 }
 window.roxy.background.submit = async (input) => {
@@ -95,8 +96,12 @@ window.roxy.background.submit = async (input) => {
 }
 function Harness() {
   const [background, setBackground] = useState<string | null>(null)
+  const [catalog, setCatalog] = useState(false)
   const [active, setActive] = useState(true)
-  change = setBackground
+  change = (value, fromCatalog) => {
+    setBackground(value)
+    setCatalog(fromCatalog)
+  }
   return (
     <main className="@container mx-auto max-w-4xl p-4 text-text">
       <h1 className="text-lg font-medium">Background Settings</h1>
@@ -104,20 +109,30 @@ function Harness() {
         <button id="active" onClick={() => setActive(!active)}>
           Toggle active
         </button>
-        <button id="local" onClick={() => setBackground(image)}>
+        <button id="local" onClick={() => change(image, false)}>
           Choose local
         </button>
-        <button id="replace" onClick={() => setBackground(image + '#changed')}>
+        <button id="replace" onClick={() => change(image + '#changed', false)}>
           Replace local
         </button>
         <button id="reduce" onClick={() => applyMotion('reduced')}>
           Reduce motion
         </button>
       </div>
-      <WallpaperWorkshop image={background} disabled={false} active={active} />
+      <WallpaperWorkshop
+        image={background}
+        disabled={false}
+        active={active}
+        onAddCustom={() => {
+          state.customAdds++
+          change(image, false)
+        }}
+      />
       <div id="actions" className="flex flex-wrap gap-2">
         <button>Reset effects</button>
-        <WallpaperWorkshop image={background} disabled={false} active={active} mode="submit" />
+        {background && !catalog && (
+          <WallpaperWorkshop image={background} disabled={false} active={active} mode="submit" />
+        )}
       </div>
     </main>
   )

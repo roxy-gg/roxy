@@ -2,6 +2,7 @@ const assert = require('node:assert/strict')
 const { app, BrowserWindow } = require('electron')
 const path = require('node:path')
 const fs = require('node:fs/promises')
+const port = Number(process.env.ROXY_TEST_PORT || 3102)
 let win, server
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 const evaluate = (code) => win.webContents.executeJavaScript(`(async()=>{${code}})()`, true)
@@ -24,6 +25,18 @@ const input = async (selector, value) => {
   )
   await wait(50)
 }
+const select = async (name, value) => {
+  await evaluate(
+    `const el=document.querySelector('select[name="${name}"]');el.value=${JSON.stringify(value)};el.dispatchEvent(new Event('change',{bubbles:true}))`
+  )
+  await wait(50)
+}
+const tagKey = async (key) => {
+  await evaluate(
+    `document.querySelector('#wallpaper-tags').dispatchEvent(new KeyboardEvent('keydown',{key:${JSON.stringify(key)},bubbles:true}))`
+  )
+  await wait(50)
+}
 app.whenReady().then(async () => {
   let code = 0
   const timer = setTimeout(() => app.exit(2), 90000)
@@ -31,7 +44,7 @@ app.whenReady().then(async () => {
     const { createServer } = await import('vite')
     server = await createServer({
       configFile: path.join(__dirname, 'vite.config.mjs'),
-      server: { host: '127.0.0.1', port: 3102, strictPort: true }
+      server: { host: '127.0.0.1', port, strictPort: true }
     })
     await server.listen()
     win = new BrowserWindow({
@@ -47,18 +60,42 @@ app.whenReady().then(async () => {
         console.error(message)
       }
     })
-    await win.loadURL('http://127.0.0.1:3102/wallpapers.html')
+    await win.loadURL(`http://127.0.0.1:${port}/wallpapers.html`)
     await until(`document.querySelector('h3')`)
     await until(`document.querySelectorAll('button[aria-pressed]').length===10`)
     assert.equal(await evaluate(`return window.__wallpapers.queries[0].limit`), 10)
     assert.equal(await evaluate(`return window.__wallpapers.queries[0].sort`), 'mostUsed')
+    const customFirst = `document.querySelector('[aria-busy] > button:first-child')?.getAttribute('aria-label') === 'Add Custom Background'`
+    const submitVisible = `[...document.querySelectorAll('button')].some(button=>button.textContent.trim()==='Submit for review')`
     assert.equal(
-      await evaluate(
-        `return document.querySelector('button[aria-expanded]').getAttribute('aria-expanded')`
-      ),
-      'true'
+      await evaluate(`return ${submitVisible}`),
+      false,
+      'no submission before a custom upload'
+    )
+    assert.equal(await evaluate(`return ${customFirst}`), true, 'custom tile is always first')
+    await evaluate(`document.querySelector('button[aria-label="Add Custom Background"]').click()`)
+    await click('Add Custom Background')
+    assert.equal(await evaluate(`return window.__wallpapers.customAdds`), 2)
+    assert.equal(
+      await evaluate(`return document.querySelectorAll('button[aria-pressed]').length`),
+      10,
+      'adding a custom background does not hide the catalog or replace a store result'
     )
     await until(`document.querySelectorAll('button[aria-pressed] img').length===10`)
+    assert.deepEqual(
+      await evaluate(
+        `return [...document.querySelectorAll('button[aria-pressed]')].map(button=>button.textContent.trim())`
+      ),
+      ['Aurora Hills', ...Array.from({ length: 9 }, (_, index) => `Silent Drift ${index + 1}`)],
+      'wallpaper cards show titles without media type, dimensions, or active-device counts'
+    )
+    assert.equal(
+      await evaluate(
+        `return !!document.querySelectorAll('button[aria-pressed]')[1].querySelector('svg')`
+      ),
+      true,
+      'video cards retain the play indicator'
+    )
     assert.equal(
       await evaluate(`return [...document.images].every(image=>image.src.startsWith('data:'))`),
       true
@@ -77,22 +114,109 @@ app.whenReady().then(async () => {
     )
     await click('Use background')
     assert.equal(await evaluate(`return window.__wallpapers.applied.length`), 1)
+    assert.equal(
+      await evaluate(`return ${submitVisible}`),
+      false,
+      'catalog wallpapers cannot be resubmitted'
+    )
+    await click('Choose local')
+    assert.equal(
+      await evaluate(`return ${submitVisible}`),
+      true,
+      'custom upload reveals submission even for identical image bytes'
+    )
     await click('Submit for review')
     assert.equal(
       await evaluate(`return document.querySelector('button[type=submit]').disabled`),
       true
     )
-    await input('form label:nth-of-type(1) input', 'My original')
-    await input('form label:nth-of-type(5) input', 'Original artwork / MIT')
+    await input('form input[name=title]', 'Moonlit Forest')
+    const tagValues = `return [...document.querySelectorAll('form button[aria-label^="Remove tag "]')].map(button=>button.getAttribute('aria-label').replace('Remove tag ',''))`
+    assert.deepEqual(
+      await evaluate(tagValues),
+      ['image', 'moonlit', 'forest'],
+      'tags generated from title and media'
+    )
+    assert.equal(
+      await evaluate(`return document.querySelector('input[name=credit]').required`),
+      false
+    )
+    assert.equal(
+      await evaluate(`return document.querySelector('select[name=license]').value`),
+      '',
+      'license must be chosen explicitly'
+    )
+    await select('license', 'other')
+    assert.equal(
+      await evaluate(`return document.querySelector('input[name=permission]').required`),
+      true
+    )
+    await input('input[name=permission]', 'Original artwork / MIT')
+    await select('license', 'CC0-1.0')
+    assert.equal(await evaluate(`return !!document.querySelector('input[name=permission]')`), false)
+    await input('#wallpaper-tags', ' Nature ')
+    await tagKey('Enter')
+    await input('#wallpaper-tags', 'NATURE')
+    await tagKey(',')
+    assert.deepEqual(
+      await evaluate(tagValues),
+      ['image', 'moonlit', 'forest', 'nature'],
+      'tag entry normalizes and deduplicates'
+    )
+    await evaluate(`document.querySelector('button[aria-label="Remove tag moonlit"]').click()`)
+    await input('form input[name=title]', 'Quiet Forest')
+    assert.deepEqual(
+      await evaluate(tagValues),
+      ['image', 'forest', 'nature'],
+      'title edits preserve manual tags and removals'
+    )
+    await click('Generate tags')
+    assert.deepEqual(await evaluate(tagValues), ['image', 'forest', 'nature', 'quiet'])
+    await evaluate(
+      `const data=new DataTransfer();data.setData('text','mist, Nature\\nnight');document.querySelector('#wallpaper-tags').dispatchEvent(new ClipboardEvent('paste',{clipboardData:data,bubbles:true,cancelable:true}))`
+    )
+    assert.deepEqual(
+      await evaluate(tagValues),
+      ['image', 'forest', 'nature', 'quiet', 'mist', 'night'],
+      'paste creates normalized chips'
+    )
+    await tagKey('Backspace')
+    assert.deepEqual(
+      await evaluate(tagValues),
+      ['image', 'forest', 'nature', 'quiet', 'mist'],
+      'backspace removes last chip'
+    )
     await evaluate(`document.querySelector('input[type=checkbox]').click()`)
     await until(`!document.querySelector('button[type=submit]').disabled`)
+    await input('#wallpaper-tags', 'x'.repeat(200))
+    assert.equal(
+      await evaluate(`return document.querySelector('button[type=submit]').disabled`),
+      true,
+      'serialized tags are bounded to 200 characters'
+    )
+    await input('#wallpaper-tags', '')
+    await until(`!document.querySelector('button[type=submit]').disabled`)
+    await click('Send for review')
+    const submission = await evaluate(`return window.__wallpapers.submissions[0]`)
+    assert.equal(submission.credit, '', 'author may be empty')
+    assert.equal(submission.license, 'CC0-1.0')
+    assert.equal(submission.tags, 'image, forest, nature, quiet, mist')
+    await click('Submit for review')
+    await select('license', 'other')
+    await input('input[name=permission]', 'Original artwork / MIT')
+    await evaluate(`document.querySelector('input[type=checkbox]').click()`)
     await click('Replace local')
     await until(`!document.querySelector('input[type=checkbox]').checked`)
     await evaluate(`document.querySelector('input[type=checkbox]').click()`)
     await click('Send for review')
-    assert.equal(await evaluate(`return window.__wallpapers.submissions.length`), 1)
+    assert.equal(await evaluate(`return window.__wallpapers.submissions.length`), 2)
+    assert.equal(
+      await evaluate(`return window.__wallpapers.submissions[1].license`),
+      'Original artwork / MIT'
+    )
     await until(`document.querySelector('[role=status]').textContent.includes('Submitted')`)
     await input('input[type=search]', 'slow')
+    assert.equal(await evaluate(`return ${customFirst}`), true, 'custom tile stays during loading')
     await wait(300)
     await input('input[type=search]', 'fast')
     await wait(1100)
@@ -125,6 +249,13 @@ app.whenReady().then(async () => {
     await evaluate(`window.__wallpapers.fail=true`)
     await input('input[type=search]', 'error')
     await until(`!!document.querySelector('[role=alert]')`)
+    assert.equal(await evaluate(`return ${customFirst}`), true, 'custom tile survives store errors')
+    assert.equal(
+      await evaluate(
+        `return document.querySelector('button[aria-label="Add Custom Background"]').disabled`
+      ),
+      false
+    )
     await evaluate(`window.__wallpapers.fail=false`)
     await click('Retry catalog')
     await until(`document.querySelectorAll('button[aria-pressed]').length===10`)
@@ -136,55 +267,127 @@ app.whenReady().then(async () => {
     )
     await click('Load more')
     await until(`document.querySelectorAll('button[aria-pressed]').length===20`)
-    await win.loadURL('http://127.0.0.1:3102/?background')
+    assert.equal(
+      await evaluate(`return ${customFirst}`),
+      true,
+      'custom tile stays first after sorting and pagination'
+    )
+    assert.equal(
+      await evaluate(
+        `return document.querySelectorAll('button[aria-label="Add Custom Background"]').length`
+      ),
+      1,
+      'pagination does not duplicate the custom tile'
+    )
+    await input('input[type=search]', 'empty')
+    await until(
+      `document.querySelector('[aria-busy]')?.getAttribute('aria-busy')==='false' && document.querySelectorAll('button[aria-pressed]').length===0`
+    )
+    assert.equal(
+      await evaluate(`return ${customFirst}`),
+      true,
+      'custom tile stays with an empty store'
+    )
+    await evaluate(`localStorage.removeItem('roxy.test.background')`)
+    await win.loadURL(`http://127.0.0.1:${port}/?background`)
     await until(`document.querySelector('#wallpaper-settings #wallpaper-workshop-heading')`)
     assert.equal(
       await evaluate(
-        `return !!(document.querySelector('#wallpaper-workshop-heading').compareDocumentPosition(document.querySelector('#background-heading')) & Node.DOCUMENT_POSITION_FOLLOWING)`
+        `return !document.querySelector('#background-heading') && !document.querySelector('#wallpaper-settings .background-preview-host') && ![...document.querySelectorAll('#wallpaper-settings button')].some(button=>['Save background','Choose background','Change background'].includes(button.textContent.trim()))`
       ),
       true,
-      'Workshop appears before background controls'
+      'Background has no duplicate preview, upload, or save section'
     )
     assert.equal(
-      await evaluate(
-        `const reset=[...document.querySelectorAll('#wallpaper-settings button')].find(button=>button.textContent.trim()==='Reset effects');return !!reset?.parentElement.querySelector('button[title]')`
-      ),
-      true,
-      'real settings place submit beside reset'
+      await evaluate(`return ${submitVisible}`),
+      false,
+      'Background hides submission before a custom upload'
     )
+    await evaluate(`location.hash='cancel'`)
+    const previousImage = await evaluate(`return (await window.roxy.background.get()).image`)
+    await click('Add Custom Background')
+    assert.equal(
+      await evaluate(`return (await window.roxy.background.get()).image`),
+      previousImage,
+      'cancel preserves the current background'
+    )
+    assert.equal(
+      await evaluate(`return ${submitVisible}`),
+      false,
+      'cancel does not reveal submission'
+    )
+    await evaluate(`location.hash=''`)
     await evaluate(
-      `[...document.querySelectorAll('#wallpaper-settings button')].find(button=>['Choose background','Change background'].includes(button.textContent.trim())).click()`
+      `document.querySelector('#wallpaper-settings button[aria-label="Add Custom Background"]').click()`
     )
     await until(
       `![...document.querySelectorAll('#wallpaper-settings button')].find(button=>button.textContent.trim()==='Submit for review').disabled`
     )
-    await evaluate(`location.hash='fail'`)
-    await click('Save background')
-    await until(
-      `document.querySelector('#wallpaper-settings [role=alert]')?.textContent.includes('Could not save')`
-    )
     assert.equal(
       await evaluate(
-        `return document.querySelector('#wallpaper-settings [role=status]')?.textContent.includes('Nothing was uploaded')`
+        `const add=[...document.querySelectorAll('#wallpaper-settings button')].find(button=>button.textContent.trim()==='Add Custom Background');return !!add.parentElement.querySelector('button[title]')`
       ),
-      false
+      true,
+      'Submit for review is the secondary action beside custom upload'
     )
-    await evaluate(`location.hash='slow'`)
-    await click('Save background')
-    await until(
-      `document.querySelector('#wallpaper-settings [role=status]')?.textContent.includes('Nothing was uploaded')`
+    await click('Add Custom Background')
+    assert.equal(
+      await evaluate(`return window.__backgroundActions.choices`),
+      3,
+      'header and first tile use the real local upload picker'
     )
     assert.equal(
       await evaluate(`return window.__backgroundActions.submissions`),
       0,
-      'Save background never publishes'
+      'custom upload never publishes'
+    )
+    await evaluate(
+      `await window.roxy.background.applyCatalog('00000000-0000-4000-8000-000000000001')`
+    )
+    await until(`!(${submitVisible})`)
+    await win.reload()
+    await until(`document.querySelector('#wallpaper-settings #wallpaper-workshop-heading')`)
+    assert.equal(
+      await evaluate(`return ${submitVisible}`),
+      false,
+      'catalog provenance survives reload'
+    )
+    await click('Add Custom Background')
+    await until(submitVisible)
+    await win.reload()
+    await until(submitVisible)
+    assert.equal(
+      await evaluate(`return ${submitVisible}`),
+      true,
+      'custom upload eligibility survives reload'
+    )
+    await evaluate(`document.querySelector('#background-sidebar-tab').click()`)
+    await until(`document.querySelector('#sidebar-heading')`)
+    await click('Remove')
+    await evaluate(`document.querySelector('#background-background-tab').click()`)
+    await until(`!(${submitVisible})`)
+    await click('Add Custom Background')
+    await evaluate(`location.hash='fail'`)
+    await click('Add Custom Background')
+    await until(
+      `document.querySelector('#wallpaper-settings [role=alert]')?.textContent.includes('Could not save')`
+    )
+    await evaluate(`location.hash=''`)
+    await click('Add Custom Background')
+    assert.equal(
+      await evaluate(`return window.__backgroundActions.submissions`),
+      0,
+      'uploads save locally without publishing'
     )
     assert.equal(
-      await evaluate(`return window.__backgroundActions.updates>=2`),
+      await evaluate(`return !!(await window.roxy.background.get()).image`),
       true,
-      'explicit save writes local settings'
+      'custom upload is saved without a separate Save action'
     )
-    await evaluate(`location.hash='';document.querySelector('#background-glass').click()`)
+    await evaluate(`location.hash='';document.querySelector('#background-sidebar-tab').click()`)
+    await until(`!!document.querySelector('#background-glass')`)
+    await evaluate(`document.querySelector('#background-glass').click()`)
+    await evaluate(`document.querySelector('#background-background-tab').click()`)
     await until(
       `!document.querySelector('#wallpaper-settings [role=status]')?.textContent.includes('Nothing was uploaded')`
     )
@@ -192,6 +395,9 @@ app.whenReady().then(async () => {
       `[...document.querySelectorAll('#wallpaper-settings button')].find(button=>button.textContent.trim()==='Submit for review').click()`
     )
     await until(`!!document.querySelector('#wallpaper-settings form')`)
+    await input('form input[name=title]', 'Aurora Mountains')
+    await input('#wallpaper-tags', 'a'.repeat(160))
+    await tagKey('Enter')
     win.setContentSize(390, 900)
     await wait(200)
     assert.equal(
@@ -212,9 +418,22 @@ app.whenReady().then(async () => {
       path.join(__dirname, '../.out/wallpapers-desktop.png'),
       (await win.webContents.capturePage()).toPNG()
     )
+    for (const [hash, media] of [
+      ['gif', 'gif'],
+      ['mp4', 'video']
+    ]) {
+      await evaluate(`location.hash=${JSON.stringify(hash)}`)
+      await click('Add Custom Background')
+      await until(`document.querySelector('button[aria-label="Remove tag ${media}"]')`)
+      assert.equal(
+        await evaluate(`return document.querySelector('input[type=checkbox]').checked`),
+        false,
+        'replacing media clears publication consent'
+      )
+    }
     assert.deepEqual(errors, [])
     console.log(
-      'WALLPAPER UI OK: default top10, sorting/pagination, thumbnail-only browse/selection, consent, retry/races, top placement, submit beside reset, mobile'
+      'WALLPAPER UI OK: custom-only submission and restart, license choices, optional author, auto-tags/chips/paste/limits, upload first across store states, consent, retry/races, local save, mobile'
     )
   } catch (error) {
     console.error(error)

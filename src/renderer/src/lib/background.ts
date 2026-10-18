@@ -9,6 +9,7 @@ let snapshot = {
   image: null as string | null,
   rendered: null as string | null,
   poster: undefined as string | undefined,
+  catalogId: undefined as string | undefined,
   reduced: prefersReducedMotion(),
   processing: false,
   failed: false,
@@ -37,7 +38,15 @@ export function applyBackground(state: BackgroundState): void {
     settings.effect !== snapshot.settings.effect ||
     state.poster !== snapshot.poster ||
     reduced !== snapshot.reduced
-  snapshot = { ...snapshot, ...state, poster: state.poster, settings, reduced, ready: true }
+  snapshot = {
+    ...snapshot,
+    ...state,
+    poster: state.poster,
+    catalogId: state.catalogId,
+    settings,
+    reduced,
+    ready: true
+  }
   if (!regenerate) {
     notify()
     return

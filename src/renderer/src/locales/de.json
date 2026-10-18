@@ -59,6 +59,7 @@
     "sessionOpacityHint": "Für bessere Lesbarkeit niedriger halten.",
     "sessionPreview": "Unterhaltung",
     "showOn": "Hintergrund anzeigen auf",
+    "sidebarDescription": "Adjust image effects, sidebar style, and chat visibility. Choose or upload a background in Background.",
     "sidebarHints": {
       "default": "Behält die solide Oberfläche des Seitenleisten-Designs bei.",
       "dimmed": "Erweitert das Bild über das Fenster unter einer dunkleren Seitenleiste.",
@@ -775,6 +776,7 @@
       "general": "Allgemein",
       "openRemote": "Fernzugriff verwalten",
       "section": "Einstellungsbereich",
+      "sidebar": "Sidebar",
       "theme": "Design",
       "worktrees": "Worktree-Konfiguration"
     },
@@ -1155,10 +1157,11 @@
   "wallpapers": {
     "activeUses_one": "{{count}} active device",
     "activeUses_other": "{{count}} active devices",
+    "addCustom": "Add Custom Background",
+    "addOwn": "Add your own",
     "applied": "Background saved on this device. Your effects and visibility settings are unchanged.",
-    "browse": "Browse wallpapers",
-    "close": "Hide catalog",
     "consent": "I own this work or have permission from all rights holders to let Roxy host and distribute it publicly, including any required creator credit. I consent to uploading it for review.",
+    "customHint": "Your image, GIF, or video",
     "description": "Find a background that feels like you. Browse curated images and silent video loops, then keep a copy on this device.",
     "dimensions": "{{kind}} / {{width}} x {{height}}",
     "empty": "No wallpapers found. Try another search or check back for new additions.",
@@ -1178,24 +1181,47 @@
       "tags": "Tags, separated by commas (optional)",
       "title": "Wallpaper title"
     },
+    "generateTags": "Generate tags",
     "kinds": {
       "all": "All wallpapers",
       "image": "Images",
       "video": "Silent videos"
     },
+    "licenseHint": "Choose only a license you are authorized to offer. Selecting a license does not grant rights to someone else's work. Include any attribution it requires.",
+    "licenses": {
+      "CC-BY-4": {
+        "0": "CC BY 4.0 - Attribution"
+      },
+      "CC-BY-NC-4": {
+        "0": "CC BY-NC 4.0 - Attribution, non-commercial"
+      },
+      "CC-BY-SA-4": {
+        "0": "CC BY-SA 4.0 - Attribution, share alike"
+      },
+      "CC0-1": {
+        "0": "CC0 1.0 - Public domain dedication"
+      },
+      "other": "Other / I have permission",
+      "placeholder": "Select a license..."
+    },
     "loading": "Loading wallpapers...",
     "more": "Load more",
     "mostUsed": "Most Used",
     "newest": "Newest",
+    "permission": "Permission details and original source",
     "privacy": "This uploads your current original background and the details below to Roxy, without an account or public submitter identity. Network addresses may be processed to prevent abuse. Videos and GIFs become silent MP4s, up to 60 seconds; source metadata is removed. Only approved submissions are public.",
     "publishHint": "Made something worth sharing? Submit your current background for the community catalog.",
     "recentApproved": "Recent Approved",
+    "removeTag": "Remove tag {{tag}}",
     "retry": "Retry catalog",
     "search": "Search titles and tags",
     "send": "Send for review",
     "sort": "Sort wallpapers",
     "submit": "Submit for review",
     "submitted": "Submitted for staff review. Reference: {{id}}. Your local background has not changed.",
+    "tagPlaceholder": "Add a tag...",
+    "tagsHint": "Tags are created locally from your title and media type. Edit them, or press Enter or comma to add your own. Paste a comma-separated list to add several.",
+    "tagsTooLong": "Keep all tags under 200 characters in total.",
     "title": "Wallpaper Workshop",
     "type": "Wallpaper type",
     "use": "Use background",

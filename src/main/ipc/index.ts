@@ -672,13 +672,12 @@ export function registerIpc(): void {
       ? wallpaperClient.result(() => wallpaperClient.thumbnail(id, sha256))
       : { ok: false, error: 'invalid' }
   )
-  ipcMain.handle(CHANNELS.backgroundSubmit, (event, input: WallpaperSubmitRequest) =>
-    trustedWallpaper(event)
-      ? wallpaperClient.result(async () =>
-          wallpaperClient.submit(input, (await background.getBackground()).image)
-        )
-      : { ok: false, error: 'invalid' }
-  )
+  ipcMain.handle(CHANNELS.backgroundSubmit, async (event, input: WallpaperSubmitRequest) => {
+    if (!trustedWallpaper(event)) return { ok: false, error: 'invalid' }
+    const state = await background.getBackground()
+    if (state.catalogId) return { ok: false, error: 'invalid' }
+    return wallpaperClient.result(() => wallpaperClient.submit(input, state.image))
+  })
   ipcMain.handle(CHANNELS.backgroundApplyCatalog, (event, id: string) => {
     if (!trustedWallpaper(event) || !validWallpaperId(id)) return { ok: false, error: 'invalid' }
     const revision = background.reserveBackgroundImport()
