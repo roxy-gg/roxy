@@ -47,7 +47,7 @@ export const AGENTS: AgentDef[] = [
     id: 'explore',
     name: 'Explore',
     description:
-      'Investigative subagent for independent research and side quests; shares the workspace and has full tools.',
+      'Investigative subagent for parallel evidence gathering; reports findings and leaves code changes to the parent.',
     mode: 'subagent',
     hidden: false,
     color: '#f0883e',
@@ -74,8 +74,8 @@ export function getAgent(id: string): AgentDef | undefined {
 
 /**
  * An agent is read-only when it may not write or edit files (its tool allowlist
- * excludes both). Plan mode qualifies. Explore has full tools; its preference
- * for investigation is guidance, not a permissions boundary.
+ * excludes both). Plan mode qualifies. Explore has full tools; its investigation-only
+ * instructions are guidance, not a permissions boundary.
  */
 export function isReadOnlyAgent(agent: AgentDef): boolean {
   return agent.tools !== 'all' && !agent.tools.includes('write') && !agent.tools.includes('edit')

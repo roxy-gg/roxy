@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtempSync } from 'node:fs'
+import { mkdtempSync, readFileSync } from 'node:fs'
 import { rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -8,6 +8,7 @@ import * as repo from '../src/main/db/repo'
 import * as bots from '../src/main/db/bots'
 import { closeDb } from '../src/main/db/database'
 import { runSessionTurn } from '../src/main/services/session-turn'
+import { setAgentPromptText } from '../src/main/harness/agent'
 import { cancelSubagentRun, listRunningSubagents } from '../src/main/services/subagent-stream'
 import { PartsFold, partsToContent } from '../src/shared/parts'
 import type { ChatMessage } from '../src/shared/api'
@@ -99,6 +100,12 @@ async function main(): Promise<void> {
     })
 
     for (const owner of ['host', 'bot'] as const) {
+      // Exercise the shipped Explore prompt and the harness's no-injection fallback.
+      const explorePrompt =
+        owner === 'host'
+          ? readFileSync(path.resolve('resources/prompts/agent-explore.txt'), 'utf8')
+          : undefined
+      setAgentPromptText(explorePrompt ? { 'agent-explore.txt': explorePrompt } : {})
       const chat =
         owner === 'bot'
           ? repo.getChat(guest.chatId)!
@@ -113,6 +120,31 @@ async function main(): Promise<void> {
         )
         if (child >= 0) {
           requests[child] = body
+          const childPrompt = body.messages
+            .filter((message) => message.role === 'system')
+            .map((message) => String(message.content))
+            .join('\n')
+          assert.ok(
+            childPrompt.includes('Investigate without editing files.'),
+            'children keep investigation non-mutating, including without prompt injection'
+          )
+          assert.ok(
+            childPrompt.includes('return a concrete recommendation for the lead agent to apply'),
+            'children return proposed changes instead of implementing them'
+          )
+          assert.ok(
+            childPrompt.includes('file paths and line references') &&
+              !childPrompt.includes('files created/edited'),
+            'child reports focus on evidence rather than files changed'
+          )
+          if (explorePrompt) {
+            assert.ok(childPrompt.includes(explorePrompt.trim()), 'shipped prompt is injected')
+            assert.ok(
+              explorePrompt.includes('Parallelize discovery, not implementation.') &&
+                explorePrompt.includes('Do not create, edit, or delete project files'),
+              'shipped Explore prompt discourages implementation and shared-workspace edits'
+            )
+          }
           if (child === 1)
             return new Promise<Response>((resolve, reject) => {
               if (signal?.aborted) return reject(new Error('cancelled'))
@@ -153,6 +185,15 @@ async function main(): Promise<void> {
             assert.ok(
               guidance.includes('Two is only the minimum batch size, not a default or target'),
               'prompt and tool do not encourage a two-subagent quota'
+            )
+            assert.ok(
+              guidance.includes('Parallelize discovery, not implementation.'),
+              'prompt and tool favor parallel investigation'
+            )
+            assert.ok(
+              guidance.includes('Keep file edits and integration in the main agent') &&
+                guidance.includes('do not split implementation across subagents'),
+              'prompt and tool keep implementation with the parent even across different files'
             )
           }
           return response({
@@ -288,6 +329,7 @@ async function main(): Promise<void> {
     console.log('  OK parent stop cancels the whole batch')
     closeDb()
   } finally {
+    setAgentPromptText({})
     globalThis.fetch = originalFetch
     win.destroy()
     closeDb()

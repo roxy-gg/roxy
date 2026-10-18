@@ -620,7 +620,7 @@ function buildSystemMessage(
     ...instructions,
     ...(agent && !isReadOnlyAgent(agent)
       ? [
-          'Choose whether to delegate based on the work, not a subagent quota. Handle simple requests, a single code path, or one focused investigation directly in the main agent. When multiple genuinely independent investigations or tasks would benefit from parallel work, use the task tool without asking permission. Choose as many subtasks as are useful: 2, 3, 4, 5, or more, with no fixed maximum. Two is only the minimum batch size, not a default or target; do not invent or split work just to launch subagents. Wait for prerequisites before delegating dependent work, and give each child a self-contained assignment that avoids overlapping edits.'
+          'Choose whether to delegate based on the work, not a subagent quota. Handle simple requests, a single code path, or one focused investigation directly in the main agent. When multiple genuinely independent investigations would benefit from parallel work, use the task tool without asking permission. Parallelize discovery, not implementation. Use subagents to locate code, trace behavior, research documentation, and check assumptions. Keep file edits and integration in the main agent; do not split implementation across subagents, even across different files, because they share one workspace. Choose as many subtasks as are useful: 2, 3, 4, 5, or more, with no fixed maximum. Two is only the minimum batch size, not a default or target; do not invent or split work just to launch subagents. Wait for prerequisites before delegating dependent work. Give each child a self-contained investigation brief, explicitly tell it not to edit files, and ask for evidence, file paths and line references, unresolved questions, and recommended next steps. Synthesize the findings before implementing changes yourself.'
         ]
       : []),
     ...(skillInfo ? [skillInfo] : []),
@@ -1133,7 +1133,7 @@ type ToolSchema = ReturnType<typeof fn>
 /** The delegation tool — lets a primary agent spawn a focused subagent. */
 const TASK_SCHEMA = fn(
   'task',
-  'Run a parallel batch when multiple genuinely independent investigations or tasks would benefit from delegation. Handle simple requests, a single code path, or one focused investigation directly in the main agent instead. Choose as many subtasks as are useful: 2, 3, 4, 5, or more. Two is only the minimum batch size, not a default or target; do not invent or split work just to launch subagents. There is no maximum task count or concurrency limit. Wait for prerequisites before delegating dependent work. Supply complete context in each prompt: Explore subagents do not inherit this conversation. They have full tools but share this workspace, so avoid overlapping edits. This call waits until every subtask completes, fails, or is cancelled, then returns every result in input order. No other parent tools run while the batch is active. This is not a persistent bot handoff.',
+  'Run a parallel batch when multiple genuinely independent investigations would benefit from delegation. Handle simple requests, a single code path, or one focused investigation directly in the main agent instead. Parallelize discovery, not implementation. Keep file edits and integration in the main agent; do not split implementation across subagents, even across different files, because they share one workspace. Choose as many subtasks as are useful: 2, 3, 4, 5, or more. Two is only the minimum batch size, not a default or target; do not invent or split work just to launch subagents. There is no maximum task count or concurrency limit. Wait for prerequisites before delegating dependent work. Supply complete context in each prompt: Explore subagents do not inherit this conversation. They have full tools for investigation; explicitly tell each child not to edit files and to return evidence, file paths and line references, unresolved questions, and recommended next steps. This call waits until every subtask completes, fails, or is cancelled, then returns every result in input order. No other parent tools run while the batch is active. This is not a persistent bot handoff.',
   {
     tasks: {
       type: 'array',
@@ -1142,7 +1142,9 @@ const TASK_SCHEMA = fn(
         type: 'object',
         properties: {
           description: str('A short label for this investigation.'),
-          prompt: str('The complete assignment and context for this subagent.')
+          prompt: str(
+            'A self-contained investigation brief with context, questions to answer, and an explicit instruction not to edit files.'
+          )
         },
         required: ['description', 'prompt']
       }
@@ -2201,7 +2203,7 @@ function subagentSystemPrompt(agent: AgentDef, cwd: string, skillInfo?: string):
   const lines = [
     injected?.trim() || `You are the "${agent.name}" subagent. ${agent.description}`,
     'A lead agent delegated a focused task to you. You have NO memory of the prior conversation — work only from the task below.',
-    'Use your tools to complete it, then reply with a concise report: what you found or did, files created/edited (with paths), and key results. Be terse.'
+    'Investigate without editing files. Do not create or delete project files, run formatters or auto-fix commands, or make commits. If asked to implement a change, return a concrete recommendation for the lead agent to apply instead. Reply with a concise report of findings, file paths and line references, supporting evidence, unresolved questions, and recommended next steps. Distinguish observed facts from assumptions.'
   ]
   if (agent.tools !== 'all') {
     lines.push(`You may only use these tools: ${agent.tools.join(', ')}.`)
