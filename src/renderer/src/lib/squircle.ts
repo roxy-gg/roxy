@@ -55,6 +55,17 @@ export function installSquircle(): void {
     }
   }
 
+  try {
+    css.registerProperty({
+      name: '--sq-exponent',
+      syntax: '<number>',
+      initialValue: '4',
+      inherits: true
+    })
+  } catch {
+    // Already registered by a previous mount.
+  }
+
   const url = URL.createObjectURL(new Blob([workletSource], { type: 'text/javascript' }))
   void css.paintWorklet
     .addModule(url)

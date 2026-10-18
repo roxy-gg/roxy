@@ -6127,7 +6127,9 @@ async function main(): Promise<void> {
     ['minimalist-light', 'light'],
     ['onyx-absolute-black', 'dark'],
     ['tokyo-midnight', 'dark'],
-    ['cyberpunk', 'dark']
+    ['cyberpunk', 'dark'],
+    ['tokyo-0300', 'dark'],
+    ['orion-cyber', 'dark']
   ]) {
     const theme = getBuiltInTheme(id)
     check(
@@ -6150,8 +6152,25 @@ async function main(): Promise<void> {
       .join(' ')
   )
   {
-    // Built-in palettes use opaque hex so WCAG luminance can be checked without a DOM.
-    const luminance = (hex: string): number => {
+    // Source apps use translucent text; composite it before measuring WCAG contrast.
+    const luminance = (hex: string, background = '#ffffff'): number => {
+      const rgba = /^rgba\((\d+), (\d+), (\d+), ([\d.]+)\)$/.exec(hex)
+      if (rgba) {
+        const alpha = Number(rgba[4])
+        hex =
+          '#' +
+          rgba
+            .slice(1, 4)
+            .map((channel, i) =>
+              Math.round(
+                Number(channel) * alpha +
+                  parseInt(background.slice(1 + i * 2, 3 + i * 2), 16) * (1 - alpha)
+              )
+                .toString(16)
+                .padStart(2, '0')
+            )
+            .join('')
+      }
       const rgb = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex)
       if (!rgb) return NaN
       const [r, g, b] = rgb.slice(1).map((channel) => {
@@ -6169,7 +6188,9 @@ async function main(): Promise<void> {
         `theme: ${theme.id} keeps primary and muted text readable on every surface`,
         ['bg', 'surface', 'surface-2', 'elevated'].every(
           (key) =>
-            contrast(lum('text'), lum(key)) >= 4.5 && contrast(lum('text-muted'), lum(key)) >= 3
+            contrast(lum('text'), lum(key)) >= 4.5 &&
+            contrast(luminance(colors['--color-text-muted'], colors[`--color-${key}`]), lum(key)) >=
+              3
         )
       )
       check(
@@ -6179,12 +6200,19 @@ async function main(): Promise<void> {
             ? lum('white') < lum('black') && lum('bg') > 0.5
             : lum('white') > lum('black') && lum('bg') < 0.1)
       )
-      check(
-        `theme: ${theme.id} shifts accent hover toward stronger contrast`,
-        theme.appearance === 'light'
-          ? lum('accent-hover') < lum('accent')
-          : lum('accent-hover') > lum('accent')
-      )
+      // Source token mappings must not be recolored to satisfy our old design heuristic.
+      if (theme.id.startsWith('claude-code-'))
+        check(
+          `theme: ${theme.id} preserves the shipped blue-400 hover fill`,
+          colors['--color-accent-hover'] === '#3987e5'
+        )
+      else
+        check(
+          `theme: ${theme.id} shifts accent hover toward stronger contrast`,
+          theme.appearance === 'light'
+            ? lum('accent-hover') < lum('accent')
+            : lum('accent-hover') > lum('accent')
+        )
     }
     const onyx = getBuiltInTheme('onyx-absolute-black')
     check(
@@ -6192,6 +6220,77 @@ async function main(): Promise<void> {
       onyx?.colors?.bg === '#000000' && onyx.colors.surface === '#000000'
     )
   }
+  for (const id of ['claude-code-dark', 'claude-code-light', 'codex-dark', 'codex-light']) {
+    const theme = getBuiltInTheme(id)!
+    const resolved = resolveTheme(theme)
+    check(
+      `theme: ${id} carries source fonts, geometry and flat edges`,
+      !!theme.fonts?.sans &&
+        !!theme.fonts.mono &&
+        !!resolved.vars['--radius-lg'] &&
+        !!resolved.vars['--sq-exponent'] &&
+        resolved.vars['--edge-lit'] === 'transparent'
+    )
+    const copy = parseTheme(serializeTheme(theme))
+    check(
+      `theme: ${id} round trips every source override`,
+      copy.ok && JSON.stringify(resolveTheme(copy.theme).vars) === JSON.stringify(resolved.vars)
+    )
+  }
+  for (const [id, bg, surface, text, accent, exponent] of [
+    ['claude-code-dark', '#151515', '#151515', '#f0efec', '#6da7ec', '2'],
+    ['claude-code-light', '#fcfcfb', '#fcfcfb', '#0b0b0b', '#184f95', '2'],
+    ['codex-dark', '#181818', '#141414', '#dfdfdf', '#339cff', '2.8284271247461903'],
+    ['codex-light', '#ffffff', '#f6f6f6', '#1a1c1f', '#339cff', '2.8284271247461903']
+  ]) {
+    const vars = resolveTheme(getBuiltInTheme(id)!).vars
+    check(
+      `theme: ${id} retains inspected source tokens`,
+      vars['--color-bg'] === bg &&
+        vars['--color-surface'] === surface &&
+        vars['--color-text'] === text &&
+        vars['--color-accent'] === accent &&
+        vars['--sq-exponent'] === exponent
+    )
+  }
+  check(
+    'theme: Roxy defaults do not force source fonts or geometry',
+    !resolveTheme(getBuiltInTheme(DEFAULT_THEME_ID)!).vars['--sq-exponent'] &&
+      !resolveTheme(getBuiltInTheme(DEFAULT_THEME_ID)!).vars['--font-sans']
+  )
+  for (const id of ['tokyo-0300', 'orion-cyber']) {
+    const original = getBuiltInTheme(id)!
+    const copy = parseTheme(serializeTheme(original))
+    check(
+      `theme: ${id} round trips its supplied palette, fonts and overrides`,
+      copy.ok &&
+        copy.warnings.length === 0 &&
+        JSON.stringify(copy.theme.colors) === JSON.stringify(original.colors) &&
+        JSON.stringify(copy.theme.fonts) === JSON.stringify(original.fonts) &&
+        JSON.stringify(copy.theme.vars) === JSON.stringify(original.vars)
+    )
+  }
+  const tokyo0300 = resolveTheme(getBuiltInTheme('tokyo-0300')!)
+  check(
+    'theme: Tokyo 3:00 AM retains its red signal, code and scrollbar settings',
+    tokyo0300.vars['--color-accent'] === '#d95757' &&
+      tokyo0300.vars['--font-mono'].startsWith(`'Berkeley Mono', 'IBM Plex Mono'`) &&
+      tokyo0300.vars['--theme-code-line-height'] === '1.6' &&
+      tokyo0300.vars['--theme-code-font-size'] === '13px' &&
+      tokyo0300.vars['--theme-scrollbar-thumb'] === '#272d35' &&
+      tokyo0300.vars['--theme-scrollbar-thumb-hover'] === '#3a424d' &&
+      tokyo0300.vars['--theme-selection'] === 'rgba(217, 87, 87, 0.24)'
+  )
+  const orionCyber = resolveTheme(getBuiltInTheme('orion-cyber')!)
+  check(
+    'theme: Orion Cyber retains chartreuse buttons, monospace UI and sharp edges',
+    orionCyber.vars['--color-white'] === '#d4ff00' &&
+      orionCyber.vars['--color-success'] === '#d4ff00' &&
+      orionCyber.vars['--font-sans'].startsWith(`'Share Tech Mono'`) &&
+      orionCyber.vars['--font-mono'].startsWith(`'Share Tech Mono'`) &&
+      orionCyber.vars['--sq-scale'] === '0' &&
+      orionCyber.vars['--theme-selection'] === 'rgba(212, 255, 0, 0.25)'
+  )
   check(
     'theme: the starter theme a user gets is valid',
     parseTheme(serializeTheme(starterTheme('mine', 'Mine'))).ok

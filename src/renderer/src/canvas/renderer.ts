@@ -123,7 +123,7 @@ function paintHover(region: HitRegion, paint: PaintContext, pen: Pen): void {
   ctx.fillStyle = wash
   pen.invalidate()
   const radius = region.hover === 'card' ? 0 : 4
-  if (radius > 0) ctx.fill(squircle(region.x, region.y, region.w, region.h, radius))
+  if (radius > 0) ctx.fill(squircle(region.x, region.y, region.w, region.h, radius, theme))
   else ctx.fillRect(region.x, region.y, region.w, region.h)
 }
 
@@ -143,7 +143,8 @@ function paintNode(node: Node, paint: PaintContext, pen: Pen): void {
         node.h,
         node.radius,
         node.fill ?? null,
-        node.border ?? null
+        node.border ?? null,
+        theme
       )
       pen.invalidate()
       return
@@ -248,7 +249,7 @@ function paintNode(node: Node, paint: PaintContext, pen: Pen): void {
     case 'clip': {
       ctx.save()
       ctx.beginPath()
-      ctx.clip(squircle(node.x, node.y, node.w, node.h, node.radius))
+      ctx.clip(squircle(node.x, node.y, node.w, node.h, node.radius, theme))
       pen.invalidate()
       const top = Math.max(paint.scrollTop, node.y)
       const bottom = Math.min(paint.scrollTop + paint.viewportHeight, node.y + node.h)
@@ -351,7 +352,8 @@ function paintImage(node: Extract<Node, { kind: 'image' }>, paint: PaintContext,
       node.h,
       node.radius,
       theme.palette.surface2,
-      node.border ?? null
+      node.border ?? null,
+      theme
     )
     if (node.src === '__roxy__') {
       ctx.font = fontCss({ size: 15, weight: 600, family: 'sans', style: 'normal' }, theme)
@@ -365,7 +367,7 @@ function paintImage(node: Extract<Node, { kind: 'image' }>, paint: PaintContext,
   }
   ctx.save()
   ctx.beginPath()
-  const path = squircle(node.x, node.y, node.w, node.h, node.radius)
+  const path = squircle(node.x, node.y, node.w, node.h, node.radius, theme)
   ctx.clip(path)
   const rect = drawContain(
     ctx,
@@ -382,7 +384,7 @@ function paintImage(node: Extract<Node, { kind: 'image' }>, paint: PaintContext,
   if (node.border) {
     ctx.strokeStyle = node.border
     ctx.lineWidth = 1
-    ctx.stroke(squircle(rect.x + 0.5, rect.y + 0.5, rect.w - 1, rect.h - 1, node.radius))
+    ctx.stroke(squircle(rect.x + 0.5, rect.y + 0.5, rect.w - 1, rect.h - 1, node.radius, theme))
   }
 }
 

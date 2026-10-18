@@ -29,24 +29,19 @@
  * border width can be read straight off the element.
  */
 
-/* Exponent of the superellipse |x/r|^n + |y/r|^n = 1. n=2 is a plain circle;
-   Apple's icon grid sits around 5. 4 keeps the corner visibly continuous while
-   staying tight enough not to read as a chamfer at the 6-24px radii used here. */
-const N = 4
-
 /* Line segments per corner. The curve is flattest near its ends, so 14 is already
    sub-pixel at these radii even at 2x DPR, and Chromium caches the painted image
    per geometry -- this runs on resize, not per frame. */
 const STEPS = 14
-
-const EXP = 2 / N
 
 /**
  * Trace a superellipse-cornered rectangle. `inset` shrinks the box on all sides,
  * which is how the hairline gets centred inside the border area rather than half
  * hanging outside it (where a mask, or the element's own edge, would clip it).
  */
-function squirclePath(ctx, width, height, radius, inset) {
+function squirclePath(ctx, width, height, radius, inset, exponent = 4) {
+  // CSS corner-shape superellipse(k) uses n = 2 ** k; n=2 is a circle.
+  const exp = 2 / Math.max(2, Math.min(8, exponent))
   const x0 = inset
   const y0 = inset
   const x1 = width - inset
@@ -68,8 +63,8 @@ function squirclePath(ctx, width, height, radius, inset) {
 
   // Unit superellipse offsets. Math.pow of a value in [0,1] stays in [0,1], so
   // both offsets stay within r.
-  const dx = (t) => r * Math.pow(Math.cos(t), EXP)
-  const dy = (t) => r * Math.pow(Math.sin(t), EXP)
+  const dx = (t) => r * Math.pow(Math.cos(t), exp)
+  const dy = (t) => r * Math.pow(Math.sin(t), exp)
   const step = Math.PI / 2 / STEPS
 
   ctx.moveTo(x0 + r, y0)
@@ -159,10 +154,17 @@ register(
   'squircle-mask',
   class {
     static get inputProperties() {
-      return ['--sq-r']
+      return ['--sq-r', '--sq-exponent']
     }
     paint(ctx, size, styleMap) {
-      squirclePath(ctx, size.width, size.height, px(styleMap, '--sq-r', 8), 0)
+      squirclePath(
+        ctx,
+        size.width,
+        size.height,
+        px(styleMap, '--sq-r', 8),
+        0,
+        px(styleMap, '--sq-exponent', 4)
+      )
       // Any opaque color does -- only the alpha channel is read as the mask.
       ctx.fillStyle = '#fff'
       ctx.fill()
@@ -176,6 +178,7 @@ register(
     static get inputProperties() {
       return [
         '--sq-r',
+        '--sq-exponent',
         '--sq-fill',
         '--sq-ring',
         '--sq-dash',
@@ -186,12 +189,13 @@ register(
     }
     paint(ctx, size, styleMap) {
       const r = px(styleMap, '--sq-r', 12)
+      const exponent = px(styleMap, '--sq-exponent', 4)
 
       // Skipped when `--sq-fill` is left at its `transparent` default, i.e. the
       // element is keeping its own `bg-*` and only wants the hairline.
       const fill = color(styleMap, '--sq-fill')
       if (opaque(fill)) {
-        squirclePath(ctx, size.width, size.height, r, 0)
+        squirclePath(ctx, size.width, size.height, r, 0, exponent)
         ctx.fillStyle = fill
         ctx.fill()
       }
@@ -201,7 +205,7 @@ register(
       // Centre the stroke on the inner half of the border area so the whole
       // hairline lands inside the shape -- a stroke centred on the outline would
       // lose its outer half and render at half opacity.
-      squirclePath(ctx, size.width, size.height, r, w / 2)
+      squirclePath(ctx, size.width, size.height, r, w / 2, exponent)
       ctx.lineWidth = w
       // `border-style: dashed` is painted by the UA along the *rectangle*, so its
       // dashes get sliced by the shape at every corner. `--sq-dash` re-creates it

@@ -46,6 +46,8 @@ export interface CanvasTheme {
   /** Resolved font stacks, ready to drop into `ctx.font`. */
   sans: string
   mono: string
+  corners?: { scale: number; exponent: number; radii: Record<number, number> }
+  edge?: string
   /**
    * Bumped whenever anything above changes. Layout caches key on it, so a theme
    * switch invalidates measured text (a different font stack measures
@@ -176,10 +178,42 @@ export function readTheme(): CanvasTheme {
     style.getPropertyValue('--font-sans').trim() || 'ui-sans-serif, system-ui, sans-serif'
   const mono = style.getPropertyValue('--font-mono').trim() || 'ui-monospace, monospace'
   const appearance = root.dataset.appearance === 'light' ? 'light' : 'dark'
-  const key = JSON.stringify([palette, appearance, sans, mono, fontEpoch, document.fonts.status])
+  const rootSize = parseFloat(style.fontSize) || 16
+  const length = (name: string, fallback: number): number => {
+    const value = style.getPropertyValue(name).trim()
+    if (/^-?[\d.]+(?:px|rem)?$/.test(value)) {
+      const n = parseFloat(value)
+      return Number.isFinite(n) ? n * (value.endsWith('rem') ? rootSize : 1) : fallback
+    }
+    if (!value) return fallback
+    // Resolve calc()/em/user-authored lengths with the same engine as DOM corners.
+    const measure = document.createElement('span')
+    measure.style.cssText = 'position:absolute;visibility:hidden;pointer-events:none'
+    measure.style.borderTopLeftRadius = value
+    root.appendChild(measure)
+    const n = parseFloat(getComputedStyle(measure).borderTopLeftRadius)
+    measure.remove()
+    return Number.isFinite(n) ? n : fallback
+  }
+  const corners = {
+    scale: Math.max(0, length('--sq-scale', 1.708)),
+    exponent: Math.max(2, Math.min(8, length('--sq-exponent', 4))),
+    radii: { 4: length('--radius-sm', 4), 6: length('--radius-md', 6), 8: length('--radius-lg', 8) }
+  }
+  const edge = root.style.getPropertyValue('--edge').trim() || undefined
+  const key = JSON.stringify([
+    palette,
+    appearance,
+    sans,
+    mono,
+    corners,
+    edge,
+    fontEpoch,
+    document.fonts.status
+  ])
   if (lastTheme && key === lastKey) return lastTheme
   lastKey = key
-  lastTheme = { palette, appearance, sans, mono, epoch: ++epoch }
+  lastTheme = { palette, appearance, sans, mono, corners, edge, epoch: ++epoch }
   return lastTheme
 }
 

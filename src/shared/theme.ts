@@ -190,6 +190,14 @@ const EXTRA_VAR_ALLOWLIST = new Set([
   '--ease-drawer',
   // Corner geometry (see the squircle system in main.css)
   '--sq-scale',
+  '--sq-exponent',
+  '--sq-contain',
+  '--radius-sm',
+  '--radius-md',
+  '--radius-lg',
+  '--radius-xl',
+  '--radius-2xl',
+  '--theme-composer-radius',
   // Edge lighting: the translucent hairline, its hover/float variant, and the
   // top-lit bevel. These are derived from `--color-white` (the polarity token),
   // so every theme already gets a coherent default -- these are here for a theme
@@ -632,6 +640,50 @@ const ROXY_LIGHT: ThemeFile = {
   }
 }
 
+// Shipped desktop token mappings, not hand-picked brand palettes. See docs/theme-sources.md.
+const CLAUDE_FONTS: ThemeFonts = {
+  sans: ['anthropic-sans', 'Anthropic Sans', 'ui-sans-serif', 'system-ui'],
+  mono: ['SF Mono', 'ui-monospace', 'Menlo', 'Consolas', 'monospace']
+}
+const CODEX_FONTS: ThemeFonts = {
+  sans: ['-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'sans-serif'],
+  mono: [
+    'ui-monospace',
+    'SFMono-Regular',
+    'SF Mono',
+    'Menlo',
+    'Consolas',
+    'Liberation Mono',
+    'monospace'
+  ]
+}
+const CLAUDE_GEOMETRY = {
+  '--sq-scale': '1',
+  '--sq-exponent': '2',
+  '--sq-contain': '1',
+  '--radius-sm': '0.3125rem',
+  '--radius-md': '0.375rem',
+  '--radius-lg': '0.4375rem',
+  '--radius-xl': '0.625rem',
+  '--radius-2xl': '0.75rem',
+  '--theme-composer-radius': '0.75rem',
+  '--edge-lit': 'transparent'
+}
+const CODEX_GEOMETRY = {
+  '--sq-scale': '1.25',
+  '--sq-exponent': '2.8284271247461903',
+  '--sq-contain': '0.7420655675294083',
+  '--radius-sm': '0.375rem',
+  '--radius-md': '0.5rem',
+  '--radius-lg': '0.625rem',
+  '--radius-xl': '0.75rem',
+  '--radius-2xl': '1rem',
+  '--theme-composer-radius': '1.375rem',
+  '--edge-lit': 'transparent',
+  '--elevation-raised': '0px 1px 2px -1px #00000014',
+  '--elevation-float': '0px 4px 8px -2px #0000001a'
+}
+
 export const BUILT_IN_THEMES: ThemeFile[] = [
   ROXY_DARK,
   ROXY_LIGHT,
@@ -640,25 +692,33 @@ export const BUILT_IN_THEMES: ThemeFile[] = [
     version: THEME_VERSION,
     id: 'claude-code-dark',
     name: 'Claude Code Dark',
-    description: 'Claude-inspired warm charcoal with a soft terracotta accent.',
+    description:
+      'Claude desktop tokens: neutral charcoal, blue links, and Anthropic Sans when installed.',
     appearance: 'dark',
     colors: {
-      bg: '#1f1e1b',
-      surface: '#252420',
-      'surface-2': '#2b2a25',
-      elevated: '#32312b',
-      border: '#39382f',
-      'border-strong': '#4b493f',
-      text: '#f0e9dd',
-      'text-muted': '#b6ad9d',
-      'text-subtle': '#958b7b',
-      accent: '#e09b79',
-      'accent-hover': '#efb493',
-      success: '#78b887',
-      warning: '#d4ae58',
-      danger: '#ef8580',
-      white: '#f6efe4',
-      black: '#201e1a'
+      bg: '#151515',
+      surface: '#151515',
+      'surface-2': '#1a1a19',
+      elevated: '#20201f',
+      border: 'rgba(255, 255, 255, 0.1)',
+      'border-strong': 'rgba(255, 255, 255, 0.2)',
+      text: '#f0efec',
+      'text-muted': '#c3c2b7',
+      'text-subtle': '#898781',
+      accent: '#6da7ec',
+      'accent-hover': '#3987e5',
+      success: '#0ca30c',
+      warning: '#db9300',
+      danger: '#ec7e7e',
+      white: '#ffffff',
+      black: '#0b0b0b'
+    },
+    fonts: CLAUDE_FONTS,
+    vars: {
+      ...CLAUDE_GEOMETRY,
+      '--edge': 'rgba(255, 255, 255, 0.1)',
+      '--edge-strong': 'rgba(255, 255, 255, 0.2)',
+      '--elevation-float': '0 8px 24px #00000052, 0 2px 6px #0003'
     }
   },
   {
@@ -666,25 +726,33 @@ export const BUILT_IN_THEMES: ThemeFile[] = [
     version: THEME_VERSION,
     id: 'claude-code-light',
     name: 'Claude Code Light',
-    description: 'Claude-inspired parchment and ink with a terracotta accent.',
+    description:
+      'Claude desktop tokens: off-white surfaces, blue links, and Anthropic Sans when installed.',
     appearance: 'light',
     colors: {
-      bg: '#faf8f3',
-      surface: '#f4f0e8',
-      'surface-2': '#ede7dd',
-      elevated: '#e7dfd2',
-      border: '#dcd3c5',
-      'border-strong': '#bdb09e',
-      text: '#302b25',
-      'text-muted': '#6d6255',
-      'text-subtle': '#807364',
-      accent: '#a14d30',
-      'accent-hover': '#853c23',
-      success: '#2d714a',
-      warning: '#8a610e',
-      danger: '#b7443f',
-      white: '#302b25',
-      black: '#fffdf8'
+      bg: '#fcfcfb',
+      surface: '#fcfcfb',
+      'surface-2': '#ffffff',
+      elevated: '#ffffff',
+      border: 'rgba(11, 11, 11, 0.1)',
+      'border-strong': 'rgba(11, 11, 11, 0.2)',
+      text: '#0b0b0b',
+      'text-muted': '#52514e',
+      'text-subtle': '#898781',
+      accent: '#184f95',
+      'accent-hover': '#3987e5',
+      success: '#006300',
+      warning: '#734500',
+      danger: '#8e2626',
+      white: '#0b0b0b',
+      black: '#ffffff'
+    },
+    fonts: CLAUDE_FONTS,
+    vars: {
+      ...CLAUDE_GEOMETRY,
+      '--edge': 'rgba(11, 11, 11, 0.1)',
+      '--edge-strong': 'rgba(11, 11, 11, 0.2)',
+      '--elevation-float': '0 8px 24px #0000001f, 0 2px 6px #00000014'
     }
   },
   {
@@ -692,25 +760,31 @@ export const BUILT_IN_THEMES: ThemeFile[] = [
     version: THEME_VERSION,
     id: 'codex-dark',
     name: 'Codex Dark',
-    description: 'Codex-inspired cool slate with a crisp mint accent.',
+    description: 'Codex desktop defaults: neutral surfaces, blue accents, and the native UI font.',
     appearance: 'dark',
     colors: {
-      bg: '#13171b',
-      surface: '#191e23',
-      'surface-2': '#20262c',
-      elevated: '#272e35',
-      border: '#30383f',
-      'border-strong': '#46515c',
-      text: '#e7edf2',
-      'text-muted': '#a4afb9',
-      'text-subtle': '#85929e',
-      accent: '#70d6c1',
-      'accent-hover': '#93e5d4',
-      success: '#88c98e',
-      warning: '#e1b96a',
-      danger: '#ee8792',
-      white: '#eef5f3',
-      black: '#13171b'
+      bg: '#181818',
+      surface: '#141414',
+      'surface-2': '#282828',
+      elevated: '#363636',
+      border: 'rgba(255, 255, 255, 0.084)',
+      'border-strong': 'rgba(255, 255, 255, 0.156)',
+      text: '#dfdfdf',
+      'text-muted': 'rgba(223, 223, 223, 0.65)',
+      'text-subtle': 'rgba(255, 255, 255, 0.498)',
+      accent: '#339cff',
+      'accent-hover': '#83c3ff',
+      success: '#40c977',
+      warning: '#ff8549',
+      danger: '#fa423e',
+      white: '#ffffff',
+      black: '#282828'
+    },
+    fonts: CODEX_FONTS,
+    vars: {
+      ...CODEX_GEOMETRY,
+      '--edge': 'rgba(255, 255, 255, 0.084)',
+      '--edge-strong': 'rgba(255, 255, 255, 0.156)'
     }
   },
   {
@@ -718,25 +792,31 @@ export const BUILT_IN_THEMES: ThemeFile[] = [
     version: THEME_VERSION,
     id: 'codex-light',
     name: 'Codex Light',
-    description: 'Codex-inspired mist-grey surfaces with a deep mint accent.',
+    description: 'Codex desktop defaults: white surfaces, blue accents, and the native UI font.',
     appearance: 'light',
     colors: {
-      bg: '#f8faf9',
-      surface: '#f1f5f3',
-      'surface-2': '#e9efec',
-      elevated: '#e0e8e4',
-      border: '#d3ddd7',
-      'border-strong': '#b3c3ba',
-      text: '#1c2b25',
-      'text-muted': '#52685c',
-      'text-subtle': '#6e8075',
-      accent: '#166b58',
-      'accent-hover': '#10513f',
-      success: '#27743e',
-      warning: '#8c630d',
-      danger: '#b63d50',
-      white: '#1c2b25',
-      black: '#f8faf9'
+      bg: '#ffffff',
+      surface: '#f6f6f6',
+      'surface-2': '#ffffff',
+      elevated: '#ffffff',
+      border: 'rgba(26, 28, 31, 0.078)',
+      'border-strong': 'rgba(26, 28, 31, 0.117)',
+      text: '#1a1c1f',
+      'text-muted': 'rgba(26, 28, 31, 0.65)',
+      'text-subtle': 'rgba(26, 28, 31, 0.495)',
+      accent: '#339cff',
+      'accent-hover': '#0169cc',
+      success: '#00a240',
+      warning: '#e25507',
+      danger: '#ba2623',
+      white: '#1a1c1f',
+      black: '#ffffff'
+    },
+    fonts: CODEX_FONTS,
+    vars: {
+      ...CODEX_GEOMETRY,
+      '--edge': 'rgba(26, 28, 31, 0.078)',
+      '--edge-strong': 'rgba(26, 28, 31, 0.117)'
     }
   },
   {
@@ -867,6 +947,76 @@ export const BUILT_IN_THEMES: ThemeFile[] = [
       danger: '#ff8191',
       white: '#f9eeff',
       black: '#130e1b'
+    }
+  },
+  {
+    kind: THEME_KIND,
+    version: THEME_VERSION,
+    id: 'tokyo-0300',
+    name: 'Tokyo 3:00 AM',
+    description:
+      'Absolute carbon black with cold steel surfaces and a restrained Tokyo-red signal.',
+    author: 'Roxy',
+    appearance: 'dark',
+    extends: 'roxy-dark',
+    colors: {
+      bg: '#000102',
+      surface: '#030405',
+      'surface-2': '#06080a',
+      elevated: '#0a0d10',
+      border: '#12161b',
+      'border-strong': '#272d35',
+      text: '#e5e8ec',
+      'text-muted': '#9299a2',
+      'text-subtle': '#5f6771',
+      accent: '#d95757',
+      'accent-hover': '#ed6a68',
+      success: '#42a77b',
+      warning: '#c99a48',
+      danger: '#f04452',
+      white: '#ffffff',
+      black: '#000000'
+    },
+    fonts: { sans: 'system', mono: ['Berkeley Mono', 'IBM Plex Mono'] },
+    vars: {
+      '--theme-code-line-height': '1.6',
+      '--theme-code-font-size': '13px',
+      '--theme-scrollbar-thumb': '#272d35',
+      '--theme-scrollbar-thumb-hover': '#3a424d',
+      '--theme-selection': 'rgba(217, 87, 87, 0.24)'
+    }
+  },
+  {
+    kind: THEME_KIND,
+    version: THEME_VERSION,
+    id: 'orion-cyber',
+    name: 'Orion Cyber',
+    description:
+      'Industrial dashboard aesthetic. Monospace, sharp edges, and high-contrast chartreuse.',
+    author: 'Roxy',
+    appearance: 'dark',
+    colors: {
+      bg: '#141414',
+      surface: '#0a0a0a',
+      'surface-2': '#1c1c1c',
+      elevated: '#252525',
+      border: '#262626',
+      'border-strong': '#3d3d3d',
+      text: '#ffffff',
+      'text-muted': '#8a8a8a',
+      'text-subtle': '#5c5c5c',
+      accent: '#d4ff00',
+      'accent-hover': '#e6ff33',
+      success: '#d4ff00',
+      warning: '#ffaa00',
+      danger: '#ff3333',
+      white: '#d4ff00',
+      black: '#000000'
+    },
+    fonts: { sans: 'Share Tech Mono', mono: 'Share Tech Mono' },
+    vars: {
+      '--sq-scale': '0',
+      '--theme-selection': 'rgba(212, 255, 0, 0.25)'
     }
   }
 ]
@@ -1127,6 +1277,10 @@ VARS (optional, advanced)
   Raw CSS custom properties for things the fields above don't cover. Only these
   names are accepted; anything else is dropped:
 ${vars}
+  --sq-exponent controls the corner curve (2 = circular, 4 = Roxy's squircle).
+  --sq-scale scales the radius; --sq-contain sets its circular clipping fallback.
+  --radius-* sets the control size ramp; --theme-composer-radius sets the composer
+  independently. These affect both DOM chrome and canvas transcript cards.
 
 CONSTRAINTS — a value breaking any of these is silently discarded
   - No url(), image-set(), attr() or expression() — blocked as an exfiltration risk.
