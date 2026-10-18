@@ -121,6 +121,7 @@ export const CHANNELS = {
    */
   backgroundGet: 'background:get',
   backgroundSearch: 'background:search',
+  backgroundThumbnail: 'background:thumbnail',
   backgroundApplyCatalog: 'background:apply-catalog',
   backgroundSubmit: 'background:submit',
   backgroundChoose: 'background:choose',

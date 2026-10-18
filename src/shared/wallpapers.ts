@@ -12,14 +12,17 @@ export interface Wallpaper {
   duration: number
   sha256: string
   featured: boolean
+  activeUses: number
+  approvedAt: string | null
   posterUrl: string
   mediaUrl: string
 }
 export interface WallpaperQuery {
   q?: string
   kind?: 'all' | 'image' | 'video'
-  sort?: 'featured' | 'newest'
+  sort?: 'mostUsed' | 'recentApproved'
   cursor?: string
+  limit?: number
 }
 export interface WallpaperPage {
   entries: Wallpaper[]

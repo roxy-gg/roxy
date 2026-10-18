@@ -27,6 +27,8 @@ export interface BackgroundState {
   image: string | null
   /** Decoded still frame for video effects and reduced motion. */
   poster?: string
+  /** Identity of a successfully applied catalog wallpaper, never a local upload. */
+  catalogId?: string
 }
 
 export const DEFAULT_BACKGROUND: BackgroundSettings = {

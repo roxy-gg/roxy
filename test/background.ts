@@ -98,6 +98,31 @@ async function run(): Promise<void> {
     )
     assert.equal(saved.image, imported.state.image)
     assert.ok(!JSON.stringify(saved).includes(input))
+    const catalogId = '00000000-0000-4000-8000-000000000001'
+    const catalogImport = await service.importBackground(
+      input,
+      undefined,
+      service.reserveBackgroundImport(),
+      catalogId
+    )
+    assert.ok(catalogImport.ok)
+    assert.equal(catalogImport.state.catalogId, catalogId)
+    await service.updateBackground({ ...DEFAULT_BACKGROUND })
+    assert.equal(
+      (await service.getBackground()).catalogId,
+      catalogId,
+      'reset effects preserves catalog selection'
+    )
+    assert.equal(
+      JSON.parse(await fs.readFile(path.join(directory, 'chat-background.json'), 'utf8')).catalogId,
+      catalogId
+    )
+    await service.importBackground(input)
+    assert.equal(
+      (await service.getBackground()).catalogId,
+      undefined,
+      'local upload clears catalog identity'
+    )
     const gifInput = path.join(directory, 'animated.gif')
     const frames = Buffer.alloc(16 * 16 * 2 * 4)
     for (let i = 0; i < 16 * 16; i++) {

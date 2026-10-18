@@ -32,6 +32,8 @@ ctx.arc(860, 180, 95, 0, Math.PI * 2)
 ctx.fill()
 const image = canvas.toDataURL()
 const callbacks = new Set<(state: BackgroundState) => void>()
+const actions = { updates: 0, submissions: 0 }
+;(window as unknown as { __backgroundActions: typeof actions }).__backgroundActions = actions
 let state: BackgroundState = JSON.parse(localStorage.getItem('roxy.test.background') || 'null') ?? {
   image: null,
   settings: { ...DEFAULT_BACKGROUND }
@@ -56,9 +58,13 @@ const delayed = (
   return work
 }
 window.roxy.background = {
+  thumbnail: async () => ({ ok: true, value: image }),
   search: async () => ({ ok: true, value: { entries: [], nextCursor: null } }),
   applyCatalog: async () => ({ ok: true, value: commit({ settings: state.settings, image }) }),
-  submit: async () => ({ ok: true, value: { id: '00000000-0000-4000-8000-000000000001' } }),
+  submit: async () => {
+    actions.submissions++
+    return { ok: true, value: { id: '00000000-0000-4000-8000-000000000001' } }
+  },
   get: async () => {
     if (new URLSearchParams(location.search).has('motion-race'))
       await new Promise((resolve) => setTimeout(resolve, 200))
@@ -81,10 +87,12 @@ window.roxy.background = {
     return commit({ settings: state.settings, image })
   },
   remove: async () => commit({ settings: state.settings, image: null }),
-  update: (settings) =>
-    delayed(() =>
+  update: (settings) => {
+    actions.updates++
+    return delayed(() =>
       commit({ ...state, settings: normalizeBackground({ ...state.settings, ...settings }) })
-    ),
+    )
+  },
   onChanged: (cb) => {
     callbacks.add(cb)
     return () => {

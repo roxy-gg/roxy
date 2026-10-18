@@ -1,4 +1,7 @@
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
+import { promises as fs } from 'node:fs'
+import path from 'node:path'
+import sharp from 'sharp'
 import type {
   Wallpaper,
   WallpaperPage,
@@ -19,9 +22,13 @@ class WallpaperFailure extends Error {
 
 export class WallpaperClient {
   private readonly base: URL
+  private readonly thumbnails = new Map<string, Promise<string>>()
+  private cacheWork: Promise<unknown> = Promise.resolve()
+  private reconciledCache = false
   constructor(
     base = process.env.ROXY_CATALOG_BASE || 'https://roxy.gg',
-    private readonly fetchImpl: typeof fetch = fetch
+    private readonly fetchImpl: typeof fetch = fetch,
+    private readonly cacheDirectory?: () => string
   ) {
     this.base = new URL(base)
     if (
@@ -61,7 +68,8 @@ export class WallpaperClient {
         redirect: 'error',
         credentials: 'omit'
       })
-      if (!response.ok)
+      if (!response.ok) {
+        await response.body?.cancel().catch(() => {})
         throw new WallpaperFailure(
           response.status === 429
             ? 'rateLimited'
@@ -69,8 +77,11 @@ export class WallpaperClient {
               ? 'unsupported'
               : 'unavailable'
         )
-      if (!response.body || Number(response.headers.get('content-length') || 0) > max)
+      }
+      if (!response.body || Number(response.headers.get('content-length') || 0) > max) {
+        await response.body?.cancel().catch(() => {})
         throw Error('Invalid response')
+      }
       const reader = response.body.getReader()
       const chunks: Buffer[] = []
       let length = 0
@@ -140,6 +151,8 @@ export class WallpaperClient {
       duration: raw.duration,
       sha256: raw.sha256,
       featured: raw.featured,
+      activeUses: Number.isSafeInteger(raw.activeUses) && raw.activeUses >= 0 ? raw.activeUses : 0,
+      approvedAt: typeof raw.approvedAt === 'string' ? raw.approvedAt : null,
       posterUrl: new URL(`/api/wallpapers/${raw.id}/poster`, this.base).href,
       mediaUrl: new URL(`/api/wallpapers/${raw.id}/media`, this.base).href
     }
@@ -148,21 +161,26 @@ export class WallpaperClient {
   async search(input: WallpaperQuery): Promise<WallpaperPage> {
     if (!input || typeof input !== 'object' || Array.isArray(input))
       throw new WallpaperFailure('invalid')
-    const { q = '', kind = 'all', sort = 'featured', cursor = '0' } = input
+    const { q = '', kind = 'all', sort = 'mostUsed', cursor = '0', limit = 10 } = input
     if (
       typeof q !== 'string' ||
       q.length > 120 ||
       /[\x00-\x1f]/.test(q) ||
       !['all', 'image', 'video'].includes(kind) ||
-      !['featured', 'newest'].includes(sort) ||
+      !['mostUsed', 'recentApproved'].includes(sort) ||
+      !Number.isInteger(limit) ||
+      limit < 1 ||
+      limit > 24 ||
       typeof cursor !== 'string' ||
       !/^\d{1,6}$/.test(cursor)
     )
       throw new WallpaperFailure('invalid')
-    const raw = await this.json(`/api/wallpapers?${new URLSearchParams({ q, kind, sort, cursor })}`)
+    const raw = await this.json(
+      `/api/wallpapers?${new URLSearchParams({ q, kind, sort, cursor, limit: String(limit) })}`
+    )
     if (
       !Array.isArray(raw.entries) ||
-      raw.entries.length > 24 ||
+      raw.entries.length > limit ||
       (raw.nextCursor !== null &&
         (typeof raw.nextCursor !== 'string' || !/^\d{1,6}$/.test(raw.nextCursor)))
     )
@@ -171,6 +189,121 @@ export class WallpaperClient {
       entries: raw.entries.map((item: unknown) => this.wallpaper(item)),
       nextCursor: raw.nextCursor
     }
+  }
+
+  thumbnail(id: string, sha256: string): Promise<string> {
+    if (!validWallpaperId(id) || typeof sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(sha256))
+      return Promise.reject(new WallpaperFailure('invalid'))
+    const key = createHash('sha256')
+      .update(`${this.base.origin}:${id}:${sha256}:thumbnail-v1`)
+      .digest('hex')
+    const existing = this.thumbnails.get(key)
+    if (existing) return existing
+    const work = (async () => {
+      const directory = this.cacheDirectory?.()
+      if (directory && !this.reconciledCache) {
+        this.reconciledCache = true
+        const prune = this.cacheWork.catch(() => {}).then(() => this.pruneThumbnails(directory))
+        this.cacheWork = prune
+        await prune.catch(() => {})
+      }
+      const file = directory ? path.join(directory, `${key}.webp`) : undefined
+      const validate = async (bytes: Buffer): Promise<void> => {
+        if (!bytes.length || bytes.length > 256 * 1024) throw Error('Invalid thumbnail size')
+        const decoder = sharp(bytes, { limitInputPixels: 480 * 270 }).timeout({ seconds: 5 })
+        const info = await decoder.metadata()
+        if (
+          info.format !== 'webp' ||
+          (info.pages || 1) !== 1 ||
+          !info.width ||
+          !info.height ||
+          info.width > 480 ||
+          info.height > 270
+        )
+          throw Error('Invalid thumbnail')
+        await decoder.raw().toBuffer()
+      }
+      let bytes: Buffer | undefined
+      if (file)
+        try {
+          if ((await fs.stat(file)).size > 256 * 1024) throw Error('Oversized cache')
+          bytes = await fs.readFile(file)
+          await validate(bytes)
+          await fs.utimes(file, new Date(), new Date()).catch(() => {})
+        } catch {
+          bytes = undefined
+          await fs.rm(file, { force: true }).catch(() => {})
+        }
+      if (!bytes) {
+        const response = await this.request(`/api/wallpapers/${id}/thumbnail`, 256 * 1024)
+        if (response.type !== 'image/webp') throw Error('Invalid thumbnail type')
+        bytes = response.bytes
+        await validate(bytes)
+        if (file && directory) {
+          const content = bytes
+          const save = this.cacheWork
+            .catch(() => {})
+            .then(async () => {
+              await fs.mkdir(directory, { recursive: true })
+              const temporary = `${file}.${randomUUID()}.tmp`
+              try {
+                await fs.writeFile(temporary, content, { mode: 0o600 })
+                await fs.rename(temporary, file)
+              } finally {
+                await fs.rm(temporary, { force: true }).catch(() => {})
+              }
+              await this.pruneThumbnails(directory)
+            })
+          this.cacheWork = save
+          await save.catch(() => {}) // Cache errors never prevent browsing.
+        }
+      }
+      return `data:image/webp;base64,${bytes.toString('base64')}`
+    })()
+    this.thumbnails.set(key, work)
+    void work.finally(() => this.thumbnails.delete(key)).catch(() => {})
+    return work
+  }
+
+  private async pruneThumbnails(directory: string): Promise<void> {
+    await fs.mkdir(directory, { recursive: true })
+    const entries: { name: string; size: number; modified: number }[] = []
+    for (const name of await fs.readdir(directory)) {
+      if (!/^[a-f0-9]{64}\.webp(?:\.[a-f0-9-]+\.tmp)?$/.test(name)) continue
+      try {
+        const stat = await fs.stat(path.join(directory, name))
+        if (name.endsWith('.tmp')) {
+          if (stat.mtimeMs < Date.now() - 3600_000)
+            await fs.rm(path.join(directory, name), { force: true })
+          continue
+        }
+        entries.push({ name, size: stat.size, modified: stat.mtimeMs })
+      } catch {
+        /* Another cache owner may already have removed it. */
+      }
+    }
+    entries.sort((a, b) => b.modified - a.modified)
+    let total = 0
+    for (let index = 0; index < entries.length; index++) {
+      total += entries[index].size
+      if (index >= 500 || total > 50 * 1024 * 1024)
+        await fs.rm(path.join(directory, entries[index].name), { force: true })
+    }
+  }
+
+  async usage(deviceId: string, wallpaperId: string | null, sequence: number): Promise<void> {
+    if (
+      !validWallpaperId(deviceId) ||
+      (wallpaperId !== null && !validWallpaperId(wallpaperId)) ||
+      !Number.isSafeInteger(sequence)
+    )
+      throw new WallpaperFailure('invalid')
+    const result = await this.json('/api/wallpapers/usage', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ deviceId, wallpaperId, sequence })
+    })
+    if (result.ok !== true) throw Error('Invalid usage response')
   }
 
   async download(id: string) {

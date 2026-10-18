@@ -960,6 +960,7 @@ export interface RoxyApi {
     install(source: string, cwd?: string): Promise<SkillInstallResult>
   }
   background: {
+    thumbnail(id: string, sha256: string): Promise<WallpaperResult<string>>
     search(input: WallpaperQuery): Promise<WallpaperResult<WallpaperPage>>
     applyCatalog(id: string): Promise<WallpaperResult<BackgroundResult | null>>
     submit(input: WallpaperSubmitRequest): Promise<WallpaperResult<{ id: string }>>

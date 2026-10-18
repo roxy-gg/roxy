@@ -3,6 +3,7 @@ import { registerVoiceIpc, resetVoice } from '../services/voice'
 import { CHANNELS } from '../../shared/ipc'
 import { CatalogClient } from '../services/catalog'
 import { WallpaperClient, validWallpaperId } from '../services/wallpapers'
+import { startWallpaperUsage } from '../services/wallpaper-usage'
 import type { WallpaperQuery, WallpaperSubmitRequest } from '../../shared/wallpapers'
 import { pathToFileURL } from 'node:url'
 import os from 'node:os'
@@ -139,7 +140,9 @@ const llmControllers = new Map<string, AbortController>()
 const localTurnReleases = new Map<string, { senderId: number; release: () => void }>()
 
 const catalogs = new WeakMap<Electron.WebContents, CatalogClient>()
-const wallpaperClient = new WallpaperClient()
+const wallpaperClient = new WallpaperClient(undefined, fetch, () =>
+  path.join(app.getPath('userData'), 'wallpaper-thumbnails')
+)
 function catalogFor(sender: Electron.WebContents): CatalogClient {
   let client = catalogs.get(sender)
   if (!client) {
@@ -239,6 +242,14 @@ function queueAddOptions(value: unknown): QueueAddOptions | undefined {
  * channel here + a matching bridge method.
  */
 export function registerIpc(): void {
+  const stopWallpaperUsage = startWallpaperUsage({
+    directory: app.getPath('userData'),
+    current: background.getBackgroundCatalogId,
+    subscribe: background.subscribeBackgroundChanges,
+    report: (deviceId, wallpaperId, sequence) =>
+      wallpaperClient.usage(deviceId, wallpaperId, sequence)
+  })
+  app.once('before-quit', stopWallpaperUsage)
   registerVoiceIpc()
   // ---- settings ----
   ipcMain.handle(CHANNELS.settingsGetAll, () => repo.getSettings())
@@ -656,6 +667,11 @@ export function registerIpc(): void {
       ? wallpaperClient.result(() => wallpaperClient.search(input))
       : { ok: false, error: 'invalid' }
   )
+  ipcMain.handle(CHANNELS.backgroundThumbnail, (event, id: string, sha256: string) =>
+    trustedWallpaper(event)
+      ? wallpaperClient.result(() => wallpaperClient.thumbnail(id, sha256))
+      : { ok: false, error: 'invalid' }
+  )
   ipcMain.handle(CHANNELS.backgroundSubmit, (event, input: WallpaperSubmitRequest) =>
     trustedWallpaper(event)
       ? wallpaperClient.result(async () =>
@@ -675,7 +691,8 @@ export function registerIpc(): void {
         const result = await background.importBackground(
           file,
           BrowserWindow.fromWebContents(event.sender) ?? undefined,
-          revision
+          revision,
+          id
         )
         return background.isCurrentBackgroundImport(revision) ? broadcastBackground(result) : null
       } finally {

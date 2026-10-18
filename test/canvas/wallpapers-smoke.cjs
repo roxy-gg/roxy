@@ -49,9 +49,25 @@ app.whenReady().then(async () => {
     })
     await win.loadURL('http://127.0.0.1:3102/wallpapers.html')
     await until(`document.querySelector('h3')`)
-    assert.equal(await evaluate(`return window.__wallpapers.searches.length`), 0)
-    await click('Browse wallpapers')
-    await until(`document.querySelectorAll('button[aria-pressed]').length===2`)
+    await until(`document.querySelectorAll('button[aria-pressed]').length===10`)
+    assert.equal(await evaluate(`return window.__wallpapers.queries[0].limit`), 10)
+    assert.equal(await evaluate(`return window.__wallpapers.queries[0].sort`), 'mostUsed')
+    assert.equal(
+      await evaluate(
+        `return document.querySelector('button[aria-expanded]').getAttribute('aria-expanded')`
+      ),
+      'true'
+    )
+    await until(`document.querySelectorAll('button[aria-pressed] img').length===10`)
+    assert.equal(
+      await evaluate(`return [...document.images].every(image=>image.src.startsWith('data:'))`),
+      true
+    )
+    assert.equal(
+      await evaluate(`return !!document.querySelector('#actions button[title]')`),
+      true,
+      'submit sits next to reset effects'
+    )
     await evaluate(`document.querySelector('button[aria-pressed]').click()`)
     await until(`document.querySelector('h4')`)
     assert.equal(
@@ -85,12 +101,17 @@ app.whenReady().then(async () => {
       'fast'
     )
     await evaluate(`document.querySelectorAll('button[aria-pressed]')[1].click()`)
-    await until(`!!document.querySelector('video')`)
+    await until(`!!document.querySelector('h4')`)
+    assert.equal(
+      await evaluate(`return document.querySelector('video')`),
+      null,
+      'video selection remains thumbnail-only'
+    )
     assert.equal(
       await evaluate(
-        `return document.querySelector('video').muted && !document.querySelector('video').autoplay`
+        `return performance.getEntriesByType('resource').some(entry=>entry.name.includes('do-not-load'))`
       ),
-      true
+      false
     )
     await click('Reduce motion')
     await until(`!document.querySelector('video')`)
@@ -100,19 +121,85 @@ app.whenReady().then(async () => {
     assert.equal(await evaluate(`return window.__wallpapers.searches.length`), searches)
     assert.equal(await evaluate(`return document.querySelector('input[type=search]')`), null)
     await click('Toggle active')
-    await until(`document.querySelectorAll('button[aria-pressed]').length===2`)
+    await until(`document.querySelectorAll('button[aria-pressed]').length===10`)
     await evaluate(`window.__wallpapers.fail=true`)
     await input('input[type=search]', 'error')
     await until(`!!document.querySelector('[role=alert]')`)
     await evaluate(`window.__wallpapers.fail=false`)
     await click('Retry catalog')
-    await until(`document.querySelectorAll('button[aria-pressed]').length===2`)
+    await until(`document.querySelectorAll('button[aria-pressed]').length===10`)
+    await evaluate(
+      `const el=document.querySelector('select[aria-label="Sort wallpapers"]');el.value='recentApproved';el.dispatchEvent(new Event('change',{bubbles:true}));`
+    )
+    await until(
+      `window.__wallpapers.queries.at(-1).sort==='recentApproved' && document.querySelectorAll('button[aria-pressed]').length===10`
+    )
+    await click('Load more')
+    await until(`document.querySelectorAll('button[aria-pressed]').length===20`)
+    await win.loadURL('http://127.0.0.1:3102/?background')
+    await until(`document.querySelector('#wallpaper-settings #wallpaper-workshop-heading')`)
+    assert.equal(
+      await evaluate(
+        `return !!(document.querySelector('#wallpaper-workshop-heading').compareDocumentPosition(document.querySelector('#background-heading')) & Node.DOCUMENT_POSITION_FOLLOWING)`
+      ),
+      true,
+      'Workshop appears before background controls'
+    )
+    assert.equal(
+      await evaluate(
+        `const reset=[...document.querySelectorAll('#wallpaper-settings button')].find(button=>button.textContent.trim()==='Reset effects');return !!reset?.parentElement.querySelector('button[title]')`
+      ),
+      true,
+      'real settings place submit beside reset'
+    )
+    await evaluate(
+      `[...document.querySelectorAll('#wallpaper-settings button')].find(button=>['Choose background','Change background'].includes(button.textContent.trim())).click()`
+    )
+    await until(
+      `![...document.querySelectorAll('#wallpaper-settings button')].find(button=>button.textContent.trim()==='Submit for review').disabled`
+    )
+    await evaluate(`location.hash='fail'`)
+    await click('Save background')
+    await until(
+      `document.querySelector('#wallpaper-settings [role=alert]')?.textContent.includes('Could not save')`
+    )
+    assert.equal(
+      await evaluate(
+        `return document.querySelector('#wallpaper-settings [role=status]')?.textContent.includes('Nothing was uploaded')`
+      ),
+      false
+    )
+    await evaluate(`location.hash='slow'`)
+    await click('Save background')
+    await until(
+      `document.querySelector('#wallpaper-settings [role=status]')?.textContent.includes('Nothing was uploaded')`
+    )
+    assert.equal(
+      await evaluate(`return window.__backgroundActions.submissions`),
+      0,
+      'Save background never publishes'
+    )
+    assert.equal(
+      await evaluate(`return window.__backgroundActions.updates>=2`),
+      true,
+      'explicit save writes local settings'
+    )
+    await evaluate(`location.hash='';document.querySelector('#background-glass').click()`)
+    await until(
+      `!document.querySelector('#wallpaper-settings [role=status]')?.textContent.includes('Nothing was uploaded')`
+    )
+    await evaluate(
+      `[...document.querySelectorAll('#wallpaper-settings button')].find(button=>button.textContent.trim()==='Submit for review').click()`
+    )
+    await until(`!!document.querySelector('#wallpaper-settings form')`)
     win.setContentSize(390, 900)
     await wait(200)
     assert.equal(
-      await evaluate(`return document.documentElement.scrollWidth<=innerWidth`),
+      await evaluate(
+        `const host=document.querySelector('#wallpaper-settings');return host.scrollWidth<=host.clientWidth`
+      ),
       true,
-      'mobile does not overflow'
+      'real wallpaper settings and expanded submission form do not overflow on mobile'
     )
     await fs.mkdir(path.join(__dirname, '../.out'), { recursive: true })
     await fs.writeFile(
@@ -127,7 +214,7 @@ app.whenReady().then(async () => {
     )
     assert.deepEqual(errors, [])
     console.log(
-      'WALLPAPER UI OK: explicit browsing, preview/apply, submission consent/reset, races, retry, silent preview, reduced motion, mobile'
+      'WALLPAPER UI OK: default top10, sorting/pagination, thumbnail-only browse/selection, consent, retry/races, top placement, submit beside reset, mobile'
     )
   } catch (error) {
     console.error(error)

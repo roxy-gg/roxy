@@ -18,6 +18,41 @@ const filename = (): string => path.join(app.getPath('userData'), 'chat-backgrou
 let cached: Promise<BackgroundState> | undefined
 let pending: Promise<unknown> = Promise.resolve()
 let imageRevision = 0
+const listeners = new Set<() => void>()
+export function subscribeBackgroundChanges(listener: () => void): () => void {
+  listeners.add(listener)
+  return () => {
+    listeners.delete(listener)
+  }
+}
+const changed = (): void => {
+  for (const listener of listeners) {
+    try {
+      listener()
+    } catch {
+      /* Usage observers cannot break a saved background. */
+    }
+  }
+}
+
+/** Read the committed file for cross-process usage reconciliation, not a window's cached state. */
+export async function getBackgroundCatalogId(): Promise<string | null> {
+  try {
+    const data = JSON.parse(await fs.readFile(filename(), 'utf8'))
+    return data &&
+      typeof data.image === 'string' &&
+      data.image.length <= MAX_DATA_URL &&
+      /^data:(?:image\/(?:png|gif)|video\/mp4);base64,[A-Za-z0-9+/=]+$/.test(data.image) &&
+      typeof data.catalogId === 'string' &&
+      /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(data.catalogId)
+      ? data.catalogId
+      : null
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT' || error instanceof SyntaxError)
+      return null
+    throw error
+  }
+}
 
 export function getBackground(): Promise<BackgroundState> {
   cached ??= (async () => {
@@ -65,17 +100,23 @@ export function getBackground(): Promise<BackgroundState> {
           /* A damaged GIF must not animate under reduced motion. */
         }
       }
+      const image =
+        typeof data.image === 'string' &&
+        data.image.length <= MAX_DATA_URL &&
+        /^data:(?:image\/(?:png|gif)|video\/mp4);base64,[A-Za-z0-9+/=]+$/.test(data.image) &&
+        (!data.image.startsWith('data:video/') || !!poster) &&
+        (!data.image.startsWith('data:image/gif;') || !!poster)
+          ? data.image
+          : null
       return {
         settings: normalizeBackground(data.settings),
-        image:
-          typeof data.image === 'string' &&
-          data.image.length <= MAX_DATA_URL &&
-          /^data:(?:image\/(?:png|gif)|video\/mp4);base64,[A-Za-z0-9+/=]+$/.test(data.image) &&
-          (!data.image.startsWith('data:video/') || !!poster) &&
-          (!data.image.startsWith('data:image/gif;') || !!poster)
-            ? data.image
-            : null,
-        ...(poster ? { poster } : {})
+        image,
+        ...(poster ? { poster } : {}),
+        ...(image &&
+        typeof data.catalogId === 'string' &&
+        /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(data.catalogId)
+          ? { catalogId: data.catalogId }
+          : {})
       }
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT' && !(error instanceof SyntaxError))
@@ -104,6 +145,7 @@ function changeBackground(
       await fs.writeFile(`${file}.tmp`, JSON.stringify(state), { mode: 0o600 })
       await fs.rename(`${file}.tmp`, file)
       cached = Promise.resolve(state)
+      if (previous.catalogId !== state.catalogId || previous.image !== state.image) changed()
       return { ok: true, state }
     } catch {
       await fs.rm(`${file}.tmp`, { force: true }).catch(() => undefined)
@@ -132,6 +174,7 @@ export function resetBackground(): Promise<void> {
     const file = filename()
     await Promise.all([fs.rm(file, { force: true }), fs.rm(`${file}.tmp`, { force: true })])
     cached = undefined
+    changed()
   })
   pending = work.catch(() => undefined)
   return work
@@ -148,7 +191,8 @@ export function isCurrentBackgroundImport(revision: number): boolean {
 export async function importBackground(
   file: string,
   owner?: BrowserWindow,
-  revision = reserveBackgroundImport()
+  revision = reserveBackgroundImport(),
+  catalogId?: string
 ): Promise<BackgroundResult> {
   let bytes: Buffer
   try {
@@ -228,7 +272,9 @@ export async function importBackground(
       }
     }
     return changeBackground((state) =>
-      revision === imageRevision ? { settings: state.settings, image, poster } : null
+      revision === imageRevision
+        ? { settings: state.settings, image, poster, ...(catalogId ? { catalogId } : {}) }
+        : null
     )
   }
   try {
@@ -264,7 +310,12 @@ export async function importBackground(
   }
   return changeBackground((state) =>
     revision === imageRevision
-      ? { settings: state.settings, image, ...(poster ? { poster } : {}) }
+      ? {
+          settings: state.settings,
+          image,
+          ...(poster ? { poster } : {}),
+          ...(catalogId ? { catalogId } : {})
+        }
       : null
   )
 }

@@ -7,7 +7,6 @@ import '../../src/renderer/src/i18n'
 import { WallpaperWorkshop } from '../../src/renderer/src/components/WallpaperWorkshop'
 import { applyMotion } from '../../src/renderer/src/lib/motion'
 import type { Wallpaper } from '../../src/shared/wallpapers'
-import video from '../fixtures/background.mp4?url'
 
 const canvas = document.createElement('canvas')
 canvas.width = 640
@@ -33,11 +32,15 @@ const item: Wallpaper = {
   bytes: 1024,
   sha256: 'a'.repeat(64),
   featured: true,
+  activeUses: 7,
+  approvedAt: '2026-10-18T00:00:00.000Z',
   posterUrl: image,
   mediaUrl: image
 }
 const state = {
   searches: [] as string[],
+  queries: [] as unknown[],
+  thumbnails: [] as string[],
   applied: [] as string[],
   submissions: [] as unknown[],
   fail: false
@@ -60,24 +63,26 @@ window.roxy.background = {
 } as typeof window.roxy.background
 window.roxy.background.search = async (input) => {
   state.searches.push(input.q || '')
+  state.queries.push(input)
   await new Promise((resolve) => setTimeout(resolve, input.q === 'slow' ? 700 : 20))
   if (state.fail) return { ok: false, error: 'unavailable' }
   return {
     ok: true,
     value: {
-      entries: [
-        { ...item, title: input.q || item.title },
-        {
-          ...item,
-          id: '00000000-0000-4000-8000-000000000002',
-          title: 'Silent Drift',
-          kind: 'video',
-          mediaUrl: video
-        }
-      ],
-      nextCursor: null
+      entries: Array.from({ length: 10 }, (_, index) => ({
+        ...item,
+        id: `00000000-0000-4000-8000-${String(index + Number(input.cursor || 0) + 1).padStart(12, '0')}`,
+        title: index === 0 ? input.q || item.title : `Silent Drift ${index}`,
+        kind: index % 2 === 0 ? 'image' : 'video',
+        mediaUrl: 'https://do-not-load.test/full.mp4'
+      })),
+      nextCursor: input.cursor ? null : '10'
     }
   }
+}
+window.roxy.background.thumbnail = async (id) => {
+  state.thumbnails.push(id)
+  return { ok: true, value: image }
 }
 window.roxy.background.applyCatalog = async (id) => {
   state.applied.push(id)
@@ -110,6 +115,10 @@ function Harness() {
         </button>
       </div>
       <WallpaperWorkshop image={background} disabled={false} active={active} />
+      <div id="actions" className="flex flex-wrap gap-2">
+        <button>Reset effects</button>
+        <WallpaperWorkshop image={background} disabled={false} active={active} mode="submit" />
+      </div>
     </main>
   )
 }

@@ -26,12 +26,19 @@ export function BackgroundSettings({ active = true }: { active?: boolean }): JSX
   const [empty, setEmpty] = useState(true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState<{ image: string | null; settings: Settings } | null>(null)
+  const isSaved =
+    saved?.image === background.image &&
+    (Object.keys(DEFAULT_BACKGROUND) as (keyof Settings)[]).every(
+      (key) => saved?.settings[key] === draft[key]
+    )
 
   const run = async (
     operation: () => Promise<BackgroundResult | null>,
     lock = true,
     current = (): boolean => true
-  ): Promise<void> => {
+  ): Promise<boolean> => {
     if (lock) setBusy(true)
     setError('')
     try {
@@ -40,8 +47,10 @@ export function BackgroundSettings({ active = true }: { active?: boolean }): JSX
       if (result && !result.ok && current()) {
         setError(t(`background.errors.${result.error}`))
       }
+      return result?.ok === true
     } catch {
       if (current()) setError(t('background.errors.saveFailed'))
+      return false
     } finally {
       if (lock) setBusy(false)
     }
@@ -73,8 +82,21 @@ export function BackgroundSettings({ active = true }: { active?: boolean }): JSX
   const disabled = busy || !background.ready || !api?.background
   const controlsDisabled = disabled || !background.image
 
+  const saveBackground = async (): Promise<void> => {
+    if (disabled || saving) return
+    const snapshot = { image: background.image, settings: { ...draft } }
+    setSaved(null)
+    setSaving(true)
+    try {
+      if (await run(() => api.background.update(snapshot.settings))) setSaved(snapshot)
+    } finally {
+      setSaving(false)
+    }
+  }
+
   return (
     <section className="@container mb-8" aria-labelledby="background-heading">
+      <WallpaperWorkshop image={background.image} disabled={disabled} active={active} />
       <h2 id="background-heading" className="text-sm font-medium text-text">
         {t('background.title')}
       </h2>
@@ -357,7 +379,9 @@ export function BackgroundSettings({ active = true }: { active?: boolean }): JSX
           </div>
         </fieldset>
         <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border px-4 py-3">
-          <p className="text-[11px] text-text-subtle">{t('background.autoSave')}</p>
+          <p role="status" className="min-w-0 flex-1 text-[11px] text-text-subtle">
+            {t(isSaved && !busy ? 'background.savedLocally' : 'background.autoSave')}
+          </p>
           <Button
             size="sm"
             variant="ghost"
@@ -366,6 +390,20 @@ export function BackgroundSettings({ active = true }: { active?: boolean }): JSX
           >
             {t('background.reset')}
           </Button>
+          <Button
+            size="sm"
+            variant="primary"
+            disabled={disabled}
+            onClick={() => void saveBackground()}
+          >
+            {t(saving ? 'background.saving' : 'background.save')}
+          </Button>
+          <WallpaperWorkshop
+            image={background.image}
+            disabled={disabled}
+            active={active}
+            mode="submit"
+          />
         </div>
       </div>
       {(error || background.failed) && (
@@ -374,7 +412,6 @@ export function BackgroundSettings({ active = true }: { active?: boolean }): JSX
             t(background.image ? 'background.effectFailed' : 'background.errors.readFailed')}
         </p>
       )}
-      <WallpaperWorkshop image={background.image} disabled={disabled} active={active} />
     </section>
   )
 }
