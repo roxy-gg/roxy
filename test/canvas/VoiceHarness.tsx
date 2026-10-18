@@ -29,7 +29,10 @@ const publish = (): void => emit({ type: 'state', state: structuredClone(state) 
 window.roxy.voice = {
   state: async () => structuredClone(state),
   update: async (patch) => {
-    state.settings = normalizeVoice({ ...state.settings, ...patch })
+    const next = normalizeVoice({ ...state.settings, ...patch })
+    if (patch.enabled === true && (!next.modelId || !state.installed.includes(next.modelId)))
+      return { ok: false, error: 'modelRequired' }
+    state.settings = next
     publish()
     return { ok: true, value: state.settings }
   },
@@ -49,7 +52,8 @@ window.roxy.voice = {
   cancelDownload: async () => {},
   remove: async (id) => {
     state.installed = state.installed.filter((model) => model !== id)
-    if (state.settings.modelId === id) state.settings.modelId = null
+    if (state.settings.modelId === id)
+      state.settings = { ...state.settings, enabled: false, modelId: null }
     publish()
     return { ok: true, value: undefined }
   },

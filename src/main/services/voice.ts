@@ -91,8 +91,10 @@ export async function voiceState(): Promise<VoiceState> {
   const models = (
     await Promise.all(VOICE_MODELS.map(async (m) => ((await installed(m.id)) ? m.id : null)))
   ).filter((id): id is string => id !== null)
+  const settings = { ...getVoiceSettings() }
+  settings.enabled = settings.enabled && models.includes(settings.modelId ?? '')
   return {
-    settings: getVoiceSettings(),
+    settings,
     supported: supported(),
     permission: permission(),
     installed: models,
@@ -436,7 +438,7 @@ async function startVoice(id: string, chatId: string): Promise<VoiceResult> {
 
 async function downloadModel(id: string): Promise<VoiceResult> {
   if (download || changing) return fail('busy')
-  if (!getVoiceSettings().enabled) return fail('disabled')
+  if (!supported()) return fail('unsupported')
   const model = VOICE_MODELS.find((m) => m.id === id)
   if (!model) return fail('modelRequired')
   const job = {
@@ -524,8 +526,11 @@ export async function resetVoice(): Promise<void> {
 }
 
 export function registerVoiceIpc(): void {
-  lastError = bindHotkeys(getVoiceSettings())
-  warmEngine()
+  const ready = voiceState().then(({ settings }) => {
+    if (getVoiceSettings().enabled !== settings.enabled) setVoiceSettings(settings)
+    lastError = bindHotkeys(settings)
+    if (settings.enabled) warmEngine()
+  })
   powerMonitor.on('suspend', () => {
     void stopVoice(false)
   })
@@ -545,7 +550,11 @@ export function registerVoiceIpc(): void {
     channel: string,
     action: (e: IpcMainInvokeEvent, ...args: any[]) => unknown
   ): void => {
-    ipcMain.handle(channel, (e, ...args) => (trusted(e) ? action(e, ...args) : fail('disabled')))
+    ipcMain.handle(channel, async (e, ...args) => {
+      if (!trusted(e)) return fail('disabled')
+      await ready
+      return action(e, ...args)
+    })
   }
   handle(CHANNELS.voiceState, () => voiceState())
   handle(CHANNELS.voiceUpdate, async (_e, patch: Partial<VoiceSettings>) => {
@@ -555,6 +564,13 @@ export function registerVoiceIpc(): void {
     try {
       const before = getVoiceSettings()
       const next = normalizeVoice({ ...before, ...patch })
+      if (patch.enabled === true && !next.modelId) return fail('modelRequired')
+      if (next.enabled && !supported()) return fail('unsupported')
+      if (
+        (next.enabled || patch.modelId != null) &&
+        (!next.modelId || !(await installed(next.modelId)))
+      )
+        return fail('modelRequired')
       const error = bindHotkeys(next)
       if (error) return fail(error)
       try {
@@ -565,7 +581,6 @@ export function registerVoiceIpc(): void {
       }
       await stopVoice(false)
       warmEngine()
-      if (!next.enabled) download?.controller.abort()
       lastError = null
       await publish()
       return { ok: true, value: next }
@@ -614,8 +629,11 @@ export function registerVoiceIpc(): void {
       await stopVoice(false)
       if (engine?.modelId === id) unloadEngine()
       await rm(directory(id), { recursive: true, force: true })
-      if (getVoiceSettings().modelId === id)
-        setVoiceSettings({ ...getVoiceSettings(), modelId: null })
+      if (getVoiceSettings().modelId === id) {
+        const settings = { ...getVoiceSettings(), enabled: false, modelId: null }
+        setVoiceSettings(settings)
+        bindHotkeys(settings)
+      }
       await publish()
       return { ok: true, value: undefined }
     } catch {

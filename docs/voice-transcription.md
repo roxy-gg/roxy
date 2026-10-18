@@ -2,8 +2,12 @@
 
 Voice Translation lives in Settings > General and defaults off. The name is the
 requested UI label; the feature is speech transcription, not language translation.
-Enabling it does not download a model or open the microphone. Hotkeys start blank
-and register only after the user configures them.
+Transcription Models appears first, with Nemotron Streaming 3.5 followed by
+Parakeet Unified EN 0.6B. Downloads work while voice is off. Downloading alone
+does not enable voice; selecting Use model enables it. There is no separate
+feature-enable toggle. Removing the selected model disables
+voice and unregisters its shortcuts. Enabling never opens the microphone.
+Hotkeys start blank and register only after the user configures them.
 
 ## Implementation
 

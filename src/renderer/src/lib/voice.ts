@@ -50,6 +50,10 @@ export function useVoiceComposer(
   interrupt: () => void
 } {
   const state = useVoiceState()
+  const enabled =
+    !!state?.settings.enabled &&
+    !!state.settings.modelId &&
+    state.installed.includes(state.settings.modelId)
   const { pathname } = useLocation()
   const [phase, setPhase] = useState<'idle' | 'starting' | 'recording' | 'stopping'>('idle')
   const [slowPhase, setSlowPhase] = useState<'starting' | 'stopping' | null>(null)
@@ -186,10 +190,10 @@ export function useVoiceComposer(
     }
   }, [chatId])
   useEffect(() => {
-    if (state && !state.settings.enabled) interrupt()
-  }, [state?.settings.enabled])
+    if (!enabled) interrupt()
+  }, [enabled])
   return {
-    enabled: state?.settings.enabled ?? false,
+    enabled,
     phase,
     slowPhase: slowPhase === phase ? slowPhase : null,
     error,

@@ -20,7 +20,7 @@ import {
 } from '@shared/voice'
 import { api } from '../lib/api'
 import { useVoiceState } from '../lib/voice'
-import { Button, Input, Switch } from './ui'
+import { Button, Input } from './ui'
 import { cn } from '../lib/cn'
 
 export function VoiceSettings(): JSX.Element {
@@ -71,7 +71,8 @@ export function VoiceSettings(): JSX.Element {
         {t('voice.loading')}
       </p>
     )
-  const enabled = state.settings.enabled
+  const modelReady = !!state.settings.modelId && state.installed.includes(state.settings.modelId)
+  const enabled = state.settings.enabled && modelReady
   const shown = VOICE_MODELS.filter(
     (model) =>
       model.name.toLowerCase().includes(search.toLowerCase()) &&
@@ -82,22 +83,162 @@ export function VoiceSettings(): JSX.Element {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-start justify-between gap-4 rounded-xl border border-border bg-surface p-4">
-        <div>
-          <h2 className="text-sm font-semibold text-text">{t('voice.heading')}</h2>
-          <p className="mt-1 max-w-xl text-xs leading-relaxed text-text-muted">
-            {t('voice.description')}
-          </p>
-        </div>
-        <div role="group" aria-label={t('voice.heading')} className="shrink-0">
-          <Switch
-            label={t('voice.heading')}
-            checked={enabled}
-            disabled={busy || !state.supported}
-            onChange={(value) => void update({ enabled: value })}
+      <section aria-labelledby="voice-models-heading">
+        <h2 id="voice-models-heading" className="text-sm font-semibold text-text">
+          {t('voice.models')}
+        </h2>
+        <p className="mt-1 text-xs leading-relaxed text-text-muted">{t('voice.modelsBody')}</p>
+        <div className="relative mt-4">
+          <Search className="pointer-events-none absolute left-3 top-3 h-3.5 w-3.5 text-text-subtle" />
+          <Input
+            aria-label={t('voice.search')}
+            placeholder={t('voice.search')}
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            className="pl-9"
           />
         </div>
-      </div>
+        <div className="my-3 flex flex-wrap items-center justify-between gap-2 text-xs text-text-muted">
+          <span className="flex items-center gap-1.5">
+            <AudioLines className="h-3.5 w-3.5" />
+            {t('voice.streamingOnly')}
+          </span>
+          <select
+            aria-label={t('voice.languages')}
+            value={language}
+            onChange={(event) => setLanguage(event.target.value)}
+            className="rounded-md border border-border bg-surface-2 px-2 py-1.5 text-xs text-text-muted"
+          >
+            <option value="all">{t('voice.allLanguages')}</option>
+            <option value="en">{t('voice.english')}</option>
+            <option value="multi">{t('voice.multilingual')}</option>
+          </select>
+        </div>
+        <div className="space-y-3">
+          {shown.map((model) => {
+            const downloaded = state.installed.includes(model.id)
+            const active = enabled && state.settings.modelId === model.id
+            const job = state.download?.modelId === model.id ? state.download : null
+            const percent = job ? Math.floor((job.received / job.total) * 100) : 0
+            return (
+              <article
+                key={model.id}
+                className={cn(
+                  'rounded-xl border p-4',
+                  active ? 'border-accent/60 bg-accent/5' : 'border-border bg-surface'
+                )}
+              >
+                <div className="flex flex-wrap items-center gap-2">
+                  <h3 className="text-sm font-medium text-text">{model.name}</h3>
+                  {active && (
+                    <span className="flex items-center gap-1 rounded-md bg-accent/15 px-2 py-0.5 text-[11px] text-accent">
+                      <Check className="h-3 w-3" />
+                      {t('voice.active')}
+                    </span>
+                  )}
+                </div>
+                <p className="mt-1 text-xs leading-relaxed text-text-muted">
+                  {t(`voice.modelDescriptions.${model.description}`)}
+                </p>
+                <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2 border-t border-border pt-3 text-[11px] text-text-subtle">
+                  <span className="flex items-center gap-1">
+                    <Globe className="h-3 w-3" />
+                    {t(model.multilingual ? 'voice.multilingual' : 'voice.english')}
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <AudioLines className="h-3 w-3" />
+                    {t('voice.streaming')}
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <HardDrive className="h-3 w-3" />
+                    {t('voice.size', {
+                      size: Math.ceil(model.files.reduce((n, f) => n + f.bytes, 0) / 1048576)
+                    })}
+                  </span>
+                  <button
+                    className="text-left underline underline-offset-2 hover:text-text"
+                    onClick={() => void api.system.openExternal(model.licenseUrl)}
+                  >
+                    {model.license}
+                  </button>
+                </div>
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  {job ? (
+                    <>
+                      <progress
+                        className="h-1.5 min-w-20 flex-1 accent-accent"
+                        value={percent}
+                        max={100}
+                        aria-label={t('voice.downloading', { percent })}
+                      />
+                      <span className="text-xs text-text-muted">
+                        {t('voice.downloading', { percent })}
+                      </span>
+                      <Button size="sm" onClick={() => void api.voice.cancelDownload()}>
+                        {t('common.cancel')}
+                      </Button>
+                    </>
+                  ) : downloaded ? (
+                    <>
+                      {!active && (
+                        <Button
+                          size="sm"
+                          disabled={!state.supported || busy}
+                          onClick={() => void update({ enabled: true, modelId: model.id })}
+                        >
+                          {t('voice.useModel')}
+                        </Button>
+                      )}
+                      {removing === model.id ? (
+                        <>
+                          <Button
+                            size="sm"
+                            variant="danger"
+                            disabled={busy}
+                            onClick={() => {
+                              setRemoving(null)
+                              void result(api.voice.remove(model.id))
+                            }}
+                          >
+                            {t('voice.confirmDelete')}
+                          </Button>
+                          <Button size="sm" variant="ghost" onClick={() => setRemoving(null)}>
+                            {t('common.cancel')}
+                          </Button>
+                        </>
+                      ) : (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          disabled={busy}
+                          onClick={() => setRemoving(model.id)}
+                        >
+                          <Trash2 className="h-3 w-3" />
+                          {t('voice.delete')}
+                        </Button>
+                      )}
+                    </>
+                  ) : (
+                    <Button
+                      size="sm"
+                      disabled={!state.supported || !!state.download || busy}
+                      onClick={() => void result(api.voice.download(model.id))}
+                    >
+                      <Download className="h-3.5 w-3.5" />
+                      {t('voice.download')}
+                    </Button>
+                  )}
+                </div>
+              </article>
+            )
+          })}
+          {!shown.length && (
+            <p className="py-6 text-center text-xs text-text-muted">{t('voice.noModels')}</p>
+          )}
+        </div>
+      </section>
+
+      <p className="text-xs leading-relaxed text-text-muted">{t('voice.description')}</p>
       {!state.supported && (
         <p role="alert" className="text-xs text-danger">
           {t('voice.errors.unsupported')}
@@ -197,161 +338,6 @@ export function VoiceSettings(): JSX.Element {
           {t('common.save')}
         </Button>
       </fieldset>
-
-      <section aria-labelledby="voice-models-heading" className={cn(!enabled && 'opacity-50')}>
-        <h2 id="voice-models-heading" className="text-sm font-semibold text-text">
-          {t('voice.models')}
-        </h2>
-        <p className="mt-1 text-xs leading-relaxed text-text-muted">{t('voice.modelsBody')}</p>
-        <div className="relative mt-4">
-          <Search className="pointer-events-none absolute left-3 top-3 h-3.5 w-3.5 text-text-subtle" />
-          <Input
-            aria-label={t('voice.search')}
-            placeholder={t('voice.search')}
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            className="pl-9"
-          />
-        </div>
-        <div className="my-3 flex flex-wrap items-center justify-between gap-2 text-xs text-text-muted">
-          <span className="flex items-center gap-1.5">
-            <AudioLines className="h-3.5 w-3.5" />
-            {t('voice.streamingOnly')}
-          </span>
-          <select
-            aria-label={t('voice.languages')}
-            value={language}
-            onChange={(event) => setLanguage(event.target.value)}
-            className="rounded-md border border-border bg-surface-2 px-2 py-1.5 text-xs text-text-muted"
-          >
-            <option value="all">{t('voice.allLanguages')}</option>
-            <option value="en">{t('voice.english')}</option>
-            <option value="multi">{t('voice.multilingual')}</option>
-          </select>
-        </div>
-        <div className="space-y-3">
-          {shown.map((model) => {
-            const downloaded = state.installed.includes(model.id)
-            const active = downloaded && state.settings.modelId === model.id
-            const job = state.download?.modelId === model.id ? state.download : null
-            const percent = job ? Math.floor((job.received / job.total) * 100) : 0
-            return (
-              <article
-                key={model.id}
-                className={cn(
-                  'rounded-xl border p-4',
-                  active ? 'border-accent/60 bg-accent/5' : 'border-border bg-surface'
-                )}
-              >
-                <div className="flex flex-wrap items-center gap-2">
-                  <h3 className="text-sm font-medium text-text">{model.name}</h3>
-                  {active && (
-                    <span className="flex items-center gap-1 rounded-md bg-accent/15 px-2 py-0.5 text-[11px] text-accent">
-                      <Check className="h-3 w-3" />
-                      {t('voice.active')}
-                    </span>
-                  )}
-                </div>
-                <p className="mt-1 text-xs leading-relaxed text-text-muted">
-                  {t(`voice.modelDescriptions.${model.description}`)}
-                </p>
-                <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2 border-t border-border pt-3 text-[11px] text-text-subtle">
-                  <span className="flex items-center gap-1">
-                    <Globe className="h-3 w-3" />
-                    {t(model.multilingual ? 'voice.multilingual' : 'voice.english')}
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <AudioLines className="h-3 w-3" />
-                    {t('voice.streaming')}
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <HardDrive className="h-3 w-3" />
-                    {t('voice.size', {
-                      size: Math.ceil(model.files.reduce((n, f) => n + f.bytes, 0) / 1048576)
-                    })}
-                  </span>
-                  <button
-                    className="text-left underline underline-offset-2 hover:text-text"
-                    onClick={() => void api.system.openExternal(model.licenseUrl)}
-                  >
-                    {model.license}
-                  </button>
-                </div>
-                <div className="mt-3 flex flex-wrap items-center gap-2">
-                  {job ? (
-                    <>
-                      <progress
-                        className="h-1.5 min-w-20 flex-1 accent-accent"
-                        value={percent}
-                        max={100}
-                        aria-label={t('voice.downloading', { percent })}
-                      />
-                      <span className="text-xs text-text-muted">
-                        {t('voice.downloading', { percent })}
-                      </span>
-                      <Button size="sm" onClick={() => void api.voice.cancelDownload()}>
-                        {t('common.cancel')}
-                      </Button>
-                    </>
-                  ) : downloaded ? (
-                    <>
-                      {!active && (
-                        <Button
-                          size="sm"
-                          disabled={!enabled || busy}
-                          onClick={() => void update({ modelId: model.id })}
-                        >
-                          {t('voice.useModel')}
-                        </Button>
-                      )}
-                      {removing === model.id ? (
-                        <>
-                          <Button
-                            size="sm"
-                            variant="danger"
-                            disabled={!enabled || busy}
-                            onClick={() => {
-                              setRemoving(null)
-                              void result(api.voice.remove(model.id))
-                            }}
-                          >
-                            {t('voice.confirmDelete')}
-                          </Button>
-                          <Button size="sm" variant="ghost" onClick={() => setRemoving(null)}>
-                            {t('common.cancel')}
-                          </Button>
-                        </>
-                      ) : (
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          disabled={!enabled || busy}
-                          onClick={() => setRemoving(model.id)}
-                        >
-                          <Trash2 className="h-3 w-3" />
-                          {t('voice.delete')}
-                        </Button>
-                      )}
-                    </>
-                  ) : (
-                    <Button
-                      size="sm"
-                      disabled={!enabled || !state.supported || !!state.download || busy}
-                      onClick={() => void result(api.voice.download(model.id))}
-                    >
-                      <Download className="h-3.5 w-3.5" />
-                      {t('voice.download')}
-                    </Button>
-                  )}
-                </div>
-              </article>
-            )
-          })}
-          {!shown.length && (
-            <p className="py-6 text-center text-xs text-text-muted">{t('voice.noModels')}</p>
-          )}
-        </div>
-      </section>
     </div>
   )
 }
