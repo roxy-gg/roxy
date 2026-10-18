@@ -11,6 +11,7 @@ import {
 import { api } from '../lib/api'
 import { Button, Input, Switch, Badge, Textarea } from './ui'
 import { ConfigBackup } from './ConfigBackup'
+import { CatalogSearch } from './CatalogSearch'
 
 function configSummary(config: McpServerConfig): string {
   return config.type === 'remote' ? config.url : config.command.join(' ')
@@ -51,47 +52,69 @@ export function McpServers({
   const [value, setValue] = useState('')
   const [json, setJson] = useState('')
   const [formErr, setFormErr] = useState('')
+  const [listErr, setListErr] = useState('')
   /** id of the server whose raw JSON is open in the editor (only one at a time). */
   const [editing, setEditing] = useState<string | null>(null)
 
   const reload = async (): Promise<void> => {
-    setServers(await api.mcp.list())
+    setListErr('')
+    try {
+      setServers(await api.mcp.list())
+    } catch {
+      setListErr(t('catalog.listFailed'))
+    }
   }
 
   useEffect(() => {
     if (!active) return
     let alive = true
-    api.mcp.list().then((rows) => {
-      if (!alive) return
-      setServers(rows)
-      setLoading(false)
-    })
+    setListErr('')
+    api.mcp
+      .list()
+      .then((rows) => {
+        if (alive) setServers(rows)
+      })
+      .catch(() => {
+        if (alive) setListErr(t('catalog.listFailed'))
+      })
+      .finally(() => {
+        if (alive) setLoading(false)
+      })
     return () => {
       alive = false
     }
-  }, [active])
+  }, [active, t])
 
   const toggle = async (id: string, enabled: boolean): Promise<void> => {
     setBusy(id)
+    setListErr('')
     try {
       setServers(await api.mcp.setEnabled(id, enabled))
+    } catch {
+      setListErr(t('catalog.actionFailed'))
     } finally {
       setBusy(null)
     }
   }
   const reconnect = async (id: string): Promise<void> => {
     setBusy(id)
+    setListErr('')
     try {
       setServers(await api.mcp.reconnect(id))
+    } catch {
+      setListErr(t('catalog.actionFailed'))
     } finally {
       setBusy(null)
     }
   }
   const remove = async (id: string): Promise<void> => {
     setBusy(id)
+    setListErr('')
     try {
       setServers(await api.mcp.remove(id))
       if (editing === id) setEditing(null)
+    } catch {
+      setListErr(t('catalog.actionFailed'))
     } finally {
       setBusy(null)
     }
@@ -195,6 +218,19 @@ export function McpServers({
 
   return (
     <div className="flex flex-col gap-2">
+      {listErr && (
+        <div role="alert" className="flex flex-wrap items-center gap-2 text-xs text-danger">
+          <p>{listErr}</p>
+          <Button
+            size="sm"
+            onClick={() => void reload()}
+            disabled={!active}
+            className="focus-visible:inset-ring-2 focus-visible:inset-ring-accent/70"
+          >
+            {t('catalog.retry')}
+          </Button>
+        </div>
+      )}
       {loading ? (
         <p className="text-xs text-text-subtle">{t('common.loading')}</p>
       ) : servers.length === 0 && !showAdd ? (
@@ -368,6 +404,14 @@ export function McpServers({
           <ConfigBackup onImported={() => void reload()} />
         </div>
       )}
+      <div className="mt-7">
+        <CatalogSearch
+          kind="mcp"
+          active={active}
+          installedServers={servers}
+          onMcpInstalled={setServers}
+        />
+      </div>
     </div>
   )
 }

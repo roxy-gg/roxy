@@ -96,6 +96,12 @@ export const CHANNELS = {
   skillsRemove: 'skills:remove',
   skillsInstall: 'skills:install',
 
+  catalogSearch: 'catalog:search',
+  catalogSkillDetail: 'catalog:skillDetail',
+  catalogInstallSkill: 'catalog:installSkill',
+  catalogMcpSetup: 'catalog:mcpSetup',
+  catalogInstallMcp: 'catalog:installMcp',
+
   /**
    * Themes -- user-authored `theme.json` files that re-point the app's CSS
    * custom properties. `themesResolve` returns the properties to set on the

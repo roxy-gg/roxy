@@ -3,6 +3,7 @@
  * Implemented in src/preload/index.ts, handled in src/main/ipc/*.
  */
 import type { Language } from './i18n'
+import type { CatalogApi } from './catalog'
 import type { BackgroundResult, BackgroundSettings, BackgroundState } from './background'
 import type { Bot, BotJob, BotJobInput } from './bots'
 import type { MotionPreference } from './motion'
@@ -901,6 +902,7 @@ export interface RoxyApi {
     list(): Promise<IntegrationConnection[]>
     setEnabled(id: string, enabled: boolean): Promise<void>
   }
+  catalog: CatalogApi
   mcp: {
     /** List configured MCP servers merged with their live connection status. */
     list(): Promise<McpServerView[]>

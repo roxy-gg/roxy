@@ -123,6 +123,14 @@ const roxy: RoxyApi = {
     list: () => ipcRenderer.invoke(CHANNELS.integrationsList),
     setEnabled: (id, enabled) => ipcRenderer.invoke(CHANNELS.integrationsSetEnabled, id, enabled)
   },
+  catalog: {
+    search: (kind, query, cursor) =>
+      ipcRenderer.invoke(CHANNELS.catalogSearch, kind, query, cursor),
+    skillDetail: (id) => ipcRenderer.invoke(CHANNELS.catalogSkillDetail, id),
+    installSkill: (id, reviewId) => ipcRenderer.invoke(CHANNELS.catalogInstallSkill, id, reviewId),
+    mcpSetup: (id) => ipcRenderer.invoke(CHANNELS.catalogMcpSetup, id),
+    installMcp: (input) => ipcRenderer.invoke(CHANNELS.catalogInstallMcp, input)
+  },
   mcp: {
     list: () => ipcRenderer.invoke(CHANNELS.mcpList),
     upsert: (input) => ipcRenderer.invoke(CHANNELS.mcpUpsert, input),

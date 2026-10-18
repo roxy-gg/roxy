@@ -1,5 +1,8 @@
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import { CHANNELS } from '../../shared/ipc'
+import { CatalogClient } from '../services/catalog'
+import type { CatalogApi, CatalogKind } from '../../shared/catalog'
+import { catalogMcpId } from '../../shared/catalog-mcp'
 import type { Language } from '../../shared/i18n'
 import { DEFAULT_MOTION, type MotionPreference } from '../../shared/motion'
 import type { BackgroundResult, BackgroundSettings } from '../../shared/background'
@@ -81,7 +84,8 @@ import {
   readSkill,
   writeSkill,
   deleteSkill,
-  installSkillFromSource
+  installSkillFromSource,
+  installCatalogSkillFiles
 } from '../services/skills'
 import {
   createTheme,
@@ -125,6 +129,16 @@ import { BUNDLE_FILENAME } from '../../shared/portable'
 /** In-flight streamed completions, keyed by requestId, so they can be aborted. */
 const llmControllers = new Map<string, AbortController>()
 const localTurnReleases = new Map<string, { senderId: number; release: () => void }>()
+
+const catalogs = new WeakMap<Electron.WebContents, CatalogClient>()
+function catalogFor(sender: Electron.WebContents): CatalogClient {
+  let client = catalogs.get(sender)
+  if (!client) {
+    client = new CatalogClient()
+    catalogs.set(sender, client)
+  }
+  return client
+}
 
 /**
  * Every abortable piece of model work a SESSION currently owns.
@@ -460,6 +474,52 @@ export function registerIpc(): void {
     if (rec) await reconnectMcpServer(rec, app.getPath('home'))
     return listMcpServersWithStatus()
   })
+
+  // ---- public discovery relay; credentials stay exclusively on roxy.gg ----
+  ipcMain.handle(
+    CHANNELS.catalogSearch,
+    (event, kind: CatalogKind, query: string, cursor?: string) =>
+      catalogFor(event.sender).search(kind, query, cursor)
+  )
+  ipcMain.handle(CHANNELS.catalogSkillDetail, (event, id: string) =>
+    catalogFor(event.sender).skillDetail(id)
+  )
+  ipcMain.handle(CHANNELS.catalogMcpSetup, (event, id: string) =>
+    catalogFor(event.sender).mcpSetup(id)
+  )
+  ipcMain.handle(CHANNELS.catalogInstallSkill, async (event, id: string, reviewId: string) => {
+    const client = catalogFor(event.sender)
+    const bundle = client.skillForInstall(id, reviewId)
+    // Refuse shadowing skills in other global roots, including a concurrent add.
+    refreshSkills()
+    if (
+      (await listSkills(app.getPath('home'))).some(
+        (s) => s.name.toLowerCase() === bundle.name.toLowerCase()
+      )
+    )
+      throw Error(
+        'A skill with this name already exists. Remove it before installing another source.'
+      )
+    await installCatalogSkillFiles(bundle.name, bundle.files)
+    client.forget(reviewId)
+    return discoverSkillViews()
+  })
+  ipcMain.handle(
+    CHANNELS.catalogInstallMcp,
+    async (event, input: Parameters<CatalogApi['installMcp']>[0]) => {
+      if (!input || typeof input !== 'object') throw Error('Invalid catalog setup.')
+      const client = catalogFor(event.sender)
+      const id = catalogMcpId(input.id)
+      const config = client.mcpForInstall(id, input.reviewId, input.optionId, input.values)
+      // No await between collision check and persistence: never upsert over a user's config.
+      if (repo.listMcpServers().some((s) => s.id.toLowerCase() === id.toLowerCase()))
+        throw Error('This MCP server is already configured.')
+      repo.upsertMcpServer({ id, config, enabled: true })
+      client.forget(input.reviewId)
+      await reconnectMcpServer({ id, config, enabled: true }, app.getPath('home'))
+      return listMcpServersWithStatus()
+    }
+  )
 
   // ---- skills (SKILL.md discovery) ----
   ipcMain.handle(CHANNELS.skillsList, (_e, cwd?: string) => discoverSkillViews(cwd))

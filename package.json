@@ -38,6 +38,8 @@
     "i18n:json": "node script/i18n-sync.mjs --json",
     "icons": "node script/generate-icons.mjs",
     "icons:providers": "node script/copy-provider-icons.mjs",
+    "smoke:catalog": "esbuild test/catalog-mcp.ts --bundle --platform=node --format=cjs --packages=external --outfile=test/.out/catalog-mcp.cjs && node test/.out/catalog-mcp.cjs && esbuild test/catalog.ts --bundle --platform=node --format=cjs --packages=external --outfile=test/.out/catalog.cjs && node test/.out/catalog.cjs",
+    "smoke:catalog-ui": "electron test/canvas/catalog-smoke.cjs",
     "smoke:shared": "esbuild test/shared.ts --bundle --platform=node --format=cjs --packages=external --outfile=test/.out/shared.cjs && node test/.out/shared.cjs",
     "smoke:app": "esbuild test/smoke.ts --bundle --platform=node --format=cjs --packages=external --outfile=test/.out/smoke.cjs && electron test/.out/smoke.cjs",
     "smoke": "npm run smoke:shared && npm run smoke:i18n && npm run smoke:store && npm run smoke:images && npm run smoke:subagents && npm run smoke:multirepo && npm run smoke:live && npm run smoke:cookies && npm run smoke:browser-proxy && npm run smoke:app",

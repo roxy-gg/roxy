@@ -16,15 +16,23 @@ import type { SkillView } from '@shared/api'
 import { api } from '../lib/api'
 import { Badge, Button, Input, Textarea } from '../components/ui'
 import { ConfigBackup } from '../components/ConfigBackup'
+import { CatalogSearch } from '../components/CatalogSearch'
 
 export default function Skills({ active }: { active: boolean }): JSX.Element {
   const { t } = useTranslation()
+  const [skills, setSkills] = useState<SkillView[]>([])
 
   return (
     <div className="@container">
       <p className="mb-6 text-sm text-text-muted">{t('skills.subtitle')}</p>
       <div className="flex flex-col gap-9">
-        <DiscoveredSkills active={active} />
+        <DiscoveredSkills active={active} skills={skills} setSkills={setSkills} />
+        <CatalogSearch
+          kind="skills"
+          active={active}
+          installedSkills={skills}
+          onSkillsInstalled={setSkills}
+        />
         <BuiltInTools />
       </div>
     </div>
@@ -73,21 +81,33 @@ interface SkillDraft {
 }
 
 /** The real, filesystem-discovered skills (SKILL.md files under the user's global roots). */
-function DiscoveredSkills({ active }: { active: boolean }): JSX.Element {
+function DiscoveredSkills({
+  active,
+  skills,
+  setSkills
+}: {
+  active: boolean
+  skills: SkillView[]
+  setSkills: (skills: SkillView[]) => void
+}): JSX.Element {
   const { t } = useTranslation()
-  const [skills, setSkills] = useState<SkillView[]>([])
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [draft, setDraft] = useState<SkillDraft | null>(null)
   const [installing, setInstalling] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     if (!active) return
     let alive = true
+    setError(null)
     api.skills
       .list()
       .then((rows) => {
         if (alive) setSkills(rows)
+      })
+      .catch(() => {
+        if (alive) setError(t('catalog.listFailed'))
       })
       .finally(() => {
         if (alive) setLoading(false)
@@ -95,30 +115,43 @@ function DiscoveredSkills({ active }: { active: boolean }): JSX.Element {
     return () => {
       alive = false
     }
-  }, [active])
+  }, [active, setSkills, t])
 
   const refresh = async (): Promise<void> => {
     setRefreshing(true)
+    setError(null)
     try {
       setSkills(await api.skills.refresh())
+    } catch {
+      setError(t('catalog.listFailed'))
     } finally {
       setRefreshing(false)
     }
   }
 
   const startEdit = async (name: string): Promise<void> => {
-    const detail = await api.skills.read(name)
-    setDraft({
-      mode: 'edit',
-      name,
-      description: detail?.description ?? '',
-      body: detail?.body ?? ''
-    })
+    setError(null)
+    try {
+      const detail = await api.skills.read(name)
+      setDraft({
+        mode: 'edit',
+        name,
+        description: detail?.description ?? '',
+        body: detail?.body ?? ''
+      })
+    } catch {
+      setError(t('catalog.actionFailed'))
+    }
   }
 
   const remove = async (name: string): Promise<void> => {
-    setSkills(await api.skills.remove(name))
-    if (draft?.name === name) setDraft(null)
+    setError(null)
+    try {
+      setSkills(await api.skills.remove(name))
+      if (draft?.name === name) setDraft(null)
+    } catch {
+      setError(t('catalog.actionFailed'))
+    }
   }
 
   return (
@@ -195,6 +228,11 @@ function DiscoveredSkills({ active }: { active: boolean }): JSX.Element {
         />
       )}
 
+      {error && (
+        <p role="alert" className="mb-3 text-xs text-danger">
+          {error}
+        </p>
+      )}
       {loading ? (
         <p className="text-xs text-text-muted">{t('skills.scanning')}</p>
       ) : skills.length === 0 ? (
