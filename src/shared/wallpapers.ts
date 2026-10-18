@@ -38,6 +38,7 @@ export interface WallpaperSubmission {
 }
 export interface WallpaperSubmitRequest extends WallpaperSubmission {
   expectedImageHash: string
+  customId?: string
 }
 export type WallpaperError =
   | 'unavailable'

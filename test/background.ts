@@ -18,6 +18,26 @@ async function run(): Promise<void> {
   app.on('window-all-closed', () => {})
   if (process.env.ROXY_BACKGROUND_RELOAD_TEST) {
     app.setPath('userData', process.env.ROXY_BACKGROUND_RELOAD_TEST)
+    if (process.env.ROXY_BACKGROUND_LIBRARY_WRITE) {
+      const color = process.env.ROXY_BACKGROUND_LIBRARY_WRITE
+      const file = path.join(app.getPath('userData'), `worker-${color}.png`)
+      await sharp({ create: { width: 64, height: 64, channels: 3, background: color } })
+        .png()
+        .toFile(file)
+      assert.ok((await service.importBackground(file)).ok)
+      await fs.rm(file)
+      return
+    }
+    if (process.env.ROXY_BACKGROUND_LIBRARY_RELOAD) {
+      const entries = await service.listCustomBackgrounds()
+      assert.equal(entries.length, 2)
+      assert.ok(entries.some((entry) => entry.title === 'Blue flowers'))
+      const current = await service.getBackground()
+      assert.ok(current.customId)
+      assert.ok(entries.some((entry) => entry.id === current.customId))
+      console.log('Fresh process restored the custom library and active selection')
+      return
+    }
     if (process.env.ROXY_BACKGROUND_VIDEO_RELOAD) {
       const state = await service.getBackground()
       assert.ok(state.image?.startsWith('data:video/mp4;base64,'))
@@ -241,13 +261,22 @@ async function run(): Promise<void> {
     ])
     assert.deepEqual(await service.getBackground(), {
       settings: { ...DEFAULT_BACKGROUND, effect: 'dither' },
-      image: null
+      image: null,
+      libraryVersion: (await service.getBackground()).libraryVersion
     })
-    assert.deepEqual(
-      JSON.parse(await fs.readFile(path.join(directory, 'chat-background.json'), 'utf8')),
-      await service.getBackground()
+    const retained = await service.listCustomBackgrounds()
+    assert.ok(retained.length > 1, 'clearing active background keeps uploaded media')
+    assert.equal(
+      JSON.parse(await fs.readFile(path.join(directory, 'chat-background.json'), 'utf8')).library
+        .length,
+      retained.length
     )
     await service.resetBackground()
+    await assert.rejects(
+      fs.access(path.join(directory, 'chat-backgrounds')),
+      { code: 'ENOENT' },
+      'factory reset removes all personal media'
+    )
     assert.deepEqual(await service.getBackground(), { settings: DEFAULT_BACKGROUND, image: null })
     await service.resetBackground()
     await fs.writeFile(path.join(directory, 'chat-background.json'), 'null')
@@ -268,6 +297,269 @@ async function run(): Promise<void> {
 
     const imageFile = path.join(directory, 'valid.png')
     await fs.writeFile(imageFile, data)
+    // Saved media is independent of its source, reusable, bounded and privately managed.
+    await service.importBackground(imageFile)
+    const first = (await service.listCustomBackgrounds())[0]
+    assert.equal(first.title, 'valid')
+    assert.equal((await service.getBackground()).customId, first.id)
+    const thumb = await sharp(Buffer.from(first.thumbnail.split(',')[1], 'base64')).metadata()
+    assert.equal(thumb.format, 'webp')
+    assert.ok(thumb.width! <= 480 && thumb.height! <= 270)
+    assert.ok(first.thumbnail.length < 350000)
+    assert.equal('image' in first, false, 'list excludes full media')
+    assert.equal('poster' in first, false)
+    await service.importBackground(imageFile)
+    assert.equal(
+      (await service.listCustomBackgrounds()).length,
+      1,
+      'duplicate uploads reuse the same card'
+    )
+    const secondFile = path.join(directory, 'second.png')
+    await sharp({ create: { width: 120, height: 80, channels: 3, background: '#f0b0c0' } })
+      .png()
+      .toFile(secondFile)
+    await service.importBackground(secondFile)
+    const second = (await service.listCustomBackgrounds()).find((entry) => entry.id !== first.id)!
+    assert.ok(second)
+    await fs.rm(secondFile)
+    await service.renameCustomBackground(first.id, 'Blue flowers')
+    await service.updateBackground({ effect: 'ascii', sidebarOpacity: 39 })
+    await service.applyCustomBackground(first.id)
+    assert.equal((await service.getBackground()).image, imported.state.image)
+    assert.equal((await service.getBackground()).settings.sidebarOpacity, 39)
+    await new Promise<void>((resolve, reject) => {
+      const child = spawn(process.execPath, [process.argv[1]], {
+        env: {
+          ...process.env,
+          ROXY_BACKGROUND_RELOAD_TEST: directory,
+          ROXY_BACKGROUND_LIBRARY_RELOAD: '1'
+        },
+        stdio: 'inherit'
+      })
+      child.once('error', reject)
+      child.once('exit', (code) =>
+        code === 0 ? resolve() : reject(Error(`Library reload exited ${code}`))
+      )
+    })
+    await service.importBackground(
+      imageFile,
+      undefined,
+      service.reserveBackgroundImport(),
+      catalogId
+    )
+    assert.equal((await service.getBackground()).customId, undefined)
+    await service.applyCustomBackground(second.id)
+    assert.equal((await service.getBackground()).catalogId, undefined)
+    const inactiveSubmission = await service.getCustomSubmission(first.id)
+    assert.equal(
+      inactiveSubmission.image,
+      imported.state.image,
+      'submission loads the selected saved media, not the active image'
+    )
+    assert.equal(inactiveSubmission.entry.id, first.id)
+    assert.equal(
+      (await service.getBackground()).customId,
+      second.id,
+      'preparing inactive publication does not apply it'
+    )
+    await assert.rejects(() => service.getCustomSubmission('../escape'))
+    await service.recordBackgroundSubmission(first.id, catalogId, 'Blue flowers')
+    const laterSubmission = '00000000-0000-4000-8000-000000000002'
+    await service.recordBackgroundSubmission(first.id, laterSubmission, 'Later submission')
+    assert.equal(
+      (await service.listCustomBackgrounds()).find((entry) => entry.id === first.id)?.publishedId,
+      undefined,
+      'submission is not publication'
+    )
+    await service.refreshCustomPublications(async (id) => id === catalogId)
+    assert.equal(
+      (await service.listCustomBackgrounds()).find((entry) => entry.id === first.id)?.publishedId,
+      catalogId
+    )
+    assert.equal(
+      (await service.getBackground()).customId,
+      second.id,
+      'approval of another item never switches selection'
+    )
+    await service.applyCustomBackground(first.id)
+    assert.equal((await service.getBackground()).customPublished, true)
+    await assert.rejects(
+      () => service.getCustomSubmission(first.id),
+      'published entries cannot be resubmitted'
+    )
+    const now = Date.now
+    try {
+      Date.now = () => now() + 61000
+      await service.refreshCustomPublications(async () => {
+        throw Error('offline')
+      })
+      assert.equal(
+        (await service.getBackground()).customPublished,
+        true,
+        'offline checks retain last confirmed publication'
+      )
+      Date.now = () => now() + 122000
+      await service.refreshCustomPublications(async () => false)
+      assert.equal(
+        (await service.getBackground()).customPublished,
+        false,
+        'authoritative withdrawal restores Custom'
+      )
+    } finally {
+      Date.now = now
+    }
+    assert.equal(
+      (await service.getBackground()).catalogId,
+      undefined,
+      'publication badges do not report a local upload as catalog use'
+    )
+    await service.deleteCustomBackground(second.id)
+    await assert.rejects(
+      () => service.getCustomSubmission(second.id),
+      'deleted saved media cannot be submitted'
+    )
+    assert.equal(
+      (await service.getBackground()).customId,
+      first.id,
+      'deleting an inactive item keeps current wallpaper'
+    )
+    await assert.rejects(fs.access(path.join(directory, 'chat-backgrounds', `${second.id}.json`)), {
+      code: 'ENOENT'
+    })
+    assert.deepEqual(await service.applyCustomBackground('../escape'), {
+      ok: false,
+      error: 'readFailed'
+    })
+    assert.deepEqual(await service.renameCustomBackground(first.id, 'bad\nname'), {
+      ok: false,
+      error: 'readFailed'
+    })
+    const asset = path.join(directory, 'chat-backgrounds', `${first.id}.json`)
+    await fs.writeFile(asset, '{}')
+    assert.equal(
+      (await service.applyCustomBackground(first.id)).ok,
+      false,
+      'corrupt retained assets cannot replace active media'
+    )
+    assert.equal((await service.getBackground()).customId, first.id)
+    assert.ok(
+      (await service.importBackground(imageFile)).ok,
+      'reupload repairs a damaged retained asset'
+    )
+    assert.ok((await service.applyCustomBackground(first.id)).ok)
+    assert.equal(
+      (await service.listCustomBackgrounds())[0].title,
+      'Blue flowers',
+      'repair preserves custom name'
+    )
+    await service.deleteCustomBackground(first.id)
+    assert.equal((await service.getBackground()).image, null, 'deleting the active item clears it')
+    assert.equal((await service.getBackground()).settings.sidebarOpacity, 39)
+    assert.equal((await service.listCustomBackgrounds()).length, 0)
+    const manifest = path.join(directory, 'chat-background.json')
+    const emptyManifest = await fs.readFile(manifest, 'utf8')
+    const fullLibrary = Array.from({ length: 50 }, (_, index) => ({
+      ...first,
+      id: index === 0 ? first.id : index.toString(16).padStart(64, '0')
+    }))
+    await fs.writeFile(
+      manifest,
+      JSON.stringify({
+        settings: DEFAULT_BACKGROUND,
+        image: null,
+        librarySchema: 1,
+        library: fullLibrary
+      })
+    )
+    assert.ok(
+      (await service.importBackground(imageFile)).ok,
+      'duplicate import succeeds at count capacity'
+    )
+    const capacityFile = path.join(directory, 'capacity.png')
+    await sharp({ create: { width: 20, height: 20, channels: 3, background: '#123456' } })
+      .png()
+      .toFile(capacityFile)
+    assert.deepEqual(await service.importBackground(capacityFile), {
+      ok: false,
+      error: 'libraryFull'
+    })
+    await fs.writeFile(
+      manifest,
+      JSON.stringify({
+        settings: DEFAULT_BACKGROUND,
+        image: null,
+        librarySchema: 1,
+        library: Array.from({ length: 11 }, (_, index) => ({
+          ...first,
+          id: index.toString(16).padStart(64, '0'),
+          bytes: 34 * 1024 * 1024
+        }))
+      })
+    )
+    assert.deepEqual(
+      await service.importBackground(capacityFile),
+      { ok: false, error: 'libraryFull' },
+      'retained bytes are bounded independently of count'
+    )
+    await fs.writeFile(manifest, emptyManifest)
+    await Promise.all(
+      ['red', 'green'].map(
+        (color) =>
+          new Promise<void>((resolve, reject) => {
+            const child = spawn(process.execPath, [process.argv[1]], {
+              env: {
+                ...process.env,
+                ROXY_BACKGROUND_RELOAD_TEST: directory,
+                ROXY_BACKGROUND_LIBRARY_WRITE: color
+              },
+              stdio: 'inherit'
+            })
+            child.once('error', reject)
+            child.once('exit', (code) =>
+              code === 0 ? resolve() : reject(Error(`Concurrent library write exited ${code}`))
+            )
+          })
+      )
+    )
+    await service.updateBackground({ sidebarOpacity: 42 })
+    const sharedEntries = await service.listCustomBackgrounds()
+    assert.equal(
+      sharedEntries.length,
+      2,
+      'concurrent processes retain both uploads despite previously cached state'
+    )
+    for (const entry of sharedEntries) assert.ok((await service.applyCustomBackground(entry.id)).ok)
+    const staleGeneration = service.backgroundGeneration()
+    await service.recordBackgroundSubmission(sharedEntries[0].id, catalogId, 'Delayed')
+    let releasePublication: (published: boolean) => void = () => {}
+    let publicationStarted: () => void = () => {}
+    const started = new Promise<void>((resolve) => {
+      publicationStarted = resolve
+    })
+    const originalNow = Date.now
+    Date.now = () => originalNow() + 183000
+    const delayedPublication = service.refreshCustomPublications(async () => {
+      publicationStarted()
+      return new Promise<boolean>((resolve) => {
+        releasePublication = resolve
+      })
+    })
+    await started
+    Date.now = originalNow
+    await service.resetBackground()
+    releasePublication(true)
+    await delayedPublication
+    await assert.rejects(
+      fs.access(manifest),
+      { code: 'ENOENT' },
+      'late publication check cannot recreate reset storage'
+    )
+    await service.recordBackgroundSubmission(first.id, catalogId, 'Stale', staleGeneration)
+    await assert.rejects(
+      fs.access(path.join(directory, 'chat-background.json')),
+      { code: 'ENOENT' },
+      'late submission completion cannot recreate reset storage'
+    )
     const delayedImport = service.importBackground(imageFile)
     const catalogRevision = service.reserveBackgroundImport()
     await service.removeBackground()
@@ -314,6 +606,12 @@ async function run(): Promise<void> {
       (await service.getBackground()).poster?.startsWith('data:image/png;base64,'),
       'older GIF state gains a reduced-motion poster'
     )
+    assert.equal(
+      (await service.listCustomBackgrounds()).length,
+      1,
+      'legacy local background is migrated into the library once'
+    )
+    assert.ok((await service.getBackground()).customId)
     await service.resetBackground()
     await fs.writeFile(
       file,
@@ -324,6 +622,20 @@ async function run(): Promise<void> {
       })
     )
     assert.equal((await service.getBackground()).image, null, 'corrupt video poster is rejected')
+    await service.resetBackground()
+    await fs.writeFile(
+      file,
+      JSON.stringify({ settings: DEFAULT_BACKGROUND, image: 'data:image/png;base64,AAAA' })
+    )
+    assert.equal(
+      (await service.getBackground()).image,
+      'data:image/png;base64,AAAA',
+      'failed legacy thumbnail generation does not block reads'
+    )
+    assert.ok(
+      (await service.removeBackground()).ok,
+      'damaged legacy background can still be cleared'
+    )
     await service.resetBackground()
     for (const interrupt of ['closed', 'crashed'] as const) {
       app.once('browser-window-created', (_event, decoder) => {

@@ -32,6 +32,7 @@ export function BackgroundSettings({
   const [empty, setEmpty] = useState(true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [customUploadVersion, setCustomUploadVersion] = useState(0)
 
   const run = async (
     operation: () => Promise<BackgroundResult | null>,
@@ -87,17 +88,13 @@ export function BackgroundSettings({
           image={background.image}
           disabled={disabled}
           active={active}
-          onAddCustom={() => void run(() => api.background.choose())}
-        >
-          {background.image && !background.catalogId && (
-            <WallpaperWorkshop
-              image={background.image}
-              disabled={disabled}
-              active={active}
-              mode="submit"
-            />
-          )}
-        </WallpaperWorkshop>
+          customUploadVersion={customUploadVersion}
+          onAddCustom={() =>
+            void run(() => api.background.choose()).then((ok) => {
+              if (ok) setCustomUploadVersion((version) => version + 1)
+            })
+          }
+        />
         {error && (
           <p role="alert" className="mt-2 text-xs text-danger">
             {error}

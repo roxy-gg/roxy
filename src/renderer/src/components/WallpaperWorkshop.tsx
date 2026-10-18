@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { Search, Play, Plus, Upload, X } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { Search, Play, Plus, Upload, X, Check, Trash2 } from 'lucide-react'
+import type { CustomBackground, BackgroundResult } from '@shared/background'
 import { useTranslation } from 'react-i18next'
 import type {
   Wallpaper,
@@ -8,6 +9,7 @@ import type {
   WallpaperSubmission
 } from '@shared/wallpapers'
 import { api } from '../lib/api'
+import { useBackground } from '../lib/background'
 import { Button } from './ui'
 
 const LICENSES = ['CC0-1.0', 'CC-BY-4.0', 'CC-BY-SA-4.0', 'CC-BY-NC-4.0', 'other'] as const
@@ -36,16 +38,24 @@ export function WallpaperWorkshop({
   active = true,
   mode = 'browse',
   onAddCustom,
-  children
+  customUploadVersion = 0,
+  customBackground
 }: {
   image: string | null
   disabled: boolean
   active?: boolean
   mode?: 'browse' | 'submit'
   onAddCustom?: () => void
-  children?: ReactNode
+  customUploadVersion?: number
+  customBackground?: CustomBackground
 }): JSX.Element {
   const { t } = useTranslation()
+  const background = useBackground()
+  const [customs, setCustoms] = useState<CustomBackground[]>([])
+  const [customError, setCustomError] = useState('')
+  const [selectedCustomId, setSelectedCustomId] = useState<string | null>(null)
+  const [customTitle, setCustomTitle] = useState('')
+  const [confirmDelete, setConfirmDelete] = useState(false)
   const [query, setQuery] = useState('')
   const [kind, setKind] = useState<WallpaperQuery['kind']>('all')
   const [sort, setSort] = useState<WallpaperQuery['sort']>('mostUsed')
@@ -57,12 +67,13 @@ export function WallpaperWorkshop({
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [retry, setRetry] = useState(0)
+  const [libraryRetry, setLibraryRetry] = useState(0)
   const [submitOpen, setSubmitOpen] = useState(false)
   const [tagInput, setTagInput] = useState('')
   const [licenseChoice, setLicenseChoice] = useState('')
   const tagsEdited = useRef(false)
   const [form, setForm] = useState<WallpaperSubmission>({
-    title: '',
+    title: customBackground?.title ?? '',
     description: '',
     tags: '',
     credit: '',
@@ -70,15 +81,101 @@ export function WallpaperWorkshop({
     rightsConsent: false
   })
   const request = useRef(0)
+  const libraryRequest = useRef(0)
   const lock = useRef(false)
   const activeImage = useRef(image)
   const consentImage = useRef<string | null>(null)
+  const rootRef = useRef<HTMLDivElement>(null)
+  const focusedDelete = useRef(false)
   activeImage.current = image
-  const mediaTag = image?.startsWith('data:video/')
-    ? 'video'
-    : image?.startsWith('data:image/gif;')
-      ? 'gif'
-      : 'image'
+  const visibleCustoms = customs.filter(
+    (entry) =>
+      (kind === 'all' || entry.kind === kind) &&
+      (!query || entry.title.toLocaleLowerCase().includes(query.toLocaleLowerCase()))
+  )
+  const selectedCustom = visibleCustoms.find((entry) => entry.id === selectedCustomId)
+  const highlightedCatalog = selected?.id ?? (!selectedCustomId ? background.catalogId : undefined)
+  const highlightedCustom = selectedCustomId ?? (!selected ? background.customId : undefined)
+  useEffect(() => {
+    if (mode !== 'browse') return
+    setSelected(null)
+    setSelectedCustomId(background.customId ?? null)
+    setConfirmDelete(false)
+  }, [background.customId, background.catalogId, customUploadVersion, mode])
+  useEffect(() => {
+    if (customUploadVersion) {
+      setQuery('')
+      setKind('all')
+    }
+  }, [customUploadVersion])
+  useEffect(() => {
+    if (confirmDelete) {
+      focusedDelete.current = true
+      rootRef.current?.querySelector<HTMLButtonElement>('[data-cancel-delete]')?.focus()
+    } else if (focusedDelete.current) {
+      focusedDelete.current = false
+      ;(
+        rootRef.current?.querySelector<HTMLButtonElement>('[data-delete-custom]') ??
+        rootRef.current?.querySelector<HTMLButtonElement>('[data-add-custom]')
+      )?.focus()
+    }
+  }, [confirmDelete])
+  useEffect(() => {
+    setCustomTitle(selectedCustom?.title ?? '')
+    setConfirmDelete(false)
+  }, [selectedCustom?.id, selectedCustom?.title])
+  useEffect(() => {
+    if (!active || mode !== 'browse') return
+    const version = ++libraryRequest.current
+    void api.background
+      .listCustom()
+      .then((result) => {
+        if (libraryRequest.current !== version) return
+        if (result.ok) {
+          setCustoms(result.value)
+          setSelectedCustomId((current) =>
+            current && !result.value.some((entry) => entry.id === current) ? null : current
+          )
+          setCustomError('')
+        } else setCustomError(t('wallpapers.libraryFailed'))
+      })
+      .catch(() => {
+        if (libraryRequest.current === version) setCustomError(t('wallpapers.libraryFailed'))
+      })
+    const interval = setInterval(() => {
+      if (document.visibilityState === 'visible') setLibraryRetry((value) => value + 1)
+    }, 60000)
+    window.addEventListener('focus', refreshLibrary)
+    function refreshLibrary(): void {
+      setLibraryRetry((value) => value + 1)
+    }
+    return () => {
+      libraryRequest.current++
+      clearInterval(interval)
+      window.removeEventListener('focus', refreshLibrary)
+    }
+  }, [active, mode, background.libraryVersion, retry, libraryRetry, t])
+  const manageCustom = async (operation: () => Promise<BackgroundResult>): Promise<void> => {
+    if (lock.current || disabled || !active) return
+    lock.current = true
+    setWorking(true)
+    setCustomError('')
+    try {
+      const result = await operation()
+      if (!result.ok) setCustomError(t(`background.errors.${result.error}`))
+    } catch {
+      setCustomError(t('wallpapers.libraryFailed'))
+    } finally {
+      lock.current = false
+      setWorking(false)
+    }
+  }
+  const mediaTag =
+    customBackground?.kind === 'video' || image?.startsWith('data:video/')
+      ? 'video'
+      : image?.startsWith('data:image/gif;')
+        ? 'gif'
+        : 'image'
   const suggestedTags = (title: string): string[] =>
     parseTags(
       [
@@ -210,14 +307,17 @@ export function WallpaperWorkshop({
         const snapshot = consentImage.current
         if (!snapshot || activeImage.current !== snapshot || !form.rightsConsent || tagsTooLong)
           return
-        const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(snapshot))
-        const expectedImageHash = Array.from(new Uint8Array(digest), (byte) =>
-          byte.toString(16).padStart(2, '0')
-        ).join('')
+        const digest = customBackground
+          ? null
+          : await crypto.subtle.digest('SHA-256', new TextEncoder().encode(snapshot))
+        const expectedImageHash =
+          customBackground?.id ??
+          Array.from(new Uint8Array(digest!), (byte) => byte.toString(16).padStart(2, '0')).join('')
         const result = await api.background.submit({
           ...form,
           tags: submittedTags,
-          expectedImageHash
+          expectedImageHash,
+          ...(customBackground ? { customId: customBackground.id } : {})
         })
         if (result.ok) {
           setNotice(t('wallpapers.submitted', { id: result.value.id }))
@@ -242,6 +342,7 @@ export function WallpaperWorkshop({
     'w-full rounded-lg border border-border bg-bg px-3 py-2 text-xs text-text outline-accent'
   return (
     <div
+      ref={rootRef}
       className={
         mode === 'browse'
           ? 'mb-5 overflow-hidden rounded-xl border border-border bg-surface'
@@ -259,6 +360,7 @@ export function WallpaperWorkshop({
               <p className="mt-1 max-w-lg text-xs text-text-muted">{t('wallpapers.description')}</p>
             </div>
             <Button
+              data-add-custom
               size="sm"
               disabled={disabled || working || !active || !onAddCustom}
               onClick={onAddCustom}
@@ -266,7 +368,6 @@ export function WallpaperWorkshop({
               <Plus aria-hidden className="h-3.5 w-3.5" />
               {t('wallpapers.addCustom')}
             </Button>
-            {children}
           </div>
           {active && (
             <div className="space-y-4 border-t border-border p-4">
@@ -281,7 +382,10 @@ export function WallpaperWorkshop({
                     type="search"
                     value={query}
                     maxLength={120}
-                    onChange={(event) => setQuery(event.target.value)}
+                    onChange={(event) => {
+                      setQuery(event.target.value)
+                      setSelectedCustomId(null)
+                    }}
                     placeholder={t('wallpapers.search')}
                     className={`${inputClass} pl-9`}
                   />
@@ -289,7 +393,10 @@ export function WallpaperWorkshop({
                 <select
                   aria-label={t('wallpapers.type')}
                   value={kind}
-                  onChange={(event) => setKind(event.target.value as WallpaperQuery['kind'])}
+                  onChange={(event) => {
+                    setKind(event.target.value as WallpaperQuery['kind'])
+                    setSelectedCustomId(null)
+                  }}
                   className={`${inputClass} !w-auto min-w-0 flex-1 sm:flex-none`}
                 >
                   {(['all', 'image', 'video'] as const).map((value) => (
@@ -329,13 +436,63 @@ export function WallpaperWorkshop({
                   </span>
                   <span className="block p-2 text-xs font-medium">{t('wallpapers.addOwn')}</span>
                 </button>
+                {visibleCustoms.map((entry) => (
+                  <button
+                    type="button"
+                    key={`custom:${entry.id}`}
+                    data-custom-id={entry.id}
+                    aria-pressed={highlightedCustom === entry.id}
+                    aria-current={background.customId === entry.id ? 'true' : undefined}
+                    onClick={() => {
+                      setSelected(null)
+                      setSelectedCustomId(entry.id)
+                      setConfirmDelete(false)
+                    }}
+                    className={`group overflow-hidden rounded-lg border text-left focus-visible:outline-2 focus-visible:outline-accent ${highlightedCustom === entry.id ? 'border-accent ring-1 ring-accent' : 'border-border hover:border-text-subtle'}`}
+                  >
+                    <div className="relative aspect-video bg-bg">
+                      <img
+                        src={entry.thumbnail}
+                        alt=""
+                        loading="lazy"
+                        className="h-full w-full object-cover"
+                      />
+                      {!entry.publishedId && (
+                        <span className="absolute top-2 left-2 rounded-md bg-black/75 px-2 py-1 text-[10px] font-medium text-white">
+                          {t('wallpapers.custom')}
+                        </span>
+                      )}
+                      {background.customId === entry.id && (
+                        <span className="absolute top-2 right-2 flex items-center gap-1 rounded-md bg-accent px-1.5 py-1 text-[10px] font-medium text-on-accent">
+                          <Check aria-hidden className="h-3 w-3" />
+                          {t('wallpapers.inUse')}
+                        </span>
+                      )}
+                      {entry.kind === 'video' && (
+                        <Play
+                          aria-hidden
+                          className="absolute right-2 bottom-2 h-5 w-5 rounded bg-black/60 p-1 text-white"
+                        />
+                      )}
+                    </div>
+                    <span className="block truncate p-2 text-xs font-medium">
+                      {entry.title || t('wallpapers.untitledCustom')}
+                    </span>
+                  </button>
+                ))}
                 {page.entries.map((item) => (
                   <button
                     type="button"
                     key={item.id}
-                    aria-pressed={selected?.id === item.id}
-                    onClick={() => setSelected(item)}
-                    className={`group overflow-hidden rounded-lg border text-left focus-visible:outline-2 focus-visible:outline-accent ${selected?.id === item.id ? 'border-accent' : 'border-border hover:border-text-subtle'}`}
+                    data-catalog-id={item.id}
+                    aria-pressed={highlightedCatalog === item.id}
+                    aria-current={background.catalogId === item.id ? 'true' : undefined}
+                    onClick={() => {
+                      setSelectedCustomId(null)
+                      setSelected(item)
+                      setConfirmDelete(false)
+                    }}
+                    className={`group overflow-hidden rounded-lg border text-left focus-visible:outline-2 focus-visible:outline-accent ${highlightedCatalog === item.id ? 'border-accent ring-1 ring-accent' : 'border-border hover:border-text-subtle'}`}
                   >
                     <div className="relative aspect-video bg-bg">
                       {thumbnails[`${item.id}:${item.sha256}`] ? (
@@ -360,17 +517,159 @@ export function WallpaperWorkshop({
                           className="absolute right-2 bottom-2 h-5 w-5 rounded bg-black/60 p-1 text-white"
                         />
                       )}
+                      {background.catalogId === item.id && (
+                        <span className="absolute top-2 right-2 flex items-center gap-1 rounded-md bg-accent px-1.5 py-1 text-[10px] font-medium text-on-accent">
+                          <Check aria-hidden className="h-3 w-3" />
+                          {t('wallpapers.inUse')}
+                        </span>
+                      )}
                     </div>
                     <span className="block truncate p-2 text-xs font-medium">{item.title}</span>
                   </button>
                 ))}
               </div>
+              {!!customs.length && (
+                <p className="text-[11px] text-text-subtle">{t('wallpapers.myBackgrounds')}</p>
+              )}
+              {customError && (
+                <p role="alert" className="text-xs text-danger">
+                  {customError}
+                </p>
+              )}
+              {selectedCustom && (
+                <div
+                  className="space-y-3 rounded-lg border border-border bg-bg p-3"
+                  data-custom-details={selectedCustom.id}
+                >
+                  <img
+                    src={selectedCustom.thumbnail}
+                    alt={selectedCustom.title || t('wallpapers.untitledCustom')}
+                    className="aspect-video max-h-72 w-full rounded-md bg-surface object-contain"
+                  />
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <h4 className="min-w-0 flex-1 break-words text-sm font-medium">
+                      {selectedCustom.title || t('wallpapers.untitledCustom')}
+                    </h4>
+                    <Button
+                      size="sm"
+                      disabled={working || disabled || background.customId === selectedCustom.id}
+                      onClick={() =>
+                        void manageCustom(() => api.background.applyCustom(selectedCustom.id))
+                      }
+                    >
+                      {t(
+                        background.customId === selectedCustom.id
+                          ? 'wallpapers.inUse'
+                          : 'wallpapers.use'
+                      )}
+                    </Button>
+                    {!selectedCustom.publishedId && (
+                      <WallpaperWorkshop
+                        key={selectedCustom.id}
+                        image={
+                          background.customId === selectedCustom.id
+                            ? image
+                            : selectedCustom.thumbnail
+                        }
+                        customBackground={selectedCustom}
+                        mode="submit"
+                        disabled={working || disabled}
+                        active={active}
+                      />
+                    )}
+                  </div>
+                  <form
+                    className="flex flex-wrap items-end gap-2"
+                    onSubmit={(event) => {
+                      event.preventDefault()
+                      void manageCustom(() =>
+                        api.background.renameCustom(selectedCustom.id, customTitle)
+                      )
+                    }}
+                  >
+                    <label className="min-w-0 flex-1 space-y-1 text-xs">
+                      <span>{t('wallpapers.backgroundName')}</span>
+                      <input
+                        name="customTitle"
+                        maxLength={100}
+                        required
+                        value={customTitle}
+                        onChange={(event) => setCustomTitle(event.target.value)}
+                        className={inputClass}
+                        disabled={working || disabled}
+                      />
+                    </label>
+                    <Button
+                      size="sm"
+                      type="submit"
+                      disabled={
+                        working ||
+                        disabled ||
+                        !customTitle.trim() ||
+                        customTitle.trim() === selectedCustom.title
+                      }
+                    >
+                      {t('wallpapers.rename')}
+                    </Button>
+                  </form>
+                  <div className="flex flex-wrap items-center gap-2 border-t border-border pt-3">
+                    {confirmDelete ? (
+                      <>
+                        <p id="wallpaper-delete-hint" className="w-full text-xs text-text-muted">
+                          {t('wallpapers.deleteHint')}
+                        </p>
+                        <Button
+                          size="sm"
+                          variant="danger"
+                          aria-describedby="wallpaper-delete-hint"
+                          disabled={working || disabled}
+                          onClick={() =>
+                            void manageCustom(async () => {
+                              const result = await api.background.deleteCustom(selectedCustom.id)
+                              if (result.ok) {
+                                setSelectedCustomId((current) =>
+                                  current === selectedCustom.id ? null : current
+                                )
+                                setConfirmDelete(false)
+                              }
+                              return result
+                            })
+                          }
+                        >
+                          {t('wallpapers.confirmDelete')}
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          data-cancel-delete
+                          aria-describedby="wallpaper-delete-hint"
+                          disabled={working}
+                          onClick={() => setConfirmDelete(false)}
+                        >
+                          {t('wallpapers.cancel')}
+                        </Button>
+                      </>
+                    ) : (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        data-delete-custom
+                        disabled={working || disabled}
+                        onClick={() => setConfirmDelete(true)}
+                      >
+                        <Trash2 aria-hidden className="h-3.5 w-3.5" />
+                        {t('wallpapers.delete')}
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              )}
               {loading && (
                 <p role="status" className="text-xs text-text-muted">
                   {t('wallpapers.loading')}
                 </p>
               )}
-              {!loading && !page.entries.length && !error && (
+              {!loading && !page.entries.length && !visibleCustoms.length && !error && (
                 <p className="py-6 text-center text-xs text-text-muted">{t('wallpapers.empty')}</p>
               )}
               {selected && (
@@ -389,10 +688,16 @@ export function WallpaperWorkshop({
                       <h4 className="text-sm font-medium">{selected.title}</h4>
                       <Button
                         size="sm"
-                        disabled={working || disabled}
+                        disabled={working || disabled || background.catalogId === selected.id}
                         onClick={() => void act(false)}
                       >
-                        {t(working ? 'wallpapers.working' : 'wallpapers.use')}
+                        {t(
+                          working
+                            ? 'wallpapers.working'
+                            : background.catalogId === selected.id
+                              ? 'wallpapers.inUse'
+                              : 'wallpapers.use'
+                        )}
                       </Button>
                     </div>
                     {selected.description && (
@@ -410,7 +715,7 @@ export function WallpaperWorkshop({
                   {t('wallpapers.more')}
                 </Button>
               )}
-              {error && (
+              {(error || customError) && (
                 <Button
                   size="sm"
                   variant="ghost"

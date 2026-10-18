@@ -5,7 +5,10 @@ const fs = require('node:fs/promises')
 const port = Number(process.env.ROXY_TEST_PORT || 3102)
 let win, server
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
-const evaluate = (code) => win.webContents.executeJavaScript(`(async()=>{${code}})()`, true)
+const evaluate = (code) =>
+  win.webContents.executeJavaScript(`(async()=>{${code}})()`, true).catch((error) => {
+    throw Error(`${error.message}\nEvaluating: ${code}`)
+  })
 const until = async (code) => {
   for (let i = 0; i < 100; i++) {
     if (await evaluate(`return ${code}`)) return
@@ -15,7 +18,7 @@ const until = async (code) => {
 }
 const click = async (text) => {
   await evaluate(
-    `[...document.querySelectorAll('button')].find(el=>el.textContent.trim()===${JSON.stringify(text)}).click()`
+    `const button=[...document.querySelectorAll('button')].find(el=>el.textContent.trim()===${JSON.stringify(text)});if(!button)throw Error('Missing button: '+${JSON.stringify(text)});button.click()`
   )
   await wait(100)
 }
@@ -187,7 +190,9 @@ app.whenReady().then(async () => {
       'backspace removes last chip'
     )
     await evaluate(`document.querySelector('input[type=checkbox]').click()`)
-    await until(`!document.querySelector('button[type=submit]').disabled`)
+    await until(
+      `!document.querySelector('form:has(input[name=title]) button[type=submit]').disabled`
+    )
     await input('#wallpaper-tags', 'x'.repeat(200))
     assert.equal(
       await evaluate(`return document.querySelector('button[type=submit]').disabled`),
@@ -288,7 +293,9 @@ app.whenReady().then(async () => {
       true,
       'custom tile stays with an empty store'
     )
-    await evaluate(`localStorage.removeItem('roxy.test.background')`)
+    await evaluate(
+      `localStorage.removeItem('roxy.test.background');localStorage.removeItem('roxy.test.background.library');localStorage.removeItem('roxy.test.background.assets')`
+    )
     await win.loadURL(`http://127.0.0.1:${port}/?background`)
     await until(`document.querySelector('#wallpaper-settings #wallpaper-workshop-heading')`)
     assert.equal(
@@ -321,14 +328,21 @@ app.whenReady().then(async () => {
       `document.querySelector('#wallpaper-settings button[aria-label="Add Custom Background"]').click()`
     )
     await until(
-      `![...document.querySelectorAll('#wallpaper-settings button')].find(button=>button.textContent.trim()==='Submit for review').disabled`
+      `[...document.querySelectorAll('#wallpaper-settings button')].some(button=>button.textContent.trim()==='Submit for review' && !button.disabled)`
     )
     assert.equal(
       await evaluate(
         `const add=[...document.querySelectorAll('#wallpaper-settings button')].find(button=>button.textContent.trim()==='Add Custom Background');return !!add.parentElement.querySelector('button[title]')`
       ),
+      false,
+      'publication is not in the catalog header'
+    )
+    assert.equal(
+      await evaluate(
+        `const detail=document.querySelector('[data-custom-details]');return !!detail.querySelector('button[title]') && !![...detail.querySelectorAll('button')].find(button=>button.textContent.trim()==='In use')`
+      ),
       true,
-      'Submit for review is the secondary action beside custom upload'
+      'publication sits beside the selected local card use action'
     )
     await click('Add Custom Background')
     assert.equal(
@@ -366,6 +380,12 @@ app.whenReady().then(async () => {
     await click('Remove')
     await evaluate(`document.querySelector('#background-background-tab').click()`)
     await until(`!(${submitVisible})`)
+    await evaluate(`document.querySelector('[data-custom-id]').click()`)
+    assert.equal(
+      await evaluate(`return ${submitVisible}`),
+      true,
+      'saved local cards can be published without being in use'
+    )
     await click('Add Custom Background')
     await evaluate(`location.hash='fail'`)
     await click('Add Custom Background')
@@ -394,7 +414,14 @@ app.whenReady().then(async () => {
     await evaluate(
       `[...document.querySelectorAll('#wallpaper-settings button')].find(button=>button.textContent.trim()==='Submit for review').click()`
     )
-    await until(`!!document.querySelector('#wallpaper-settings form')`)
+    await until(`!!document.querySelector('#wallpaper-settings form:has(input[name=title])')`)
+    assert.equal(
+      await evaluate(
+        `return !!document.querySelector('[data-custom-details] form:has(input[name=title])')`
+      ),
+      true,
+      'publication form stays in the selected card details'
+    )
     await input('form input[name=title]', 'Aurora Mountains')
     await input('#wallpaper-tags', 'a'.repeat(160))
     await tagKey('Enter')
@@ -424,6 +451,8 @@ app.whenReady().then(async () => {
     ]) {
       await evaluate(`location.hash=${JSON.stringify(hash)}`)
       await click('Add Custom Background')
+      await until(submitVisible)
+      await click('Submit for review')
       await until(`document.querySelector('button[aria-label="Remove tag ${media}"]')`)
       assert.equal(
         await evaluate(`return document.querySelector('input[type=checkbox]').checked`),
@@ -431,9 +460,175 @@ app.whenReady().then(async () => {
         'replacing media clears publication consent'
       )
     }
+    await evaluate(`location.hash=''`)
+    await click('Add Custom Background')
+    await until(`document.querySelector('[data-custom-id][aria-current=true]')`)
+    const firstCustom = await evaluate(`return (await window.roxy.background.get()).customId`)
+    assert.equal(
+      await evaluate(
+        `return document.querySelector('[data-custom-id="${firstCustom}"]').getAttribute('aria-pressed')`
+      ),
+      'true',
+      'upload is automatically selected'
+    )
+    assert.ok(
+      await evaluate(
+        `return document.querySelector('[data-custom-id="${firstCustom}"]').textContent.includes('Custom')`
+      )
+    )
+    await input('input[name=customTitle]', 'Blue Flowers')
+    await click('Rename')
+    await until(
+      `document.querySelector('[data-custom-id="${firstCustom}"]').textContent.includes('Blue Flowers')`
+    )
+    const libraryBefore = await evaluate(
+      `return (await window.roxy.background.listCustom()).value.length`
+    )
+    await click('Add Custom Background')
+    assert.equal(
+      await evaluate(`return (await window.roxy.background.listCustom()).value.length`),
+      libraryBefore,
+      'duplicate upload reuses its card'
+    )
+    await evaluate(`location.hash='second'`)
+    await click('Add Custom Background')
+    await until(`document.querySelectorAll('[data-custom-id]').length===${libraryBefore + 1}`)
+    const secondCustom = await evaluate(`return (await window.roxy.background.get()).customId`)
+    await evaluate(`document.querySelector('[data-custom-id="${firstCustom}"]').click()`)
+    assert.equal(
+      await evaluate(
+        `return document.querySelector('[data-custom-id="${firstCustom}"]').getAttribute('aria-pressed')`
+      ),
+      'true',
+      'click selects card'
+    )
+    assert.equal(
+      await evaluate(
+        `return document.querySelector('[data-custom-id="${secondCustom}"]').getAttribute('aria-current')`
+      ),
+      'true',
+      'browsing another card preserves in-use marker'
+    )
+    await click('Submit for review')
+    await until(`document.querySelector('form input[name=title]')`)
+    assert.equal(
+      await evaluate(`return document.querySelector('form input[name=title]').value`),
+      'Blue Flowers',
+      'publication form is prefilled for the selected local card'
+    )
+    await select('license', 'CC0-1.0')
+    await evaluate(`document.querySelector('[data-custom-details] input[type=checkbox]').click()`)
+    await click('Send for review')
+    assert.equal(
+      await evaluate(`return window.__backgroundActions.lastSubmission.customId`),
+      firstCustom
+    )
+    assert.equal(
+      await evaluate(`return window.__backgroundActions.lastSubmission.expectedImageHash`),
+      firstCustom,
+      'consent is bound to selected saved media'
+    )
+    assert.equal(
+      await evaluate(`return (await window.roxy.background.get()).customId`),
+      secondCustom,
+      'publishing an inactive card does not change the active background'
+    )
+    await evaluate(`document.querySelector('[data-custom-id="${secondCustom}"]').click()`)
+    assert.equal(
+      await evaluate(`return !!document.querySelector('form input[name=title]')`),
+      false,
+      'switching cards closes the previous card publication form'
+    )
+    await evaluate(`document.querySelector('[data-custom-id="${firstCustom}"]').click()`)
+    await click('Use background')
+    await until(`document.querySelector('[data-custom-id="${firstCustom}"][aria-current=true]')`)
+    await win.reload()
+    await until(
+      `document.querySelector('[data-custom-id="${firstCustom}"][aria-pressed=true][aria-current=true]')`
+    )
+    assert.ok(
+      await evaluate(
+        `return document.querySelector('[data-custom-id="${firstCustom}"]').textContent.includes('Blue Flowers')`
+      ),
+      'name and active selection survive reload'
+    )
+    await evaluate(`document.querySelector('[data-custom-id="${secondCustom}"]').click()`)
+    await click('Add Custom Background')
+    await until(`document.querySelector('[data-custom-id="${secondCustom}"][aria-pressed=true]')`)
+    await evaluate(
+      `location.hash='';document.querySelector('[data-custom-id="${firstCustom}"]').click()`
+    )
+    await click('Add Custom Background')
+    await until(`document.querySelector('[data-custom-id="${firstCustom}"][aria-pressed=true]')`)
+    await evaluate(`document.querySelector('[data-custom-id="${secondCustom}"]').click()`)
+    await click('Delete from My Backgrounds')
+    assert.equal(
+      await evaluate(`return document.activeElement?.textContent.trim()`),
+      'Cancel',
+      'delete confirmation focuses the safe action'
+    )
+    await click('Cancel')
+    assert.equal(
+      await evaluate(`return document.activeElement?.textContent.trim()`),
+      'Delete from My Backgrounds',
+      'cancel restores keyboard focus'
+    )
+    assert.ok(
+      await evaluate(`return !!document.querySelector('[data-custom-id="${secondCustom}"]')`)
+    )
+    await click('Delete from My Backgrounds')
+    await click('Delete background')
+    await until(`!document.querySelector('[data-custom-id="${secondCustom}"]')`)
+    assert.equal(
+      await evaluate(`return (await window.roxy.background.get()).customId`),
+      firstCustom,
+      'inactive deletion does not clear selection'
+    )
+    await evaluate(`location.hash='library-fail';window.dispatchEvent(new Event('focus'))`)
+    await until(`document.querySelector('[role=alert]')?.textContent.includes('My Backgrounds')`)
+    await evaluate(`location.hash=''`)
+    await click('Retry catalog')
+    await until(`!document.querySelector('[role=alert]')`)
+    await evaluate(`document.querySelector('[data-custom-id="${firstCustom}"]').click()`)
+    await click('Submit for review')
+    await until(`!!document.querySelector('form input[name=title]')`)
+    await input('form input[name=title]', 'Published Flowers')
+    await select('license', 'CC0-1.0')
+    await evaluate(`document.querySelector('input[type=checkbox]').click()`)
+    await click('Send for review')
+    assert.ok(
+      await evaluate(
+        `return document.querySelector('[data-custom-id="${firstCustom}"]').textContent.includes('Custom')`
+      ),
+      'pending submission is still Custom'
+    )
+    await evaluate(`location.hash='published'`)
+    await win.reload()
+    await until(`document.querySelector('[data-custom-id="${firstCustom}"]')`)
+    assert.equal(
+      await evaluate(
+        `return document.querySelector('[data-custom-id="${firstCustom}"]').textContent.includes('Custom')`
+      ),
+      false,
+      'confirmed publication removes Custom badge'
+    )
+    assert.equal(
+      await evaluate(`return ${submitVisible}`),
+      false,
+      'published background cannot be resubmitted'
+    )
+    await evaluate(`location.hash=''`)
+    await click('Delete from My Backgrounds')
+    await click('Delete background')
+    await until(`!document.querySelector('[data-custom-id="${firstCustom}"]')`)
+    assert.equal(
+      await evaluate(`return (await window.roxy.background.get()).image`),
+      null,
+      'active deletion clears the background'
+    )
     assert.deepEqual(errors, [])
     console.log(
-      'WALLPAPER UI OK: custom-only submission and restart, license choices, optional author, auto-tags/chips/paste/limits, upload first across store states, consent, retry/races, local save, mobile'
+      'WALLPAPER UI OK: persistent custom cards, selected/in-use states, rename/delete/focus/retry, publication badges, custom-only submission, licenses, tags, consent, local save, mobile'
     )
   } catch (error) {
     console.error(error)

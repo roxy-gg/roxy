@@ -54,6 +54,24 @@ assert.equal(calls[0].url.searchParams.get('sort'), 'mostUsed')
 assert.equal(result.entries[0].posterUrl, `https://roxy.gg/api/wallpapers/${id}/poster`)
 assert.equal(result.entries[0].mediaUrl, `https://roxy.gg/api/wallpapers/${id}/media`)
 assert.deepEqual(await client.download(id), { bytes, extension: '.png' })
+assert.equal(
+  await client.isPublished(id),
+  true,
+  'valid public detail confirms publication without downloading media'
+)
+const unpublished = new WallpaperClient(
+  'https://roxy.gg',
+  async () => new Response('', { status: 404 })
+)
+assert.equal(await unpublished.isPublished(id), false, 'pending and rejected are not public')
+const offline = new WallpaperClient('https://roxy.gg', async () => {
+  throw Error('offline')
+})
+await assert.rejects(() => offline.isPublished(id), 'offline status is unknown, not unpublished')
+const wrongId = new WallpaperClient('https://roxy.gg', async () =>
+  Response.json({ ...entry, id: '00000000-0000-4000-8000-000000000002' })
+)
+await assert.rejects(() => wrongId.isPublished(id))
 await assert.rejects(() => client.download('../secret'))
 const before = calls.length
 await assert.rejects(() => client.submit({ ...submission, rightsConsent: false }, null))

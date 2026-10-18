@@ -4,7 +4,7 @@ For the optional community catalog and explicit Submit for review flow, see [Wal
 
 Open **Settings > Background** to browse wallpapers or add a custom background. **Sidebar** sits directly below **Background** in the Theme settings group, followed by **Colors** and **Motion**. Switching panels preserves unsaved theme JSON; in narrow windows the menu sits above the content.
 
-Choose local media using **Add Custom Background** or the first **Add your own** tile in **Background**. Uploads save automatically; this page has no duplicate preview/upload/save section. **Submit for review** appears as a secondary action after a custom upload and opens the optional publication form. Open **Sidebar** for the live preview and appearance controls. Use **Empty chats only** for a quiet transcript, or **All conversations** with a lower conversation visibility. The preview can show either state.
+Choose local media using **Add Custom Background** or the first **Add your own** tile in **Background**. Uploads save automatically; this page has no duplicate preview/upload/save section. Select a local card to find **Submit for review** beside **Use background** or **In use** in its detail panel. Its optional form publishes that saved background without requiring you to apply it. Open **Sidebar** for the live preview and appearance controls. Use **Empty chats only** for a quiet transcript, or **All conversations** with a lower conversation visibility. The preview can show either state.
 
 - **None** uses the image without an effect.
 - **Dither** quantizes the image with ordered Bayer thresholds.

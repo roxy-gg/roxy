@@ -2,12 +2,15 @@ import { app, BrowserWindow } from 'electron'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import sharp from 'sharp'
+import { createHash } from 'node:crypto'
+import { lock } from 'proper-lockfile'
 import {
   DEFAULT_BACKGROUND,
   normalizeBackground,
   type BackgroundResult,
   type BackgroundSettings,
-  type BackgroundState
+  type BackgroundState,
+  type CustomBackground
 } from '../../shared/background'
 
 const MAX_BYTES = 25 * 1024 * 1024
@@ -15,9 +18,39 @@ const MAX_PIXELS = 40_000_000
 const MAX_FRAMES = 80
 const MAX_DATA_URL = Math.ceil(MAX_BYTES / 3) * 4 + 32
 const filename = (): string => path.join(app.getPath('userData'), 'chat-background.json')
-let cached: Promise<BackgroundState> | undefined
+const libraryDirectory = (): string => path.join(app.getPath('userData'), 'chat-backgrounds')
+const validCustomId = (id: unknown): id is string =>
+  typeof id === 'string' && /^[a-f0-9]{64}$/.test(id)
+const validCatalogId = (id: unknown): id is string =>
+  typeof id === 'string' && /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(id)
+type StoredBackground = BackgroundState & { library?: CustomBackground[]; librarySchema?: 1 }
+let cached: Promise<StoredBackground> | undefined
 let pending: Promise<unknown> = Promise.resolve()
 let imageRevision = 0
+let resetGeneration = 0
+
+function storageTransaction<T>(operation: () => Promise<T>): Promise<T> {
+  const work = pending.then(async () => {
+    await fs.mkdir(app.getPath('userData'), { recursive: true })
+    const release = await lock(filename(), {
+      realpath: false,
+      stale: 30000,
+      retries: { retries: 20, minTimeout: 25, maxTimeout: 200 }
+    })
+    try {
+      cached = undefined
+      return await operation()
+    } finally {
+      await release()
+    }
+  })
+  pending = work.catch(() => {})
+  return work
+}
+
+export function backgroundGeneration(): number {
+  return resetGeneration
+}
 const listeners = new Set<() => void>()
 export function subscribeBackgroundChanges(listener: () => void): () => void {
   listeners.add(listener)
@@ -54,7 +87,7 @@ export async function getBackgroundCatalogId(): Promise<string | null> {
   }
 }
 
-export function getBackground(): Promise<BackgroundState> {
+async function getStoredBackground(): Promise<StoredBackground> {
   cached ??= (async () => {
     try {
       const source = await fs.readFile(filename(), 'utf8')
@@ -108,7 +141,34 @@ export function getBackground(): Promise<BackgroundState> {
         (!data.image.startsWith('data:image/gif;') || !!poster)
           ? data.image
           : null
-      return {
+      const library: CustomBackground[] = Array.isArray(data.library)
+        ? data.library
+            .filter(
+              (entry: CustomBackground) =>
+                entry &&
+                validCustomId(entry.id) &&
+                typeof entry.title === 'string' &&
+                entry.title.length <= 100 &&
+                !/[\x00-\x1f\x7f]/.test(entry.title) &&
+                ['image', 'video'].includes(entry.kind) &&
+                Number.isSafeInteger(entry.bytes) &&
+                entry.bytes > 0 &&
+                entry.bytes <= MAX_DATA_URL * 2 &&
+                Number.isSafeInteger(entry.createdAt) &&
+                typeof entry.thumbnail === 'string' &&
+                entry.thumbnail.length <= 350000 &&
+                /^data:image\/webp;base64,[A-Za-z0-9+/=]+$/.test(entry.thumbnail) &&
+                (!entry.submissionId || validCatalogId(entry.submissionId)) &&
+                (!entry.submissionIds ||
+                  (Array.isArray(entry.submissionIds) &&
+                    entry.submissionIds.length <= 10 &&
+                    entry.submissionIds.every(validCatalogId))) &&
+                (!entry.publishedId ||
+                  [entry.submissionId, ...(entry.submissionIds ?? [])].includes(entry.publishedId))
+            )
+            .slice(0, 50)
+        : []
+      const state: StoredBackground = {
         settings: normalizeBackground(data.settings),
         image,
         ...(poster ? { poster } : {}),
@@ -116,8 +176,32 @@ export function getBackground(): Promise<BackgroundState> {
         typeof data.catalogId === 'string' &&
         /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(data.catalogId)
           ? { catalogId: data.catalogId }
-          : {})
+          : {}),
+        ...(validCustomId(data.customId) &&
+        library.some((entry) => entry.id === data.customId) &&
+        image &&
+        !data.catalogId
+          ? { customId: data.customId }
+          : {}),
+        library,
+        librarySchema: 1,
+        libraryVersion: Number.isSafeInteger(data.libraryVersion) ? data.libraryVersion : 0
       }
+      // Preserve the currently saved local upload when upgrading from single-background storage.
+      if (image && !state.catalogId && data.librarySchema !== 1) {
+        try {
+          const entry = await retainCustomBackground(state, image, poster, '')
+          const migrated = { ...state, library: [entry], customId: entry.id, libraryVersion: 1 }
+          await fs.writeFile(`${filename()}.tmp`, JSON.stringify(migrated), { mode: 0o600 })
+          await fs.rename(`${filename()}.tmp`, filename())
+          return migrated
+        } catch {
+          // A failed migration must never prevent clearing/replacing an older background.
+          await fs.rm(`${filename()}.tmp`, { force: true }).catch(() => {})
+          delete state.librarySchema
+        }
+      }
+      return state
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT' && !(error instanceof SyntaxError))
         throw error
@@ -130,30 +214,106 @@ export function getBackground(): Promise<BackgroundState> {
   })
 }
 
+function publicState(state: StoredBackground): BackgroundState {
+  const { library, librarySchema: _schema, libraryVersion, ...active } = state
+  return {
+    ...active,
+    ...(libraryVersion ? { libraryVersion } : {}),
+    ...(state.customId
+      ? { customPublished: !!library?.find((entry) => entry.id === state.customId)?.publishedId }
+      : {})
+  }
+}
+
+export async function getBackground(): Promise<BackgroundState> {
+  return storageTransaction(async () => publicState(await getStoredBackground()))
+}
+
+async function retainCustomBackground(
+  state: StoredBackground,
+  image: string,
+  poster: string | undefined,
+  title: string
+): Promise<CustomBackground> {
+  const id = createHash('sha256').update(image).digest('hex')
+  const existing = state.library?.find((entry) => entry.id === id)
+  const bytes = Buffer.byteLength(image) + Buffer.byteLength(poster ?? '')
+  if (
+    !existing &&
+    ((state.library?.length ?? 0) >= 50 ||
+      (state.library ?? []).reduce((total, entry) => total + entry.bytes, bytes) >
+        350 * 1024 * 1024)
+  )
+    throw new Error('libraryFull')
+  const thumbnail = await sharp(Buffer.from((poster ?? image).split(',')[1], 'base64'), {
+    limitInputPixels: MAX_PIXELS
+  })
+    .resize({ width: 480, height: 270, fit: 'inside', withoutEnlargement: true })
+    .webp({ quality: 75 })
+    .toBuffer()
+  if (thumbnail.length > 256 * 1024) throw Error('Invalid thumbnail')
+  const entry: CustomBackground = existing ?? {
+    id,
+    title,
+    thumbnail: `data:image/webp;base64,${thumbnail.toString('base64')}`,
+    kind: image.startsWith('data:video/') ? 'video' : 'image',
+    bytes,
+    createdAt: Date.now()
+  }
+  await fs.mkdir(libraryDirectory(), { recursive: true })
+  const file = path.join(libraryDirectory(), `${id}.json`)
+  try {
+    await fs.writeFile(`${file}.tmp`, JSON.stringify({ image, poster }), { mode: 0o600 })
+    await fs.rename(`${file}.tmp`, file)
+  } finally {
+    await fs.rm(`${file}.tmp`, { force: true }).catch(() => {})
+  }
+  return entry
+}
+
 /** Serialize writes across windows and atomically replace the last good image. */
 function changeBackground(
-  change: (state: BackgroundState) => BackgroundState | null
+  change: (state: StoredBackground) => StoredBackground | null | Promise<StoredBackground | null>
 ): Promise<BackgroundResult> {
-  const work = pending.then(async (): Promise<BackgroundResult> => {
+  return storageTransaction(async (): Promise<BackgroundResult> => {
     const file = filename()
+    let previous: StoredBackground | undefined
     try {
-      const previous = await getBackground()
-      const state = change(previous)
+      previous = await getStoredBackground()
+      const state = await change(previous)
       // A superseded import must not recreate storage after a removal/reset.
-      if (!state) return { ok: true, state: previous }
+      if (!state) return { ok: true, state: publicState(previous) }
       await fs.mkdir(path.dirname(file), { recursive: true })
       await fs.writeFile(`${file}.tmp`, JSON.stringify(state), { mode: 0o600 })
       await fs.rename(`${file}.tmp`, file)
       cached = Promise.resolve(state)
       if (previous.catalogId !== state.catalogId || previous.image !== state.image) changed()
-      return { ok: true, state }
-    } catch {
+      return { ok: true, state: publicState(state) }
+    } catch (error) {
       await fs.rm(`${file}.tmp`, { force: true }).catch(() => undefined)
-      return { ok: false, error: 'saveFailed' }
+      return {
+        ok: false,
+        error:
+          error instanceof Error && error.message === 'libraryFull' ? 'libraryFull' : 'saveFailed'
+      }
+    } finally {
+      // Reconcile unreferenced assets after failed commits, superseded imports, and deletion.
+      if (previous) {
+        const current = await cached?.catch(() => undefined)
+        if (current) {
+          const names = await fs.readdir(libraryDirectory()).catch(() => [] as string[])
+          for (const name of names) {
+            if (
+              /^[a-f0-9]{64}\.json(?:\.tmp)?$/.test(name) &&
+              (!current.library?.some((entry) => `${entry.id}.json` === name) ||
+                name.endsWith('.tmp'))
+            )
+              await fs.rm(path.join(libraryDirectory(), name), { force: true }).catch(() => {})
+          }
+        }
+      }
     }
-  })
-  pending = work
-  return work
+  }).catch(() => ({ ok: false, error: 'saveFailed' }))
 }
 
 export function updateBackground(settings: Partial<BackgroundSettings>): Promise<BackgroundResult> {
@@ -165,19 +325,200 @@ export function updateBackground(settings: Partial<BackgroundSettings>): Promise
 
 export function removeBackground(): Promise<BackgroundResult> {
   imageRevision++
-  return changeBackground((state) => ({ settings: state.settings, image: null }))
+  return changeBackground(
+    ({ poster: _poster, catalogId: _catalog, customId: _custom, ...state }) => ({
+      ...state,
+      image: null
+    })
+  )
+}
+
+export async function listCustomBackgrounds(): Promise<CustomBackground[]> {
+  return storageTransaction(async () => (await getStoredBackground()).library ?? [])
+}
+
+export async function applyCustomBackground(id: string): Promise<BackgroundResult> {
+  if (!validCustomId(id)) return { ok: false, error: 'readFailed' }
+  const revision = reserveBackgroundImport()
+  return changeBackground(async (state) => {
+    if (!state.library?.some((entry) => entry.id === id)) throw Error('Missing background')
+    const media = await readCustomAsset(id)
+    if (!isCurrentBackgroundImport(revision)) return null
+    const { catalogId: _catalog, poster: _poster, ...previous } = state
+    return {
+      ...previous,
+      image: media.image,
+      ...(media.poster ? { poster: media.poster } : {}),
+      customId: id
+    }
+  })
+}
+
+async function readCustomAsset(id: string): Promise<{ image: string; poster?: string }> {
+  const file = path.join(libraryDirectory(), `${id}.json`)
+  if ((await fs.stat(file)).size > MAX_DATA_URL * 2 + 100) throw Error('Invalid asset')
+  const media = JSON.parse(await fs.readFile(file, 'utf8'))
+  if (
+    typeof media.image !== 'string' ||
+    media.image.length > MAX_DATA_URL ||
+    createHash('sha256').update(media.image).digest('hex') !== id ||
+    !/^data:(?:image\/(?:png|gif)|video\/mp4);base64,[A-Za-z0-9+/=]+$/.test(media.image) ||
+    (media.poster !== undefined &&
+      (typeof media.poster !== 'string' ||
+        media.poster.length > MAX_DATA_URL ||
+        !/^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(media.poster)))
+  )
+    throw Error('Invalid asset')
+  return media
+}
+
+export function getCustomSubmission(
+  id: string
+): Promise<{ entry: CustomBackground; image: string }> {
+  return storageTransaction(async () => {
+    if (!validCustomId(id)) throw Error('Invalid background')
+    const entry = (await getStoredBackground()).library?.find((entry) => entry.id === id)
+    if (!entry || entry.publishedId) throw Error('Background cannot be submitted')
+    const media = await readCustomAsset(id)
+    return { entry, image: media.image }
+  })
+}
+
+export async function deleteCustomBackground(id: string): Promise<BackgroundResult> {
+  if (!validCustomId(id)) return { ok: false, error: 'readFailed' }
+  const result = await changeBackground((state) => {
+    if (!state.library?.some((entry) => entry.id === id)) throw Error('Missing background')
+    const { customId, poster, ...previous } = state
+    return {
+      ...previous,
+      ...(customId === id ? { image: null } : { customId, poster }),
+      library: state.library.filter((entry) => entry.id !== id),
+      libraryVersion: (state.libraryVersion ?? 0) + 1
+    }
+  })
+  return result
+}
+
+export function renameCustomBackground(id: string, title: string): Promise<BackgroundResult> {
+  if (
+    !validCustomId(id) ||
+    typeof title !== 'string' ||
+    !title.trim() ||
+    title.length > 100 ||
+    /[\x00-\x1f\x7f]/.test(title)
+  )
+    return Promise.resolve({ ok: false, error: 'readFailed' })
+  return changeBackground((state) => {
+    if (!state.library?.some((entry) => entry.id === id)) throw Error('Missing background')
+    return {
+      ...state,
+      library: state.library.map((entry) =>
+        entry.id === id ? { ...entry, title: title.trim() } : entry
+      ),
+      libraryVersion: (state.libraryVersion ?? 0) + 1
+    }
+  })
+}
+
+export function recordBackgroundSubmission(
+  id: string,
+  submissionId: string,
+  title: string,
+  generation = resetGeneration
+): Promise<BackgroundResult> {
+  return changeBackground((state) =>
+    generation !== resetGeneration || !state.library?.some((entry) => entry.id === id)
+      ? null
+      : {
+          ...state,
+          library: state.library?.map((entry) =>
+            entry.id === id
+              ? {
+                  ...entry,
+                  title: entry.title || title.trim(),
+                  submissionId,
+                  submissionIds: [
+                    ...new Set([
+                      ...(entry.submissionIds ?? (entry.submissionId ? [entry.submissionId] : [])),
+                      submissionId
+                    ])
+                  ].slice(0, 10)
+                }
+              : entry
+          ),
+          libraryVersion: (state.libraryVersion ?? 0) + 1
+        }
+  )
+}
+
+let publicationWork: Promise<BackgroundResult | null> | undefined
+let publicationChecked = 0
+export function refreshCustomPublications(
+  check: (id: string) => Promise<boolean>
+): Promise<BackgroundResult | null> {
+  if (publicationWork) return publicationWork
+  if (Date.now() - publicationChecked < 60000) return Promise.resolve(null)
+  publicationChecked = Date.now()
+  const generation = resetGeneration
+  const work = (async () => {
+    const entries = (await listCustomBackgrounds()).filter((entry) => entry.submissionId)
+    const updates = new Map<string, { submissionId: string; publishedId?: string }>()
+    // Failed/offline lookups retain the last known state; only an authoritative 404 unpublishes.
+    for (let offset = 0; offset < entries.length; offset += 3)
+      await Promise.all(
+        entries.slice(offset, offset + 3).map(async (entry) => {
+          try {
+            let publishedId: string | undefined
+            for (const id of entry.submissionIds ?? [entry.submissionId!]) {
+              if (await check(id)) {
+                publishedId = id
+                break
+              }
+            }
+            if (publishedId !== entry.publishedId)
+              updates.set(entry.id, { submissionId: entry.submissionId!, publishedId })
+          } catch {
+            /* Publication checks never prevent local library access. */
+          }
+        })
+      )
+    if (!updates.size || generation !== resetGeneration) return null
+    return changeBackground((state) =>
+      generation !== resetGeneration || !state.library?.some((entry) => updates.has(entry.id))
+        ? null
+        : {
+            ...state,
+            library: state.library?.map((entry) => {
+              const update = updates.get(entry.id)
+              return update && update.submissionId === entry.submissionId
+                ? { ...entry, publishedId: update.publishedId }
+                : entry
+            }),
+            libraryVersion: (state.libraryVersion ?? 0) + 1
+          }
+    )
+  })().finally(() => {
+    if (publicationWork === work) publicationWork = undefined
+  })
+  publicationWork = work
+  return work
 }
 
 export function resetBackground(): Promise<void> {
   imageRevision++
-  const work = pending.then(async () => {
+  resetGeneration++
+  publicationWork = undefined
+  return storageTransaction(async () => {
     const file = filename()
-    await Promise.all([fs.rm(file, { force: true }), fs.rm(`${file}.tmp`, { force: true })])
+    await Promise.all([
+      fs.rm(file, { force: true }),
+      fs.rm(`${file}.tmp`, { force: true }),
+      fs.rm(libraryDirectory(), { recursive: true, force: true })
+    ])
     cached = undefined
+    publicationChecked = 0
     changed()
   })
-  pending = work.catch(() => undefined)
-  return work
 }
 
 export function reserveBackgroundImport(): number {
@@ -271,11 +612,7 @@ export async function importBackground(
         decoder.destroy()
       }
     }
-    return changeBackground((state) =>
-      revision === imageRevision
-        ? { settings: state.settings, image, poster, ...(catalogId ? { catalogId } : {}) }
-        : null
-    )
+    return commitImport()
   }
   try {
     const source = sharp(bytes, { limitInputPixels: MAX_PIXELS, animated: false })
@@ -308,14 +645,35 @@ export async function importBackground(
   } catch {
     return { ok: false, error: 'invalidImage' }
   }
-  return changeBackground((state) =>
-    revision === imageRevision
-      ? {
-          settings: state.settings,
-          image,
-          ...(poster ? { poster } : {}),
-          ...(catalogId ? { catalogId } : {})
-        }
-      : null
-  )
+  return commitImport()
+
+  function commitImport(): Promise<BackgroundResult> {
+    return changeBackground(async (state) => {
+      if (revision !== imageRevision) return null
+      const { customId: _custom, catalogId: _catalog, poster: _poster, ...previous } = state
+      const entry = catalogId
+        ? undefined
+        : await retainCustomBackground(
+            state,
+            image,
+            poster,
+            path
+              .basename(file, path.extname(file))
+              .replace(/[\x00-\x1f\x7f]/g, '')
+              .slice(0, 100)
+          )
+      if (revision !== imageRevision) return null
+      return {
+        ...previous,
+        image,
+        ...(poster ? { poster } : {}),
+        ...(catalogId ? { catalogId } : { customId: entry!.id }),
+        library: entry
+          ? [entry, ...(state.library ?? []).filter((item) => item.id !== entry.id)]
+          : state.library,
+        librarySchema: 1,
+        libraryVersion: (state.libraryVersion ?? 0) + (entry ? 1 : 0)
+      }
+    })
+  }
 }

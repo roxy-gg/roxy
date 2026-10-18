@@ -6,6 +6,8 @@ import '../../src/renderer/src/assets/main.css'
 import '../../src/renderer/src/i18n'
 import { WallpaperWorkshop } from '../../src/renderer/src/components/WallpaperWorkshop'
 import { applyMotion } from '../../src/renderer/src/lib/motion'
+import { applyBackground } from '../../src/renderer/src/lib/background'
+import { DEFAULT_BACKGROUND } from '../../src/shared/background'
 import type { Wallpaper } from '../../src/shared/wallpapers'
 
 const canvas = document.createElement('canvas')
@@ -49,6 +51,7 @@ const state = {
 ;(window as any).__wallpapers = state
 let change: (image: string, catalog: boolean) => void = () => {}
 window.roxy.background = {
+  listCustom: async () => ({ ok: true, value: [] }),
   get: async () => ({
     image: null,
     settings: {
@@ -101,6 +104,11 @@ function Harness() {
   change = (value, fromCatalog) => {
     setBackground(value)
     setCatalog(fromCatalog)
+    applyBackground({
+      image: value,
+      settings: DEFAULT_BACKGROUND,
+      ...(fromCatalog ? { catalogId: state.applied.at(-1) } : {})
+    })
   }
   return (
     <main className="@container mx-auto max-w-4xl p-4 text-text">

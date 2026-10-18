@@ -5,7 +5,12 @@
 import type { Language } from './i18n'
 import type { VoiceDevice, VoiceEvent, VoiceResult, VoiceSettings, VoiceState } from './voice'
 import type { CatalogApi } from './catalog'
-import type { BackgroundResult, BackgroundSettings, BackgroundState } from './background'
+import type {
+  BackgroundResult,
+  BackgroundSettings,
+  BackgroundState,
+  CustomBackground
+} from './background'
 import type {
   WallpaperPage,
   WallpaperQuery,
@@ -960,6 +965,10 @@ export interface RoxyApi {
     install(source: string, cwd?: string): Promise<SkillInstallResult>
   }
   background: {
+    listCustom(): Promise<WallpaperResult<CustomBackground[]>>
+    applyCustom(id: string): Promise<BackgroundResult>
+    deleteCustom(id: string): Promise<BackgroundResult>
+    renameCustom(id: string, title: string): Promise<BackgroundResult>
     thumbnail(id: string, sha256: string): Promise<WallpaperResult<string>>
     search(input: WallpaperQuery): Promise<WallpaperResult<WallpaperPage>>
     applyCatalog(id: string): Promise<WallpaperResult<BackgroundResult | null>>

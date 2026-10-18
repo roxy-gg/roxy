@@ -2,7 +2,7 @@ import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import { registerVoiceIpc, resetVoice } from '../services/voice'
 import { CHANNELS } from '../../shared/ipc'
 import { CatalogClient } from '../services/catalog'
-import { WallpaperClient, validWallpaperId } from '../services/wallpapers'
+import { WallpaperClient, WallpaperFailure, validWallpaperId } from '../services/wallpapers'
 import { startWallpaperUsage } from '../services/wallpaper-usage'
 import type { WallpaperQuery, WallpaperSubmitRequest } from '../../shared/wallpapers'
 import { pathToFileURL } from 'node:url'
@@ -667,16 +667,81 @@ export function registerIpc(): void {
       ? wallpaperClient.result(() => wallpaperClient.search(input))
       : { ok: false, error: 'invalid' }
   )
+  ipcMain.handle(CHANNELS.backgroundListCustom, (event) => {
+    if (!trustedWallpaper(event)) return { ok: false, error: 'invalid' }
+    void background
+      .refreshCustomPublications((id) => wallpaperClient.isPublished(id))
+      .then((result) => {
+        if (result) broadcastBackground(result)
+      })
+      .catch(() => {})
+    return wallpaperClient.result(() => background.listCustomBackgrounds())
+  })
+  ipcMain.handle(CHANNELS.backgroundApplyCustom, async (event, id: string) =>
+    trustedWallpaper(event)
+      ? broadcastBackground(await background.applyCustomBackground(id))
+      : { ok: false, error: 'readFailed' }
+  )
+  ipcMain.handle(CHANNELS.backgroundDeleteCustom, async (event, id: string) =>
+    trustedWallpaper(event)
+      ? broadcastBackground(await background.deleteCustomBackground(id))
+      : { ok: false, error: 'readFailed' }
+  )
+  ipcMain.handle(CHANNELS.backgroundRenameCustom, async (event, id: string, title: string) =>
+    trustedWallpaper(event)
+      ? broadcastBackground(await background.renameCustomBackground(id, title))
+      : { ok: false, error: 'readFailed' }
+  )
   ipcMain.handle(CHANNELS.backgroundThumbnail, (event, id: string, sha256: string) =>
     trustedWallpaper(event)
       ? wallpaperClient.result(() => wallpaperClient.thumbnail(id, sha256))
       : { ok: false, error: 'invalid' }
   )
+  const backgroundSubmissions = new Set<string>()
   ipcMain.handle(CHANNELS.backgroundSubmit, async (event, input: WallpaperSubmitRequest) => {
-    if (!trustedWallpaper(event)) return { ok: false, error: 'invalid' }
-    const state = await background.getBackground()
-    if (state.catalogId) return { ok: false, error: 'invalid' }
-    return wallpaperClient.result(() => wallpaperClient.submit(input, state.image))
+    if (
+      !trustedWallpaper(event) ||
+      !input ||
+      (input.customId !== undefined &&
+        (typeof input.customId !== 'string' || !/^[a-f0-9]{64}$/.test(input.customId)))
+    )
+      return { ok: false, error: 'invalid' }
+    return wallpaperClient.result(async () => {
+      const generation = background.backgroundGeneration()
+      const custom = input.customId
+        ? await background.getCustomSubmission(input.customId)
+        : undefined
+      const state = custom ? undefined : await background.getBackground()
+      if (state?.catalogId || state?.customPublished) throw new WallpaperFailure('invalid')
+      const customId = custom?.entry.id ?? state?.customId
+      const entry =
+        custom?.entry ??
+        (customId
+          ? (await background.listCustomBackgrounds()).find((entry) => entry.id === customId)
+          : undefined)
+      if (
+        entry &&
+        ((entry.submissionIds?.length ?? 0) >= 10 || backgroundSubmissions.has(entry.id))
+      )
+        throw new WallpaperFailure('rateLimited')
+      if (generation !== background.backgroundGeneration()) throw new WallpaperFailure('changed')
+      if (entry) backgroundSubmissions.add(entry.id)
+      try {
+        const result = await wallpaperClient.submit(input, custom?.image ?? state?.image ?? null)
+        if (customId && generation === background.backgroundGeneration())
+          broadcastBackground(
+            await background.recordBackgroundSubmission(
+              customId,
+              result.id,
+              input.title,
+              generation
+            )
+          )
+        return result
+      } finally {
+        if (entry) backgroundSubmissions.delete(entry.id)
+      }
+    })
   })
   ipcMain.handle(CHANNELS.backgroundApplyCatalog, (event, id: string) => {
     if (!trustedWallpaper(event) || !validWallpaperId(id)) return { ok: false, error: 'invalid' }
@@ -700,6 +765,8 @@ export function registerIpc(): void {
     })
   })
   ipcMain.handle(CHANNELS.backgroundChoose, async (event) => {
+    if (!trustedWallpaper(event)) return { ok: false, error: 'readFailed' }
+    const revision = background.reserveBackgroundImport()
     const win = BrowserWindow.fromWebContents(event.sender)
     const options: Electron.OpenDialogOptions = {
       properties: ['openFile'],
@@ -715,7 +782,7 @@ export function registerIpc(): void {
       : await dialog.showOpenDialog(options)
     if (chosen.canceled || !chosen.filePaths[0]) return null
     return broadcastBackground(
-      await background.importBackground(chosen.filePaths[0], win ?? undefined)
+      await background.importBackground(chosen.filePaths[0], win ?? undefined, revision)
     )
   })
   ipcMain.handle(CHANNELS.backgroundRemove, async () =>

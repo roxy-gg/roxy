@@ -29,6 +29,22 @@ export interface BackgroundState {
   poster?: string
   /** Identity of a successfully applied catalog wallpaper, never a local upload. */
   catalogId?: string
+  /** Retained device-local upload currently in use. */
+  customId?: string
+  customPublished?: boolean
+  libraryVersion?: number
+}
+
+export interface CustomBackground {
+  id: string
+  title: string
+  thumbnail: string
+  kind: 'image' | 'video'
+  bytes: number
+  createdAt: number
+  submissionId?: string
+  submissionIds?: string[]
+  publishedId?: string
 }
 
 export const DEFAULT_BACKGROUND: BackgroundSettings = {
@@ -43,7 +59,16 @@ export const DEFAULT_BACKGROUND: BackgroundSettings = {
 
 export type BackgroundResult =
   | { ok: true; state: BackgroundState }
-  | { ok: false; error: 'invalidImage' | 'invalidVideo' | 'tooLarge' | 'readFailed' | 'saveFailed' }
+  | {
+      ok: false
+      error:
+        | 'invalidImage'
+        | 'invalidVideo'
+        | 'tooLarge'
+        | 'readFailed'
+        | 'saveFailed'
+        | 'libraryFull'
+    }
 
 export function normalizeBackground(value: unknown): BackgroundSettings {
   const input = value && typeof value === 'object' ? (value as Record<string, unknown>) : {}

@@ -8,7 +8,8 @@ import { useRoxyStore } from '../../src/renderer/src/lib/store'
 import {
   DEFAULT_BACKGROUND,
   normalizeBackground,
-  type BackgroundState
+  type BackgroundState,
+  type CustomBackground
 } from '../../src/shared/background'
 import { BUILT_IN_THEMES, resolveTheme } from '../../src/shared/theme'
 import mp4Url from '../fixtures/background.mp4?url'
@@ -32,6 +33,12 @@ ctx.arc(860, 180, 95, 0, Math.PI * 2)
 ctx.fill()
 const image = canvas.toDataURL()
 const callbacks = new Set<(state: BackgroundState) => void>()
+let library: CustomBackground[] = JSON.parse(
+  localStorage.getItem('roxy.test.background.library') || '[]'
+)
+let assets: Record<string, { image: string; poster?: string }> = JSON.parse(
+  localStorage.getItem('roxy.test.background.assets') || '{}'
+)
 const actions = { updates: 0, submissions: 0, choices: 0 }
 ;(window as unknown as { __backgroundActions: typeof actions }).__backgroundActions = actions
 let state: BackgroundState = JSON.parse(localStorage.getItem('roxy.test.background') || 'null') ?? {
@@ -42,8 +49,37 @@ const commit = (next: BackgroundState) => {
   if (location.hash === '#fail') return { ok: false as const, error: 'saveFailed' as const }
   state = next
   localStorage.setItem('roxy.test.background', JSON.stringify(state))
+  localStorage.setItem('roxy.test.background.library', JSON.stringify(library))
+  localStorage.setItem('roxy.test.background.assets', JSON.stringify(assets))
   for (const cb of callbacks) cb(state)
   return { ok: true as const, state }
+}
+const retain = async (media: string, poster?: string) => {
+  if (location.hash === '#fail') return { ok: false as const, error: 'saveFailed' as const }
+  const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(media))
+  const id = Array.from(new Uint8Array(hash), (byte) => byte.toString(16).padStart(2, '0')).join('')
+  if (!library.some((entry) => entry.id === id)) {
+    library = [
+      {
+        id,
+        title: location.hash === '#second' ? 'Second upload' : 'My upload',
+        thumbnail: image,
+        kind: media.startsWith('data:video/') ? 'video' : 'image',
+        bytes: media.length,
+        createdAt: Date.now()
+      },
+      ...library
+    ]
+    assets[id] = { image: media, poster }
+  }
+  return commit({
+    settings: state.settings,
+    image: media,
+    poster,
+    customId: id,
+    customPublished: !!library.find((entry) => entry.id === id)?.publishedId,
+    libraryVersion: (state.libraryVersion ?? 0) + 1
+  })
 }
 let pending: Promise<unknown> = Promise.resolve()
 const delayed = (
@@ -58,14 +94,60 @@ const delayed = (
   return work
 }
 window.roxy.background = {
+  listCustom: async () => {
+    if (location.hash === '#library-fail') return { ok: false, error: 'unavailable' }
+    if (location.hash === '#published') {
+      library = library.map((entry) =>
+        entry.submissionId ? { ...entry, publishedId: entry.submissionId } : entry
+      )
+      commit({
+        ...state,
+        customPublished: !!library.find((entry) => entry.id === state.customId)?.publishedId
+      })
+    }
+    return { ok: true, value: library }
+  },
+  applyCustom: async (id) =>
+    commit({
+      settings: state.settings,
+      ...assets[id],
+      customId: id,
+      customPublished: !!library.find((entry) => entry.id === id)?.publishedId,
+      libraryVersion: state.libraryVersion
+    }),
+  deleteCustom: async (id) => {
+    library = library.filter((entry) => entry.id !== id)
+    delete assets[id]
+    return commit({
+      ...(state.customId === id ? { settings: state.settings, image: null } : state),
+      libraryVersion: (state.libraryVersion ?? 0) + 1
+    })
+  },
+  renameCustom: async (id, title) => {
+    library = library.map((entry) => (entry.id === id ? { ...entry, title } : entry))
+    return commit({ ...state, libraryVersion: (state.libraryVersion ?? 0) + 1 })
+  },
   thumbnail: async () => ({ ok: true, value: image }),
   search: async () => ({ ok: true, value: { entries: [], nextCursor: null } }),
   applyCatalog: async (catalogId) => ({
     ok: true,
-    value: commit({ settings: state.settings, image, catalogId })
+    value: commit({
+      settings: state.settings,
+      image,
+      catalogId,
+      libraryVersion: state.libraryVersion
+    })
   }),
-  submit: async () => {
+  submit: async (input) => {
     actions.submissions++
+    const targetId = input.customId ?? state.customId
+    ;(actions as typeof actions & { lastSubmission?: unknown }).lastSubmission = input
+    library = library.map((entry) =>
+      entry.id === targetId
+        ? { ...entry, title: input.title, submissionId: '00000000-0000-4000-8000-000000000001' }
+        : entry
+    )
+    commit({ ...state, libraryVersion: (state.libraryVersion ?? 0) + 1 })
     return { ok: true, value: { id: '00000000-0000-4000-8000-000000000001' } }
   },
   get: async () => {
@@ -86,11 +168,12 @@ window.roxy.background = {
           new Blob([blob], { type: location.hash === '#gif' ? 'image/gif' : 'video/mp4' })
         )
       })
-      return commit({ settings: state.settings, image: media, poster: image })
+      return retain(media, image)
     }
-    return commit({ settings: state.settings, image })
+    return retain(image + (location.hash === '#second' ? '#second' : ''))
   },
-  remove: async () => commit({ settings: state.settings, image: null }),
+  remove: async () =>
+    commit({ settings: state.settings, image: null, libraryVersion: state.libraryVersion }),
   update: (settings) => {
     actions.updates++
     return delayed(() =>

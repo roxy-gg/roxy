@@ -14,7 +14,7 @@ import type {
 const MAX_BYTES = 25 * 1024 * 1024
 export const validWallpaperId = (id: unknown): id is string =>
   typeof id === 'string' && /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(id)
-class WallpaperFailure extends Error {
+export class WallpaperFailure extends Error {
   constructor(readonly code: WallpaperError) {
     super(code)
   }
@@ -57,7 +57,8 @@ export class WallpaperClient {
   private async request(
     route: string,
     max: number,
-    init?: RequestInit
+    init?: RequestInit,
+    allowMissing = false
   ): Promise<{ bytes: Buffer; type: string }> {
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), init ? 180_000 : 30_000)
@@ -70,6 +71,8 @@ export class WallpaperClient {
       })
       if (!response.ok) {
         await response.body?.cancel().catch(() => {})
+        if (allowMissing && response.status === 404)
+          return { bytes: Buffer.from('null'), type: 'application/json' }
         throw new WallpaperFailure(
           response.status === 429
             ? 'rateLimited'
@@ -318,6 +321,17 @@ export class WallpaperClient {
     )
       throw Error('Invalid wallpaper media')
     return { bytes: media.bytes, extension: wallpaper.kind === 'video' ? '.mp4' : '.png' }
+  }
+
+  async isPublished(id: string): Promise<boolean> {
+    if (!validWallpaperId(id)) throw new WallpaperFailure('invalid')
+    const response = await this.request(`/api/wallpapers/${id}`, 512 * 1024, undefined, true)
+    if (response.type !== 'application/json') throw Error('Invalid response')
+    const raw = JSON.parse(response.bytes.toString('utf8'))
+    if (raw === null) return false
+    const wallpaper = this.wallpaper(raw)
+    if (wallpaper.id !== id) throw Error('Mismatched wallpaper')
+    return true
   }
 
   async submit(input: WallpaperSubmitRequest, image: string | null): Promise<{ id: string }> {
