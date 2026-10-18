@@ -308,7 +308,9 @@ export default function Settings(): JSX.Element {
         aria-labelledby="settings-background"
         hidden={panel !== 'background'}
       >
-        {(visited.has('background') || panel === 'background') && <BackgroundSettings />}
+        {(visited.has('background') || panel === 'background') && (
+          <BackgroundSettings active={panel === 'background'} />
+        )}
       </div>
       <div
         id="settings-colors-panel"

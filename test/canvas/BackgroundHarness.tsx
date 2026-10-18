@@ -56,6 +56,9 @@ const delayed = (
   return work
 }
 window.roxy.background = {
+  search: async () => ({ ok: true, value: { entries: [], nextCursor: null } }),
+  applyCatalog: async () => ({ ok: true, value: commit({ settings: state.settings, image }) }),
+  submit: async () => ({ ok: true, value: { id: '00000000-0000-4000-8000-000000000001' } }),
   get: async () => {
     if (new URLSearchParams(location.search).has('motion-race'))
       await new Promise((resolve) => setTimeout(resolve, 200))

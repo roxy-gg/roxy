@@ -2,6 +2,11 @@ import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import { registerVoiceIpc, resetVoice } from '../services/voice'
 import { CHANNELS } from '../../shared/ipc'
 import { CatalogClient } from '../services/catalog'
+import { WallpaperClient, validWallpaperId } from '../services/wallpapers'
+import type { WallpaperQuery, WallpaperSubmitRequest } from '../../shared/wallpapers'
+import { pathToFileURL } from 'node:url'
+import os from 'node:os'
+import path from 'node:path'
 import type { CatalogApi, CatalogKind } from '../../shared/catalog'
 import { catalogMcpId } from '../../shared/catalog-mcp'
 import type { Language } from '../../shared/i18n'
@@ -134,6 +139,7 @@ const llmControllers = new Map<string, AbortController>()
 const localTurnReleases = new Map<string, { senderId: number; release: () => void }>()
 
 const catalogs = new WeakMap<Electron.WebContents, CatalogClient>()
+const wallpaperClient = new WallpaperClient()
 function catalogFor(sender: Electron.WebContents): CatalogClient {
   let client = catalogs.get(sender)
   if (!client) {
@@ -638,6 +644,45 @@ export function registerIpc(): void {
     return result
   }
   ipcMain.handle(CHANNELS.backgroundGet, () => background.getBackground())
+  const trustedWallpaper = (event: Electron.IpcMainInvokeEvent): boolean =>
+    !!BrowserWindow.fromWebContents(event.sender) &&
+    event.senderFrame === event.sender.mainFrame &&
+    [
+      process.env.ELECTRON_RENDERER_URL?.replace(/\/$/, '') + '/',
+      pathToFileURL(path.join(__dirname, '../renderer/index.html')).href
+    ].includes(event.sender.getURL().split('#')[0])
+  ipcMain.handle(CHANNELS.backgroundSearch, (event, input: WallpaperQuery) =>
+    trustedWallpaper(event)
+      ? wallpaperClient.result(() => wallpaperClient.search(input))
+      : { ok: false, error: 'invalid' }
+  )
+  ipcMain.handle(CHANNELS.backgroundSubmit, (event, input: WallpaperSubmitRequest) =>
+    trustedWallpaper(event)
+      ? wallpaperClient.result(async () =>
+          wallpaperClient.submit(input, (await background.getBackground()).image)
+        )
+      : { ok: false, error: 'invalid' }
+  )
+  ipcMain.handle(CHANNELS.backgroundApplyCatalog, (event, id: string) => {
+    if (!trustedWallpaper(event) || !validWallpaperId(id)) return { ok: false, error: 'invalid' }
+    const revision = background.reserveBackgroundImport()
+    return wallpaperClient.result(async () => {
+      const media = await wallpaperClient.download(id)
+      const directory = await fsp.mkdtemp(path.join(os.tmpdir(), 'roxy-wallpaper-'))
+      try {
+        const file = path.join(directory, `background${media.extension}`)
+        await fsp.writeFile(file, media.bytes, { mode: 0o600 })
+        const result = await background.importBackground(
+          file,
+          BrowserWindow.fromWebContents(event.sender) ?? undefined,
+          revision
+        )
+        return background.isCurrentBackgroundImport(revision) ? broadcastBackground(result) : null
+      } finally {
+        await fsp.rm(directory, { recursive: true, force: true })
+      }
+    })
+  })
   ipcMain.handle(CHANNELS.backgroundChoose, async (event) => {
     const win = BrowserWindow.fromWebContents(event.sender)
     const options: Electron.OpenDialogOptions = {

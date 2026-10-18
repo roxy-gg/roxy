@@ -14,8 +14,9 @@ import { useBackground } from '../lib/background'
 import { cn } from '../lib/cn'
 import { Button } from './ui'
 import { ChatBackground } from './ChatBackground'
+import { WallpaperWorkshop } from './WallpaperWorkshop'
 
-export function BackgroundSettings(): JSX.Element {
+export function BackgroundSettings({ active = true }: { active?: boolean }): JSX.Element {
   const { t } = useTranslation()
   const background = useBackground()
   const [edits, setEdits] = useState<Partial<Settings>>({})
@@ -373,6 +374,7 @@ export function BackgroundSettings(): JSX.Element {
             t(background.image ? 'background.effectFailed' : 'background.errors.readFailed')}
         </p>
       )}
+      <WallpaperWorkshop image={background.image} disabled={disabled} active={active} />
     </section>
   )
 }

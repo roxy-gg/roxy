@@ -168,6 +168,9 @@ const roxy: RoxyApi = {
     install: (source, cwd) => ipcRenderer.invoke(CHANNELS.skillsInstall, source, cwd)
   },
   background: {
+    search: (input) => ipcRenderer.invoke(CHANNELS.backgroundSearch, input),
+    applyCatalog: (id) => ipcRenderer.invoke(CHANNELS.backgroundApplyCatalog, id),
+    submit: (input) => ipcRenderer.invoke(CHANNELS.backgroundSubmit, input),
     get: () => ipcRenderer.invoke(CHANNELS.backgroundGet),
     choose: () => ipcRenderer.invoke(CHANNELS.backgroundChoose),
     remove: () => ipcRenderer.invoke(CHANNELS.backgroundRemove),

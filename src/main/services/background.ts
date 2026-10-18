@@ -137,12 +137,19 @@ export function resetBackground(): Promise<void> {
   return work
 }
 
-/** Only called with a path returned by the native picker, never renderer input. */
+export function reserveBackgroundImport(): number {
+  return ++imageRevision
+}
+export function isCurrentBackgroundImport(revision: number): boolean {
+  return revision === imageRevision
+}
+
+/** Only called with a trusted picker path or main-created catalog temporary file. */
 export async function importBackground(
   file: string,
-  owner?: BrowserWindow
+  owner?: BrowserWindow,
+  revision = reserveBackgroundImport()
 ): Promise<BackgroundResult> {
-  const revision = ++imageRevision
   let bytes: Buffer
   try {
     const stat = await fs.stat(file)

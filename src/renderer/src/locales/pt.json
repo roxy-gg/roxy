@@ -1149,6 +1149,51 @@
     "systemDefault": "Microfone padrão do sistema",
     "useModel": "Usar modelo"
   },
+  "wallpapers": {
+    "applied": "Background saved on this device. Your effects and visibility settings are unchanged.",
+    "browse": "Browse wallpapers",
+    "close": "Hide catalog",
+    "consent": "I own this work or have permission from all rights holders to let Roxy host and distribute it publicly, including any required creator credit. I consent to uploading it for review.",
+    "description": "Find a background that feels like you. Browse curated images and silent video loops, then keep a copy on this device.",
+    "dimensions": "{{kind}} / {{width}} x {{height}}",
+    "empty": "No wallpapers found. Try another search or check back for new additions.",
+    "errors": {
+      "changed": "Your background changed. Review it and confirm publication consent again.",
+      "invalid": "Check the title, permission details, and publication consent.",
+      "noBackground": "Choose and save a background before submitting it.",
+      "rateLimited": "The submission or request limit has been reached. Please try again later.",
+      "unavailable": "The wallpaper service is unavailable. Check your connection and try again.",
+      "unsupported": "This media could not be published. Use an image under 25 MB or a GIF/MP4/MOV up to 60 seconds."
+    },
+    "featured": "Featured",
+    "fields": {
+      "credit": "Required creator credit (if any)",
+      "description": "Description (optional)",
+      "license": "License / permission and original source",
+      "tags": "Tags, separated by commas (optional)",
+      "title": "Wallpaper title"
+    },
+    "kinds": {
+      "all": "All wallpapers",
+      "image": "Images",
+      "video": "Silent videos"
+    },
+    "loading": "Loading wallpapers...",
+    "more": "Load more",
+    "newest": "Newest",
+    "privacy": "This uploads your current original background and the details below to Roxy, without an account or public submitter identity. Network addresses may be processed to prevent abuse. Videos and GIFs become silent MP4s, up to 60 seconds; source metadata is removed. Only approved submissions are public.",
+    "publishHint": "Made something worth sharing? Submit your current background for the community catalog.",
+    "retry": "Retry catalog",
+    "search": "Search titles and tags",
+    "send": "Send for review",
+    "sort": "Sort wallpapers",
+    "submit": "Submit for review",
+    "submitted": "Submitted for staff review. Reference: {{id}}. Your local background has not changed.",
+    "title": "Wallpaper Workshop",
+    "type": "Wallpaper type",
+    "use": "Use background",
+    "working": "Preparing..."
+  },
   "workstream": {
     "action": {
       "openPr": "Abrir um pull request",

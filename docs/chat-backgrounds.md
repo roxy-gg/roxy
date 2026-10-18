@@ -1,5 +1,7 @@
 # Chat Backgrounds
 
+For the optional community catalog and explicit Submit for review flow, see [Wallpaper Workshop](wallpaper-workshop.md). Local uploads still save automatically; publishing is separate and opt-in.
+
 Open **Settings > Appearance** (or **Appearance** from the chat sidebar). The left menu opens **Background** first, with **Color Theme** second. Switching panels preserves unsaved theme JSON; in narrow windows the menu sits above the content.
 
 Choose a local image in **Background**. Changes save automatically. Use **Empty chats only** for a quiet transcript, or **All conversations** with a lower conversation visibility. The preview can show either state.

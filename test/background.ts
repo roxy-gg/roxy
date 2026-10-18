@@ -244,6 +244,14 @@ async function run(): Promise<void> {
     const imageFile = path.join(directory, 'valid.png')
     await fs.writeFile(imageFile, data)
     const delayedImport = service.importBackground(imageFile)
+    const catalogRevision = service.reserveBackgroundImport()
+    await service.removeBackground()
+    await service.importBackground(imageFile, undefined, catalogRevision)
+    assert.equal(
+      (await service.getBackground()).image,
+      null,
+      'remove cancels a catalog import reserved before download'
+    )
     await service.removeBackground()
     await delayedImport
     assert.equal((await service.getBackground()).image, null, 'remove cancels older imports')
