@@ -8,7 +8,8 @@ import {
   type KeyboardEvent
 } from 'react'
 import { useTranslation } from 'react-i18next'
-import { ArrowUp, Plus, Square, X } from 'lucide-react'
+import { ArrowUp, LoaderCircle, Mic, Plus, Square, X } from 'lucide-react'
+import { useVoiceComposer } from '../lib/voice'
 import { ModelPicker } from './ModelPicker'
 import { ContextMeter, ContextPicker, ThinkingPicker, AgentPicker } from './InferenceControls'
 import { imageFilesFrom, readImageFile, type ComposerImage } from '../lib/images'
@@ -61,6 +62,7 @@ export function Composer({
     }))
   }
   const setValue = (next: string | ((current: string) => string)): void => {
+    voice.interrupt()
     updateDraft((current) => ({
       ...current,
       value: typeof next === 'function' ? next(current.value) : next
@@ -76,6 +78,7 @@ export function Composer({
   }
   const [dragging, setDragging] = useState(false)
   const ref = useRef<HTMLTextAreaElement>(null)
+  const voice = useVoiceComposer(chatId, ref)
   const mirror = useRef<HTMLDivElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const bots = useRoxyStore((s) => s.bots)
@@ -217,6 +220,11 @@ export function Composer({
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>): void => {
     if (event.nativeEvent.isComposing) return
+    if (event.key === 'Escape' && voice.phase !== 'idle') {
+      event.preventDefault()
+      voice.interrupt()
+      return
+    }
     if (mentions.length) {
       if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
         event.preventDefault()
@@ -307,6 +315,24 @@ export function Composer({
 
   return (
     <div className="composer-gutter bg-bg px-4 pb-1.5">
+      {voice.enabled && (voice.slowPhase || voice.error || voice.fallback) && (
+        <p
+          role={voice.error ? 'alert' : 'status'}
+          className={cn(
+            'mx-auto mb-2 max-w-3xl text-xs',
+            voice.error ? 'text-danger' : 'text-text-muted'
+          )}
+        >
+          {voice.error
+            ? t(`voice.errors.${voice.error}`)
+            : voice.slowPhase
+              ? t(`voice.phase.${voice.slowPhase}`)
+              : t('voice.fallback')}
+          {voice.fallback && voice.slowPhase && !voice.error && (
+            <span className="mt-1 block">{t('voice.fallback')}</span>
+          )}
+        </p>
+      )}
       <div
         onDragOver={(e) => {
           if (e.dataTransfer.types.includes('Files')) {
@@ -483,60 +509,85 @@ export function Composer({
             {variant === 'session' && <ContextPicker />}
             <ContextMeter />
           </div>
-          {showStop ? (
-            <button
-              onClick={onStop}
-              title={t('composer.stop')}
-              className="press-scale flex h-8 w-8 shrink-0 items-center justify-center sq sq-lg rounded-lg bg-white text-black hover:bg-white/90"
-            >
-              <Square className="h-3 w-3 fill-current" />
-            </button>
-          ) : (
-            <div className="flex max-w-[min(100%,22rem)] flex-col items-end gap-1">
-              {knownTargets.length > 1 && !sendTarget && (
-                <div
-                  role="group"
-                  aria-label={t('composer.chooseSendTo')}
-                  className="flex flex-wrap justify-end gap-1"
-                >
-                  <span className="px-1 text-[11px] text-text-muted">
-                    {t('composer.chooseSendTo')}
-                  </span>
-                  {knownTargets.map((bot) => (
-                    <button
-                      key={bot.id}
-                      type="button"
-                      onClick={() => setPickedSendId(bot.id)}
-                      className="press-scale rounded-md bg-white/5 px-2 py-0.5 text-[11px] font-medium text-accent hover:bg-white/10"
-                    >
-                      @{bot.username}
-                    </button>
-                  ))}
-                </div>
-              )}
-              <div className="flex items-center gap-1.5">
-                {sendTarget && (
-                  <button
-                    type="button"
-                    onClick={() => void submit(sendTarget.id)}
-                    disabled={!canSend || submitting}
-                    title={t('composer.sendToHint')}
-                    className="press-scale h-8 shrink-0 rounded-lg bg-accent/15 px-2.5 text-xs font-medium text-accent hover:bg-accent/25 disabled:opacity-30"
-                  >
-                    {t('composer.sendTo', { username: sendTarget.username })}
-                  </button>
+          <div className="flex shrink-0 items-center gap-1.5">
+            {voice.enabled && (
+              <button
+                type="button"
+                aria-label={t(voice.phase === 'idle' ? 'voice.start' : 'voice.stop')}
+                title={t(voice.phase === 'idle' ? 'voice.start' : 'voice.stop')}
+                aria-pressed={voice.phase !== 'idle'}
+                aria-busy={voice.phase === 'starting' || voice.phase === 'stopping'}
+                disabled={voice.phase === 'stopping'}
+                onClick={voice.toggle}
+                className={cn(
+                  'press-scale flex h-8 w-8 shrink-0 items-center justify-center rounded-lg disabled:opacity-40',
+                  voice.phase === 'idle'
+                    ? 'text-text-muted hover:bg-white/5 hover:text-text'
+                    : 'bg-danger/15 text-danger'
                 )}
-                <button
-                  onClick={() => void submit()}
-                  disabled={!canSend || submitting}
-                  title={sending ? t('composer.addToQueue') : t('composer.send')}
-                  className="press-scale flex h-8 w-8 shrink-0 items-center justify-center sq sq-lg rounded-lg bg-white text-black hover:bg-white/90 disabled:opacity-30"
-                >
-                  <ArrowUp className="h-4 w-4" />
-                </button>
+              >
+                {voice.phase === 'starting' || voice.phase === 'stopping' ? (
+                  <LoaderCircle className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Mic className="h-4 w-4" />
+                )}
+              </button>
+            )}
+            {showStop ? (
+              <button
+                onClick={onStop}
+                title={t('composer.stop')}
+                className="press-scale flex h-8 w-8 shrink-0 items-center justify-center sq sq-lg rounded-lg bg-white text-black hover:bg-white/90"
+              >
+                <Square className="h-3 w-3 fill-current" />
+              </button>
+            ) : (
+              <div className="flex max-w-[min(100%,22rem)] flex-col items-end gap-1">
+                {knownTargets.length > 1 && !sendTarget && (
+                  <div
+                    role="group"
+                    aria-label={t('composer.chooseSendTo')}
+                    className="flex flex-wrap justify-end gap-1"
+                  >
+                    <span className="px-1 text-[11px] text-text-muted">
+                      {t('composer.chooseSendTo')}
+                    </span>
+                    {knownTargets.map((bot) => (
+                      <button
+                        key={bot.id}
+                        type="button"
+                        onClick={() => setPickedSendId(bot.id)}
+                        className="press-scale rounded-md bg-white/5 px-2 py-0.5 text-[11px] font-medium text-accent hover:bg-white/10"
+                      >
+                        @{bot.username}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <div className="flex items-center gap-1.5">
+                  {sendTarget && (
+                    <button
+                      type="button"
+                      onClick={() => void submit(sendTarget.id)}
+                      disabled={!canSend || submitting}
+                      title={t('composer.sendToHint')}
+                      className="press-scale h-8 shrink-0 rounded-lg bg-accent/15 px-2.5 text-xs font-medium text-accent hover:bg-accent/25 disabled:opacity-30"
+                    >
+                      {t('composer.sendTo', { username: sendTarget.username })}
+                    </button>
+                  )}
+                  <button
+                    onClick={() => void submit()}
+                    disabled={!canSend || submitting}
+                    title={sending ? t('composer.addToQueue') : t('composer.send')}
+                    className="press-scale flex h-8 w-8 shrink-0 items-center justify-center sq sq-lg rounded-lg bg-white text-black hover:bg-white/90 disabled:opacity-30"
+                  >
+                    <ArrowUp className="h-4 w-4" />
+                  </button>
+                </div>
               </div>
-            </div>
-          )}
+            )}
+          </div>
         </div>
       </div>
       {error && (

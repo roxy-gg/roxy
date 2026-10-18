@@ -1,4 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
+import { registerVoiceIpc, resetVoice } from '../services/voice'
 import { CHANNELS } from '../../shared/ipc'
 import type { Language } from '../../shared/i18n'
 import { DEFAULT_MOTION, type MotionPreference } from '../../shared/motion'
@@ -216,6 +217,7 @@ function queueAddOptions(value: unknown): QueueAddOptions | undefined {
  * channel here + a matching bridge method.
  */
 export function registerIpc(): void {
+  registerVoiceIpc()
   // ---- settings ----
   ipcMain.handle(CHANNELS.settingsGetAll, () => repo.getSettings())
   ipcMain.handle(
@@ -252,6 +254,7 @@ export function registerIpc(): void {
   )
   ipcMain.handle(CHANNELS.settingsCompleteOnboarding, () => repo.completeOnboarding())
   ipcMain.handle(CHANNELS.settingsReset, async () => {
+    await resetVoice()
     // "Wipes all providers" has to include the subscription tokens held by the
     // sidecar, which resetAll() can't see - they aren't in the database. Every
     // sidecar-backed provider has to be named: disconnecting one now leaves the

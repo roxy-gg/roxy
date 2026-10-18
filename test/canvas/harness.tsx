@@ -30,6 +30,9 @@ const AppearanceHarness = lazy(() =>
 const SidebarHarness = lazy(() =>
   import('./SidebarHarness').then((module) => ({ default: module.SidebarHarness }))
 )
+const VoiceHarness = lazy(() =>
+  import('./VoiceHarness').then((module) => ({ default: module.VoiceHarness }))
+)
 
 document.documentElement.dataset.platform = 'win32'
 const stopMotion = startMotion()
@@ -219,7 +222,11 @@ function CopilotHarness(): JSX.Element {
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    {new URLSearchParams(location.search).has('sidebar') ? (
+    {new URLSearchParams(location.search).has('voice') ? (
+      <Suspense>
+        <VoiceHarness />
+      </Suspense>
+    ) : new URLSearchParams(location.search).has('sidebar') ? (
       <Suspense>
         <SidebarHarness />
       </Suspense>

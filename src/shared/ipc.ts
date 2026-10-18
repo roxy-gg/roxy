@@ -1,5 +1,15 @@
 /** IPC channel names shared by the preload bridge and the main-process handlers. */
 export const CHANNELS = {
+  voiceState: 'voice:state',
+  voiceEvent: 'voice:event',
+  voiceUpdate: 'voice:update',
+  voiceDevices: 'voice:devices',
+  voicePrivacy: 'voice:privacy',
+  voiceDownload: 'voice:download',
+  voiceCancelDownload: 'voice:cancelDownload',
+  voiceRemove: 'voice:remove',
+  voiceStart: 'voice:start',
+  voiceStop: 'voice:stop',
   botsList: 'bots:list',
   botsReorder: 'bots:reorder',
   botsCreate: 'bots:create',

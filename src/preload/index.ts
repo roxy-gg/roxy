@@ -18,12 +18,30 @@ import type { CliProxyState } from '../shared/cliproxy'
 import type { ResolvedTheme } from '../shared/theme'
 import type { MotionPreference } from '../shared/motion'
 import type { BackgroundState } from '../shared/background'
+import type { VoiceEvent } from '../shared/voice'
 
 /**
  * The typed bridge exposed to the renderer as `window.roxy`. Every method maps
  * to an ipcMain.handle channel registered in src/main/ipc/index.ts.
  */
 const roxy: RoxyApi = {
+  voice: {
+    state: () => ipcRenderer.invoke(CHANNELS.voiceState),
+    update: (patch) => ipcRenderer.invoke(CHANNELS.voiceUpdate, patch),
+    devices: () => ipcRenderer.invoke(CHANNELS.voiceDevices),
+    privacy: () => ipcRenderer.invoke(CHANNELS.voicePrivacy),
+    download: (id) => ipcRenderer.invoke(CHANNELS.voiceDownload, id),
+    cancelDownload: () => ipcRenderer.invoke(CHANNELS.voiceCancelDownload),
+    remove: (id) => ipcRenderer.invoke(CHANNELS.voiceRemove, id),
+    start: (id, chatId) => ipcRenderer.invoke(CHANNELS.voiceStart, id, chatId),
+    stop: (id, finalize) => ipcRenderer.invoke(CHANNELS.voiceStop, id, finalize),
+    onEvent: (callback) => {
+      const handler = (_event: Electron.IpcRendererEvent, event: VoiceEvent): void =>
+        callback(event)
+      ipcRenderer.on(CHANNELS.voiceEvent, handler)
+      return () => ipcRenderer.removeListener(CHANNELS.voiceEvent, handler)
+    }
+  },
   bots: {
     list: () => ipcRenderer.invoke(CHANNELS.botsList),
     reorder: (ids) => ipcRenderer.invoke(CHANNELS.botsReorder, ids),

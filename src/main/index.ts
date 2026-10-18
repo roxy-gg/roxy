@@ -39,6 +39,7 @@ import {
 } from './services/window-chrome'
 import { resolveThemeById } from './services/themes'
 import * as repo from './db/repo'
+import { setVoiceWindow, shutdownVoice } from './services/voice'
 
 function createWindow(): BrowserWindow {
   const isMac = process.platform === 'darwin'
@@ -90,6 +91,7 @@ function createWindow(): BrowserWindow {
   // Clicking a completion toast has to raise THIS window, not whichever one
   // happens to be first in getAllWindows() (the agent browser opens its own).
   setToastWindow(mainWindow)
+  setVoiceWindow(mainWindow)
 
   return mainWindow
 }
@@ -188,6 +190,7 @@ app.on('window-all-closed', () => {
 // start tearing down, which gives the final flush a real (if not guaranteed)
 // window to reach the network. Losing it costs one app_close, nothing more.
 app.on('before-quit', () => {
+  shutdownVoice()
   stopAutomation()
   stopAllTurns()
   shutdownTracking()

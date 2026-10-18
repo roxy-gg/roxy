@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { normalizeVoice, type VoiceSettings } from '../../shared/voice'
 import { resolveSeed } from '../../shared/providers'
 import { isCliProxyProvider } from '../../shared/cliproxy'
 import { providerAccountName } from './migrations'
@@ -148,6 +149,21 @@ function setSetting(key: string, value: string | null): void {
     `INSERT INTO settings(key, value) VALUES(?, ?)
      ON CONFLICT(key) DO UPDATE SET value = excluded.value`
   ).run(key, value)
+}
+
+export function getVoiceSettings(): VoiceSettings {
+  const row = getDb().prepare('SELECT value FROM settings WHERE key = ?').get('voice') as
+    | { value: string }
+    | undefined
+  try {
+    return normalizeVoice(row ? JSON.parse(row.value) : null)
+  } catch {
+    return normalizeVoice(null)
+  }
+}
+
+export function setVoiceSettings(settings: VoiceSettings): void {
+  setSetting('voice', JSON.stringify(normalizeVoice(settings)))
 }
 
 // ---- Forge host overrides ----------------------------------------------

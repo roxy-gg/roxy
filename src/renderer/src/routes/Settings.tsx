@@ -13,6 +13,7 @@ import {
   Languages,
   Lightbulb,
   MonitorSmartphone,
+  Mic,
   Palette,
   Plug,
   Plus,
@@ -47,6 +48,7 @@ import { NotificationSettings } from '../components/NotificationSettings'
 import { useRoxyStore } from '../lib/store'
 import { MotionSettings } from '../components/MotionSettings'
 import { BackgroundSettings } from '../components/BackgroundSettings'
+import { VoiceSettings } from '../components/VoiceSettings'
 import { RemoteWorkspaceDialog } from '../components/RemoteWorkspaceDialog'
 import { SidebarNavItem } from '../components/SidebarFrame'
 import Themes from './Themes'
@@ -76,6 +78,7 @@ const SETTINGS_GROUPS = [
       { id: 'accounts', label: 'settings.navigation.accounts', icon: UserRound },
       { id: 'browser', label: 'settings.browser.heading', icon: Globe },
       { id: 'language', label: 'settings.language.heading', icon: Languages },
+      { id: 'voice', label: 'voice.heading', icon: Mic },
       { id: 'worktrees', label: 'settings.navigation.worktrees', icon: GitBranch },
       { id: 'notifications', label: 'settings.notifications.heading', icon: Bell },
       { id: 'remote', label: 'sidebar.remoteWorkspace', icon: MonitorSmartphone },
@@ -361,6 +364,14 @@ export default function Settings(): JSX.Element {
         </Button>
       </section>
       {remoteOpen && <RemoteWorkspaceDialog onClose={() => setRemoteOpen(false)} />}
+      <section
+        id="settings-voice-panel"
+        role="region"
+        aria-labelledby="settings-voice"
+        hidden={panel !== 'voice'}
+      >
+        {(visited.has('voice') || panel === 'voice') && <VoiceSettings />}
+      </section>
 
       <section
         id="settings-accounts-panel"

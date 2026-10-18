@@ -163,16 +163,19 @@ export function Badge({
 export function Switch({
   checked,
   onChange,
-  disabled
+  disabled,
+  label
 }: {
   checked: boolean
   onChange?: (value: boolean) => void
   disabled?: boolean
+  label?: string
 }): JSX.Element {
   return (
     <button
       type="button"
       role="switch"
+      aria-label={label}
       aria-checked={checked}
       disabled={disabled}
       onClick={() => onChange?.(!checked)}

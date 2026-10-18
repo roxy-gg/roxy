@@ -3,6 +3,7 @@
  * Implemented in src/preload/index.ts, handled in src/main/ipc/*.
  */
 import type { Language } from './i18n'
+import type { VoiceDevice, VoiceEvent, VoiceResult, VoiceSettings, VoiceState } from './voice'
 import type { BackgroundResult, BackgroundSettings, BackgroundState } from './background'
 import type { Bot, BotJob, BotJobInput } from './bots'
 import type { MotionPreference } from './motion'
@@ -785,6 +786,18 @@ export interface ConfigImportResult {
 }
 
 export interface RoxyApi {
+  voice: {
+    state(): Promise<VoiceState>
+    update(patch: Partial<VoiceSettings>): Promise<VoiceResult<VoiceSettings>>
+    devices(): Promise<VoiceResult<VoiceDevice[]>>
+    privacy(): Promise<void>
+    download(id: string): Promise<VoiceResult>
+    cancelDownload(): Promise<void>
+    remove(id: string): Promise<VoiceResult>
+    start(recordingId: string, chatId: string): Promise<VoiceResult>
+    stop(recordingId: string, finalize: boolean): Promise<void>
+    onEvent(callback: (event: VoiceEvent) => void): () => void
+  }
   bots: {
     list(): Promise<Bot[]>
     /** Reorder the bot strip; unlisted bots retain their order after the supplied ids. */
