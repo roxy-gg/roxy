@@ -3,7 +3,12 @@ import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { CatalogClient, prepareCatalogSkill } from '../src/main/services/catalog'
-import { installCatalogSkillFiles } from '../src/main/services/skills'
+import {
+  installCatalogSkillFiles,
+  readRawSkill,
+  saveRawSkill,
+  refreshSkills
+} from '../src/main/services/skills'
 import type { CatalogEntry, CatalogSkillDetail, RegistryMcpServer } from '../src/shared/catalog'
 
 const entry: CatalogEntry = {
@@ -250,6 +255,71 @@ async function main() {
       await assert.rejects(fs.stat(path.join(root, 'catalog-bad-fixture')))
     } finally {
       await fs.rm(root, { recursive: true, force: true })
+    }
+  })
+  await test('raw skill editing preserves custom frontmatter and refuses stale or redirected saves', async () => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), 'roxy-raw-skill-'))
+    const dir = path.join(cwd, '.roxy/skills/raw-fixture')
+    const location = path.join(dir, 'SKILL.md')
+    const original =
+      '---\r\nname: Raw Fixture Name\r\ndescription: Test\r\nlicense: MIT\r\nmetadata:\r\n  custom: unchanged\r\n---\r\nInstructions.\r\n'
+    try {
+      await fs.mkdir(dir, { recursive: true })
+      await fs.writeFile(location, original)
+      const read = await readRawSkill('Raw Fixture Name', cwd)
+      assert.equal(read.text, original)
+      const next = original.replace('Instructions.', 'Edited instructions.')
+      await saveRawSkill(
+        { name: 'Raw Fixture Name', location, expectedText: original, text: next },
+        cwd
+      )
+      assert.equal(await fs.readFile(location, 'utf8'), next)
+      await assert.rejects(
+        saveRawSkill(
+          { name: 'Raw Fixture Name', location, expectedText: original, text: original },
+          cwd
+        ),
+        /changed on disk/
+      )
+      await assert.rejects(
+        saveRawSkill(
+          {
+            name: 'Raw Fixture Name',
+            location: location + '.other',
+            expectedText: next,
+            text: original
+          },
+          cwd
+        ),
+        /changed on disk/
+      )
+      await assert.rejects(
+        saveRawSkill(
+          {
+            name: 'Raw Fixture Name',
+            location,
+            expectedText: next,
+            text: next.replace('Raw Fixture Name', 'New Name')
+          },
+          cwd
+        ),
+        /existing frontmatter name/
+      )
+      await assert.rejects(
+        saveRawSkill(
+          {
+            name: 'Raw Fixture Name',
+            location,
+            expectedText: next,
+            text: next.split('---\r\n')[0]
+          },
+          cwd
+        )
+      )
+      assert.equal(await fs.readFile(location, 'utf8'), next)
+    } finally {
+      await fs.rm(cwd, { recursive: true, force: true })
+      refreshSkills()
     }
   })
   console.log(`\n${count} catalog client/install tests passed.`)

@@ -916,6 +916,11 @@ export interface RoxyApi {
     reconnect(id: string): Promise<McpServerView[]>
   }
   skills: {
+    readRaw(name: string, cwd?: string): Promise<{ text: string; location: string }>
+    saveRaw(
+      input: { name: string; text: string; expectedText: string; location: string },
+      cwd?: string
+    ): Promise<SkillView[]>
     /** Discovered SKILL.md skills (workspace when a cwd is given, else the user's global skills). */
     list(cwd?: string): Promise<SkillView[]>
     /** Re-scan from disk (drops the cache) and return the fresh list. */

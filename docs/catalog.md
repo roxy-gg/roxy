@@ -1,7 +1,10 @@
 # Settings catalog search
 
-Settings includes Skill Search after Discovered Skills and MCP Search after the
-configured MCP servers. Browse/search, pagination and reviews use the public
+Settings uses one compact table each for Skills and MCP servers, combining
+installed items with catalog search results. Top toolbars retain manual add,
+rescan/refresh and import/export. Installed rows expose edit/raw-edit/remove;
+MCP rows also expose enable/disable and reconnect. Built-in tools are not shown
+on the Skills page. Browse/search, pagination and reviews use the public
 roxy.gg relay. Everything runs on the existing Dokploy backend; no Vercel project,
 OIDC token or bridge secret is required.
 
@@ -41,3 +44,11 @@ back to Roxy's skill/MCP glyphs, never blocking discovery.
 Run `npm run smoke:catalog`, `npm run smoke:catalog-ui`, `npm run typecheck`,
 and `npm run smoke:shared`.
 Public search and GitHub snapshots can be live-tested without Vercel credentials.
+
+Raw skill editing reads/writes the full discovered SKILL.md, preserving custom
+frontmatter. A save refuses name changes, empty instructions and changes since
+the editor was opened. It cannot target an undiscovered file. Tables have
+All/Installed/Available filters and their own horizontal scroll on narrow views.
+Legacy skills have no publisher provenance: unique name matches can decorate a
+local row, but its tooltip explicitly says the source is not verified; ambiguous
+same-name publishers remain separate catalog rows.

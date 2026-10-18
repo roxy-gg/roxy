@@ -1,4 +1,4 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Download, ExternalLink, FileText, Plug, Search } from 'lucide-react'
 import type { McpServerView, SkillView } from '@shared/api'
@@ -11,7 +11,7 @@ import type {
   CatalogSkillDetail
 } from '@shared/catalog'
 import { api } from '../lib/api'
-import { Badge, Button, Input } from './ui'
+import { Button, Input } from './ui'
 
 export type CatalogSearchProps =
   | {
@@ -19,12 +19,14 @@ export type CatalogSearchProps =
       active: boolean
       installedSkills: SkillView[]
       onSkillsInstalled: (skills: SkillView[]) => void
+      renderSkillActions?: (skill: SkillView) => ReactNode
     }
   | {
       kind: 'mcp'
       active: boolean
       installedServers: McpServerView[]
       onMcpInstalled: (servers: McpServerView[]) => void
+      renderMcpActions?: (server: McpServerView) => ReactNode
     }
 
 // An inset focus ring survives the squircle mask, unlike an outer box shadow.
@@ -102,7 +104,7 @@ function SourceLink({ entry }: { entry: CatalogEntry }): JSX.Element {
     }
   }, [])
   const url = safeSource(entry.url)
-  if (!url) return <p className="text-xs text-text-subtle">{t('catalog.sourceUnavailable')}</p>
+  if (!url) return <span className="sr-only">{t('catalog.sourceUnavailable')}</span>
 
   const open = async (): Promise<void> => {
     setError(false)
@@ -121,9 +123,9 @@ function SourceLink({ entry }: { entry: CatalogEntry }): JSX.Element {
         className={FOCUS}
         onClick={() => void open()}
         aria-label={t('catalog.sourceNamed', { name: entry.name })}
+        title={t('catalog.sourceNamed', { name: entry.name })}
       >
         <ExternalLink aria-hidden="true" className="h-3.5 w-3.5" />
-        {t('catalog.source')}
       </Button>
       {error && (
         <p role="alert" className="text-xs text-danger">
@@ -235,6 +237,7 @@ export function CatalogSearch(props: CatalogSearchProps): JSX.Element {
   const { t } = useTranslation()
   const id = useId()
   const [query, setQuery] = useState('')
+  const [filter, setFilter] = useState<'all' | 'installed' | 'available'>('all')
   const [selected, setSelected] = useState<CatalogEntry | null>(null)
   const [installed, setInstalled] = useState<string | null>(null)
   const [reviewBusy, setReviewBusy] = useState(false)
@@ -245,7 +248,7 @@ export function CatalogSearch(props: CatalogSearchProps): JSX.Element {
   const trimmed = query.trim()
   const { result, loading, error, moreLoading, moreError, loadMore, retry } = useCatalogResults(
     props.kind,
-    props.active,
+    props.active && filter !== 'installed',
     trimmed
   )
 
@@ -276,8 +279,86 @@ export function CatalogSearch(props: CatalogSearchProps): JSX.Element {
     setSelected(null)
   }
 
+  const matches = (text: string): boolean =>
+    !trimmed || text.toLowerCase().includes(trimmed.toLowerCase())
+  // Legacy skills have no saved publisher identity. Merge only an unambiguous
+  // name match and explain that it is not a verified source match.
+  const skillMatch = (skill: SkillView): CatalogEntry | undefined => {
+    const entries =
+      result?.entries.filter((entry) => entry.name.toLowerCase() === skill.name.toLowerCase()) ?? []
+    return entries.length === 1 ? entries[0] : undefined
+  }
+  const local =
+    props.kind === 'skills'
+      ? props.installedSkills
+          .filter((skill) =>
+            matches(
+              `${skill.name} ${skill.description ?? ''} ${skill.location} ${skillMatch(skill)?.source ?? ''} ${skillMatch(skill)?.description ?? ''}`
+            )
+          )
+          .map((skill) => ({
+            key: `local:${skill.location}`,
+            skill,
+            server: undefined,
+            entry: skillMatch(skill)
+              ? {
+                  ...skillMatch(skill)!,
+                  name: skill.name,
+                  description: skill.description || skillMatch(skill)!.description
+                }
+              : {
+                  id: skill.location,
+                  kind: 'skills' as const,
+                  name: skill.name,
+                  description: skill.description ?? '',
+                  source: skill.source,
+                  url: null,
+                  iconUrl: null,
+                  installs: null,
+                  version: null
+                }
+          }))
+      : props.installedServers
+          .filter((server) =>
+            matches(
+              `${server.id} ${server.config.type === 'remote' ? server.config.url : server.config.command.join(' ')}` +
+                ` ${result?.entries.find((entry) => entry.id.toLowerCase() === server.id.toLowerCase())?.description ?? ''}`
+            )
+          )
+          .map((server) => ({
+            key: `local:${server.id}`,
+            server,
+            skill: undefined,
+            entry: result?.entries.find(
+              (entry) => entry.id.toLowerCase() === server.id.toLowerCase()
+            ) ?? {
+              id: server.id,
+              kind: 'mcp' as const,
+              name: server.id,
+              description: '',
+              source: '',
+              url: null,
+              iconUrl: null,
+              installs: null,
+              version: null
+            }
+          }))
+  const remote = (result?.entries ?? [])
+    .filter((entry) =>
+      props.kind === 'mcp'
+        ? !props.installedServers.some(
+            (server) => server.id.toLowerCase() === entry.id.toLowerCase()
+          )
+        : !props.installedSkills.some((skill) => skillMatch(skill)?.id === entry.id)
+    )
+    .map((entry) => ({ key: `catalog:${entry.id}`, entry, skill: undefined, server: undefined }))
+  const rows = [...(filter === 'available' ? [] : local), ...(filter === 'installed' ? [] : remote)]
+
   return (
-    <section aria-labelledby={`${id}-title`} className="@container flex flex-col gap-3">
+    <section
+      aria-labelledby={`${id}-title`}
+      className="@container flex w-full min-w-0 flex-col gap-3"
+    >
       <div>
         <h2
           id={`${id}-title`}
@@ -289,27 +370,40 @@ export function CatalogSearch(props: CatalogSearchProps): JSX.Element {
           {props.kind === 'skills' ? t('catalog.skillsBody') : t('catalog.mcpBody')}
         </p>
       </div>
-      <div className="relative">
-        <label className="sr-only" htmlFor={`${id}-query`}>
-          {props.kind === 'skills' ? t('catalog.skillsQuery') : t('catalog.mcpQuery')}
-        </label>
-        <Search
-          aria-hidden="true"
-          className="pointer-events-none absolute left-3 top-2.5 z-10 h-4 w-4 text-text-subtle"
-        />
-        <Input
-          ref={searchInput}
-          id={`${id}-query`}
-          type="search"
-          maxLength={120}
-          value={query}
-          disabled={!props.active || reviewBusy}
-          className="pl-9"
-          placeholder={props.kind === 'skills' ? t('catalog.skillsQuery') : t('catalog.mcpQuery')}
-          aria-describedby={`${id}-hint`}
-          autoComplete="off"
-          onChange={(event) => setQuery(event.target.value)}
-        />
+      <div className="flex flex-wrap gap-2">
+        <div className="relative min-w-48 flex-1">
+          <label className="sr-only" htmlFor={`${id}-query`}>
+            {props.kind === 'skills' ? t('catalog.skillsQuery') : t('catalog.mcpQuery')}
+          </label>
+          <Search
+            aria-hidden="true"
+            className="pointer-events-none absolute left-3 top-2.5 z-10 h-4 w-4 text-text-subtle"
+          />
+          <Input
+            ref={searchInput}
+            id={`${id}-query`}
+            type="search"
+            maxLength={120}
+            value={query}
+            disabled={!props.active || reviewBusy}
+            className="pl-9"
+            placeholder={props.kind === 'skills' ? t('catalog.skillsQuery') : t('catalog.mcpQuery')}
+            aria-describedby={`${id}-hint`}
+            autoComplete="off"
+            onChange={(event) => setQuery(event.target.value)}
+          />
+        </div>
+        <select
+          className={`${SELECT} w-auto`}
+          aria-label={t('catalog.filter')}
+          value={filter}
+          disabled={reviewBusy || !props.active}
+          onChange={(event) => setFilter(event.target.value as typeof filter)}
+        >
+          <option value="all">{t('catalog.filterAll')}</option>
+          <option value="installed">{t('catalog.filterInstalled')}</option>
+          <option value="available">{t('catalog.filterAvailable')}</option>
+        </select>
       </div>
       <p id={`${id}-hint`} className="text-xs text-text-subtle">
         {t('catalog.queryHint')}
@@ -319,7 +413,7 @@ export function CatalogSearch(props: CatalogSearchProps): JSX.Element {
           {t('catalog.installed', { name: installed })}
         </p>
       )}
-      {props.active && selected && (
+      {props.active && selected && filter !== 'installed' && (
         <CatalogReview
           key={`${props.kind}:${selected.id}`}
           catalog={props}
@@ -337,7 +431,7 @@ export function CatalogSearch(props: CatalogSearchProps): JSX.Element {
       )}
       <div aria-live="polite" aria-atomic="true" className="text-xs text-text-muted">
         {loading && <p role="status">{trimmed ? t('catalog.searching') : t('catalog.browsing')}</p>}
-        {!loading && !error && result?.entries.length === 0 && <p>{t('catalog.empty')}</p>}
+        {!loading && !error && rows.length === 0 && <p>{t('catalog.empty')}</p>}
         {result?.stale && <p className="text-warning">{t('catalog.stale')}</p>}
       </div>
       {error && (
@@ -354,53 +448,157 @@ export function CatalogSearch(props: CatalogSearchProps): JSX.Element {
           </Button>
         </div>
       )}
-      {result && result.entries.length > 0 && (
-        <div className="grid grid-cols-1 gap-3 @min-[640px]:grid-cols-2">
-          {result.entries.map((entry) => (
-            <article
-              key={entry.id}
-              className="flex min-w-0 flex-col gap-3 sq sq-xl sq-ring rounded-xl border border-border bg-surface p-4"
-            >
-              <div className="flex items-start gap-3">
-                <CatalogIcon key={entry.iconUrl} entry={entry} />
-                <div className="min-w-0 flex-1">
-                  <h3 className="break-words text-sm font-medium text-text">{entry.name}</h3>
-                  <p className="mt-1 break-words text-[11px] text-text-subtle">
-                    {t('catalog.publisher', { source: entry.source })}
-                  </p>
-                </div>
-              </div>
-              <p className="line-clamp-3 break-words text-xs text-text-muted">
-                {entry.description || t('catalog.noDescription')}
-              </p>
-              <div className="flex flex-wrap gap-2">
-                {props.kind === 'skills' && entry.installs !== null && (
-                  <Badge>{t('catalog.installs', { count: entry.installs })}</Badge>
-                )}
-                {props.kind === 'mcp' && entry.version && (
-                  <Badge>{t('catalog.version', { version: entry.version })}</Badge>
-                )}
-                {nameInUse(props, entry) && <Badge>{t('catalog.collision')}</Badge>}
-              </div>
-              <div className="mt-auto flex flex-wrap items-center justify-between gap-1">
-                <SourceLink entry={entry} />
-                <Button
-                  type="button"
-                  size="sm"
-                  className={FOCUS}
-                  disabled={!props.active || reviewBusy}
-                  aria-label={t('catalog.reviewNamed', { name: entry.name })}
-                  aria-expanded={selected?.id === entry.id}
-                  onClick={(event) => {
-                    trigger.current = event.currentTarget
-                    setSelected(entry)
-                  }}
-                >
-                  {props.kind === 'skills' ? t('catalog.reviewSkill') : t('catalog.review')}
-                </Button>
-              </div>
-            </article>
-          ))}
+      {rows.length > 0 && (
+        <div
+          role="region"
+          aria-label={t('catalog.tableScroll')}
+          tabIndex={0}
+          className={`max-w-full overflow-x-auto rounded-lg border border-border bg-surface ${FOCUS}`}
+        >
+          <table className="w-full min-w-[720px] table-fixed text-left text-xs">
+            <caption className="sr-only">
+              {props.kind === 'skills' ? t('catalog.skillsTable') : t('catalog.mcpTable')}
+            </caption>
+            <thead className="border-b border-border bg-surface-2 text-[11px] text-text-subtle">
+              <tr>
+                <th scope="col" className="w-[26%] px-3 py-2.5 font-medium">
+                  {t('catalog.nameColumn')}
+                </th>
+                <th scope="col" className="w-[29%] px-3 py-2.5 font-medium">
+                  {t('catalog.descriptionColumn')}
+                </th>
+                <th scope="col" className="w-28 px-3 py-2.5 font-medium">
+                  {t('catalog.installedColumn')}
+                </th>
+                <th scope="col" className="w-24 px-3 py-2.5 font-medium">
+                  {props.kind === 'skills'
+                    ? t('catalog.installsColumn')
+                    : t('catalog.versionColumn')}
+                </th>
+                <th scope="col" className="w-48 px-3 py-2.5 text-right font-medium">
+                  {t('catalog.actionsColumn')}
+                </th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {rows.map(({ key, entry, skill, server }) => {
+                const isLocal = Boolean(skill || server)
+                return (
+                  <tr
+                    key={key}
+                    className="align-top hover:bg-white/[0.025]"
+                    data-installed={isLocal}
+                  >
+                    <th scope="row" className="px-3 py-3 font-normal">
+                      <div className="flex items-start gap-2.5">
+                        <CatalogIcon key={entry.iconUrl} entry={entry} />
+                        <div className="min-w-0">
+                          <span
+                            className="block break-words text-sm font-medium text-text"
+                            data-catalog-name
+                          >
+                            {entry.name}
+                          </span>
+                          <span className="mt-0.5 block break-all text-[11px] text-text-subtle">
+                            {skill
+                              ? t(
+                                  skill.source === 'global'
+                                    ? 'catalog.globalSource'
+                                    : 'catalog.workspaceSource'
+                                )
+                              : entry.source}
+                          </span>
+                        </div>
+                      </div>
+                    </th>
+                    <td className="px-3 py-3 text-text-muted">
+                      <p className="line-clamp-3 break-words" title={entry.description}>
+                        {entry.description || (!isLocal ? t('catalog.noDescription') : '')}
+                      </p>
+                      {skill && (
+                        <p
+                          className="mt-1 truncate text-[11px] text-text-subtle"
+                          title={skill.location}
+                        >
+                          {skill.location}
+                        </p>
+                      )}
+                      {server && (
+                        <>
+                          <p className="break-all font-mono text-[11px] text-text-subtle">
+                            {server.config.type === 'remote'
+                              ? server.config.url
+                              : server.config.command.join(' ')}
+                          </p>
+                          <span
+                            className={`mt-1 block text-[11px] ${server.status === 'error' ? 'text-danger' : server.status === 'connected' ? 'text-success' : 'text-text-subtle'}`}
+                          >
+                            {server.status === 'connected'
+                              ? t('mcp.toolCount', { count: server.tools.length })
+                              : server.status === 'error'
+                                ? t('mcp.statusError')
+                                : t('mcp.statusDisabled')}
+                          </span>
+                          {server.error && (
+                            <p
+                              className="mt-1 line-clamp-2 break-all text-danger"
+                              title={server.error}
+                            >
+                              {server.error}
+                            </p>
+                          )}
+                        </>
+                      )}
+                    </td>
+                    <td className="px-3 py-3">
+                      <span
+                        title={skill && entry.url ? t('catalog.skillNameMatch') : undefined}
+                        className={isLocal ? 'text-success' : 'text-text-subtle'}
+                      >
+                        {isLocal
+                          ? t('catalog.isInstalled')
+                          : nameInUse(props, entry)
+                            ? t('catalog.collision')
+                            : t('catalog.notInstalled')}
+                      </span>
+                    </td>
+                    <td className="px-3 py-3 tabular-nums text-text-subtle">
+                      {props.kind === 'skills'
+                        ? (entry.installs?.toLocaleString() ?? '-')
+                        : (entry.version ?? '-')}
+                    </td>
+                    <td className="px-2 py-2.5">
+                      <div className="flex items-center justify-end gap-0.5 [&_button:focus-visible]:inset-ring-2 [&_button:focus-visible]:inset-ring-accent/70">
+                        <SourceLink entry={entry} />
+                        {skill && props.kind === 'skills' ? (
+                          props.renderSkillActions?.(skill)
+                        ) : server && props.kind === 'mcp' ? (
+                          props.renderMcpActions?.(server)
+                        ) : (
+                          <Button
+                            type="button"
+                            size="sm"
+                            className={FOCUS}
+                            disabled={!props.active || reviewBusy}
+                            aria-label={t('catalog.reviewNamed', { name: entry.name })}
+                            aria-expanded={selected?.id === entry.id}
+                            onClick={(event) => {
+                              trigger.current = event.currentTarget
+                              setSelected(entry)
+                            }}
+                          >
+                            {props.kind === 'skills'
+                              ? t('catalog.reviewSkill')
+                              : t('catalog.review')}
+                          </Button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
         </div>
       )}
       {moreError && (
@@ -408,7 +606,7 @@ export function CatalogSearch(props: CatalogSearchProps): JSX.Element {
           {t('catalog.loadMoreFailed')}
         </p>
       )}
-      {result?.nextCursor && (
+      {filter !== 'installed' && result?.nextCursor && (
         <div className="flex justify-center">
           <Button
             type="button"

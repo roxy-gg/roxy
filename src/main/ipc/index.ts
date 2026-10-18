@@ -82,6 +82,8 @@ import {
   listSkills,
   refreshSkills,
   readSkill,
+  readRawSkill,
+  saveRawSkill,
   writeSkill,
   deleteSkill,
   installSkillFromSource,
@@ -523,6 +525,16 @@ export function registerIpc(): void {
 
   // ---- skills (SKILL.md discovery) ----
   ipcMain.handle(CHANNELS.skillsList, (_e, cwd?: string) => discoverSkillViews(cwd))
+  ipcMain.handle(CHANNELS.skillsReadRaw, (_e, name: string, cwd?: string) =>
+    readRawSkill(name, cwd || app.getPath('home'))
+  )
+  ipcMain.handle(
+    CHANNELS.skillsSaveRaw,
+    async (_e, input: Parameters<typeof saveRawSkill>[0], cwd?: string) => {
+      await saveRawSkill(input, cwd || app.getPath('home'))
+      return discoverSkillViews(cwd)
+    }
+  )
   ipcMain.handle(CHANNELS.skillsRefresh, (_e, cwd?: string) => {
     refreshSkills(cwd || undefined)
     return discoverSkillViews(cwd)
@@ -537,15 +549,22 @@ export function registerIpc(): void {
   // default (~/.roxy/skills); the agent's `skill_manage` tool can target either
   // scope. Both go through the same writeSkill/deleteSkill service.
   ipcMain.handle(CHANNELS.skillsCreate, async (_e, input: SkillWriteInput, cwd?: string) => {
-    await writeSkill({ ...input, scope: input.scope ?? 'global' }, cwd || '', { mode: 'create' })
+    const result = await writeSkill({ ...input, scope: input.scope ?? 'global' }, cwd || '', {
+      mode: 'create'
+    })
+    if (!result.ok) throw Error(result.error)
     return discoverSkillViews(cwd)
   })
   ipcMain.handle(CHANNELS.skillsUpdate, async (_e, input: SkillWriteInput, cwd?: string) => {
-    await writeSkill({ ...input, scope: input.scope ?? 'global' }, cwd || '', { mode: 'edit' })
+    const result = await writeSkill({ ...input, scope: input.scope ?? 'global' }, cwd || '', {
+      mode: 'edit'
+    })
+    if (!result.ok) throw Error(result.error)
     return discoverSkillViews(cwd)
   })
   ipcMain.handle(CHANNELS.skillsRemove, async (_e, name: string, cwd?: string) => {
-    await deleteSkill(name, cwd || '')
+    const result = await deleteSkill(name, cwd || '')
+    if (!result.ok) throw Error(result.error)
     return discoverSkillViews(cwd)
   })
   // Install skill(s) from a remote source (GitHub repo/URL or a direct SKILL.md).

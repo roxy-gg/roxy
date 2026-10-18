@@ -91,6 +91,8 @@ export const CHANNELS = {
   skillsList: 'skills:list',
   skillsRefresh: 'skills:refresh',
   skillsRead: 'skills:read',
+  skillsReadRaw: 'skills:readRaw',
+  skillsSaveRaw: 'skills:saveRaw',
   skillsCreate: 'skills:create',
   skillsUpdate: 'skills:update',
   skillsRemove: 'skills:remove',

@@ -139,6 +139,8 @@ const roxy: RoxyApi = {
     reconnect: (id) => ipcRenderer.invoke(CHANNELS.mcpReconnect, id)
   },
   skills: {
+    readRaw: (name, cwd) => ipcRenderer.invoke(CHANNELS.skillsReadRaw, name, cwd),
+    saveRaw: (input, cwd) => ipcRenderer.invoke(CHANNELS.skillsSaveRaw, input, cwd),
     list: (cwd) => ipcRenderer.invoke(CHANNELS.skillsList, cwd),
     refresh: (cwd) => ipcRenderer.invoke(CHANNELS.skillsRefresh, cwd),
     read: (name, cwd) => ipcRenderer.invoke(CHANNELS.skillsRead, name, cwd),

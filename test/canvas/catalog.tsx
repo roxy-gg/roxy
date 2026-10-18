@@ -10,7 +10,7 @@ import type { McpServerView, SkillView } from '../../src/shared/api'
 const pause = (ms = 30) => new Promise((resolve) => setTimeout(resolve, ms))
 const calls: { kind: CatalogKind; query: string; cursor?: string }[] = []
 const installs: string[] = []
-const state = { calls, installs, failMore: false }
+const state = { calls, installs, failMore: false, actions: [] as string[] }
 Object.assign(window, { __catalogTest: state })
 const make = (kind: CatalogKind, name: string, extra = ''): CatalogEntry => ({
   id: kind === 'skills' ? `example/skills/${name}` : `io.github.example/${name}`,
@@ -106,9 +106,81 @@ const catalog: CatalogApi = {
     ]
   }
 }
-window.roxy = { catalog, system: { openExternal: async () => {} } } as unknown as typeof window.roxy
+let storedSkills: SkillView[] = [
+  {
+    name: 'local-workflow',
+    source: 'global',
+    location: '/fixture/local-workflow/SKILL.md',
+    description: 'A manually installed workflow.'
+  }
+]
+let storedServers: McpServerView[] = [
+  {
+    id: 'local-mcp',
+    config: { type: 'remote', url: 'https://example.com/mcp' },
+    enabled: true,
+    status: 'connected',
+    tools: ['search']
+  }
+]
+let markdown = '---\nname: local-workflow\ndescription: Fixture\nlicense: MIT\n---\nInstructions.'
+const installedList = () => Promise.resolve([...storedSkills])
+window.roxy = {
+  catalog,
+  system: { openExternal: async () => {} },
+  config: { export: async () => ({ ok: false }), import: async () => ({ cancelled: true }) },
+  skills: {
+    list: installedList,
+    refresh: installedList,
+    read: async (name: string) => ({
+      ...storedSkills.find((s) => s.name === name),
+      body: 'Instructions.'
+    }),
+    readRaw: async () => ({ text: markdown, location: storedSkills[0].location }),
+    saveRaw: async (input: { text: string }) => {
+      markdown = input.text
+      state.actions.push('skill:raw')
+      return installedList()
+    },
+    remove: async (name: string) => {
+      state.actions.push('skill:remove')
+      storedSkills = storedSkills.filter((s) => s.name !== name)
+      return installedList()
+    },
+    update: async () => {
+      state.actions.push('skill:edit')
+      return installedList()
+    },
+    create: async () => installedList()
+  },
+  mcp: {
+    list: async () => [...storedServers],
+    setEnabled: async (id: string, enabled: boolean) => {
+      state.actions.push('mcp:toggle')
+      storedServers = storedServers.map((s) =>
+        s.id === id ? { ...s, enabled, status: enabled ? 'connected' : 'disabled' } : s
+      )
+      return [...storedServers]
+    },
+    reconnect: async () => {
+      state.actions.push('mcp:reconnect')
+      return [...storedServers]
+    },
+    upsert: async (input: McpServerView) => {
+      state.actions.push('mcp:raw')
+      storedServers = storedServers.map((s) => (s.id === input.id ? { ...s, ...input } : s))
+    },
+    remove: async (id: string) => {
+      state.actions.push('mcp:remove')
+      storedServers = storedServers.filter((s) => s.id !== id)
+      return [...storedServers]
+    }
+  }
+} as unknown as typeof window.roxy
 // The real module captures window.roxy; install the fixture bridge first.
 const { CatalogSearch } = await import('../../src/renderer/src/components/CatalogSearch')
+const { default: Skills } = await import('../../src/renderer/src/routes/Skills')
+const { McpServers } = await import('../../src/renderer/src/components/McpServers')
 await i18n.changeLanguage('en')
 
 function Harness() {
@@ -120,18 +192,31 @@ function Harness() {
       <button id="toggle-active" onClick={() => setActive(!active)}>
         Toggle settings activity
       </button>
-      <CatalogSearch
-        kind="skills"
-        active={active}
-        installedSkills={skills}
-        onSkillsInstalled={setSkills}
-      />
-      <CatalogSearch
-        kind="mcp"
-        active={active}
-        installedServers={servers}
-        onMcpInstalled={setServers}
-      />
+      {new URLSearchParams(location.search).has('management') ? (
+        <>
+          <div id="skills-management">
+            <Skills active={active} />
+          </div>
+          <div id="mcp-management">
+            <McpServers active={active} showBackup />
+          </div>
+        </>
+      ) : (
+        <>
+          <CatalogSearch
+            kind="skills"
+            active={active}
+            installedSkills={skills}
+            onSkillsInstalled={setSkills}
+          />
+          <CatalogSearch
+            kind="mcp"
+            active={active}
+            installedServers={servers}
+            onMcpInstalled={setServers}
+          />
+        </>
+      )}
     </main>
   )
 }

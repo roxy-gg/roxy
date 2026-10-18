@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useTranslation, Trans } from 'react-i18next'
-import { Braces, Plug, Plus, RefreshCw, Trash2 } from 'lucide-react'
+import { Braces, Plus, RefreshCw, Trash2 } from 'lucide-react'
 import type { McpServerView } from '@shared/api'
 import {
   parseMcpJson,
@@ -9,22 +9,9 @@ import {
   type ParsedMcpJson
 } from '@shared/mcp'
 import { api } from '../lib/api'
-import { Button, Input, Switch, Badge, Textarea } from './ui'
+import { Button, Input, Textarea } from './ui'
 import { ConfigBackup } from './ConfigBackup'
 import { CatalogSearch } from './CatalogSearch'
-
-function configSummary(config: McpServerConfig): string {
-  return config.type === 'remote' ? config.url : config.command.join(' ')
-}
-
-/* Badge's visible worklet hairline comes from `sq-ring-*`; the matching
-   `border-*` is still required as the graceful fallback when Paint Worklet is
-   unavailable or has not loaded yet. */
-const MCP_STATUS_STYLES: Record<McpServerView['status'], string> = {
-  connected: 'border-success/30 sq-ring-success bg-success/15 text-success',
-  error: 'border-danger/30 sq-ring-danger bg-danger/15 text-danger',
-  disabled: 'text-text-muted'
-}
 
 /** Sizes the JSON editor to its content so a long config isn't read through a slot. */
 function jsonRows(text: string): number {
@@ -55,6 +42,7 @@ export function McpServers({
   const [listErr, setListErr] = useState('')
   /** id of the server whose raw JSON is open in the editor (only one at a time). */
   const [editing, setEditing] = useState<string | null>(null)
+  const [removing, setRemoving] = useState<string | null>(null)
 
   const reload = async (): Promise<void> => {
     setListErr('')
@@ -112,6 +100,7 @@ export function McpServers({
     setListErr('')
     try {
       setServers(await api.mcp.remove(id))
+      setRemoving(null)
       if (editing === id) setEditing(null)
     } catch {
       setListErr(t('catalog.actionFailed'))
@@ -218,6 +207,24 @@ export function McpServers({
 
   return (
     <div className="flex flex-col gap-2">
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <Button
+          size="sm"
+          onClick={() => {
+            setShowAdd((value) => !value)
+            setEditing(null)
+          }}
+          disabled={busy !== null}
+        >
+          <Plus className="h-3.5 w-3.5" />
+          {t('mcp.addServer')}
+        </Button>
+        <Button size="sm" variant="ghost" onClick={() => void reload()} disabled={busy !== null}>
+          <RefreshCw className="h-3.5 w-3.5" />
+          {t('catalog.refresh')}
+        </Button>
+        {showBackup && <ConfigBackup onImported={() => void reload()} />}
+      </div>
       {listErr && (
         <div role="alert" className="flex flex-wrap items-center gap-2 text-xs text-danger">
           <p>{listErr}</p>
@@ -231,95 +238,26 @@ export function McpServers({
           </Button>
         </div>
       )}
-      {loading ? (
-        <p className="text-xs text-text-subtle">{t('common.loading')}</p>
-      ) : servers.length === 0 && !showAdd ? (
-        <p className="text-xs text-text-muted">
-          <Trans i18nKey="mcp.emptyState" />
-        </p>
-      ) : (
-        servers.map((s) => (
-          <div
-            key={s.id}
-            className="flex flex-col sq sq-xl sq-ring rounded-xl border border-border bg-surface p-3.5"
-          >
-            <div className="flex items-center gap-3">
-              <div className="flex h-8 w-8 items-center justify-center sq sq-lg sq-ring rounded-lg border border-border bg-surface-2">
-                <Plug className="h-4 w-4 text-text-muted" />
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2">
-                  <span className="truncate text-sm font-medium text-text">{s.id}</span>
-                  <Badge className={MCP_STATUS_STYLES[s.status]}>
-                    {s.status === 'connected'
-                      ? t('mcp.toolCount', { count: s.tools.length })
-                      : s.status === 'error'
-                        ? t('mcp.statusError')
-                        : t('mcp.statusDisabled')}
-                  </Badge>
-                </div>
-                <p
-                  className="mt-0.5 truncate text-xs text-text-subtle"
-                  title={configSummary(s.config)}
-                >
-                  {configSummary(s.config)}
-                </p>
-                {s.status === 'error' && s.error && (
-                  <p className="mt-0.5 truncate text-xs text-danger" title={s.error}>
-                    {s.error}
-                  </p>
-                )}
-              </div>
-              <Switch
-                checked={s.enabled}
-                disabled={busy === s.id}
-                onChange={(v) => void toggle(s.id, v)}
-              />
-              <Button
-                size="sm"
-                variant="ghost"
-                disabled={busy === s.id}
-                onClick={() => setEditing((cur) => (cur === s.id ? null : s.id))}
-                title={t('mcp.editRawJson')}
-                aria-expanded={editing === s.id}
-                className={editing === s.id ? 'text-text' : undefined}
-              >
-                <Braces className="h-3.5 w-3.5" />
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                disabled={busy === s.id || !s.enabled}
-                onClick={() => void reconnect(s.id)}
-                title={t('mcp.reconnect')}
-              >
-                <RefreshCw className="h-3.5 w-3.5" />
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                disabled={busy === s.id}
-                onClick={() => void remove(s.id)}
-                title={t('common.remove')}
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-              </Button>
-            </div>
-            {editing === s.id && (
-              // Keyed by the stored config so an external change (import, the mcp
-              // tool) reseeds the draft instead of leaving stale text on screen.
+      {loading && <p className="text-xs text-text-subtle">{t('common.loading')}</p>}
+      {editing &&
+        servers.find((s) => s.id === editing) &&
+        (() => {
+          const server = servers.find((s) => s.id === editing)!
+          return (
+            <div className="rounded-lg border border-border bg-surface p-4">
+              <h3 className="text-sm font-medium text-text">
+                {t('mcp.rawConfigAriaLabel', { name: server.id })}
+              </h3>
               <RawConfigEditor
-                key={configSummary(s.config)}
-                server={s}
-                busy={busy === s.id}
+                key={server.id + JSON.stringify(server.config)}
+                server={server}
+                busy={busy === server.id}
                 onCancel={() => setEditing(null)}
-                onSave={(parsed) => saveRaw(s, parsed)}
+                onSave={(parsed) => saveRaw(server, parsed)}
               />
-            )}
-          </div>
-        ))
-      )}
-
+            </div>
+          )
+        })()}
       {showAdd ? (
         <div className="flex flex-col gap-3 sq sq-xl sq-ring rounded-xl border border-border bg-surface p-4">
           <div className="flex flex-col gap-2 sm:flex-row">
@@ -391,25 +329,87 @@ export function McpServers({
             </span>
           </div>
         </div>
-      ) : (
-        <button
-          onClick={() => setShowAdd(true)}
-          className="press-scale flex items-center justify-center gap-2 sq sq-xl sq-ring sq-dashed rounded-xl border border-dashed border-border bg-surface/40 p-3.5 text-sm text-text-muted hover:border-border-strong hover:[--sq-ring:var(--color-border-strong)] hover:bg-surface hover:text-text"
+      ) : null}
+      {removing && (
+        <div
+          role="alert"
+          className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-surface p-3 text-xs text-text"
         >
-          <Plus className="h-4 w-4" /> {t('mcp.addServer')}
-        </button>
-      )}
-      {showBackup && (
-        <div className="mt-1 border-t border-border pt-3">
-          <ConfigBackup onImported={() => void reload()} />
+          <span>{t('catalog.confirmRemove', { name: removing })}</span>
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={busy !== null}
+            onClick={() => setRemoving(null)}
+          >
+            {t('common.cancel')}
+          </Button>
+          <Button
+            size="sm"
+            variant="danger"
+            disabled={busy !== null}
+            onClick={() => void remove(removing)}
+          >
+            {t('common.remove')}
+          </Button>
         </div>
       )}
-      <div className="mt-7">
+      <div className="mt-3">
         <CatalogSearch
           kind="mcp"
           active={active}
           installedServers={servers}
           onMcpInstalled={setServers}
+          renderMcpActions={(server) => (
+            <>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={server.enabled}
+                aria-label={t('catalog.enableNamed', { name: server.id })}
+                disabled={busy !== null}
+                onClick={() => void toggle(server.id, !server.enabled)}
+                className={`relative mr-1 inline-flex h-5 w-9 shrink-0 items-center rounded-full p-0.5 outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-40 ${server.enabled ? 'bg-accent' : 'bg-surface-2 inset-ring-1 inset-ring-border'}`}
+              >
+                <span
+                  className={`h-4 w-4 rounded-full bg-white ${server.enabled ? 'translate-x-4' : 'translate-x-0'}`}
+                />
+              </button>
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={busy !== null}
+                onClick={() => {
+                  setEditing(server.id)
+                  setShowAdd(false)
+                }}
+                title={t('mcp.editRawJson')}
+                aria-label={t('catalog.editRawNamed', { name: server.id })}
+              >
+                <Braces className="h-3.5 w-3.5" />
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={busy !== null || !server.enabled}
+                onClick={() => void reconnect(server.id)}
+                title={t('mcp.reconnect')}
+                aria-label={t('catalog.reconnectNamed', { name: server.id })}
+              >
+                <RefreshCw className={`h-3.5 w-3.5 ${busy === server.id ? 'animate-spin' : ''}`} />
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={busy !== null}
+                onClick={() => setRemoving(server.id)}
+                title={t('common.remove')}
+                aria-label={t('catalog.removeNamed', { name: server.id })}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </Button>
+            </>
+          )}
         />
       </div>
     </div>

@@ -52,18 +52,18 @@ async function run() {
   await wait(2000)
   check(
     'both catalogs browse independently',
-    await evaluate(`return document.querySelectorAll('article').length===8`)
+    await evaluate(`return document.querySelectorAll('tbody tr').length===8`)
   )
   check(
     'skills show installs; MCP does not invent counts',
     await evaluate(
-      `return document.querySelectorAll('section')[0].textContent.includes('24,531 installs') && !document.querySelectorAll('section')[1].textContent.includes('24,531')`
+      `return document.querySelectorAll('section')[0].textContent.includes('24,531') && !document.querySelectorAll('section')[1].textContent.includes('24,531')`
     )
   )
   check(
-    'wide container renders two columns',
+    'catalogs render semantic tables with installation column, not cards',
     await evaluate(
-      `return getComputedStyle(document.querySelector('article').parentElement).gridTemplateColumns.split(' ').length===2`
+      `return document.querySelectorAll('table').length===2 && [...document.querySelectorAll('thead th')].some(h=>h.textContent==='Installed') && !document.querySelector('article')`
     )
   )
   await click('Review files')
@@ -87,7 +87,7 @@ async function run() {
   check(
     'explicit skill confirmation refreshes installed state',
     await evaluate(
-      `return window.__catalogTest.installs.length===1 && document.querySelector('section').textContent.includes('Name already in use') && !document.querySelector('[role=region]')`
+      `return window.__catalogTest.installs.length===1 && document.querySelector('tr[data-installed=true]') && !document.querySelector('[aria-busy]')`
     )
   )
   await click('Review setup', 1)
@@ -103,7 +103,7 @@ async function run() {
   check(
     'MCP confirmation uses reviewed option and refreshes list',
     await evaluate(
-      `return window.__catalogTest.installs.length===2 && document.querySelectorAll('section')[1].textContent.includes('Name already in use')`
+      `return window.__catalogTest.installs.length===2 && document.querySelectorAll('section')[1].querySelectorAll('tr[data-installed=true]').length===1 && document.querySelectorAll('section')[1].querySelectorAll('tbody tr').length===4`
     )
   )
   await input('slow')
@@ -112,7 +112,9 @@ async function run() {
   await wait(1000)
   check(
     'late search cannot replace newer results',
-    await evaluate(`return document.querySelector('section article h3').textContent==='fast'`)
+    await evaluate(
+      `return document.querySelector('section [data-catalog-name]').textContent==='fast'`
+    )
   )
   await input('x')
   await wait(400)
@@ -133,9 +135,9 @@ async function run() {
   await evaluate(`window.__catalogTest.failMore=true`)
   await click('Load more')
   check(
-    'pagination failure retains current cards',
+    'pagination failure retains current rows',
     await evaluate(
-      `return document.querySelector('section').querySelectorAll('article').length===4 && document.querySelector('section').textContent.includes('current results are still available')`
+      `return document.querySelector('section').querySelectorAll('tbody tr').length===4 && document.querySelector('section').textContent.includes('current results are still available')`
     )
   )
   await evaluate(`window.__catalogTest.failMore=false`)
@@ -143,7 +145,7 @@ async function run() {
   check(
     'pagination retry adds only next page',
     await evaluate(
-      `return document.querySelector('section').querySelectorAll('article').length===5`
+      `return document.querySelector('section').querySelectorAll('tbody tr').length===5`
     )
   )
   await evaluate(`document.querySelector('#toggle-active').click()`)
@@ -159,9 +161,9 @@ async function run() {
   win.setContentSize(390, 850)
   await wait(250)
   check(
-    'mobile container uses one column without horizontal overflow',
+    'narrow layouts scroll the table without overflowing the page',
     await evaluate(
-      `return getComputedStyle(document.querySelector('article').parentElement).gridTemplateColumns.split(' ').length===1 && document.documentElement.scrollWidth<=innerWidth`
+      `return document.querySelector('table').parentElement.scrollWidth>document.querySelector('table').parentElement.clientWidth && document.documentElement.scrollWidth<=innerWidth`
     )
   )
   await fs.writeFile(
@@ -175,6 +177,118 @@ async function run() {
     (await win.webContents.capturePage()).toPNG()
   )
   check('no renderer errors', errors.length === 0)
+  await win.loadURL('http://127.0.0.1:3104/catalog.html?management')
+  await wait(700)
+  check(
+    'real settings hide built-in tools and put manual controls above unified tables',
+    await evaluate(
+      `return !document.body.textContent.includes('Built-in tools') && document.querySelectorAll('table').length===2 && document.querySelector('#skills-management button').textContent.includes('Add from URL') && document.querySelector('#mcp-management button').textContent.includes('Add MCP server')`
+    )
+  )
+  await evaluate(
+    `document.querySelector('button[aria-label="Edit raw SKILL.md for local-workflow"]').click()`
+  )
+  await wait()
+  check(
+    'installed skill exposes full frontmatter in raw editor',
+    await evaluate(
+      `return document.querySelector('#skills-management textarea').value.includes('license: MIT')`
+    )
+  )
+  await evaluate(
+    `const el=document.querySelector('#skills-management textarea'); Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(el,el.value.replace('Instructions.','Edited.'));el.dispatchEvent(new Event('input',{bubbles:true}));`
+  )
+  await wait()
+  await evaluate(
+    `[...document.querySelectorAll('#skills-management button')].find(b=>b.textContent==='Save changes').click()`
+  )
+  await wait()
+  check(
+    'raw skill save updates installed list',
+    await evaluate(
+      `return window.__catalogTest.actions.includes('skill:raw') && !document.querySelector('#skills-management textarea')`
+    )
+  )
+  await evaluate(`document.querySelector('button[aria-label="Reconnect local-mcp"]').click()`)
+  await wait()
+  check(
+    'MCP reconnect remains available from installed table row',
+    await evaluate(`return window.__catalogTest.actions.includes('mcp:reconnect')`)
+  )
+  await evaluate(
+    `document.querySelector('button[aria-label="Edit raw configuration for local-mcp"]').click()`
+  )
+  await wait()
+  await evaluate(
+    `const el=document.querySelector('#mcp-management textarea');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(el,el.value.replace('example.com/mcp','example.com/updated'));el.dispatchEvent(new Event('input',{bubbles:true}));`
+  )
+  await wait()
+  await evaluate(
+    `[...document.querySelectorAll('#mcp-management button')].find(b=>b.textContent==='Save & reconnect').click()`
+  )
+  await wait()
+  check(
+    'MCP raw JSON save reconnects and updates configuration',
+    await evaluate(
+      `return window.__catalogTest.actions.includes('mcp:raw') && document.querySelector('#mcp-management table').textContent.includes('example.com/updated')`
+    )
+  )
+  await evaluate(`document.querySelector('button[aria-label="Enable local-mcp"]').click()`)
+  await wait()
+  check(
+    'MCP toggle disables connection and reconnect action',
+    await evaluate(
+      `return document.querySelector('button[aria-label="Enable local-mcp"]').getAttribute('aria-checked')==='false' && document.querySelector('button[aria-label="Reconnect local-mcp"]').disabled`
+    )
+  )
+  check('management has no renderer errors', errors.length === 0)
+  const beforeFilter = await evaluate(`return window.__catalogTest.calls.length`)
+  await evaluate(
+    `const el=document.querySelector('#skills-management select[aria-label="Filter by installation"]');el.value='installed';el.dispatchEvent(new Event('change',{bubbles:true}));`
+  )
+  await wait(400)
+  check(
+    'installed-only filter keeps local items without upstream requests',
+    await evaluate(
+      `return document.querySelector('#skills-management tbody').rows.length===1 && window.__catalogTest.calls.length===${beforeFilter}`
+    )
+  )
+  await evaluate(`document.querySelector('button[aria-label="Remove local-workflow"]').click()`)
+  await wait()
+  check(
+    'skill removal requires explicit confirmation',
+    await evaluate(
+      `return !window.__catalogTest.actions.includes('skill:remove') && document.querySelector('#skills-management [role=alert]').textContent.includes('local-workflow')`
+    )
+  )
+  await evaluate(
+    `[...document.querySelectorAll('#skills-management button')].find(b=>b.textContent==='Delete').click()`
+  )
+  await wait()
+  check(
+    'confirmed skill removal updates installed filter',
+    await evaluate(
+      `return window.__catalogTest.actions.includes('skill:remove') && !document.querySelector('#skills-management tr[data-installed=true]')`
+    )
+  )
+  await evaluate(`document.querySelector('button[aria-label="Remove local-mcp"]').click()`)
+  await wait()
+  check(
+    'MCP removal requires explicit confirmation',
+    await evaluate(
+      `return !window.__catalogTest.actions.includes('mcp:remove') && document.querySelector('#mcp-management [role=alert]').textContent.includes('local-mcp')`
+    )
+  )
+  await evaluate(
+    `[...document.querySelectorAll('#mcp-management button')].find(b=>b.textContent==='Remove').click()`
+  )
+  await wait()
+  check(
+    'confirmed MCP removal updates table',
+    await evaluate(
+      `return window.__catalogTest.actions.includes('mcp:remove') && !document.querySelector('#mcp-management tr[data-installed=true]')`
+    )
+  )
   console.log(`CATALOG UI OK - ${checks} checks passed`)
 }
 app.whenReady().then(async () => {
