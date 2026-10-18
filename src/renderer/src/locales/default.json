@@ -1,7 +1,7 @@
 {
   "voice": {
     "heading": "Voice Translation",
-    "description": "Turn speech into text in your chat input as you speak. Off by default. Recognition runs locally; audio is never uploaded. This transcribes your words, it does not translate between languages.",
+    "description": "Turn speech into text in your chat input as you speak. Off until you download a model and select Use model above. Recognition runs locally; audio is never uploaded. This transcribes your words, it does not translate between languages.",
     "loading": "Loading voice settings...",
     "microphone": "Microphone",
     "microphoneBody": "Capture starts only when you press the mic or a shortcut, and closes when recording ends. Refresh devices to request access and choose an input.",
@@ -23,7 +23,7 @@
     "hotkeyNumber": "Shortcut {{number}}",
     "hotkeyHint": "Use Electron shortcut names such as CommandOrControl+Shift+Space. Leave blank to disable. Toggle shortcuts only; hold-to-talk and modifier-only keys are not supported. Editing the draft stops dictation and preserves the text already shown.",
     "models": "Transcription Models",
-    "modelsBody": "Download a model, then select Use model. Only genuine streaming models are listed. Downloads require internet; transcription works offline. Review each model's license before downloading. Sizes show installed model data, not memory usage.",
+    "modelsBody": "Download a model, then select Use model to enable voice transcription. Only genuine streaming models are listed. Downloads require internet; transcription works offline. Review each model's license before downloading. Sizes show installed model data, not memory usage.",
     "search": "Search models by name...",
     "streamingOnly": "Streaming models only",
     "streaming": "Streaming",
@@ -52,7 +52,7 @@
       "stopping": "Finishing transcription..."
     },
     "errors": {
-      "disabled": "Enable Voice Translation in Settings first.",
+      "disabled": "Download a model and select Use model in Settings > General > Voice Translation first.",
       "unsupported": "Local voice recognition is not available for this operating system or architecture. Windows requires x64; macOS supports Apple Silicon and Intel.",
       "modelRequired": "Download and select a streaming model in Settings > General > Voice Translation.",
       "permissionDenied": "Microphone access was denied. Allow Roxy in your system microphone privacy settings, then restart Roxy if needed.",

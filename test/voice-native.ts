@@ -8,7 +8,11 @@ import { VOICE_MODELS } from '../src/shared/voice'
 // Explicit opt-in integration probe: downloads a pinned model into test/.out,
 // verifies each file, then feeds a public prerecorded sample. Never opens a mic.
 async function run(): Promise<void> {
-  const model = VOICE_MODELS[process.argv.includes('--nemotron') ? 1 : 0]
+  const model = VOICE_MODELS.find((entry) =>
+    process.argv.includes('--nemotron')
+      ? entry.description === 'nemotron'
+      : entry.description === 'parakeet'
+  )!
   const directory = resolve('test/.out/voice-native-' + model.id)
   await mkdir(directory, { recursive: true })
   for (const file of model.files) {

@@ -17,10 +17,10 @@ await build({
   format: 'cjs'
 })
 const shared = require(resolve('test/.out/voice-shared.cjs'))
-const contentsByName = new Map(
-  shared.VOICE_MODELS[0].files.map((file) => [file.name, Buffer.from(file.name)])
-)
-const originalFiles = shared.VOICE_MODELS[0].files
+const model = shared.VOICE_MODELS.find((entry) => entry.id === 'parakeet-unified-en-streaming')
+const otherModel = shared.VOICE_MODELS.find((entry) => entry.id === 'nemotron-streaming-3.5')
+const contentsByName = new Map(model.files.map((file) => [file.name, Buffer.from(file.name)]))
+const originalFiles = model.files
 let renamed = false
 let savedMarker = false
 const handlers = new Map()
@@ -64,6 +64,7 @@ let captureOptions
 let releaseOpen
 let closes = 0
 let available = true
+let otherAvailable = false
 const recorder = {
   isRecording: false,
   start() {
@@ -117,6 +118,7 @@ globalThis.__voiceMocks = {
     rm: async () => {},
     rename: async () => {
       renamed = true
+      available = true
     },
     writeFile: async () => {
       savedMarker = true
@@ -125,18 +127,12 @@ globalThis.__voiceMocks = {
       write: async (chunk, offset) => ({ bytesWritten: chunk.length - offset }),
       close: async () => {}
     }),
-    readFile: async () => '7551fd26fc810cc1e4e043e608db4d13b59be31e',
+    readFile: async (path) => (path.includes(model.id) ? model.revision : otherModel.revision),
     stat: async (path) => {
-      if (!available) throw new Error('missing')
+      const entry = path.includes(model.id) ? model : otherModel
+      if (entry === model ? !available : !otherAvailable) throw new Error('missing')
       const name = path.split(/[\\/]/).pop()
-      return {
-        size: {
-          'encoder.int8.onnx': 654046389,
-          'decoder.int8.onnx': 7257777,
-          'joiner.int8.onnx': 1735860,
-          'tokens.txt': 8952
-        }[name]
-      }
+      return { size: entry.files.find((file) => file.name === name).bytes }
     }
   },
   native: {
@@ -208,6 +204,18 @@ try {
   const invoke = (name, ...args) => handlers.get('voice:' + name)(trusted, ...args)
   assert.equal(registrations.size, 0)
   assert.equal(forks, 0, 'Disabled voice does not boot a model')
+  assert.equal((await invoke('update', { enabled: true })).error, 'modelRequired')
+  assert.equal(settings.enabled, false, 'Voice cannot enable without a selected model')
+  available = false
+  assert.equal(
+    (await invoke('update', { enabled: true, modelId: model.id })).error,
+    'modelRequired'
+  )
+  assert.equal((await invoke('update', { modelId: model.id })).error, 'modelRequired')
+  assert.equal(settings.modelId, null, 'Uninstalled models cannot be selected')
+  assert.equal(registrations.size, 0)
+  assert.equal(forks, 0)
+  available = true
   contents.getURL = () => 'https://untrusted.example/'
   assert.equal((await invoke('start', 'one', 'chat')).error, 'disabled')
   contents.getURL = () => 'http://localhost:3105/'
@@ -271,11 +279,15 @@ try {
   available = true
   await invoke('update', { enabled: true })
   while (loads < 2) await new Promise((resolve) => setTimeout(resolve, 1))
-  await invoke('update', { modelId: shared.VOICE_MODELS[1].id })
+  assert.equal((await invoke('update', { modelId: otherModel.id })).error, 'modelRequired')
+  assert.equal(settings.modelId, model.id, 'Invalid selection preserves the working model')
+  assert.equal(kills, 1, 'Invalid selection does not unload the working model')
+  otherAvailable = true
+  assert((await invoke('update', { modelId: otherModel.id })).ok)
   assert.equal(kills, 2, 'Switching models unloads previous weights')
-  assert.equal((await invoke('start', 'missing-model', 'chat')).error, 'modelRequired')
-  await invoke('update', { modelId: shared.VOICE_MODELS[0].id })
   while (loads < 3) await new Promise((resolve) => setTimeout(resolve, 1))
+  await invoke('update', { modelId: model.id })
+  while (loads < 4) await new Promise((resolve) => setTimeout(resolve, 1))
   assert((await invoke('start', 'isolated', 'chat')).ok)
   const beforeStale = events.filter((event) => event.type === 'transcript').length
   workers.at(-1).emit('message', { type: 'text', recordingId: 'one', text: 'stale' })
@@ -286,11 +298,11 @@ try {
   )
   await invoke('stop', 'isolated', false)
   await invoke('update', { microphone: { id: 'usb', name: 'Mic', occurrence: 0 } })
-  assert.equal(loads, 3, 'Microphone settings do not reload unchanged weights')
+  assert.equal(loads, 4, 'Microphone settings do not reload unchanged weights')
   await invoke('update', { enabled: false })
-  assert.equal(kills, 3)
+  assert.equal(kills, 4)
   await invoke('update', { enabled: true })
-  while (loads < 4) await new Promise((resolve) => setTimeout(resolve, 1))
+  while (loads < 5) await new Promise((resolve) => setTimeout(resolve, 1))
   assert((await invoke('start', 'crash', 'chat')).ok)
   workers.at(-1).emit('exit', 1)
   await new Promise((resolve) => setTimeout(resolve, 5))
@@ -303,16 +315,27 @@ try {
     )
   )
   assert((await invoke('start', 'recovered', 'chat')).ok)
-  assert.equal(loads, 5, 'Next recording recovers a crashed model process')
+  assert.equal(loads, 6, 'Next recording recovers a crashed model process')
   await invoke('stop', 'recovered', false)
-  await invoke('remove', shared.VOICE_MODELS[0].id)
+  await invoke('remove', model.id)
   assert.equal(settings.modelId, null, 'Removing the selected model clears selection')
-  assert.equal(kills, 4, 'Removing the selected model unloads it')
-  await invoke('update', { enabled: false, modelId: shared.VOICE_MODELS[0].id })
+  assert.equal(settings.enabled, false, 'Removing the selected model disables voice')
+  assert.equal(registrations.size, 0, 'Removing the selected model unregisters shortcuts')
+  assert.equal(kills, 5, 'Removing the selected model unloads it')
   available = false
-  await invoke('update', { enabled: true })
-  assert.equal((await invoke('start', 'missing', 'chat')).error, 'modelRequired')
-  shared.VOICE_MODELS[0].files = originalFiles.map((file) => ({
+  assert.equal(
+    (await invoke('update', { enabled: true, modelId: model.id })).error,
+    'modelRequired'
+  )
+  assert.equal((await invoke('start', 'missing', 'chat')).error, 'disabled')
+  settings = { ...settings, enabled: true, modelId: model.id }
+  assert.equal(
+    (await service.voiceState()).settings.enabled,
+    false,
+    'Stale enabled settings are reported off'
+  )
+  settings = { ...settings, enabled: false, modelId: null }
+  model.files = originalFiles.map((file) => ({
     ...file,
     bytes: contentsByName.get(file.name).length,
     sha256: createHash('sha256').update(contentsByName.get(file.name)).digest('hex')
@@ -320,24 +343,52 @@ try {
   const originalFetch = globalThis.fetch
   try {
     globalThis.fetch = async (url) => new Response(contentsByName.get(url.split('/').pop()))
-    assert((await invoke('download', shared.VOICE_MODELS[0].id)).ok)
+    assert((await invoke('download', model.id)).ok)
     assert(renamed && savedMarker, 'Only verified files publish a completed directory')
+    assert.equal(settings.enabled, false, 'Downloading while off does not enable voice')
+    assert.equal(settings.modelId, null, 'Downloading does not implicitly select a model')
+    assert((await invoke('update', { enabled: true, modelId: model.id })).ok)
+    assert.equal(settings.enabled, true, 'Use model enables a verified download')
+    await invoke('update', { enabled: false })
+    available = false
     renamed = savedMarker = false
     globalThis.fetch = async () => new Response('corrupt')
-    assert.equal((await invoke('download', shared.VOICE_MODELS[0].id)).error, 'integrityFailed')
+    assert.equal((await invoke('download', model.id)).error, 'integrityFailed')
     assert(!renamed && !savedMarker, 'Corrupt download never publishes')
     globalThis.fetch = (_url, { signal }) =>
       new Promise((_resolve, reject) =>
         signal.addEventListener('abort', () => reject(Error('cancelled')))
       )
-    const pending = invoke('download', shared.VOICE_MODELS[0].id)
+    const pending = invoke('download', model.id)
     await new Promise((resolve) => setTimeout(resolve, 5))
+    assert((await invoke('update', { enabled: false })).ok)
+    assert((await service.voiceState()).download, 'Voice being off does not cancel downloads')
     await invoke('cancelDownload')
     assert((await pending).ok, 'Explicit cancellation is not a download error')
     assert(!renamed && !savedMarker, 'Cancelled download never publishes')
   } finally {
     globalThis.fetch = originalFetch
   }
+  settings = { ...settings, enabled: true, modelId: model.id }
+  service.registerVoiceIpc()
+  assert.equal((await invoke('state')).settings.enabled, false)
+  assert.equal(
+    settings.enabled,
+    false,
+    'Startup disables persisted voice when model files are missing'
+  )
+  assert.equal(registrations.size, 0, 'Startup does not register shortcuts without a usable model')
+  available = true
+  settings = { ...settings, enabled: true }
+  const previousLoads = loads
+  service.registerVoiceIpc()
+  assert.equal((await invoke('state')).settings.enabled, true)
+  while (loads === previousLoads) await new Promise((resolve) => setTimeout(resolve, 1))
+  assert.equal(
+    registrations.size,
+    2,
+    'Startup restores enabled voice with a verified selected model'
+  )
   service.shutdownVoice()
   console.log(
     'VOICE SERVICE OK: opt-in, isolation, hotkeys, streaming, warm reuse without mic, unload/switch/removal, crash recovery, cancellation, verified downloads'

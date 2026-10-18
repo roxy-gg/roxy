@@ -12,6 +12,13 @@ const click = async (selector) => {
   await evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`)
   await wait()
 }
+const modelButton = async (label) => {
+  await evaluate(`const button = [...document.querySelector('article').querySelectorAll('button')]
+    .find((element) => element.textContent.trim() === ${JSON.stringify(label)});
+    if (!button || button.disabled) throw Error('Model action unavailable: ' + ${JSON.stringify(label)});
+    button.click();`)
+  await wait()
+}
 const until = async (code) => {
   for (let n = 0; n < 100; n++) {
     if (await evaluate(`return ${code}`)) return
@@ -45,17 +52,66 @@ app
     win.webContents.on('console-message', (_event, level, text) => {
       if (level >= 3) errors.push(text)
     })
-    await win.loadURL('http://localhost:3105/?voice')
-    await until(`!!document.querySelector('[role="switch"]')`)
+    await win.loadURL(process.env.VOICE_UI_URL || 'http://localhost:3105/?voice')
+    await until(`!!document.querySelector('#voice-models-heading')`)
     assert.equal(
-      await evaluate(
-        `return document.querySelector('[role="switch"]').getAttribute('aria-checked')`
-      ),
-      'false'
+      await evaluate(`return document.querySelector('[role="switch"]')`),
+      null,
+      'Voice settings have no feature-enable toggle'
     )
+    assert.equal(await evaluate(`return document.querySelector('fieldset').disabled`), true)
     assert.equal(await evaluate(`return document.querySelectorAll('article').length`), 2)
-    await click('[role="switch"]')
-    await click('#voice-ready')
+    assert.deepEqual(
+      await evaluate(
+        `return [...document.querySelectorAll('article h3')].map((el) => el.textContent)`
+      ),
+      ['Nemotron Streaming 3.5', 'Parakeet Unified EN 0.6B']
+    )
+    assert.equal(
+      await evaluate(`return document.querySelector('h2').textContent`),
+      'Transcription Models'
+    )
+    await modelButton('Download')
+    assert.equal(
+      await evaluate(`return document.querySelector('fieldset').disabled`),
+      true,
+      'Downloading alone does not enable voice'
+    )
+    await click('#voice-page')
+    await until(`!!document.querySelector('textarea')`)
+    assert.equal(
+      await evaluate(`return document.querySelector('[aria-label="Start voice transcription"]')`),
+      null,
+      'Downloading alone does not expose a nonfunctional mic'
+    )
+    await click('#voice-page')
+    await modelButton('Use model')
+    assert.equal(
+      await evaluate(`return document.querySelector('fieldset').disabled`),
+      false,
+      'Use model enables voice without a separate toggle step'
+    )
+    assert.equal(
+      await evaluate(`return document.querySelector('article').textContent.includes('Active')`),
+      true
+    )
+    assert.equal(await evaluate(`return document.querySelector('[role="switch"]')`), null)
+    await modelButton('Delete')
+    await modelButton('Delete model files?')
+    assert.equal(
+      await evaluate(`return document.querySelector('fieldset').disabled`),
+      true,
+      'Removing the active model turns voice off'
+    )
+    await click('#voice-page')
+    await until(`!!document.querySelector('textarea')`)
+    assert.equal(
+      await evaluate(`return document.querySelector('[aria-label="Start voice transcription"]')`),
+      null
+    )
+    await click('#voice-page')
+    await modelButton('Download')
+    await modelButton('Use model')
     await setInput('input[aria-label="Search models by name..."]', 'Nemotron')
     assert.equal(await evaluate(`return document.querySelectorAll('article').length`), 1)
     await setInput('input[aria-label="Search models by name..."]', '')
