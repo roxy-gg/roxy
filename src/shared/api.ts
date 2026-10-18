@@ -4,6 +4,7 @@
  */
 import type { Language } from './i18n'
 import type { VoiceDevice, VoiceEvent, VoiceResult, VoiceSettings, VoiceState } from './voice'
+import type { CatalogApi } from './catalog'
 import type { BackgroundResult, BackgroundSettings, BackgroundState } from './background'
 import type { Bot, BotJob, BotJobInput } from './bots'
 import type { MotionPreference } from './motion'
@@ -914,6 +915,7 @@ export interface RoxyApi {
     list(): Promise<IntegrationConnection[]>
     setEnabled(id: string, enabled: boolean): Promise<void>
   }
+  catalog: CatalogApi
   mcp: {
     /** List configured MCP servers merged with their live connection status. */
     list(): Promise<McpServerView[]>
@@ -927,6 +929,11 @@ export interface RoxyApi {
     reconnect(id: string): Promise<McpServerView[]>
   }
   skills: {
+    readRaw(name: string, cwd?: string): Promise<{ text: string; location: string }>
+    saveRaw(
+      input: { name: string; text: string; expectedText: string; location: string },
+      cwd?: string
+    ): Promise<SkillView[]>
     /** Discovered SKILL.md skills (workspace when a cwd is given, else the user's global skills). */
     list(cwd?: string): Promise<SkillView[]>
     /** Re-scan from disk (drops the cache) and return the fresh list. */

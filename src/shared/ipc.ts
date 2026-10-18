@@ -101,10 +101,18 @@ export const CHANNELS = {
   skillsList: 'skills:list',
   skillsRefresh: 'skills:refresh',
   skillsRead: 'skills:read',
+  skillsReadRaw: 'skills:readRaw',
+  skillsSaveRaw: 'skills:saveRaw',
   skillsCreate: 'skills:create',
   skillsUpdate: 'skills:update',
   skillsRemove: 'skills:remove',
   skillsInstall: 'skills:install',
+
+  catalogSearch: 'catalog:search',
+  catalogSkillDetail: 'catalog:skillDetail',
+  catalogInstallSkill: 'catalog:installSkill',
+  catalogMcpSetup: 'catalog:mcpSetup',
+  catalogInstallMcp: 'catalog:installMcp',
 
   /**
    * Themes -- user-authored `theme.json` files that re-point the app's CSS

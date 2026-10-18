@@ -34,9 +34,13 @@ export function squirclePath(
   y: number,
   w: number,
   h: number,
-  radius: number
+  radius: number,
+  corners?: CanvasTheme['corners']
 ): void {
-  const r = Math.min(radius * SQ_SCALE, Math.min(w, h) / 2)
+  const r = Math.min(
+    (corners?.radii[radius] ?? radius) * (corners?.scale ?? SQ_SCALE),
+    Math.min(w, h) / 2
+  )
   if (r <= 0.5) {
     path.rect(x, y, w, h)
     return
@@ -48,8 +52,8 @@ export function squirclePath(
   for (let i = 0; i <= STEPS; i++) {
     const t = (i / STEPS) * (Math.PI / 2)
     // Superellipse in polar-ish form: raise the unit circle to 2/n.
-    const cx = Math.pow(Math.abs(Math.cos(t)), 2 / SQ_N) * r
-    const cy = Math.pow(Math.abs(Math.sin(t)), 2 / SQ_N) * r
+    const cx = Math.pow(Math.abs(Math.cos(t)), 2 / (corners?.exponent ?? SQ_N)) * r
+    const cy = Math.pow(Math.abs(Math.sin(t)), 2 / (corners?.exponent ?? SQ_N)) * r
     corner.push([cx, cy])
   }
   const right = x + w
@@ -80,9 +84,16 @@ export function squirclePath(
 }
 
 /** A squircle as a reusable Path2D. */
-export function squircle(x: number, y: number, w: number, h: number, radius: number): Path2D {
+export function squircle(
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  radius: number,
+  theme?: CanvasTheme
+): Path2D {
   const path = new Path2D()
-  squirclePath(path, x, y, w, h, radius)
+  squirclePath(path, x, y, w, h, radius, theme?.corners)
   return path
 }
 
@@ -115,16 +126,17 @@ export function drawCard(
   h: number,
   radius: number,
   fill: string | null,
-  border: string | null
+  border: string | null,
+  theme?: CanvasTheme
 ): void {
   if (fill) {
     ctx.fillStyle = fill
-    ctx.fill(squircle(x, y, w, h, radius))
+    ctx.fill(squircle(x, y, w, h, radius, theme))
   }
   if (border) {
     ctx.strokeStyle = border
     ctx.lineWidth = 1
-    ctx.stroke(squircle(x + 0.5, y + 0.5, w - 1, h - 1, radius))
+    ctx.stroke(squircle(x + 0.5, y + 0.5, w - 1, h - 1, radius, theme))
   }
 }
 
@@ -239,6 +251,7 @@ export function hoverWash(theme: CanvasTheme, surface: string, strength = 0.05):
  * this is the same trick main.css plays, done in sRGB.
  */
 export function edge(theme: CanvasTheme, surface: string, strength = 0.06): string {
+  if (theme.edge) return theme.edge
   return mix(surface, theme.palette.white, strength)
 }
 

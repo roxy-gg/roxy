@@ -190,6 +190,14 @@ const EXTRA_VAR_ALLOWLIST = new Set([
   '--ease-drawer',
   // Corner geometry (see the squircle system in main.css)
   '--sq-scale',
+  '--sq-exponent',
+  '--sq-contain',
+  '--radius-sm',
+  '--radius-md',
+  '--radius-lg',
+  '--radius-xl',
+  '--radius-2xl',
+  '--theme-composer-radius',
   // Edge lighting: the translucent hairline, its hover/float variant, and the
   // top-lit bevel. These are derived from `--color-white` (the polarity token),
   // so every theme already gets a coherent default -- these are here for a theme
@@ -632,7 +640,386 @@ const ROXY_LIGHT: ThemeFile = {
   }
 }
 
-export const BUILT_IN_THEMES: ThemeFile[] = [ROXY_DARK, ROXY_LIGHT]
+// Shipped desktop token mappings, not hand-picked brand palettes. See docs/theme-sources.md.
+const CLAUDE_FONTS: ThemeFonts = {
+  sans: ['anthropic-sans', 'Anthropic Sans', 'ui-sans-serif', 'system-ui'],
+  mono: ['SF Mono', 'ui-monospace', 'Menlo', 'Consolas', 'monospace']
+}
+const CODEX_FONTS: ThemeFonts = {
+  sans: ['-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'sans-serif'],
+  mono: [
+    'ui-monospace',
+    'SFMono-Regular',
+    'SF Mono',
+    'Menlo',
+    'Consolas',
+    'Liberation Mono',
+    'monospace'
+  ]
+}
+const CLAUDE_GEOMETRY = {
+  '--sq-scale': '1',
+  '--sq-exponent': '2',
+  '--sq-contain': '1',
+  '--radius-sm': '0.3125rem',
+  '--radius-md': '0.375rem',
+  '--radius-lg': '0.4375rem',
+  '--radius-xl': '0.625rem',
+  '--radius-2xl': '0.75rem',
+  '--theme-composer-radius': '0.75rem',
+  '--edge-lit': 'transparent'
+}
+const CODEX_GEOMETRY = {
+  '--sq-scale': '1.25',
+  '--sq-exponent': '2.8284271247461903',
+  '--sq-contain': '0.7420655675294083',
+  '--radius-sm': '0.375rem',
+  '--radius-md': '0.5rem',
+  '--radius-lg': '0.625rem',
+  '--radius-xl': '0.75rem',
+  '--radius-2xl': '1rem',
+  '--theme-composer-radius': '1.375rem',
+  '--edge-lit': 'transparent',
+  '--elevation-raised': '0px 1px 2px -1px #00000014',
+  '--elevation-float': '0px 4px 8px -2px #0000001a'
+}
+
+export const BUILT_IN_THEMES: ThemeFile[] = [
+  ROXY_DARK,
+  ROXY_LIGHT,
+  {
+    kind: THEME_KIND,
+    version: THEME_VERSION,
+    id: 'claude-code-dark',
+    name: 'Claude Code Dark',
+    description:
+      'Claude desktop tokens: neutral charcoal, blue links, and Anthropic Sans when installed.',
+    appearance: 'dark',
+    colors: {
+      bg: '#151515',
+      surface: '#151515',
+      'surface-2': '#1a1a19',
+      elevated: '#20201f',
+      border: 'rgba(255, 255, 255, 0.1)',
+      'border-strong': 'rgba(255, 255, 255, 0.2)',
+      text: '#f0efec',
+      'text-muted': '#c3c2b7',
+      'text-subtle': '#898781',
+      accent: '#6da7ec',
+      'accent-hover': '#3987e5',
+      success: '#0ca30c',
+      warning: '#db9300',
+      danger: '#ec7e7e',
+      white: '#ffffff',
+      black: '#0b0b0b'
+    },
+    fonts: CLAUDE_FONTS,
+    vars: {
+      ...CLAUDE_GEOMETRY,
+      '--edge': 'rgba(255, 255, 255, 0.1)',
+      '--edge-strong': 'rgba(255, 255, 255, 0.2)',
+      '--elevation-float': '0 8px 24px #00000052, 0 2px 6px #0003'
+    }
+  },
+  {
+    kind: THEME_KIND,
+    version: THEME_VERSION,
+    id: 'claude-code-light',
+    name: 'Claude Code Light',
+    description:
+      'Claude desktop tokens: off-white surfaces, blue links, and Anthropic Sans when installed.',
+    appearance: 'light',
+    colors: {
+      bg: '#fcfcfb',
+      surface: '#fcfcfb',
+      'surface-2': '#ffffff',
+      elevated: '#ffffff',
+      border: 'rgba(11, 11, 11, 0.1)',
+      'border-strong': 'rgba(11, 11, 11, 0.2)',
+      text: '#0b0b0b',
+      'text-muted': '#52514e',
+      'text-subtle': '#898781',
+      accent: '#184f95',
+      'accent-hover': '#3987e5',
+      success: '#006300',
+      warning: '#734500',
+      danger: '#8e2626',
+      white: '#0b0b0b',
+      black: '#ffffff'
+    },
+    fonts: CLAUDE_FONTS,
+    vars: {
+      ...CLAUDE_GEOMETRY,
+      '--edge': 'rgba(11, 11, 11, 0.1)',
+      '--edge-strong': 'rgba(11, 11, 11, 0.2)',
+      '--elevation-float': '0 8px 24px #0000001f, 0 2px 6px #00000014'
+    }
+  },
+  {
+    kind: THEME_KIND,
+    version: THEME_VERSION,
+    id: 'codex-dark',
+    name: 'Codex Dark',
+    description: 'Codex desktop defaults: neutral surfaces, blue accents, and the native UI font.',
+    appearance: 'dark',
+    colors: {
+      bg: '#181818',
+      surface: '#141414',
+      'surface-2': '#282828',
+      elevated: '#363636',
+      border: 'rgba(255, 255, 255, 0.084)',
+      'border-strong': 'rgba(255, 255, 255, 0.156)',
+      text: '#dfdfdf',
+      'text-muted': 'rgba(223, 223, 223, 0.65)',
+      'text-subtle': 'rgba(255, 255, 255, 0.498)',
+      accent: '#339cff',
+      'accent-hover': '#83c3ff',
+      success: '#40c977',
+      warning: '#ff8549',
+      danger: '#fa423e',
+      white: '#ffffff',
+      black: '#282828'
+    },
+    fonts: CODEX_FONTS,
+    vars: {
+      ...CODEX_GEOMETRY,
+      '--edge': 'rgba(255, 255, 255, 0.084)',
+      '--edge-strong': 'rgba(255, 255, 255, 0.156)'
+    }
+  },
+  {
+    kind: THEME_KIND,
+    version: THEME_VERSION,
+    id: 'codex-light',
+    name: 'Codex Light',
+    description: 'Codex desktop defaults: white surfaces, blue accents, and the native UI font.',
+    appearance: 'light',
+    colors: {
+      bg: '#ffffff',
+      surface: '#f6f6f6',
+      'surface-2': '#ffffff',
+      elevated: '#ffffff',
+      border: 'rgba(26, 28, 31, 0.078)',
+      'border-strong': 'rgba(26, 28, 31, 0.117)',
+      text: '#1a1c1f',
+      'text-muted': 'rgba(26, 28, 31, 0.65)',
+      'text-subtle': 'rgba(26, 28, 31, 0.495)',
+      accent: '#339cff',
+      'accent-hover': '#0169cc',
+      success: '#00a240',
+      warning: '#e25507',
+      danger: '#ba2623',
+      white: '#1a1c1f',
+      black: '#ffffff'
+    },
+    fonts: CODEX_FONTS,
+    vars: {
+      ...CODEX_GEOMETRY,
+      '--edge': 'rgba(26, 28, 31, 0.078)',
+      '--edge-strong': 'rgba(26, 28, 31, 0.117)'
+    }
+  },
+  {
+    kind: THEME_KIND,
+    version: THEME_VERSION,
+    id: 'minimalist-dark',
+    name: 'Minimalist Dark',
+    description: 'Quiet graphite, restrained borders, and a silver-blue accent.',
+    appearance: 'dark',
+    colors: {
+      bg: '#111111',
+      surface: '#171717',
+      'surface-2': '#1d1d1d',
+      elevated: '#242424',
+      border: '#2c2c2c',
+      'border-strong': '#414141',
+      text: '#ededed',
+      'text-muted': '#ababab',
+      'text-subtle': '#898989',
+      accent: '#b9c4d1',
+      'accent-hover': '#d4dce5',
+      success: '#80bf91',
+      warning: '#d4b16a',
+      danger: '#df8585',
+      white: '#f5f5f5',
+      black: '#111111'
+    }
+  },
+  {
+    kind: THEME_KIND,
+    version: THEME_VERSION,
+    id: 'minimalist-light',
+    name: 'Minimalist Light',
+    description: 'Clean white, soft grey, and a restrained slate accent.',
+    appearance: 'light',
+    colors: {
+      bg: '#ffffff',
+      surface: '#f7f7f7',
+      'surface-2': '#efefef',
+      elevated: '#e8e8e8',
+      border: '#dddddd',
+      'border-strong': '#bebebe',
+      text: '#202020',
+      'text-muted': '#626262',
+      'text-subtle': '#777777',
+      accent: '#475569',
+      'accent-hover': '#334155',
+      success: '#307447',
+      warning: '#89630f',
+      danger: '#b64141',
+      white: '#202020',
+      black: '#ffffff'
+    }
+  },
+  {
+    kind: THEME_KIND,
+    version: THEME_VERSION,
+    id: 'onyx-absolute-black',
+    name: 'Onyx Absolute Black',
+    description: 'True-black foundations with luminous text and a violet accent.',
+    appearance: 'dark',
+    colors: {
+      bg: '#000000',
+      surface: '#000000',
+      'surface-2': '#08080a',
+      elevated: '#111114',
+      border: '#202024',
+      'border-strong': '#34343b',
+      text: '#f5f5f7',
+      'text-muted': '#aaaab3',
+      'text-subtle': '#858590',
+      accent: '#a7a9ff',
+      'accent-hover': '#c4c5ff',
+      success: '#65c98a',
+      warning: '#e4b866',
+      danger: '#ef7b88',
+      white: '#ffffff',
+      black: '#000000'
+    }
+  },
+  {
+    kind: THEME_KIND,
+    version: THEME_VERSION,
+    id: 'tokyo-midnight',
+    name: 'Tokyo Midnight',
+    description: 'Inky indigo surfaces under an electric periwinkle glow.',
+    appearance: 'dark',
+    colors: {
+      bg: '#141724',
+      surface: '#1a1e2e',
+      'surface-2': '#202539',
+      elevated: '#272d43',
+      border: '#303853',
+      'border-strong': '#475475',
+      text: '#dce4ff',
+      'text-muted': '#a4b2d6',
+      'text-subtle': '#8494b9',
+      accent: '#90adff',
+      'accent-hover': '#b2c6ff',
+      success: '#83c99b',
+      warning: '#e4be7a',
+      danger: '#f1889b',
+      white: '#edf1ff',
+      black: '#141724'
+    }
+  },
+  {
+    kind: THEME_KIND,
+    version: THEME_VERSION,
+    id: 'cyberpunk',
+    name: 'Cyberpunk',
+    description: 'Neon pink cuts through deep plum and shadowy violet.',
+    appearance: 'dark',
+    colors: {
+      bg: '#130e1b',
+      surface: '#1b1425',
+      'surface-2': '#231a30',
+      elevated: '#2c213c',
+      border: '#392c4a',
+      'border-strong': '#594269',
+      text: '#f3e9ff',
+      'text-muted': '#bda7cf',
+      'text-subtle': '#a58bb8',
+      accent: '#ed81d4',
+      'accent-hover': '#ffa5e8',
+      success: '#73d99e',
+      warning: '#eac66d',
+      danger: '#ff8191',
+      white: '#f9eeff',
+      black: '#130e1b'
+    }
+  },
+  {
+    kind: THEME_KIND,
+    version: THEME_VERSION,
+    id: 'tokyo-0300',
+    name: 'Tokyo 3:00 AM',
+    description:
+      'Absolute carbon black with cold steel surfaces and a restrained Tokyo-red signal.',
+    author: 'Roxy',
+    appearance: 'dark',
+    extends: 'roxy-dark',
+    colors: {
+      bg: '#000102',
+      surface: '#030405',
+      'surface-2': '#06080a',
+      elevated: '#0a0d10',
+      border: '#12161b',
+      'border-strong': '#272d35',
+      text: '#e5e8ec',
+      'text-muted': '#9299a2',
+      'text-subtle': '#5f6771',
+      accent: '#d95757',
+      'accent-hover': '#ed6a68',
+      success: '#42a77b',
+      warning: '#c99a48',
+      danger: '#f04452',
+      white: '#ffffff',
+      black: '#000000'
+    },
+    fonts: { sans: 'system', mono: ['Berkeley Mono', 'IBM Plex Mono'] },
+    vars: {
+      '--theme-code-line-height': '1.6',
+      '--theme-code-font-size': '13px',
+      '--theme-scrollbar-thumb': '#272d35',
+      '--theme-scrollbar-thumb-hover': '#3a424d',
+      '--theme-selection': 'rgba(217, 87, 87, 0.24)'
+    }
+  },
+  {
+    kind: THEME_KIND,
+    version: THEME_VERSION,
+    id: 'orion-cyber',
+    name: 'Orion Cyber',
+    description:
+      'Industrial dashboard aesthetic. Monospace, sharp edges, and high-contrast chartreuse.',
+    author: 'Roxy',
+    appearance: 'dark',
+    colors: {
+      bg: '#141414',
+      surface: '#0a0a0a',
+      'surface-2': '#1c1c1c',
+      elevated: '#252525',
+      border: '#262626',
+      'border-strong': '#3d3d3d',
+      text: '#ffffff',
+      'text-muted': '#8a8a8a',
+      'text-subtle': '#5c5c5c',
+      accent: '#d4ff00',
+      'accent-hover': '#e6ff33',
+      success: '#d4ff00',
+      warning: '#ffaa00',
+      danger: '#ff3333',
+      white: '#d4ff00',
+      black: '#000000'
+    },
+    fonts: { sans: 'Share Tech Mono', mono: 'Share Tech Mono' },
+    vars: {
+      '--sq-scale': '0',
+      '--theme-selection': 'rgba(212, 255, 0, 0.25)'
+    }
+  }
+]
 
 export function getBuiltInTheme(id: string): ThemeFile | undefined {
   return BUILT_IN_THEMES.find((t) => t.id === id)
@@ -890,6 +1277,10 @@ VARS (optional, advanced)
   Raw CSS custom properties for things the fields above don't cover. Only these
   names are accepted; anything else is dropped:
 ${vars}
+  --sq-exponent controls the corner curve (2 = circular, 4 = Roxy's squircle).
+  --sq-scale scales the radius; --sq-contain sets its circular clipping fallback.
+  --radius-* sets the control size ramp; --theme-composer-radius sets the composer
+  independently. These affect both DOM chrome and canvas transcript cards.
 
 CONSTRAINTS — a value breaking any of these is silently discarded
   - No url(), image-set(), attr() or expression() — blocked as an exfiltration risk.

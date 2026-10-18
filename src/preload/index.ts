@@ -141,6 +141,14 @@ const roxy: RoxyApi = {
     list: () => ipcRenderer.invoke(CHANNELS.integrationsList),
     setEnabled: (id, enabled) => ipcRenderer.invoke(CHANNELS.integrationsSetEnabled, id, enabled)
   },
+  catalog: {
+    search: (kind, query, cursor) =>
+      ipcRenderer.invoke(CHANNELS.catalogSearch, kind, query, cursor),
+    skillDetail: (id) => ipcRenderer.invoke(CHANNELS.catalogSkillDetail, id),
+    installSkill: (id, reviewId) => ipcRenderer.invoke(CHANNELS.catalogInstallSkill, id, reviewId),
+    mcpSetup: (id) => ipcRenderer.invoke(CHANNELS.catalogMcpSetup, id),
+    installMcp: (input) => ipcRenderer.invoke(CHANNELS.catalogInstallMcp, input)
+  },
   mcp: {
     list: () => ipcRenderer.invoke(CHANNELS.mcpList),
     upsert: (input) => ipcRenderer.invoke(CHANNELS.mcpUpsert, input),
@@ -149,6 +157,8 @@ const roxy: RoxyApi = {
     reconnect: (id) => ipcRenderer.invoke(CHANNELS.mcpReconnect, id)
   },
   skills: {
+    readRaw: (name, cwd) => ipcRenderer.invoke(CHANNELS.skillsReadRaw, name, cwd),
+    saveRaw: (input, cwd) => ipcRenderer.invoke(CHANNELS.skillsSaveRaw, input, cwd),
     list: (cwd) => ipcRenderer.invoke(CHANNELS.skillsList, cwd),
     refresh: (cwd) => ipcRenderer.invoke(CHANNELS.skillsRefresh, cwd),
     read: (name, cwd) => ipcRenderer.invoke(CHANNELS.skillsRead, name, cwd),

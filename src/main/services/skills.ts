@@ -276,7 +276,7 @@ export async function writeSkill(
 ): Promise<WriteSkillResult> {
   if (skillsDisabled()) return { ok: false, error: 'Skills are disabled (ROXY_SKILLS=0).' }
   const name = (input.name ?? '').trim()
-  if (!isValidSkillName(name)) {
+  if (opts.mode === 'create' && !isValidSkillName(name)) {
     return {
       ok: false,
       error: `Invalid skill name "${name}". Use letters, digits, dot, dash, or underscore — no spaces or slashes.`
@@ -541,6 +541,55 @@ export function refreshSkills(cwd?: string): void {
   else cache.clear()
 }
 
+/** Publish a reviewed catalog snapshot without replacing an existing skill.
+ * SKILL.md is written last so discovery never loads a partially written bundle.
+ */
+export async function installCatalogSkillFiles(
+  name: string,
+  files: { path: string; contents: string }[],
+  root = primarySkillRoot('global', '')
+): Promise<void> {
+  if (skillsDisabled()) throw Error('Skills are disabled (ROXY_SKILLS=0).')
+  const directory = sanitizeSkillName(name)
+  if (
+    !directory ||
+    /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(directory) ||
+    !files.some((f) => f.path === 'SKILL.md')
+  )
+    throw Error('Invalid catalog skill snapshot.')
+  if ((await discover('')).some((s) => s.name.toLowerCase() === name.toLowerCase()))
+    throw Error(
+      'A skill with this name already exists. Remove it before installing another source.'
+    )
+  await fs.mkdir(root, { recursive: true })
+  const target = path.join(root, directory)
+  // Exclusive mkdir prevents races with another settings window or URL install.
+  try {
+    await fs.mkdir(target)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'EEXIST')
+      throw Error(
+        'A skill with this name already exists. Remove it before installing another source.'
+      )
+    throw error
+  }
+  try {
+    for (const file of [
+      ...files.filter((f) => f.path !== 'SKILL.md'),
+      ...files.filter((f) => f.path === 'SKILL.md')
+    ]) {
+      if (!isSafeSkillFilePath(file.path)) throw Error('Unsafe catalog skill path.')
+      const output = path.join(target, file.path)
+      await fs.mkdir(path.dirname(output), { recursive: true })
+      await fs.writeFile(output, file.contents, { encoding: 'utf8', flag: 'wx' })
+    }
+  } catch (error) {
+    await fs.rm(target, { recursive: true, force: true }).catch(() => {})
+    throw error
+  }
+  refreshSkills()
+}
+
 /** Read one discovered skill in full (including its body) — for the Skills page editor. */
 export async function readSkill(name: string, cwd: string): Promise<SkillInfo | undefined> {
   const wanted = (name ?? '').trim()
@@ -550,6 +599,47 @@ export async function readSkill(name: string, cwd: string): Promise<SkillInfo | 
     skills.find((s) => s.name === wanted) ??
     skills.find((s) => s.name.toLowerCase() === wanted.toLowerCase())
   )
+}
+
+/** Only edits a currently discovered file; preserve all frontmatter and bytes. */
+export async function readRawSkill(
+  name: string,
+  cwd: string
+): Promise<{ text: string; location: string }> {
+  refreshSkills()
+  const skill = await readSkill(name, cwd)
+  if (!skill) throw Error('The skill is no longer available. Rescan and try again.')
+  const stat = await fs.stat(skill.location)
+  if (stat.size > 512 * 1024) throw Error('The skill file is too large to edit.')
+  return { text: await fs.readFile(skill.location, 'utf8'), location: skill.location }
+}
+
+export async function saveRawSkill(
+  input: { name: string; text: string; expectedText: string; location: string },
+  cwd: string
+): Promise<void> {
+  if (
+    !input ||
+    typeof input.name !== 'string' ||
+    typeof input.text !== 'string' ||
+    typeof input.expectedText !== 'string' ||
+    typeof input.location !== 'string' ||
+    Buffer.byteLength(input.text) > 512 * 1024 ||
+    input.text.includes('\0')
+  )
+    throw Error('Invalid skill file.')
+  const current = await readRawSkill(input.name, cwd)
+  if (
+    path.resolve(current.location) !== path.resolve(input.location) ||
+    current.text !== input.expectedText
+  )
+    throw Error('The skill changed on disk. Close and reopen the editor before saving.')
+  const { data, body } = parseSkillFrontmatter(input.text)
+  const original = parseSkillFrontmatter(current.text).data
+  if (data.name !== original.name || !body.trim())
+    throw Error('Keep the existing frontmatter name and include non-empty instructions.')
+  await fs.writeFile(current.location, input.text, 'utf8')
+  refreshSkills()
 }
 
 // ---------------------------------------------------------------------------

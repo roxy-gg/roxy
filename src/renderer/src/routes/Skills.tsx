@@ -1,65 +1,22 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useTranslation, Trans } from 'react-i18next'
-import {
-  Download,
-  FileText,
-  FolderGit2,
-  Home,
-  Pencil,
-  Plus,
-  RefreshCw,
-  Trash2,
-  Wrench
-} from 'lucide-react'
-import { TOOLS, TOOL_CATEGORIES, type ToolDef } from '@shared/tools'
+import { Download, Braces, Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react'
 import type { SkillView } from '@shared/api'
 import { api } from '../lib/api'
-import { Badge, Button, Input, Textarea } from '../components/ui'
+import { Button, Input, Textarea } from '../components/ui'
 import { ConfigBackup } from '../components/ConfigBackup'
+import { CatalogSearch } from '../components/CatalogSearch'
 
 export default function Skills({ active }: { active: boolean }): JSX.Element {
   const { t } = useTranslation()
+  const [skills, setSkills] = useState<SkillView[]>([])
 
   return (
     <div className="@container">
       <p className="mb-6 text-sm text-text-muted">{t('skills.subtitle')}</p>
       <div className="flex flex-col gap-9">
-        <DiscoveredSkills active={active} />
-        <BuiltInTools />
+        <DiscoveredSkills active={active} skills={skills} setSkills={setSkills} />
       </div>
-    </div>
-  )
-}
-
-/** The real tools Roxy's agent can call, grouped by category (see `@shared/tools`). */
-function BuiltInTools(): JSX.Element {
-  const { t } = useTranslation()
-  return (
-    <div className="flex flex-col gap-7">
-      <div>
-        <h2 className="text-xs font-semibold uppercase tracking-wide text-text-subtle">
-          {t('skills.builtInTools')}
-        </h2>
-        <p className="mt-1 text-xs text-text-muted">
-          <Trans
-            i18nKey="skills.builtInToolsBody"
-            values={{ count: TOOLS.length }}
-            components={[<Badge key="w">{t('skills.writes')}</Badge>]}
-          />
-        </p>
-      </div>
-      {TOOL_CATEGORIES.map((category) => (
-        <section key={category}>
-          <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-text-subtle">
-            {category}
-          </h3>
-          <div className="grid grid-cols-1 gap-3 @min-[640px]:grid-cols-2">
-            {TOOLS.filter((t) => t.category === category).map((tool) => (
-              <ToolCard key={tool.id} tool={tool} />
-            ))}
-          </div>
-        </section>
-      ))}
     </div>
   )
 }
@@ -73,21 +30,37 @@ interface SkillDraft {
 }
 
 /** The real, filesystem-discovered skills (SKILL.md files under the user's global roots). */
-function DiscoveredSkills({ active }: { active: boolean }): JSX.Element {
+function DiscoveredSkills({
+  active,
+  skills,
+  setSkills
+}: {
+  active: boolean
+  skills: SkillView[]
+  setSkills: (skills: SkillView[]) => void
+}): JSX.Element {
   const { t } = useTranslation()
-  const [skills, setSkills] = useState<SkillView[]>([])
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [draft, setDraft] = useState<SkillDraft | null>(null)
   const [installing, setInstalling] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [raw, setRaw] = useState<{ name: string; text: string; location: string } | null>(null)
+  const [removing, setRemoving] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  const editRequest = useRef(0)
 
   useEffect(() => {
     if (!active) return
     let alive = true
+    setError(null)
     api.skills
       .list()
       .then((rows) => {
         if (alive) setSkills(rows)
+      })
+      .catch(() => {
+        if (alive) setError(t('catalog.listFailed'))
       })
       .finally(() => {
         if (alive) setLoading(false)
@@ -95,45 +68,88 @@ function DiscoveredSkills({ active }: { active: boolean }): JSX.Element {
     return () => {
       alive = false
     }
-  }, [active])
+  }, [active, setSkills, t])
 
   const refresh = async (): Promise<void> => {
     setRefreshing(true)
+    setError(null)
     try {
       setSkills(await api.skills.refresh())
+    } catch {
+      setError(t('catalog.listFailed'))
     } finally {
       setRefreshing(false)
     }
   }
 
   const startEdit = async (name: string): Promise<void> => {
-    const detail = await api.skills.read(name)
-    setDraft({
-      mode: 'edit',
-      name,
-      description: detail?.description ?? '',
-      body: detail?.body ?? ''
-    })
+    const version = ++editRequest.current
+    setError(null)
+    try {
+      const detail = await api.skills.read(name)
+      if (version !== editRequest.current) return
+      if (!detail) throw Error()
+      setRaw(null)
+      setInstalling(false)
+      setDraft({
+        mode: 'edit',
+        name,
+        description: detail?.description ?? '',
+        body: detail?.body ?? ''
+      })
+    } catch {
+      if (version === editRequest.current) setError(t('catalog.actionFailed'))
+    }
   }
 
+  const startRaw = async (name: string): Promise<void> => {
+    const version = ++editRequest.current
+    setError(null)
+    try {
+      const file = await api.skills.readRaw(name)
+      if (version !== editRequest.current) return
+      setRaw({ name, ...file })
+      setDraft(null)
+      setInstalling(false)
+    } catch {
+      if (version === editRequest.current) setError(t('catalog.actionFailed'))
+    }
+  }
+
+  useEffect(
+    () => () => {
+      editRequest.current++
+    },
+    [active]
+  )
+
   const remove = async (name: string): Promise<void> => {
-    setSkills(await api.skills.remove(name))
-    if (draft?.name === name) setDraft(null)
+    setBusy(true)
+    setError(null)
+    try {
+      setSkills(await api.skills.remove(name))
+      if (draft?.name === name) setDraft(null)
+      if (raw?.name === name) setRaw(null)
+      setRemoving(null)
+    } catch {
+      setError(t('catalog.actionFailed'))
+    } finally {
+      setBusy(false)
+    }
   }
 
   return (
-    <section>
+    <div className="min-w-0">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-xs font-semibold uppercase tracking-wide text-text-subtle">
-          {t('skills.discovered')}
-        </h2>
         <div className="flex flex-wrap items-center gap-1">
           <Button
             size="sm"
             variant="ghost"
             onClick={() => {
+              editRequest.current++
               setInstalling((v) => !v)
               setDraft(null)
+              setRaw(null)
             }}
             className="gap-1.5"
           >
@@ -144,8 +160,10 @@ function DiscoveredSkills({ active }: { active: boolean }): JSX.Element {
             size="sm"
             variant="ghost"
             onClick={() => {
+              editRequest.current++
               setDraft({ mode: 'create', name: '', description: '', body: '' })
               setInstalling(false)
+              setRaw(null)
             }}
             className="gap-1.5"
           >
@@ -185,6 +203,7 @@ function DiscoveredSkills({ active }: { active: boolean }): JSX.Element {
 
       {draft && (
         <SkillEditor
+          key={`${draft.mode}:${draft.name}`}
           draft={draft}
           existing={skills}
           onCancel={() => setDraft(null)}
@@ -195,23 +214,79 @@ function DiscoveredSkills({ active }: { active: boolean }): JSX.Element {
         />
       )}
 
-      {loading ? (
-        <p className="text-xs text-text-muted">{t('skills.scanning')}</p>
-      ) : skills.length === 0 ? (
-        !draft && !installing && <EmptySkills />
-      ) : (
-        <div className="grid grid-cols-1 gap-3 @min-[640px]:grid-cols-2">
-          {skills.map((skill) => (
-            <DiscoveredSkillCard
-              key={skill.location}
-              skill={skill}
-              onEdit={() => startEdit(skill.name)}
-              onRemove={() => remove(skill.name)}
-            />
-          ))}
+      {raw && (
+        <RawSkillEditor
+          key={raw.location}
+          file={raw}
+          onCancel={() => setRaw(null)}
+          onSaved={(list) => {
+            setSkills(list)
+            setRaw(null)
+          }}
+        />
+      )}
+      {removing && (
+        <div
+          role="alert"
+          className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-border bg-surface p-3 text-xs"
+        >
+          <span>{t('skills.confirmDeleteNamed', { name: removing })}</span>
+          <Button size="sm" disabled={busy} variant="ghost" onClick={() => setRemoving(null)}>
+            {t('common.cancel')}
+          </Button>
+          <Button size="sm" disabled={busy} variant="danger" onClick={() => void remove(removing)}>
+            {t('common.delete')}
+          </Button>
         </div>
       )}
-    </section>
+
+      {error && (
+        <p role="alert" className="mb-3 text-xs text-danger">
+          {error}
+        </p>
+      )}
+      {loading && <p className="text-xs text-text-muted">{t('skills.scanning')}</p>}
+      <CatalogSearch
+        kind="skills"
+        active={active}
+        installedSkills={skills}
+        onSkillsInstalled={setSkills}
+        renderSkillActions={(skill) => (
+          <>
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={busy}
+              onClick={() => void startEdit(skill.name)}
+              title={t('common.edit')}
+              aria-label={t('catalog.editNamed', { name: skill.name })}
+            >
+              <Pencil className="h-3.5 w-3.5" />
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={busy}
+              onClick={() => void startRaw(skill.name)}
+              title={t('skills.editRaw')}
+              aria-label={t('skills.editRawNamed', { name: skill.name })}
+            >
+              <Braces className="h-3.5 w-3.5" />
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={busy}
+              onClick={() => setRemoving(skill.name)}
+              title={t('common.delete')}
+              aria-label={t('catalog.removeNamed', { name: skill.name })}
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </Button>
+          </>
+        )}
+      />
+    </div>
   )
 }
 
@@ -328,7 +403,7 @@ function SkillEditor({
       setError(t('skills.errNoName'))
       return
     }
-    if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(trimmedName)) {
+    if (!isEdit && !/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(trimmedName)) {
       setError(t('skills.errBadName'))
       return
     }
@@ -406,117 +481,71 @@ function SkillEditor({
   )
 }
 
-function DiscoveredSkillCard({
-  skill,
-  onEdit,
-  onRemove
+function RawSkillEditor({
+  file,
+  onCancel,
+  onSaved
 }: {
-  skill: SkillView
-  onEdit: () => void
-  onRemove: () => void
+  file: { name: string; text: string; location: string }
+  onCancel: () => void
+  onSaved: (skills: SkillView[]) => void
 }): JSX.Element {
   const { t } = useTranslation()
-  const [confirming, setConfirming] = useState(false)
+  const [text, setText] = useState(file.text)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const save = async (): Promise<void> => {
+    if (saving || text === file.text) return
+    setSaving(true)
+    setError(null)
+    try {
+      onSaved(
+        await api.skills.saveRaw({
+          name: file.name,
+          text,
+          expectedText: file.text,
+          location: file.location
+        })
+      )
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('skills.errSaveFailed'))
+    } finally {
+      setSaving(false)
+    }
+  }
   return (
-    <div className="group flex items-start gap-3 sq sq-xl sq-ring rounded-xl border border-border bg-surface p-4">
-      <span className="flex h-9 w-9 shrink-0 items-center justify-center sq sq-lg rounded-lg bg-white/5 text-text-muted">
-        <FileText className="h-4 w-4" />
-      </span>
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2">
-          <span className="truncate text-sm font-medium text-text">{skill.name}</span>
-          <Badge>
-            <span className="inline-flex items-center gap-1">
-              {skill.source === 'workspace' ? (
-                <FolderGit2 className="h-3 w-3" />
-              ) : (
-                <Home className="h-3 w-3" />
-              )}
-              {skill.source}
-            </span>
-          </Badge>
-        </div>
-        {skill.description && (
-          <p className="mt-0.5 line-clamp-2 text-xs text-text-muted">{skill.description}</p>
-        )}
-        <p className="mt-1 truncate text-[11px] text-text-subtle" title={skill.location}>
-          {skill.location}
+    <div className="mb-4 space-y-3 rounded-lg border border-border bg-surface p-4">
+      <h3 className="text-sm font-medium text-text">
+        {t('skills.editRawNamed', { name: file.name })}
+      </h3>
+      <p className="text-xs text-text-subtle">{t('skills.rawHint')}</p>
+      <Textarea
+        autoFocus
+        value={text}
+        onChange={(event) => setText(event.target.value)}
+        rows={18}
+        className="font-mono text-xs"
+        spellCheck={false}
+        aria-label={t('skills.rawLabel', { name: file.name })}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+            event.preventDefault()
+            void save()
+          }
+        }}
+      />
+      {error && (
+        <p role="alert" className="text-xs text-danger">
+          {error}
         </p>
-        {confirming && (
-          <div className="mt-2 flex items-center gap-2">
-            <span className="text-xs text-danger">{t('skills.confirmDelete')}</span>
-            <Button size="sm" variant="ghost" onClick={() => setConfirming(false)}>
-              {t('common.cancel')}
-            </Button>
-            <Button size="sm" variant="danger" onClick={onRemove}>
-              {t('common.delete')}
-            </Button>
-          </div>
-        )}
-      </div>
-      {!confirming && (
-        <div className="flex shrink-0 items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
-          <button
-            onClick={onEdit}
-            title={t('common.edit')}
-            className="press-scale flex h-7 w-7 items-center justify-center sq sq-lg rounded-lg text-text-muted hover:bg-white/5 hover:text-text"
-          >
-            <Pencil className="h-3.5 w-3.5" />
-          </button>
-          <button
-            onClick={() => setConfirming(true)}
-            title={t('common.delete')}
-            className="press-scale flex h-7 w-7 items-center justify-center sq sq-lg rounded-lg text-text-muted hover:bg-white/5 hover:text-danger"
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-          </button>
-        </div>
       )}
-    </div>
-  )
-}
-
-function EmptySkills(): JSX.Element {
-  const { t } = useTranslation()
-  return (
-    <div className="sq sq-xl sq-ring sq-dashed rounded-xl border border-dashed border-border bg-surface/50 p-5 text-xs text-text-muted">
-      <p className="text-text">{t('skills.emptyTitle')}</p>
-      <p className="mt-2">
-        <Trans i18nKey="skills.emptyBody" components={{ code: <code className="text-text" /> }} />
-      </p>
-      <ul className="mt-2 list-disc space-y-1 pl-5">
-        <li>
-          <Trans
-            i18nKey="skills.emptyGlobal"
-            components={{ code: <code className="text-text" /> }}
-          />
-        </li>
-        <li>
-          <Trans
-            i18nKey="skills.emptyProject"
-            components={{ code: <code className="text-text" /> }}
-          />
-        </li>
-      </ul>
-      <p className="mt-2">
-        <Trans i18nKey="skills.emptyFooter" components={{ code: <code className="text-text" /> }} />
-      </p>
-    </div>
-  )
-}
-
-function ToolCard({ tool }: { tool: ToolDef }): JSX.Element {
-  return (
-    <div className="flex items-start gap-3 sq sq-xl sq-ring rounded-xl border border-border bg-surface p-4">
-      <span className="flex h-9 w-9 shrink-0 items-center justify-center sq sq-lg rounded-lg bg-white/5 text-text-muted">
-        <Wrench className="h-4 w-4" />
-      </span>
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2">
-          <code className="text-sm font-medium text-text">{tool.name}</code>
-          {tool.mutates && <Badge>writes</Badge>}
-        </div>
-        <p className="mt-0.5 text-xs text-text-muted">{tool.description}</p>
+      <div className="flex justify-end gap-2">
+        <Button size="sm" variant="ghost" disabled={saving} onClick={onCancel}>
+          {t('common.cancel')}
+        </Button>
+        <Button size="sm" disabled={saving || text === file.text} onClick={() => void save()}>
+          {saving ? t('skills.saving') : t('skills.saveChanges')}
+        </Button>
       </div>
     </div>
   )
