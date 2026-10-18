@@ -66,8 +66,8 @@
     "sidebarStyle": "サイドバーの背景",
     "sidebarStyles": {
       "default": "デフォルト",
-      "dimmed": "Dimmed",
-      "glass": "Glass"
+      "dimmed": "薄暗い",
+      "glass": "ガラス"
     },
     "title": "チャットの背景"
   },
@@ -396,8 +396,8 @@
     "tools": "ツール"
   },
   "notifications": {
-    "responseReady": "Response ready.",
-    "responseReadyForSession": "Response ready: {{session}}"
+    "responseReady": "応答準備完了。",
+    "responseReadyForSession": "応答準備完了: {{session}}"
   },
   "onboarding": {
     "apiKey": "APIキー",
@@ -512,7 +512,7 @@
     "loading": "使用量を確認中...",
     "modelRate": "このモデル",
     "modelRatePerM": "このモデル（100万あたり 入力 / 出力）",
-    "noModelLimit": "No metered limit for this model",
+    "noModelLimit": "このモデルには従量制の制限はありません",
     "otherModels": "その他のモデル",
     "overage": "今月の追加使用量",
     "perMillion": "{{rate}}",
@@ -598,23 +598,23 @@
       "version": "Roxy v{{version}}"
     },
     "activity": {
-      "activeDays": "Active days",
-      "currentStreak": "Current streak",
-      "date": "Date",
-      "days_one": "day",
-      "days_other": "days",
-      "description": "One turn is one assistant reply. Your activity history stays here even when you delete a conversation.",
-      "failed": "Couldn't load your activity. Reopen Settings to try again.",
-      "longestStreak": "Longest streak",
-      "peak_one": "Busiest day in this period: {{value}} turn.",
-      "peak_other": "Busiest day in this period: {{value}} turns.",
-      "period": "{{start}} to {{end}}",
-      "recent": "Last 7 days",
-      "total": "Agent turns",
-      "turnCount_one": "{{value}} turn",
-      "turnCount_other": "{{value}} turns",
-      "turns_one": "turn in this period",
-      "turns_other": "turns in this period"
+      "activeDays": "アクティブな日数",
+      "currentStreak": "現在の連続記録",
+      "date": "日付",
+      "days_one": "日",
+      "days_other": "日",
+      "description": "1ターンはアシスタントの1回の返信です。会話を削除しても、アクティビティ履歴はここに残ります。",
+      "failed": "アクティビティを読み込めませんでした。設定を再度開いてやり直してください。",
+      "longestStreak": "最長連続記録",
+      "peak_one": "この期間で最も忙しかった日: {{value}} ターン。",
+      "peak_other": "この期間で最も忙しかった日: {{value}} ターン。",
+      "period": "{{start}}から{{end}}",
+      "recent": "過去7日間",
+      "total": "エージェントのターン数",
+      "turnCount_one": "{{value}} ターン",
+      "turnCount_other": "{{value}} ターン",
+      "turns_one": "この期間のターン",
+      "turns_other": "この期間のターン"
     },
     "backup": {
       "description": "グローバルスキルとMCPサーバー設定を単一のファイルにエクスポートし、別のコンピューターにインポートして同じように設定します。インポートすると、同じ名前のスキル/サーバーが上書きされます。",
@@ -683,22 +683,22 @@
       "system": "システムに従う"
     },
     "navigation": {
-      "accounts": "Accounts",
-      "activity": "Activity",
-      "activityEmpty": "Your activity will appear here after your first agent response.",
-      "addOns": "Add-Ons",
-      "colors": "Colors",
-      "general": "General",
-      "openRemote": "Manage remote access",
-      "section": "Settings section",
-      "theme": "Theme",
-      "worktrees": "Worktree configuration"
+      "accounts": "アカウント",
+      "activity": "アクティビティ",
+      "activityEmpty": "最初のエージェント応答後にアクティビティが表示されます。",
+      "addOns": "アドオン",
+      "colors": "色",
+      "general": "一般",
+      "openRemote": "リモートアクセスを管理",
+      "section": "設定セクション",
+      "theme": "テーマ",
+      "worktrees": "ワークツリー設定"
     },
     "notifications": {
       "completeDescription": "Roxy が応答を完了したときに通知を受け取ります。時間のかかるタスクに便利です。Roxy がフォーカスされていないときにのみ通知され、クリックするとそのセッションに移動します。",
       "completeTitle": "応答の完了",
       "heading": "通知",
-      "testNotification": "Test notification"
+      "testNotification": "テスト通知"
     },
     "privacy": {
       "description": "アプリの起動、完了したターン、ターンにかかったステップとツールの数、使用されたトークンの数、おおよそのコストなど、このマシンで生成されたランダムなIDに関連付けられたカウントとタイミング。プロンプト、コード、ファイルパス、リポジトリ名、エラーテキストは決して含まれません。",
@@ -831,18 +831,18 @@
     "writes": "書き込み"
   },
   "subscription": {
-    "blurb": "Sign in with your {{provider}} account to use the models available to your plan through a local proxy. No API key required. Your provider's plan limits and charges still apply.",
-    "browser": "Finish signing in with {{provider}} in your browser.",
-    "continue": "Continue with {{provider}}",
-    "deviceCode": "If prompted, enter this code in your browser: <code>{{code}}</code>",
-    "downloading": "Downloading the local proxy...",
-    "failed": "Sign-in failed.",
-    "howItWorks": "Roxy includes <proxy>CLIProxyAPI v{{version}}</proxy> (checksum-verified during the build and validated before launch) and runs it on 127.0.0.1 while Roxy is open. It holds the login on this machine and exposes it to Roxy as a normal model endpoint. Your credentials never reach Roxy's servers, and the proxy is closed when you quit.",
-    "signOut": "Sign out",
-    "signingOut": "Signing out...",
-    "starting": "Starting the local proxy...",
-    "title": "Use your {{provider}} subscription",
-    "waiting": "Waiting for sign-in..."
+    "blurb": "ローカルプロキシを介してプランで利用可能なモデルを使用するには、{{provider}}アカウントでサインインしてください。APIキーは不要です。プロバイダーのプラン制限と料金が適用されます。",
+    "browser": "ブラウザで{{provider}}へのサインインを完了してください。",
+    "continue": "{{provider}}で続行",
+    "deviceCode": "プロンプトが表示されたら、ブラウザにこのコードを入力してください: <code>{{code}}</code>",
+    "downloading": "ローカルプロキシをダウンロード中...",
+    "failed": "サインインに失敗しました。",
+    "howItWorks": "Roxyには<proxy>CLIProxyAPI v{{version}}</proxy>が含まれており（ビルド中にチェックサム検証され、起動前に検証されます）、Roxyが開いている間は127.0.0.1で実行されます。このマシンでログインを保持し、通常のモデルエンドポイントとしてRoxyに公開します。あなたの認証情報はRoxyのサーバーに到達することはなく、終了するとプロキシは閉じられます。",
+    "signOut": "サインアウト",
+    "signingOut": "サインアウト中...",
+    "starting": "ローカルプロキシを起動中...",
+    "title": "{{provider}}サブスクリプションを使用",
+    "waiting": "サインインを待機中..."
   },
   "themes": {
     "active": "アクティブ",
@@ -933,9 +933,9 @@
     "copyNewContents": "新しい内容をコピー",
     "copyOutput": "出力をコピー",
     "copySelection": "選択範囲をコピー",
-    "deletePromptFailed": "Couldn't delete this prompt. Stop any running response, then try again.",
-    "deletePromptHint": "Delete this prompt and its failed response from the conversation and future model context",
-    "editPrompt": "Edit",
+    "deletePromptFailed": "このプロンプトを削除できませんでした。実行中の応答を停止してから、もう一度お試しください。",
+    "deletePromptHint": "このプロンプトとその失敗した応答を会話と将来のモデルコンテキストから削除します",
+    "editPrompt": "編集",
     "expand": "展開",
     "history": "チャット履歴",
     "invokeCalling": "@{{name}}を呼び出し中…",
@@ -946,20 +946,20 @@
     "openLink": "リンクを開く",
     "openSubagent": "サブエージェントセッションを開く",
     "promptEmpty": "テキストなしのメッセージ",
-    "promptFailed": "Failed",
+    "promptFailed": "失敗",
     "promptHistory": "あなたのメッセージ",
     "promptImages_one": "画像 {{count}} 枚を添付",
     "promptImages_other": "画像 {{count}} 枚を添付",
-    "promptInterrupted": "Interrupted",
+    "promptInterrupted": "中断",
     "promptJump": "メッセージ {{number}}: {{text}} にジャンプ",
     "promptPosition": "{{number}} / {{count}}",
-    "promptStopped": "Stopped",
+    "promptStopped": "停止",
     "promptToday": "今日、{{time}}",
     "promptYesterday": "昨日、{{time}}",
     "reasoning": "推論",
     "report": "レポート",
-    "resendPrompt": "Resend",
-    "retryConflict": "This request changed elsewhere. Your draft is kept here; close and reopen to retry.",
+    "resendPrompt": "再送信",
+    "retryConflict": "このリクエストは別の場所で変更されました。下書きはここに保持されています。閉じて再度開いてやり直してください。",
     "running": "実行中…",
     "selectAll": "すべて選択",
     "step_one": "{{count}}ステップ",
