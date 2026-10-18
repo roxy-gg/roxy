@@ -21,6 +21,7 @@ import {
   selectionText,
   paragraphSelection,
   wordSelection,
+  type PaintContext,
   type SelectionRange
 } from './renderer'
 import { CanvasMenu, type CanvasMenuItem } from './CanvasMenu'
@@ -110,6 +111,9 @@ export function CanvasSurface({
   const [theme, setTheme] = useState<CanvasTheme>(readTheme)
   const [size, setSize] = useState({ width: 0, height: 0 })
   const [status, setStatus] = useState('')
+  const copyFeedback = useRef<PaintContext['copyFeedback']>(null)
+  const copyTimer = useRef<ReturnType<typeof setTimeout>>()
+  const copyAttempt = useRef(0)
   const transparentRef = useRef(transparent)
   useLayoutEffect(() => {
     transparentRef.current = transparent
@@ -258,6 +262,9 @@ export function CanvasSurface({
     setActivePromptId(null)
     setMenu(null)
     setStatus('')
+    copyAttempt.current++
+    copyFeedback.current = null
+    clearTimeout(copyTimer.current)
   }, [sceneKey, followTail])
 
   useLayoutEffect(() => {
@@ -276,6 +283,8 @@ export function CanvasSurface({
     document.addEventListener('visibilitychange', resume)
     return () => {
       mounted.current = false
+      copyAttempt.current++
+      clearTimeout(copyTimer.current)
       stopMotion()
       document.removeEventListener('visibilitychange', resume)
       cancelAnimationFrame(frame.current)
@@ -382,6 +391,7 @@ export function CanvasSurface({
         reducedMotion: reducedMotion.current,
         transparent: transparentRef.current,
         hovered: hovered.current,
+        copyFeedback: copyFeedback.current,
         selection: selection.current,
         images: view.current.images
       })
@@ -528,10 +538,29 @@ export function CanvasSurface({
     }
   }, [size])
 
-  const copy = (value: string): void => {
+  const copy = (value: string, region?: HitRegion): void => {
+    const attempt = ++copyAttempt.current
+    const block = region && scene.current.blocks.find((block) => block.regions.includes(region))
+    const target = block &&
+      region && { blockId: block.id, regionIndex: block.regions.indexOf(region), region }
+    clearTimeout(copyTimer.current)
+    copyFeedback.current = null
+    setStatus('')
+    requestPaint()
+    const finish = (success: boolean): void => {
+      if (!mounted.current || attempt !== copyAttempt.current) return
+      setStatus(t(success ? 'chat.copied' : 'transcript.copyFailed'))
+      copyFeedback.current = target ? { ...target, success } : null
+      requestPaint()
+      copyTimer.current = setTimeout(() => {
+        copyFeedback.current = null
+        setStatus('')
+        requestPaint()
+      }, 2000)
+    }
     void navigator.clipboard.writeText(value).then(
-      () => setStatus(t('chat.copied')),
-      () => setStatus(t('transcript.copyFailed'))
+      () => finish(true),
+      () => finish(false)
     )
   }
   const selectAll = (): void => {
@@ -575,7 +604,7 @@ export function CanvasSurface({
     return true
   }, [])
 
-  const act = (action: HitAction): void => {
+  const act = (action: HitAction, region?: HitRegion): void => {
     if (action.type === 'toggle') {
       stick.current = false
       selection.current = null
@@ -587,7 +616,7 @@ export function CanvasSurface({
       if (!state) return
       if (action.command === 'patch') {
         const patch = diffPatch(state.document)
-        if (patch !== null) copy(patch)
+        if (patch !== null) copy(patch, region)
         else setStatus(t('diff.patchTooLarge'))
         return
       }
@@ -603,7 +632,7 @@ export function CanvasSurface({
         .flatMap((b) => b.scrollRegions)
         .find((r) => r.id === action.id)
       if (region) setScroll(region, action.left, action.top)
-    } else if (action.type === 'copy') copy(action.text)
+    } else if (action.type === 'copy') copy(action.text, region)
     else if (action.type === 'link') openLink(action.href)
     else if (action.type === 'image') setImage(action.src)
     else onAction?.(action)
@@ -788,7 +817,7 @@ export function CanvasSurface({
               const pos = point(event)
               const released = hitTest(scene.current, pos.x, pos.y + event.currentTarget.scrollTop)
               if (released && JSON.stringify(released.action) === JSON.stringify(pending.action))
-                act(pending.action)
+                act(pending.action, released)
             }
             if (
               !pending.dragged &&

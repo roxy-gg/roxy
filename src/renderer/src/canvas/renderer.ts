@@ -36,6 +36,12 @@ export interface PaintContext {
   transparent?: boolean
   /** The region under the pointer, so it can be washed. */
   hovered: HitRegion | null
+  copyFeedback?: {
+    blockId: string
+    regionIndex: number
+    region: HitRegion
+    success: boolean
+  } | null
   /** Decoded images by src (the transcript keeps the cache). */
   images: Map<string, HTMLImageElement>
   /** Selection to highlight, in transcript space. */
@@ -113,6 +119,37 @@ export function paintScene(scene: Scene, paint: PaintContext): void {
   // opaque, so washing first would be invisible.
   if (paint.hovered && paint.hovered.hover !== 'none') paintHover(paint.hovered, paint, pen)
   if (paint.selection) paintSelection(scene, paint, pen)
+
+  const feedback = paint.copyFeedback
+  if (feedback) {
+    const region = scene.blocks.find((block) => block.id === feedback.blockId)?.regions[
+      feedback.regionIndex
+    ]
+    const action = region?.action
+    const original = feedback.region.action
+    // Cached blocks can move or rebuild while copying; never confirm a different control.
+    const matches =
+      (action?.type === 'copy' && original.type === 'copy' && action.text === original.text) ||
+      (action?.type === 'diff' &&
+        original.type === 'diff' &&
+        action.id === original.id &&
+        action.command === 'patch' &&
+        original.command === 'patch')
+    if (region && matches) {
+      const color = feedback.success ? theme.palette.success : theme.palette.danger
+      drawCard(ctx, region.x, region.y, region.w, region.h, 4, theme.palette.surface, null, theme)
+      drawCard(ctx, region.x, region.y, region.w, region.h, 4, alpha(color, 0.1), null, theme)
+      const size = Math.min(14, region.w - 4, region.h - 4)
+      drawIcon(
+        ctx,
+        feedback.success ? 'check' : 'circleAlert',
+        region.x + (region.w - size) / 2,
+        region.y + (region.h - size) / 2,
+        size,
+        color
+      )
+    }
+  }
 
   ctx.restore()
 }

@@ -83,6 +83,23 @@ async function activate(filter) {
   const point = await target(filter)
   await click(point.x, point.y)
 }
+async function copyPixels(filter, success = true) {
+  return probe(`
+    const region=scene.blocks.flatMap(b=>b.regions).find(r=>${filter});
+    const canvas=el.querySelector('canvas');
+    const dpr=devicePixelRatio;
+    const pixels=canvas.getContext('2d').getImageData(
+      Math.round(region.x*dpr),Math.round((region.y-el.scrollTop)*dpr),
+      Math.round(region.w*dpr),Math.round(region.h*dpr)
+    ).data;
+    let colored=0;
+    for(let i=0;i<pixels.length;i+=4) {
+      const [r,g,b]=pixels.slice(i,i+3);
+      if (${success ? 'g>r*1.3 && g>b*1.2' : 'r>g*1.3 && r>b*1.2'}) colored++;
+    }
+    return colored;
+  `)
+}
 async function key(keyCode, modifiers = []) {
   if (!win.webContents.debugger.isAttached()) win.webContents.debugger.attach('1.3')
   const code = keyCode.length === 1 ? `Key${keyCode.toUpperCase()}` : keyCode
@@ -394,6 +411,7 @@ async function run() {
     await probe(`return scene.height === ${height}`)
   )
 
+  await copyFeedback()
   await terminalCards()
 
   await activate(`r.action.type === 'toggle' && r.action.id === 'm2/5'`)
@@ -558,6 +576,12 @@ async function run() {
       `window.__canvasTest.copied.at(-1).includes('@@') && window.__canvasTest.copied.at(-1).includes('src/catalog.ts')`
     )
   )
+  check(
+    'copy patch shows a visible success check',
+    (await copyPixels(
+      "r.action.type==='diff' && r.action.id==='m2/5' && r.action.command==='patch'"
+    )) > 4
+  )
   const image = await win.webContents.capturePage()
   await fs.mkdir(path.resolve(__dirname, '../.out'), { recursive: true })
   await fs.writeFile(path.resolve(__dirname, '../.out/canvas-dark.png'), image.toPNG())
@@ -624,6 +648,11 @@ async function run() {
     'standalone controls work',
     await probe(`return scene.blocks[0].selectable.some(l=>l.group==='diff:after')`)
   )
+  await activate(`r.action.type==='copy'`)
+  check(
+    'standalone modified-source copy shows success',
+    (await copyPixels("r.action.type==='copy'")) > 4
+  )
   if (!win.webContents.debugger.isAttached()) win.webContents.debugger.attach('1.3')
   await win.webContents.debugger.sendCommand('Emulation.setDeviceMetricsOverride', {
     width: 1000,
@@ -680,6 +709,96 @@ async function run() {
   await require('./copilot.cjs')({ win, url, check, evaluate, clickDom, key, wait })
   check('Copilot recovery produces no renderer errors', errors.length === 0)
   console.log(`CANVAS OK - ${checks} checks passed`)
+}
+
+async function copyFeedback() {
+  const filter = "r.action.type==='copy' && r.title==='Copy code'"
+  const point = await target(filter)
+  await mouse('mouseMove', point.x, point.y)
+  const layouts = await probe('return probe.debug.layouts')
+  const top = await probe('return el.scrollTop')
+  const payload = await probe(
+    `return scene.blocks.flatMap(b=>b.regions).find(r=>${filter}).action.text`
+  )
+  await click(point.x, point.y)
+  check(
+    'code copy writes the original source',
+    await evaluate(`window.__canvasTest.copied.at(-1)===${JSON.stringify(payload)}`)
+  )
+  check('code copy paints a visible success check', (await copyPixels(filter)) > 4)
+  check(
+    'copy success is announced',
+    await evaluate(
+      "document.querySelector('[data-canvas-surface] [role=status]').textContent==='Copied'"
+    )
+  )
+  check(
+    'copy feedback does not relayout or scroll',
+    await probe(`return probe.debug.layouts===${layouts} && el.scrollTop===${top}`)
+  )
+  await fs.mkdir(path.resolve(__dirname, '../.out'), { recursive: true })
+  await fs.writeFile(
+    path.resolve(__dirname, '../.out/canvas-copy.png'),
+    (await win.webContents.capturePage()).toPNG()
+  )
+  await wait(1200)
+  await click(point.x, point.y)
+  await wait(1000)
+  check('repeated copy restarts the confirmation timer', (await copyPixels(filter)) > 4)
+  const idleFrames = await probe('return probe.debug.frames')
+  await wait(100)
+  check(
+    'copy feedback does not start a permanent paint loop',
+    await probe(`return probe.debug.frames===${idleFrames}`)
+  )
+  await wait(1100)
+  check('confirmation automatically returns to copy', (await copyPixels(filter)) === 0)
+  await evaluate(`
+    window.__restoreClipboard=navigator.clipboard.writeText;
+    Object.defineProperty(navigator.clipboard,'writeText',{configurable:true,value:()=>Promise.reject(new Error('Clipboard denied'))});
+  `)
+  await click(point.x, point.y)
+  check(
+    'failed clipboard writes paint an error instead of success',
+    (await copyPixels(filter, false)) > 4 && (await copyPixels(filter)) === 0
+  )
+  check(
+    'copy failure is announced',
+    await evaluate(
+      "document.querySelector('[data-canvas-surface] [role=status]').textContent.includes('Could not copy')"
+    )
+  )
+  await evaluate(`
+    Object.defineProperty(navigator.clipboard,'writeText',{configurable:true,value:()=>new Promise(resolve=>{window.__finishCopy=resolve})});
+  `)
+  await click(point.x, point.y)
+  check('pending clipboard write does not claim success', (await copyPixels(filter)) === 0)
+  await clickDom('#session')
+  await evaluate('window.__finishCopy()')
+  await settle()
+  check(
+    'late clipboard completion cannot confirm in a different session',
+    await evaluate("document.querySelector('[data-canvas-surface] [role=status]').textContent===''")
+  )
+  await evaluate(`
+    Object.defineProperty(navigator.clipboard,'writeText',{configurable:true,value:window.__restoreClipboard});
+    delete window.__restoreClipboard;
+    delete window.__finishCopy;
+  `)
+  const originalSize = win.getContentSize()
+  win.setContentSize(420, 780)
+  await wait(150)
+  await evaluate(`window.roxy.settings.setMotion('reduced')`)
+  await activate(filter)
+  check('narrow reduced-motion canvas still confirms copying', (await copyPixels(filter)) > 4)
+  check(
+    'copy feedback fits without horizontal overflow',
+    await probe('return el.scrollWidth===el.clientWidth')
+  )
+  await clickDom('#session')
+  await evaluate(`window.roxy.settings.setMotion('on')`)
+  win.setContentSize(...originalSize)
+  await wait(150)
 }
 
 async function promptHistory() {
