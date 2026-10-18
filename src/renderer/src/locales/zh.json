@@ -29,7 +29,7 @@
     "errors": {
       "invalidImage": "请选择有效的 PNG、JPEG、WebP 或 GIF 图片，大小不超过 40 兆像素。",
       "invalidVideo": "此视频无法播放。请尝试使用 H.264 MP4 或 MOV 格式，且像素不超过 40 兆。",
-      "libraryFull": "My Backgrounds is full (50 backgrounds or 350 MB). Delete a saved background before adding another.",
+      "libraryFull": "我的背景已满（50 个背景或 350 MB）。请先删除一个已保存的背景，然后再添加。",
       "readFailed": "无法读取背景图片。请尝试重新选择。",
       "saveFailed": "无法保存背景。您的先前设置已保留。",
       "tooLarge": "此图片过大。请选择小于 25 MB 的图片。"
@@ -53,14 +53,14 @@
     "reset": "重置效果",
     "samplePrompt": "您想构建什么？",
     "sampleReply": "您的主题让对话成为焦点。",
-    "save": "Save background",
-    "savedLocally": "Background saved on this device. Nothing was uploaded.",
-    "saving": "Saving...",
+    "save": "保存背景",
+    "savedLocally": "背景已保存到此设备。未上传任何内容。",
+    "saving": "正在保存...",
     "sessionOpacity": "对话可见度",
     "sessionOpacityHint": "保持较低以方便阅读。",
     "sessionPreview": "对话",
     "showOn": "显示背景于",
-    "sidebarDescription": "Adjust image effects, sidebar style, and chat visibility. Choose or upload a background in Background.",
+    "sidebarDescription": "调整图像效果、侧边栏样式和聊天可见性。在“背景”中选择或上传背景。",
     "sidebarHints": {
       "default": "保持侧边栏的纯色主题表面。",
       "dimmed": "在较暗的侧边栏下将图像延伸到整个窗口。",
@@ -777,7 +777,7 @@
       "general": "通用",
       "openRemote": "管理远程访问",
       "section": "设置部分",
-      "sidebar": "Sidebar",
+      "sidebar": "侧边栏",
       "theme": "主题",
       "worktrees": "工作树配置"
     },
@@ -1156,88 +1156,88 @@
     "useModel": "使用模型"
   },
   "wallpapers": {
-    "activeUses_one": "{{count}} active device",
-    "activeUses_other": "{{count}} active devices",
-    "addCustom": "Add Custom Background",
-    "addOwn": "Add your own",
-    "applied": "Background saved on this device. Your effects and visibility settings are unchanged.",
-    "backgroundName": "Background name",
-    "cancel": "Cancel",
-    "confirmDelete": "Delete background",
-    "consent": "I own this work or have permission from all rights holders to let Roxy host and distribute it publicly, including any required creator credit. I consent to uploading it for review.",
-    "custom": "Custom",
-    "customHint": "Your image, GIF, or video",
-    "delete": "Delete from My Backgrounds",
-    "deleteHint": "Delete this saved background from this device? If it is in use, your background will be cleared. This does not remove a published catalog wallpaper.",
+    "activeUses_one": "{{count}} 个活跃设备",
+    "activeUses_other": "{{count}} 个活跃设备",
+    "addCustom": "添加自定义背景",
+    "addOwn": "添加您自己的",
+    "applied": "背景已保存到此设备。您的效果和可见性设置未更改。",
+    "backgroundName": "背景名称",
+    "cancel": "取消",
+    "confirmDelete": "删除背景",
+    "consent": "我拥有此作品或已获得所有权利持有人的许可，允许 Roxy 公开托管和分发此作品，包括任何所需的创作者署名。我同意上传以供审核。",
+    "custom": "自定义",
+    "customHint": "您的图片、GIF 或视频",
+    "delete": "从我的背景中删除",
+    "deleteHint": "要从本设备删除此已保存的背景吗？如果正在使用，您的背景将被清除。这不会删除已发布的目录壁纸。",
     "description": "Find a background that feels like you. Browse curated images and silent video loops, then keep a copy on this device.",
     "dimensions": "{{kind}} / {{width}} x {{height}}",
-    "empty": "No wallpapers found. Try another search or check back for new additions.",
+    "empty": "未找到壁纸。请尝试其他搜索或稍后查看新添加的壁纸。",
     "errors": {
-      "changed": "Your background changed. Review it and confirm publication consent again.",
-      "invalid": "Check the title, permission details, and publication consent.",
-      "noBackground": "Choose and save a background before submitting it.",
-      "rateLimited": "The submission or request limit has been reached. Please try again later.",
-      "unavailable": "The wallpaper service is unavailable. Check your connection and try again.",
-      "unsupported": "This media could not be published. Use an image under 25 MB or a GIF/MP4/MOV up to 60 seconds."
+      "changed": "您的背景已更改。请再次查看并确认发布同意。",
+      "invalid": "请检查标题、权限详情和发布同意。",
+      "noBackground": "请先选择并保存背景，然后再提交。",
+      "rateLimited": "已达到提交或请求限制。请稍后重试。",
+      "unavailable": "壁纸服务不可用。请检查您的连接并重试。",
+      "unsupported": "此媒体无法发布。请使用小于 25 MB 的图片或最长 60 秒的 GIF/MP4/MOV。"
     },
-    "featured": "Featured",
+    "featured": "精选",
     "fields": {
       "credit": "Required creator credit (if any)",
-      "description": "Description (optional)",
+      "description": "描述（可选）",
       "license": "License / permission and original source",
       "tags": "Tags, separated by commas (optional)",
-      "title": "Wallpaper title"
+      "title": "壁纸标题"
     },
-    "generateTags": "Generate tags",
-    "inUse": "In use",
+    "generateTags": "生成标签",
+    "inUse": "使用中",
     "kinds": {
-      "all": "All wallpapers",
-      "image": "Images",
-      "video": "Silent videos"
+      "all": "所有壁纸",
+      "image": "图片",
+      "video": "无声视频"
     },
-    "libraryFailed": "Could not load or update My Backgrounds. Try again.",
-    "licenseHint": "Choose only a license you are authorized to offer. Selecting a license does not grant rights to someone else's work. Include any attribution it requires.",
+    "libraryFailed": "无法加载或更新我的背景。请重试。",
+    "licenseHint": "仅选择您有权提供的许可证。选择许可证并不授予他人作品的权利。请包含其所需的任何署名。",
     "licenses": {
       "CC-BY-4": {
-        "0": "CC BY 4.0 - Attribution"
+        "0": "CC BY 4.0 - 署名"
       },
       "CC-BY-NC-4": {
-        "0": "CC BY-NC 4.0 - Attribution, non-commercial"
+        "0": "CC BY-NC 4.0 - 署名，非商业性使用"
       },
       "CC-BY-SA-4": {
-        "0": "CC BY-SA 4.0 - Attribution, share alike"
+        "0": "CC BY-SA 4.0 - 署名，相同方式共享"
       },
       "CC0-1": {
-        "0": "CC0 1.0 - Public domain dedication"
+        "0": "CC0 1.0 - 公共领域奉献"
       },
-      "other": "Other / I have permission",
-      "placeholder": "Select a license..."
+      "other": "其他 / 我已获得许可",
+      "placeholder": "选择许可证..."
     },
-    "loading": "Loading wallpapers...",
-    "more": "Load more",
-    "mostUsed": "Most Used",
-    "myBackgrounds": "My Backgrounds are saved on this device. Select a custom card to rename or delete it.",
-    "newest": "Newest",
-    "permission": "Permission details and original source",
+    "loading": "正在加载壁纸...",
+    "more": "加载更多",
+    "mostUsed": "最常用",
+    "myBackgrounds": "我的背景保存在此设备上。选择一个自定义卡片以重命名或删除它。",
+    "newest": "最新",
+    "permission": "权限详情和原始来源",
     "privacy": "This uploads your current original background and the details below to Roxy, without an account or public submitter identity. Network addresses may be processed to prevent abuse. Videos and GIFs become silent MP4s, up to 60 seconds; source metadata is removed. Only approved submissions are public.",
     "publishHint": "Made something worth sharing? Submit your current background for the community catalog.",
-    "recentApproved": "Recent Approved",
-    "removeTag": "Remove tag {{tag}}",
-    "rename": "Rename",
-    "retry": "Retry catalog",
-    "search": "Search titles and tags",
-    "send": "Send for review",
-    "sort": "Sort wallpapers",
-    "submit": "Submit for review",
-    "submitted": "Submitted for staff review. Reference: {{id}}. Your local background has not changed.",
-    "tagPlaceholder": "Add a tag...",
-    "tagsHint": "Tags are created locally from your title and media type. Edit them, or press Enter or comma to add your own. Paste a comma-separated list to add several.",
-    "tagsTooLong": "Keep all tags under 200 characters in total.",
-    "title": "Wallpaper Workshop",
-    "type": "Wallpaper type",
-    "untitledCustom": "My background",
-    "use": "Use background",
-    "working": "Preparing..."
+    "recentApproved": "最近批准",
+    "removeTag": "移除标签 {{tag}}",
+    "rename": "重命名",
+    "retry": "重试目录",
+    "search": "搜索标题和标签",
+    "send": "发送审核",
+    "sort": "排序壁纸",
+    "submit": "提交审核",
+    "submitted": "已提交工作人员审核。参考号：{{id}}。您的本地背景未更改。",
+    "tagPlaceholder": "添加标签...",
+    "tagsHint": "标签是根据您的标题和媒体类型本地创建的。编辑它们，或按 Enter 键或逗号添加您自己的标签。粘贴逗号分隔的列表以添加多个标签。",
+    "tagsTooLong": "所有标签总长度请保持在 200 个字符以内。",
+    "title": "壁纸工坊",
+    "type": "壁纸类型",
+    "untitledCustom": "我的背景",
+    "use": "使用背景",
+    "working": "正在准备..."
   },
   "workstream": {
     "action": {

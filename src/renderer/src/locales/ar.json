@@ -29,7 +29,7 @@
     "errors": {
       "invalidImage": "اختر صورة PNG أو JPEG أو WebP أو GIF صالحة بحجم أقل من 40 ميجابكسل.",
       "invalidVideo": "تعذر تشغيل هذا الفيديو. جرب ملف H.264 MP4 أو MOV أقل من 40 ميجابكسل.",
-      "libraryFull": "My Backgrounds is full (50 backgrounds or 350 MB). Delete a saved background before adding another.",
+      "libraryFull": "مكتبة خلفياتي ممتلئة (50 خلفية أو 350 ميجابايت). احذف خلفية محفوظة قبل إضافة أخرى.",
       "readFailed": "تعذر قراءة صورة الخلفية. حاول اختيارها مرة أخرى.",
       "saveFailed": "تعذر حفظ الخلفية. تم الاحتفاظ بإعداداتك السابقة.",
       "tooLarge": "هذه الصورة كبيرة جدًا. اختر واحدة بحجم أقل من 25 ميجابايت."
@@ -53,14 +53,14 @@
     "reset": "إعادة تعيين التأثيرات",
     "samplePrompt": "ماذا تود أن تبني؟",
     "sampleReply": "مظهرك يبقي المحادثة في بؤرة الاهتمام.",
-    "save": "Save background",
-    "savedLocally": "Background saved on this device. Nothing was uploaded.",
-    "saving": "Saving...",
+    "save": "حفظ الخلفية",
+    "savedLocally": "تم حفظ الخلفية على هذا الجهاز. لم يتم تحميل أي شيء.",
+    "saving": "جارٍ الحفظ...",
     "sessionOpacity": "رؤية المحادثة",
     "sessionOpacityHint": "اجعل هذا أقل لسهولة القراءة.",
     "sessionPreview": "محادثة",
     "showOn": "إظهار الخلفية على",
-    "sidebarDescription": "Adjust image effects, sidebar style, and chat visibility. Choose or upload a background in Background.",
+    "sidebarDescription": "اضبط تأثيرات الصورة، ونمط الشريط الجانبي، وإمكانية رؤية الدردشة. اختر أو حمّل خلفية في الخلفية.",
     "sidebarHints": {
       "default": "احتفظ بسطح المظهر الصلب للشريط الجانبي.",
       "dimmed": "مد الصورة عبر النافذة تحت شريط جانبي أغمق.",
@@ -172,7 +172,7 @@
     "empty": "لا توجد نتائج. حاول البحث بشيء آخر.",
     "enableNamed": "تمكين {{name}}",
     "fileContents": "محتويات {{path}} (نص عادي)",
-    "fileCount_one": "{{count}} file included",
+    "fileCount_one": "{{count}} ملف متضمن",
     "fileCount_other": "{{count}} ملفات مضمنة",
     "filePreview": "معاينة الملف المضمن",
     "filesUnavailable": "ملفات المهارة غير متاحة. تم تعطيل التثبيت حتى يمكن مراجعة الملفات.",
@@ -777,7 +777,7 @@
       "general": "عام",
       "openRemote": "إدارة الوصول عن بعد",
       "section": "قسم الإعدادات",
-      "sidebar": "Sidebar",
+      "sidebar": "الشريط الجانبي",
       "theme": "السمة",
       "worktrees": "تكوين Worktree"
     },
@@ -1156,88 +1156,88 @@
     "useModel": "استخدام النموذج"
   },
   "wallpapers": {
-    "activeUses_one": "{{count}} active device",
-    "activeUses_other": "{{count}} active devices",
-    "addCustom": "Add Custom Background",
-    "addOwn": "Add your own",
-    "applied": "Background saved on this device. Your effects and visibility settings are unchanged.",
-    "backgroundName": "Background name",
-    "cancel": "Cancel",
-    "confirmDelete": "Delete background",
-    "consent": "I own this work or have permission from all rights holders to let Roxy host and distribute it publicly, including any required creator credit. I consent to uploading it for review.",
-    "custom": "Custom",
-    "customHint": "Your image, GIF, or video",
-    "delete": "Delete from My Backgrounds",
-    "deleteHint": "Delete this saved background from this device? If it is in use, your background will be cleared. This does not remove a published catalog wallpaper.",
+    "activeUses_one": "{{count}} جهاز نشط",
+    "activeUses_other": "{{count}} أجهزة نشطة",
+    "addCustom": "إضافة خلفية مخصصة",
+    "addOwn": "أضف خاصتك",
+    "applied": "تم حفظ الخلفية على هذا الجهاز. لم تتغير تأثيراتك وإعدادات الرؤية.",
+    "backgroundName": "اسم الخلفية",
+    "cancel": "إلغاء",
+    "confirmDelete": "حذف الخلفية",
+    "consent": "أنا أمتلك هذا العمل أو لدي إذن من جميع أصحاب الحقوق للسماح لـ Roxy باستضافته وتوزيعه علنًا، بما في ذلك أي إسناد مطلوب للمبدع. أوافق على تحميله للمراجعة.",
+    "custom": "مخصص",
+    "customHint": "صورتك، GIF، أو فيديو",
+    "delete": "حذف من خلفياتي",
+    "deleteHint": "هل تريد حذف هذه الخلفية المحفوظة من هذا الجهاز؟ إذا كانت قيد الاستخدام، فسيتم مسح خلفيتك. هذا لا يزيل خلفية كتالوج منشورة.",
     "description": "Find a background that feels like you. Browse curated images and silent video loops, then keep a copy on this device.",
     "dimensions": "{{kind}} / {{width}} x {{height}}",
-    "empty": "No wallpapers found. Try another search or check back for new additions.",
+    "empty": "لم يتم العثور على خلفيات. جرب بحثًا آخر أو تحقق مرة أخرى من الإضافات الجديدة.",
     "errors": {
-      "changed": "Your background changed. Review it and confirm publication consent again.",
-      "invalid": "Check the title, permission details, and publication consent.",
-      "noBackground": "Choose and save a background before submitting it.",
-      "rateLimited": "The submission or request limit has been reached. Please try again later.",
-      "unavailable": "The wallpaper service is unavailable. Check your connection and try again.",
-      "unsupported": "This media could not be published. Use an image under 25 MB or a GIF/MP4/MOV up to 60 seconds."
+      "changed": "تغيرت خلفيتك. راجعها وقم بتأكيد موافقة النشر مرة أخرى.",
+      "invalid": "تحقق من العنوان وتفاصيل الإذن وموافقة النشر.",
+      "noBackground": "اختر واحفظ خلفية قبل إرسالها.",
+      "rateLimited": "تم الوصول إلى حد الإرسال أو الطلب. يرجى المحاولة مرة أخرى لاحقًا.",
+      "unavailable": "خدمة الخلفيات غير متاحة. تحقق من اتصالك وحاول مرة أخرى.",
+      "unsupported": "لا يمكن نشر هذه الوسائط. استخدم صورة أقل من 25 ميجابايت أو GIF/MP4/MOV حتى 60 ثانية."
     },
-    "featured": "Featured",
+    "featured": "مميز",
     "fields": {
       "credit": "Required creator credit (if any)",
-      "description": "Description (optional)",
+      "description": "الوصف (اختياري)",
       "license": "License / permission and original source",
       "tags": "Tags, separated by commas (optional)",
-      "title": "Wallpaper title"
+      "title": "عنوان الخلفية"
     },
-    "generateTags": "Generate tags",
-    "inUse": "In use",
+    "generateTags": "إنشاء علامات",
+    "inUse": "قيد الاستخدام",
     "kinds": {
-      "all": "All wallpapers",
-      "image": "Images",
-      "video": "Silent videos"
+      "all": "جميع الخلفيات",
+      "image": "الصور",
+      "video": "مقاطع الفيديو الصامتة"
     },
-    "libraryFailed": "Could not load or update My Backgrounds. Try again.",
-    "licenseHint": "Choose only a license you are authorized to offer. Selecting a license does not grant rights to someone else's work. Include any attribution it requires.",
+    "libraryFailed": "تعذر تحميل أو تحديث خلفياتي. حاول مرة أخرى.",
+    "licenseHint": "اختر فقط ترخيصًا مصرحًا لك بتقديمه. لا يمنح اختيار ترخيص حقوقًا لعمل شخص آخر. قم بتضمين أي إسناد يتطلبه.",
     "licenses": {
       "CC-BY-4": {
-        "0": "CC BY 4.0 - Attribution"
+        "0": "CC BY 4.0 - إسناد"
       },
       "CC-BY-NC-4": {
-        "0": "CC BY-NC 4.0 - Attribution, non-commercial"
+        "0": "CC BY-NC 4.0 - إسناد، غير تجاري"
       },
       "CC-BY-SA-4": {
-        "0": "CC BY-SA 4.0 - Attribution, share alike"
+        "0": "CC BY-SA 4.0 - إسناد، مشاركة بالمثل"
       },
       "CC0-1": {
-        "0": "CC0 1.0 - Public domain dedication"
+        "0": "CC0 1.0 - إهداء للملكية العامة"
       },
-      "other": "Other / I have permission",
-      "placeholder": "Select a license..."
+      "other": "أخرى / لدي إذن",
+      "placeholder": "اختر ترخيصًا..."
     },
-    "loading": "Loading wallpapers...",
-    "more": "Load more",
-    "mostUsed": "Most Used",
-    "myBackgrounds": "My Backgrounds are saved on this device. Select a custom card to rename or delete it.",
-    "newest": "Newest",
-    "permission": "Permission details and original source",
+    "loading": "جارٍ تحميل الخلفيات...",
+    "more": "تحميل المزيد",
+    "mostUsed": "الأكثر استخدامًا",
+    "myBackgrounds": "خلفياتي محفوظة على هذا الجهاز. حدد بطاقة مخصصة لإعادة تسميتها أو حذفها.",
+    "newest": "الأحدث",
+    "permission": "تفاصيل الإذن والمصدر الأصلي",
     "privacy": "This uploads your current original background and the details below to Roxy, without an account or public submitter identity. Network addresses may be processed to prevent abuse. Videos and GIFs become silent MP4s, up to 60 seconds; source metadata is removed. Only approved submissions are public.",
     "publishHint": "Made something worth sharing? Submit your current background for the community catalog.",
-    "recentApproved": "Recent Approved",
-    "removeTag": "Remove tag {{tag}}",
-    "rename": "Rename",
-    "retry": "Retry catalog",
-    "search": "Search titles and tags",
-    "send": "Send for review",
-    "sort": "Sort wallpapers",
-    "submit": "Submit for review",
-    "submitted": "Submitted for staff review. Reference: {{id}}. Your local background has not changed.",
-    "tagPlaceholder": "Add a tag...",
-    "tagsHint": "Tags are created locally from your title and media type. Edit them, or press Enter or comma to add your own. Paste a comma-separated list to add several.",
-    "tagsTooLong": "Keep all tags under 200 characters in total.",
-    "title": "Wallpaper Workshop",
-    "type": "Wallpaper type",
-    "untitledCustom": "My background",
-    "use": "Use background",
-    "working": "Preparing..."
+    "recentApproved": "الموافق عليها مؤخرًا",
+    "removeTag": "إزالة العلامة {{tag}}",
+    "rename": "إعادة تسمية",
+    "retry": "إعادة محاولة الكتالوج",
+    "search": "البحث في العناوين والعلامات",
+    "send": "إرسال للمراجعة",
+    "sort": "فرز الخلفيات",
+    "submit": "إرسال للمراجعة",
+    "submitted": "تم الإرسال لمراجعة الموظفين. المرجع: {{id}}. لم تتغير خلفيتك المحلية.",
+    "tagPlaceholder": "أضف علامة...",
+    "tagsHint": "يتم إنشاء العلامات محليًا من عنوانك ونوع الوسائط. قم بتحريرها، أو اضغط على Enter أو فاصلة لإضافة علاماتك الخاصة. الصق قائمة مفصولة بفاصلات لإضافة عدة علامات.",
+    "tagsTooLong": "اجعل جميع العلامات أقل من 200 حرف إجمالاً.",
+    "title": "ورشة عمل الخلفيات",
+    "type": "نوع الخلفية",
+    "untitledCustom": "خلفيتي",
+    "use": "استخدام الخلفية",
+    "working": "جارٍ التحضير..."
   },
   "workstream": {
     "action": {

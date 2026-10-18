@@ -29,7 +29,7 @@
     "errors": {
       "invalidImage": "Elija un PNG, JPEG, WebP o GIF válido de menos de 40 megapíxeles.",
       "invalidVideo": "Este vídeo no se pudo reproducir. Prueba con un MP4 o MOV H.264 de menos de 40 megapíxeles.",
-      "libraryFull": "My Backgrounds is full (50 backgrounds or 350 MB). Delete a saved background before adding another.",
+      "libraryFull": "Mis fondos está lleno (50 fondos o 350 MB). Elimina un fondo guardado antes de añadir otro.",
       "readFailed": "No se pudo leer la imagen de fondo. Intente seleccionarla de nuevo.",
       "saveFailed": "No se pudo guardar el fondo. Se han mantenido sus ajustes anteriores.",
       "tooLarge": "Esta imagen es demasiado grande. Elija una de menos de 25 MB."
@@ -53,14 +53,14 @@
     "reset": "Restablecer efectos",
     "samplePrompt": "¿Qué te gustaría construir?",
     "sampleReply": "Tu tema mantiene la conversación en el centro de atención.",
-    "save": "Save background",
-    "savedLocally": "Background saved on this device. Nothing was uploaded.",
-    "saving": "Saving...",
+    "save": "Guardar fondo",
+    "savedLocally": "Fondo guardado en este dispositivo. No se subió nada.",
+    "saving": "Guardando...",
     "sessionOpacity": "Visibilidad de la conversación",
     "sessionOpacityHint": "Mantenlo más bajo para una lectura más fácil.",
     "sessionPreview": "Conversación",
     "showOn": "Mostrar fondo en",
-    "sidebarDescription": "Adjust image effects, sidebar style, and chat visibility. Choose or upload a background in Background.",
+    "sidebarDescription": "Ajusta los efectos de imagen, el estilo de la barra lateral y la visibilidad del chat. Elige o sube un fondo en Fondo.",
     "sidebarHints": {
       "default": "Mantener la superficie sólida del tema de la barra lateral.",
       "dimmed": "Extender la imagen por toda la ventana bajo una barra lateral más oscura.",
@@ -777,7 +777,7 @@
       "general": "General",
       "openRemote": "Administrar acceso remoto",
       "section": "Sección de configuración",
-      "sidebar": "Sidebar",
+      "sidebar": "Barra lateral",
       "theme": "Tema",
       "worktrees": "Configuración de Worktree"
     },
@@ -1156,88 +1156,88 @@
     "useModel": "Usar modelo"
   },
   "wallpapers": {
-    "activeUses_one": "{{count}} active device",
-    "activeUses_other": "{{count}} active devices",
-    "addCustom": "Add Custom Background",
-    "addOwn": "Add your own",
-    "applied": "Background saved on this device. Your effects and visibility settings are unchanged.",
-    "backgroundName": "Background name",
-    "cancel": "Cancel",
-    "confirmDelete": "Delete background",
-    "consent": "I own this work or have permission from all rights holders to let Roxy host and distribute it publicly, including any required creator credit. I consent to uploading it for review.",
-    "custom": "Custom",
-    "customHint": "Your image, GIF, or video",
-    "delete": "Delete from My Backgrounds",
-    "deleteHint": "Delete this saved background from this device? If it is in use, your background will be cleared. This does not remove a published catalog wallpaper.",
+    "activeUses_one": "{{count}} dispositivo activo",
+    "activeUses_other": "{{count}} dispositivos activos",
+    "addCustom": "Añadir fondo personalizado",
+    "addOwn": "Añade el tuyo propio",
+    "applied": "Fondo guardado en este dispositivo. Tus efectos y configuración de visibilidad no han cambiado.",
+    "backgroundName": "Nombre del fondo",
+    "cancel": "Cancelar",
+    "confirmDelete": "Eliminar fondo",
+    "consent": "Soy el propietario de este trabajo o tengo permiso de todos los titulares de derechos para permitir que Roxy lo aloje y distribuya públicamente, incluyendo cualquier crédito de creador requerido. Doy mi consentimiento para subirlo para revisión.",
+    "custom": "Personalizado",
+    "customHint": "Tu imagen, GIF o video",
+    "delete": "Eliminar de Mis fondos",
+    "deleteHint": "¿Eliminar este fondo guardado de este dispositivo? Si está en uso, tu fondo se borrará. Esto no elimina un fondo de pantalla de catálogo publicado.",
     "description": "Find a background that feels like you. Browse curated images and silent video loops, then keep a copy on this device.",
     "dimensions": "{{kind}} / {{width}} x {{height}}",
-    "empty": "No wallpapers found. Try another search or check back for new additions.",
+    "empty": "No se encontraron fondos de pantalla. Intenta otra búsqueda o vuelve a consultar para ver las nuevas incorporaciones.",
     "errors": {
-      "changed": "Your background changed. Review it and confirm publication consent again.",
-      "invalid": "Check the title, permission details, and publication consent.",
-      "noBackground": "Choose and save a background before submitting it.",
-      "rateLimited": "The submission or request limit has been reached. Please try again later.",
-      "unavailable": "The wallpaper service is unavailable. Check your connection and try again.",
-      "unsupported": "This media could not be published. Use an image under 25 MB or a GIF/MP4/MOV up to 60 seconds."
+      "changed": "Tu fondo de pantalla ha cambiado. Revísalo y confirma de nuevo el consentimiento de publicación.",
+      "invalid": "Comprueba el título, los detalles de los permisos y el consentimiento de publicación.",
+      "noBackground": "Elige y guarda un fondo antes de enviarlo.",
+      "rateLimited": "Se ha alcanzado el límite de envíos o solicitudes. Vuelve a intentarlo más tarde.",
+      "unavailable": "El servicio de fondos de pantalla no está disponible. Comprueba tu conexión y vuelve a intentarlo.",
+      "unsupported": "Este medio no pudo ser publicado. Utiliza una imagen de menos de 25 MB o un GIF/MP4/MOV de hasta 60 segundos."
     },
-    "featured": "Featured",
+    "featured": "Destacados",
     "fields": {
       "credit": "Required creator credit (if any)",
-      "description": "Description (optional)",
+      "description": "Descripción (opcional)",
       "license": "License / permission and original source",
       "tags": "Tags, separated by commas (optional)",
-      "title": "Wallpaper title"
+      "title": "Título del fondo de pantalla"
     },
-    "generateTags": "Generate tags",
-    "inUse": "In use",
+    "generateTags": "Generar etiquetas",
+    "inUse": "En uso",
     "kinds": {
-      "all": "All wallpapers",
-      "image": "Images",
-      "video": "Silent videos"
+      "all": "Todos los fondos de pantalla",
+      "image": "Imágenes",
+      "video": "Videos silenciosos"
     },
-    "libraryFailed": "Could not load or update My Backgrounds. Try again.",
-    "licenseHint": "Choose only a license you are authorized to offer. Selecting a license does not grant rights to someone else's work. Include any attribution it requires.",
+    "libraryFailed": "No se pudieron cargar o actualizar Mis fondos. Inténtalo de nuevo.",
+    "licenseHint": "Elige solo una licencia que estés autorizado a ofrecer. Seleccionar una licencia no otorga derechos sobre el trabajo de otra persona. Incluye cualquier atribución que requiera.",
     "licenses": {
       "CC-BY-4": {
-        "0": "CC BY 4.0 - Attribution"
+        "0": "CC BY 4.0 - Atribución"
       },
       "CC-BY-NC-4": {
-        "0": "CC BY-NC 4.0 - Attribution, non-commercial"
+        "0": "CC BY-NC 4.0 - Atribución, no comercial"
       },
       "CC-BY-SA-4": {
-        "0": "CC BY-SA 4.0 - Attribution, share alike"
+        "0": "CC BY-SA 4.0 - Atribución, compartir igual"
       },
       "CC0-1": {
-        "0": "CC0 1.0 - Public domain dedication"
+        "0": "CC0 1.0 - Dedicación de dominio público"
       },
-      "other": "Other / I have permission",
-      "placeholder": "Select a license..."
+      "other": "Otro / Tengo permiso",
+      "placeholder": "Seleccionar una licencia..."
     },
-    "loading": "Loading wallpapers...",
-    "more": "Load more",
-    "mostUsed": "Most Used",
-    "myBackgrounds": "My Backgrounds are saved on this device. Select a custom card to rename or delete it.",
-    "newest": "Newest",
-    "permission": "Permission details and original source",
+    "loading": "Cargando fondos de pantalla...",
+    "more": "Cargar más",
+    "mostUsed": "Más usados",
+    "myBackgrounds": "Mis fondos se guardan en este dispositivo. Selecciona una tarjeta personalizada para renombrarla o eliminarla.",
+    "newest": "Más recientes",
+    "permission": "Detalles de permiso y fuente original",
     "privacy": "This uploads your current original background and the details below to Roxy, without an account or public submitter identity. Network addresses may be processed to prevent abuse. Videos and GIFs become silent MP4s, up to 60 seconds; source metadata is removed. Only approved submissions are public.",
     "publishHint": "Made something worth sharing? Submit your current background for the community catalog.",
-    "recentApproved": "Recent Approved",
-    "removeTag": "Remove tag {{tag}}",
-    "rename": "Rename",
-    "retry": "Retry catalog",
-    "search": "Search titles and tags",
-    "send": "Send for review",
-    "sort": "Sort wallpapers",
-    "submit": "Submit for review",
-    "submitted": "Submitted for staff review. Reference: {{id}}. Your local background has not changed.",
-    "tagPlaceholder": "Add a tag...",
-    "tagsHint": "Tags are created locally from your title and media type. Edit them, or press Enter or comma to add your own. Paste a comma-separated list to add several.",
-    "tagsTooLong": "Keep all tags under 200 characters in total.",
-    "title": "Wallpaper Workshop",
-    "type": "Wallpaper type",
-    "untitledCustom": "My background",
-    "use": "Use background",
-    "working": "Preparing..."
+    "recentApproved": "Aprobados recientemente",
+    "removeTag": "Eliminar etiqueta {{tag}}",
+    "rename": "Renombrar",
+    "retry": "Reintentar catálogo",
+    "search": "Buscar títulos y etiquetas",
+    "send": "Enviar para revisión",
+    "sort": "Ordenar fondos de pantalla",
+    "submit": "Enviar para revisión",
+    "submitted": "Enviado para revisión del personal. Referencia: {{id}}. Tu fondo de pantalla local no ha cambiado.",
+    "tagPlaceholder": "Añadir una etiqueta...",
+    "tagsHint": "Las etiquetas se crean localmente a partir de tu título y tipo de medio. Edítalas o presiona Intro o coma para añadir las tuyas. Pega una lista separada por comas para añadir varias.",
+    "tagsTooLong": "Mantén todas las etiquetas por debajo de 200 caracteres en total.",
+    "title": "Taller de fondos de pantalla",
+    "type": "Tipo de fondo de pantalla",
+    "untitledCustom": "Mi fondo",
+    "use": "Usar fondo",
+    "working": "Preparando..."
   },
   "workstream": {
     "action": {

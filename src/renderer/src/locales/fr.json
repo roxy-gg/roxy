@@ -29,7 +29,7 @@
     "errors": {
       "invalidImage": "Choisissez une image PNG, JPEG, WebP ou GIF valide de moins de 40 mégapixels.",
       "invalidVideo": "Cette vidéo n’a pas pu être lue. Essayez un MP4 ou MOV H.264 de moins de 40 mégapixels.",
-      "libraryFull": "My Backgrounds is full (50 backgrounds or 350 MB). Delete a saved background before adding another.",
+      "libraryFull": "Mes arrière-plans est plein (50 arrière-plans ou 350 Mo). Supprimez un arrière-plan enregistré avant d'en ajouter un autre.",
       "readFailed": "Impossible de lire l'image de fond. Essayez de la choisir à nouveau.",
       "saveFailed": "Impossible d'enregistrer l'arrière-plan. Vos paramètres précédents ont été conservés.",
       "tooLarge": "Cette image est trop grande. Choisissez-en une de moins de 25 Mo."
@@ -53,14 +53,14 @@
     "reset": "Réinitialiser les effets",
     "samplePrompt": "Que souhaitez-vous créer ?",
     "sampleReply": "Votre thème maintient la conversation au centre de l'attention.",
-    "save": "Save background",
-    "savedLocally": "Background saved on this device. Nothing was uploaded.",
-    "saving": "Saving...",
+    "save": "Enregistrer l'arrière-plan",
+    "savedLocally": "Arrière-plan enregistré sur cet appareil. Rien n'a été téléchargé.",
+    "saving": "Enregistrement...",
     "sessionOpacity": "Visibilité de la conversation",
     "sessionOpacityHint": "Gardez cette valeur plus basse pour une lecture plus facile.",
     "sessionPreview": "Conversation",
     "showOn": "Afficher l'arrière-plan sur",
-    "sidebarDescription": "Adjust image effects, sidebar style, and chat visibility. Choose or upload a background in Background.",
+    "sidebarDescription": "Ajustez les effets d'image, le style de la barre latérale et la visibilité du chat. Choisissez ou téléchargez un arrière-plan dans Arrière-plan.",
     "sidebarHints": {
       "default": "Conserver la surface de thème unie de la barre latérale.",
       "dimmed": "Étendre l’image sur toute la fenêtre sous une barre latérale plus sombre.",
@@ -777,7 +777,7 @@
       "general": "Général",
       "openRemote": "Gérer l'accès à distance",
       "section": "Section des paramètres",
-      "sidebar": "Sidebar",
+      "sidebar": "Barre latérale",
       "theme": "Thème",
       "worktrees": "Configuration de l'arborescence de travail"
     },
@@ -1156,47 +1156,47 @@
     "useModel": "Utiliser le modèle"
   },
   "wallpapers": {
-    "activeUses_one": "{{count}} active device",
-    "activeUses_other": "{{count}} active devices",
-    "addCustom": "Add Custom Background",
-    "addOwn": "Add your own",
-    "applied": "Background saved on this device. Your effects and visibility settings are unchanged.",
-    "backgroundName": "Background name",
-    "cancel": "Cancel",
-    "confirmDelete": "Delete background",
-    "consent": "I own this work or have permission from all rights holders to let Roxy host and distribute it publicly, including any required creator credit. I consent to uploading it for review.",
-    "custom": "Custom",
-    "customHint": "Your image, GIF, or video",
-    "delete": "Delete from My Backgrounds",
-    "deleteHint": "Delete this saved background from this device? If it is in use, your background will be cleared. This does not remove a published catalog wallpaper.",
+    "activeUses_one": "{{count}} appareil actif",
+    "activeUses_other": "{{count}} appareils actifs",
+    "addCustom": "Ajouter un arrière-plan personnalisé",
+    "addOwn": "Ajoutez le vôtre",
+    "applied": "Arrière-plan enregistré sur cet appareil. Vos effets et paramètres de visibilité sont inchangés.",
+    "backgroundName": "Nom de l'arrière-plan",
+    "cancel": "Annuler",
+    "confirmDelete": "Supprimer l'arrière-plan",
+    "consent": "Je suis propriétaire de cette œuvre ou j'ai la permission de tous les détenteurs de droits pour que Roxy l'héberge et la distribue publiquement, y compris tout crédit de créateur requis. Je consens à la télécharger pour examen.",
+    "custom": "Personnalisé",
+    "customHint": "Votre image, GIF ou vidéo",
+    "delete": "Supprimer de Mes arrière-plans",
+    "deleteHint": "Supprimer cet arrière-plan enregistré de cet appareil ? S'il est utilisé, votre arrière-plan sera effacé. Cela ne supprime pas un fond d'écran de catalogue publié.",
     "description": "Find a background that feels like you. Browse curated images and silent video loops, then keep a copy on this device.",
     "dimensions": "{{kind}} / {{width}} x {{height}}",
-    "empty": "No wallpapers found. Try another search or check back for new additions.",
+    "empty": "Aucun fond d'écran trouvé. Essayez une autre recherche ou revenez pour de nouvelles additions.",
     "errors": {
-      "changed": "Your background changed. Review it and confirm publication consent again.",
-      "invalid": "Check the title, permission details, and publication consent.",
-      "noBackground": "Choose and save a background before submitting it.",
-      "rateLimited": "The submission or request limit has been reached. Please try again later.",
-      "unavailable": "The wallpaper service is unavailable. Check your connection and try again.",
-      "unsupported": "This media could not be published. Use an image under 25 MB or a GIF/MP4/MOV up to 60 seconds."
+      "changed": "Votre arrière-plan a changé. Revoyez-le et confirmez à nouveau le consentement de publication.",
+      "invalid": "Vérifiez le titre, les détails de la permission et le consentement de publication.",
+      "noBackground": "Choisissez et enregistrez un arrière-plan avant de le soumettre.",
+      "rateLimited": "La limite de soumission ou de requête a été atteinte. Veuillez réessayer plus tard.",
+      "unavailable": "Le service de fonds d'écran est indisponible. Vérifiez votre connexion et réessayez.",
+      "unsupported": "Ce média n'a pas pu être publié. Utilisez une image de moins de 25 Mo ou un GIF/MP4/MOV de 60 secondes maximum."
     },
-    "featured": "Featured",
+    "featured": "En vedette",
     "fields": {
       "credit": "Required creator credit (if any)",
-      "description": "Description (optional)",
+      "description": "Description (facultatif)",
       "license": "License / permission and original source",
       "tags": "Tags, separated by commas (optional)",
-      "title": "Wallpaper title"
+      "title": "Titre du fond d'écran"
     },
-    "generateTags": "Generate tags",
-    "inUse": "In use",
+    "generateTags": "Générer des balises",
+    "inUse": "Utilisé",
     "kinds": {
-      "all": "All wallpapers",
+      "all": "Tous les fonds d'écran",
       "image": "Images",
-      "video": "Silent videos"
+      "video": "Vidéos silencieuses"
     },
-    "libraryFailed": "Could not load or update My Backgrounds. Try again.",
-    "licenseHint": "Choose only a license you are authorized to offer. Selecting a license does not grant rights to someone else's work. Include any attribution it requires.",
+    "libraryFailed": "Impossible de charger ou de mettre à jour Mes arrière-plans. Réessayez.",
+    "licenseHint": "Choisissez uniquement une licence que vous êtes autorisé à offrir. La sélection d'une licence n'accorde pas de droits sur le travail d'autrui. Incluez toute attribution requise.",
     "licenses": {
       "CC-BY-4": {
         "0": "CC BY 4.0 - Attribution"
@@ -1205,39 +1205,39 @@
         "0": "CC BY-NC 4.0 - Attribution, non-commercial"
       },
       "CC-BY-SA-4": {
-        "0": "CC BY-SA 4.0 - Attribution, share alike"
+        "0": "CC BY-SA 4.0 - Attribution, partage dans les mêmes conditions"
       },
       "CC0-1": {
-        "0": "CC0 1.0 - Public domain dedication"
+        "0": "CC0 1.0 - Dédicace au domaine public"
       },
-      "other": "Other / I have permission",
-      "placeholder": "Select a license..."
+      "other": "Autre / J'ai la permission",
+      "placeholder": "Sélectionner une licence..."
     },
-    "loading": "Loading wallpapers...",
-    "more": "Load more",
-    "mostUsed": "Most Used",
-    "myBackgrounds": "My Backgrounds are saved on this device. Select a custom card to rename or delete it.",
-    "newest": "Newest",
-    "permission": "Permission details and original source",
+    "loading": "Chargement des fonds d'écran...",
+    "more": "Charger plus",
+    "mostUsed": "Les plus utilisés",
+    "myBackgrounds": "Mes arrière-plans sont enregistrés sur cet appareil. Sélectionnez une carte personnalisée pour la renommer ou la supprimer.",
+    "newest": "Les plus récents",
+    "permission": "Détails de la permission et source originale",
     "privacy": "This uploads your current original background and the details below to Roxy, without an account or public submitter identity. Network addresses may be processed to prevent abuse. Videos and GIFs become silent MP4s, up to 60 seconds; source metadata is removed. Only approved submissions are public.",
     "publishHint": "Made something worth sharing? Submit your current background for the community catalog.",
-    "recentApproved": "Recent Approved",
-    "removeTag": "Remove tag {{tag}}",
-    "rename": "Rename",
-    "retry": "Retry catalog",
-    "search": "Search titles and tags",
-    "send": "Send for review",
-    "sort": "Sort wallpapers",
-    "submit": "Submit for review",
-    "submitted": "Submitted for staff review. Reference: {{id}}. Your local background has not changed.",
-    "tagPlaceholder": "Add a tag...",
-    "tagsHint": "Tags are created locally from your title and media type. Edit them, or press Enter or comma to add your own. Paste a comma-separated list to add several.",
-    "tagsTooLong": "Keep all tags under 200 characters in total.",
-    "title": "Wallpaper Workshop",
-    "type": "Wallpaper type",
-    "untitledCustom": "My background",
-    "use": "Use background",
-    "working": "Preparing..."
+    "recentApproved": "Approuvés récemment",
+    "removeTag": "Supprimer la balise {{tag}}",
+    "rename": "Renommer",
+    "retry": "Réessayer le catalogue",
+    "search": "Rechercher des titres et des balises",
+    "send": "Envoyer pour examen",
+    "sort": "Trier les fonds d'écran",
+    "submit": "Soumettre pour examen",
+    "submitted": "Soumis pour examen par le personnel. Référence : {{id}}. Votre arrière-plan local n'a pas changé.",
+    "tagPlaceholder": "Ajouter une étiquette...",
+    "tagsHint": "Les étiquettes sont créées localement à partir de votre titre et du type de média. Modifiez-les, ou appuyez sur Entrée ou sur la virgule pour ajouter les vôtres. Collez une liste séparée par des virgules pour en ajouter plusieurs.",
+    "tagsTooLong": "Gardez toutes les étiquettes sous 200 caractères au total.",
+    "title": "Atelier de fonds d'écran",
+    "type": "Type de fond d'écran",
+    "untitledCustom": "Mon arrière-plan",
+    "use": "Utiliser l'arrière-plan",
+    "working": "Préparation..."
   },
   "workstream": {
     "action": {

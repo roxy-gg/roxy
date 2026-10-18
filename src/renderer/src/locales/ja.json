@@ -29,7 +29,7 @@
     "errors": {
       "invalidImage": "40メガピクセル未満の有効なPNG、JPEG、WebP、またはGIFを選択してください。",
       "invalidVideo": "この動画は再生できませんでした。40メガピクセル未満の H.264 MP4 または MOV をお試しください。",
-      "libraryFull": "My Backgrounds is full (50 backgrounds or 350 MB). Delete a saved background before adding another.",
+      "libraryFull": "マイ背景がいっぱいです（背景50枚または350MB）。新しい背景を追加する前に、保存済みの背景を削除してください。",
       "readFailed": "背景画像を読み取れませんでした。もう一度選択してみてください。",
       "saveFailed": "背景を保存できませんでした。以前の設定が保持されています。",
       "tooLarge": "この画像は大きすぎます。25 MB 未満の画像を選択してください。"
@@ -53,14 +53,14 @@
     "reset": "効果をリセット",
     "samplePrompt": "何を作成しますか？",
     "sampleReply": "テーマは会話に集中できるようにします。",
-    "save": "Save background",
-    "savedLocally": "Background saved on this device. Nothing was uploaded.",
-    "saving": "Saving...",
+    "save": "背景を保存",
+    "savedLocally": "背景はこのデバイスに保存されました。何もアップロードされていません。",
+    "saving": "保存中...",
     "sessionOpacity": "会話の表示",
     "sessionOpacityHint": "読みやすくするために、これを低く保ちます。",
     "sessionPreview": "会話",
     "showOn": "背景を表示する場所",
-    "sidebarDescription": "Adjust image effects, sidebar style, and chat visibility. Choose or upload a background in Background.",
+    "sidebarDescription": "画像エフェクト、サイドバーのスタイル、チャットの表示設定を調整します。「背景」で背景を選択またはアップロードします。",
     "sidebarHints": {
       "default": "サイドバーの単色テーマの表面を維持します。",
       "dimmed": "暗いサイドバーの下で画像をウィンドウ全体に拡張します。",
@@ -777,7 +777,7 @@
       "general": "一般",
       "openRemote": "リモートアクセスを管理",
       "section": "設定セクション",
-      "sidebar": "Sidebar",
+      "sidebar": "サイドバー",
       "theme": "テーマ",
       "worktrees": "ワークツリー設定"
     },
@@ -1156,88 +1156,88 @@
     "useModel": "モデルを使用"
   },
   "wallpapers": {
-    "activeUses_one": "{{count}} active device",
-    "activeUses_other": "{{count}} active devices",
-    "addCustom": "Add Custom Background",
-    "addOwn": "Add your own",
-    "applied": "Background saved on this device. Your effects and visibility settings are unchanged.",
-    "backgroundName": "Background name",
-    "cancel": "Cancel",
-    "confirmDelete": "Delete background",
-    "consent": "I own this work or have permission from all rights holders to let Roxy host and distribute it publicly, including any required creator credit. I consent to uploading it for review.",
-    "custom": "Custom",
-    "customHint": "Your image, GIF, or video",
-    "delete": "Delete from My Backgrounds",
-    "deleteHint": "Delete this saved background from this device? If it is in use, your background will be cleared. This does not remove a published catalog wallpaper.",
+    "activeUses_one": "アクティブなデバイス {{count}} 台",
+    "activeUses_other": "アクティブなデバイス {{count}} 台",
+    "addCustom": "カスタム背景を追加",
+    "addOwn": "独自の背景を追加",
+    "applied": "背景がこのデバイスに保存されました。エフェクトと表示設定は変更されていません。",
+    "backgroundName": "背景名",
+    "cancel": "キャンセル",
+    "confirmDelete": "背景を削除",
+    "consent": "私はこの作品を所有しているか、すべての権利者からRoxyがこれを公開でホストおよび配布すること（必要な作成者クレジットを含む）を許可されています。レビューのためにアップロードすることに同意します。",
+    "custom": "カスタム",
+    "customHint": "あなたの画像、GIF、またはビデオ",
+    "delete": "マイ背景から削除",
+    "deleteHint": "この保存済みの背景をこのデバイスから削除しますか？使用中の場合、背景はクリアされます。これは公開されているカタログの壁紙を削除するものではありません。",
     "description": "Find a background that feels like you. Browse curated images and silent video loops, then keep a copy on this device.",
     "dimensions": "{{kind}} / {{width}} x {{height}}",
-    "empty": "No wallpapers found. Try another search or check back for new additions.",
+    "empty": "壁紙が見つかりませんでした。別の検索を試すか、新しい追加がないか確認してください。",
     "errors": {
-      "changed": "Your background changed. Review it and confirm publication consent again.",
-      "invalid": "Check the title, permission details, and publication consent.",
-      "noBackground": "Choose and save a background before submitting it.",
-      "rateLimited": "The submission or request limit has been reached. Please try again later.",
-      "unavailable": "The wallpaper service is unavailable. Check your connection and try again.",
-      "unsupported": "This media could not be published. Use an image under 25 MB or a GIF/MP4/MOV up to 60 seconds."
+      "changed": "背景が変更されました。内容を確認し、公開の同意を再度確認してください。",
+      "invalid": "タイトル、許可の詳細、および公開の同意を確認してください。",
+      "noBackground": "提出する前に背景を選択して保存してください。",
+      "rateLimited": "提出またはリクエストの制限に達しました。後でもう一度お試しください。",
+      "unavailable": "壁紙サービスが利用できません。接続を確認して再試行してください。",
+      "unsupported": "このメディアは公開できませんでした。25MB未満の画像、または60秒までのGIF/MP4/MOVを使用してください。"
     },
-    "featured": "Featured",
+    "featured": "おすすめ",
     "fields": {
       "credit": "Required creator credit (if any)",
-      "description": "Description (optional)",
+      "description": "説明（オプション）",
       "license": "License / permission and original source",
       "tags": "Tags, separated by commas (optional)",
-      "title": "Wallpaper title"
+      "title": "壁紙のタイトル"
     },
-    "generateTags": "Generate tags",
-    "inUse": "In use",
+    "generateTags": "タグを生成",
+    "inUse": "使用中",
     "kinds": {
-      "all": "All wallpapers",
-      "image": "Images",
-      "video": "Silent videos"
+      "all": "すべての壁紙",
+      "image": "画像",
+      "video": "サイレントビデオ"
     },
-    "libraryFailed": "Could not load or update My Backgrounds. Try again.",
-    "licenseHint": "Choose only a license you are authorized to offer. Selecting a license does not grant rights to someone else's work. Include any attribution it requires.",
+    "libraryFailed": "マイ背景を読み込むか更新できませんでした。もう一度お試しください。",
+    "licenseHint": "提供する権限のあるライセンスのみを選択してください。ライセンスを選択しても、他人の作品に対する権利が付与されるわけではありません。必要な帰属表示を含めてください。",
     "licenses": {
       "CC-BY-4": {
-        "0": "CC BY 4.0 - Attribution"
+        "0": "CC BY 4.0 - 表示"
       },
       "CC-BY-NC-4": {
-        "0": "CC BY-NC 4.0 - Attribution, non-commercial"
+        "0": "CC BY-NC 4.0 - 表示、非営利"
       },
       "CC-BY-SA-4": {
-        "0": "CC BY-SA 4.0 - Attribution, share alike"
+        "0": "CC BY-SA 4.0 - 表示、継承"
       },
       "CC0-1": {
-        "0": "CC0 1.0 - Public domain dedication"
+        "0": "CC0 1.0 - パブリックドメイン献呈"
       },
-      "other": "Other / I have permission",
-      "placeholder": "Select a license..."
+      "other": "その他 / 許可を得ています",
+      "placeholder": "ライセンスを選択..."
     },
-    "loading": "Loading wallpapers...",
-    "more": "Load more",
-    "mostUsed": "Most Used",
-    "myBackgrounds": "My Backgrounds are saved on this device. Select a custom card to rename or delete it.",
-    "newest": "Newest",
-    "permission": "Permission details and original source",
+    "loading": "壁紙を読み込み中...",
+    "more": "さらに読み込む",
+    "mostUsed": "最も使用された",
+    "myBackgrounds": "マイ背景はこのデバイスに保存されています。カスタムカードを選択して名前を変更または削除します。",
+    "newest": "最新",
+    "permission": "許可の詳細と元のソース",
     "privacy": "This uploads your current original background and the details below to Roxy, without an account or public submitter identity. Network addresses may be processed to prevent abuse. Videos and GIFs become silent MP4s, up to 60 seconds; source metadata is removed. Only approved submissions are public.",
     "publishHint": "Made something worth sharing? Submit your current background for the community catalog.",
-    "recentApproved": "Recent Approved",
-    "removeTag": "Remove tag {{tag}}",
-    "rename": "Rename",
-    "retry": "Retry catalog",
-    "search": "Search titles and tags",
-    "send": "Send for review",
-    "sort": "Sort wallpapers",
-    "submit": "Submit for review",
-    "submitted": "Submitted for staff review. Reference: {{id}}. Your local background has not changed.",
-    "tagPlaceholder": "Add a tag...",
-    "tagsHint": "Tags are created locally from your title and media type. Edit them, or press Enter or comma to add your own. Paste a comma-separated list to add several.",
-    "tagsTooLong": "Keep all tags under 200 characters in total.",
-    "title": "Wallpaper Workshop",
-    "type": "Wallpaper type",
-    "untitledCustom": "My background",
-    "use": "Use background",
-    "working": "Preparing..."
+    "recentApproved": "最近承認された",
+    "removeTag": "タグ {{tag}} を削除",
+    "rename": "名前を変更",
+    "retry": "カタログを再試行",
+    "search": "タイトルとタグを検索",
+    "send": "レビューのために送信",
+    "sort": "壁紙を並べ替え",
+    "submit": "レビューのために提出",
+    "submitted": "スタッフレビューのために提出されました。参照: {{id}}。ローカルの背景は変更されていません。",
+    "tagPlaceholder": "タグを追加...",
+    "tagsHint": "タグはタイトルとメディアタイプからローカルで作成されます。編集するか、Enterキーまたはコンマを押して独自のタグを追加してください。コンマ区切りのリストを貼り付けて複数追加することもできます。",
+    "tagsTooLong": "すべてのタグの合計文字数を200文字未満にしてください。",
+    "title": "壁紙ワークショップ",
+    "type": "壁紙の種類",
+    "untitledCustom": "マイ背景",
+    "use": "背景を使用",
+    "working": "準備中..."
   },
   "workstream": {
     "action": {

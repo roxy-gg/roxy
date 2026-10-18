@@ -29,7 +29,7 @@
     "errors": {
       "invalidImage": "Выберите действительный PNG, JPEG, WebP или GIF размером до 40 мегапикселей.",
       "invalidVideo": "Это видео не может быть воспроизведено. Попробуйте H.264 MP4 или MOV размером менее 40 мегапикселей.",
-      "libraryFull": "My Backgrounds is full (50 backgrounds or 350 MB). Delete a saved background before adding another.",
+      "libraryFull": "Мои фоны заполнены (50 фонов или 350 МБ). Удалите сохраненный фон, прежде чем добавлять новый.",
       "readFailed": "Не удалось прочитать фоновое изображение. Попробуйте выбрать его снова.",
       "saveFailed": "Не удалось сохранить фон. Ваши предыдущие настройки были сохранены.",
       "tooLarge": "Это изображение слишком большое. Выберите изображение размером до 25 МБ."
@@ -53,14 +53,14 @@
     "reset": "Сбросить эффекты",
     "samplePrompt": "Что бы вы хотели создать?",
     "sampleReply": "Ваша тема помогает сосредоточиться на разговоре.",
-    "save": "Save background",
-    "savedLocally": "Background saved on this device. Nothing was uploaded.",
-    "saving": "Saving...",
+    "save": "Сохранить фон",
+    "savedLocally": "Фон сохранен на этом устройстве. Ничего не было загружено.",
+    "saving": "Сохранение...",
     "sessionOpacity": "Видимость в разговоре",
     "sessionOpacityHint": "Уменьшите это значение для более лёгкого чтения.",
     "sessionPreview": "Разговор",
     "showOn": "Показывать фон в",
-    "sidebarDescription": "Adjust image effects, sidebar style, and chat visibility. Choose or upload a background in Background.",
+    "sidebarDescription": "Настройте эффекты изображения, стиль боковой панели и видимость чата. Выберите или загрузите фон в разделе «Фон».",
     "sidebarHints": {
       "default": "Сохранить сплошную поверхность темы боковой панели.",
       "dimmed": "Растянуть изображение по всему окну под более темной боковой панелью.",
@@ -777,7 +777,7 @@
       "general": "Общие",
       "openRemote": "Управление удаленным доступом",
       "section": "Раздел настроек",
-      "sidebar": "Sidebar",
+      "sidebar": "Боковая панель",
       "theme": "Тема",
       "worktrees": "Настройка рабочих деревьев"
     },
@@ -1156,88 +1156,88 @@
     "useModel": "Использовать модель"
   },
   "wallpapers": {
-    "activeUses_one": "{{count}} active device",
-    "activeUses_other": "{{count}} active devices",
-    "addCustom": "Add Custom Background",
-    "addOwn": "Add your own",
-    "applied": "Background saved on this device. Your effects and visibility settings are unchanged.",
-    "backgroundName": "Background name",
-    "cancel": "Cancel",
-    "confirmDelete": "Delete background",
-    "consent": "I own this work or have permission from all rights holders to let Roxy host and distribute it publicly, including any required creator credit. I consent to uploading it for review.",
-    "custom": "Custom",
-    "customHint": "Your image, GIF, or video",
-    "delete": "Delete from My Backgrounds",
-    "deleteHint": "Delete this saved background from this device? If it is in use, your background will be cleared. This does not remove a published catalog wallpaper.",
+    "activeUses_one": "{{count}} активное устройство",
+    "activeUses_other": "{{count}} активных устройств",
+    "addCustom": "Добавить пользовательский фон",
+    "addOwn": "Добавить свой",
+    "applied": "Фон сохранен на этом устройстве. Ваши эффекты и настройки видимости не изменились.",
+    "backgroundName": "Название фона",
+    "cancel": "Отмена",
+    "confirmDelete": "Удалить фон",
+    "consent": "Я являюсь владельцем этой работы или имею разрешение от всех правообладателей на размещение и публичное распространение Roxy, включая любое требуемое указание автора. Я согласен на загрузку для проверки.",
+    "custom": "Пользовательский",
+    "customHint": "Ваше изображение, GIF или видео",
+    "delete": "Удалить из «Моих фонов»",
+    "deleteHint": "Удалить этот сохраненный фон с этого устройства? Если он используется, ваш фон будет очищен. Это не удаляет опубликованные обои из каталога.",
     "description": "Find a background that feels like you. Browse curated images and silent video loops, then keep a copy on this device.",
     "dimensions": "{{kind}} / {{width}} x {{height}}",
-    "empty": "No wallpapers found. Try another search or check back for new additions.",
+    "empty": "Обои не найдены. Попробуйте другой поиск или проверьте наличие новых.",
     "errors": {
-      "changed": "Your background changed. Review it and confirm publication consent again.",
-      "invalid": "Check the title, permission details, and publication consent.",
-      "noBackground": "Choose and save a background before submitting it.",
-      "rateLimited": "The submission or request limit has been reached. Please try again later.",
-      "unavailable": "The wallpaper service is unavailable. Check your connection and try again.",
-      "unsupported": "This media could not be published. Use an image under 25 MB or a GIF/MP4/MOV up to 60 seconds."
+      "changed": "Ваш фон изменился. Просмотрите его и снова подтвердите согласие на публикацию.",
+      "invalid": "Проверьте название, сведения о разрешении и согласие на публикацию.",
+      "noBackground": "Выберите и сохраните фон, прежде чем отправлять его.",
+      "rateLimited": "Достигнут лимит отправки или запросов. Повторите попытку позже.",
+      "unavailable": "Служба обоев недоступна. Проверьте подключение и повторите попытку.",
+      "unsupported": "Этот медиафайл не может быть опубликован. Используйте изображение размером до 25 МБ или GIF/MP4/MOV продолжительностью до 60 секунд."
     },
-    "featured": "Featured",
+    "featured": "Рекомендуемые",
     "fields": {
       "credit": "Required creator credit (if any)",
-      "description": "Description (optional)",
+      "description": "Описание (необязательно)",
       "license": "License / permission and original source",
       "tags": "Tags, separated by commas (optional)",
-      "title": "Wallpaper title"
+      "title": "Название обоев"
     },
-    "generateTags": "Generate tags",
-    "inUse": "In use",
+    "generateTags": "Сгенерировать теги",
+    "inUse": "Используется",
     "kinds": {
-      "all": "All wallpapers",
-      "image": "Images",
-      "video": "Silent videos"
+      "all": "Все обои",
+      "image": "Изображения",
+      "video": "Беззвучные видео"
     },
-    "libraryFailed": "Could not load or update My Backgrounds. Try again.",
-    "licenseHint": "Choose only a license you are authorized to offer. Selecting a license does not grant rights to someone else's work. Include any attribution it requires.",
+    "libraryFailed": "Не удалось загрузить или обновить «Мои фоны». Попробуйте еще раз.",
+    "licenseHint": "Выбирайте только ту лицензию, которую вы уполномочены предлагать. Выбор лицензии не предоставляет прав на чужую работу. Включите любое требуемое авторство.",
     "licenses": {
       "CC-BY-4": {
-        "0": "CC BY 4.0 - Attribution"
+        "0": "CC BY 4.0 — С указанием авторства"
       },
       "CC-BY-NC-4": {
-        "0": "CC BY-NC 4.0 - Attribution, non-commercial"
+        "0": "CC BY-NC 4.0 — С указанием авторства, некоммерческая"
       },
       "CC-BY-SA-4": {
-        "0": "CC BY-SA 4.0 - Attribution, share alike"
+        "0": "CC BY-SA 4.0 — С указанием авторства, с сохранением условий"
       },
       "CC0-1": {
-        "0": "CC0 1.0 - Public domain dedication"
+        "0": "CC0 1.0 — Посвящение общественному достоянию"
       },
-      "other": "Other / I have permission",
-      "placeholder": "Select a license..."
+      "other": "Другое / У меня есть разрешение",
+      "placeholder": "Выберите лицензию..."
     },
-    "loading": "Loading wallpapers...",
-    "more": "Load more",
-    "mostUsed": "Most Used",
-    "myBackgrounds": "My Backgrounds are saved on this device. Select a custom card to rename or delete it.",
-    "newest": "Newest",
-    "permission": "Permission details and original source",
+    "loading": "Загрузка обоев...",
+    "more": "Загрузить ещё",
+    "mostUsed": "Самые используемые",
+    "myBackgrounds": "Мои фоны сохраняются на этом устройстве. Выберите пользовательскую карточку, чтобы переименовать или удалить ее.",
+    "newest": "Новые",
+    "permission": "Сведения о разрешении и исходный источник",
     "privacy": "This uploads your current original background and the details below to Roxy, without an account or public submitter identity. Network addresses may be processed to prevent abuse. Videos and GIFs become silent MP4s, up to 60 seconds; source metadata is removed. Only approved submissions are public.",
     "publishHint": "Made something worth sharing? Submit your current background for the community catalog.",
-    "recentApproved": "Recent Approved",
-    "removeTag": "Remove tag {{tag}}",
-    "rename": "Rename",
-    "retry": "Retry catalog",
-    "search": "Search titles and tags",
-    "send": "Send for review",
-    "sort": "Sort wallpapers",
-    "submit": "Submit for review",
-    "submitted": "Submitted for staff review. Reference: {{id}}. Your local background has not changed.",
-    "tagPlaceholder": "Add a tag...",
-    "tagsHint": "Tags are created locally from your title and media type. Edit them, or press Enter or comma to add your own. Paste a comma-separated list to add several.",
-    "tagsTooLong": "Keep all tags under 200 characters in total.",
-    "title": "Wallpaper Workshop",
-    "type": "Wallpaper type",
-    "untitledCustom": "My background",
-    "use": "Use background",
-    "working": "Preparing..."
+    "recentApproved": "Недавно одобренные",
+    "removeTag": "Удалить тег {{tag}}",
+    "rename": "Переименовать",
+    "retry": "Повторить загрузку каталога",
+    "search": "Поиск по названиям и тегам",
+    "send": "Отправить на проверку",
+    "sort": "Сортировать обои",
+    "submit": "Отправить на проверку",
+    "submitted": "Отправлено на проверку персоналом. Ссылка: {{id}}. Ваш локальный фон не изменился.",
+    "tagPlaceholder": "Добавить тег...",
+    "tagsHint": "Теги создаются локально на основе вашего названия и типа медиа. Измените их или нажмите Enter или запятую, чтобы добавить свои. Вставьте список, разделенный запятыми, чтобы добавить несколько.",
+    "tagsTooLong": "Общая длина всех тегов не должна превышать 200 символов.",
+    "title": "Мастерская обоев",
+    "type": "Тип обоев",
+    "untitledCustom": "Мой фон",
+    "use": "Использовать фон",
+    "working": "Подготовка..."
   },
   "workstream": {
     "action": {

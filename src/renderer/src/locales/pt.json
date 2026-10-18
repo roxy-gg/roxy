@@ -29,7 +29,7 @@
     "errors": {
       "invalidImage": "Escolha um PNG, JPEG, WebP ou GIF válido com menos de 40 megapixels.",
       "invalidVideo": "Este vídeo não pôde ser reproduzido. Tente um MP4 ou MOV H.264 com menos de 40 megapixels.",
-      "libraryFull": "My Backgrounds is full (50 backgrounds or 350 MB). Delete a saved background before adding another.",
+      "libraryFull": "Meus Planos de Fundo está cheio (50 planos de fundo ou 350 MB). Exclua um plano de fundo salvo antes de adicionar outro.",
       "readFailed": "Não foi possível ler a imagem de fundo. Tente escolhê-la novamente.",
       "saveFailed": "Não foi possível salvar o plano de fundo. Suas configurações anteriores foram mantidas.",
       "tooLarge": "Esta imagem é muito grande. Escolha uma com menos de 25 MB."
@@ -53,14 +53,14 @@
     "reset": "Repor efeitos",
     "samplePrompt": "O que gostaria de construir?",
     "sampleReply": "O seu tema mantém a conversa em foco.",
-    "save": "Save background",
-    "savedLocally": "Background saved on this device. Nothing was uploaded.",
-    "saving": "Saving...",
+    "save": "Salvar plano de fundo",
+    "savedLocally": "Plano de fundo salvo neste dispositivo. Nada foi carregado.",
+    "saving": "Salvando...",
     "sessionOpacity": "Visibilidade da conversa",
     "sessionOpacityHint": "Mantenha este valor mais baixo para facilitar a leitura.",
     "sessionPreview": "Conversa",
     "showOn": "Mostrar fundo em",
-    "sidebarDescription": "Adjust image effects, sidebar style, and chat visibility. Choose or upload a background in Background.",
+    "sidebarDescription": "Ajuste os efeitos de imagem, o estilo da barra lateral e a visibilidade do chat. Escolha ou carregue um plano de fundo em Plano de Fundo.",
     "sidebarHints": {
       "default": "Manter a superfície sólida do tema da barra lateral.",
       "dimmed": "Estender a imagem pela janela sob uma barra lateral mais escura.",
@@ -777,7 +777,7 @@
       "general": "Geral",
       "openRemote": "Gerenciar acesso remoto",
       "section": "Seção de configurações",
-      "sidebar": "Sidebar",
+      "sidebar": "Barra lateral",
       "theme": "Tema",
       "worktrees": "Configuração do worktree"
     },
@@ -1156,88 +1156,88 @@
     "useModel": "Usar modelo"
   },
   "wallpapers": {
-    "activeUses_one": "{{count}} active device",
-    "activeUses_other": "{{count}} active devices",
-    "addCustom": "Add Custom Background",
-    "addOwn": "Add your own",
-    "applied": "Background saved on this device. Your effects and visibility settings are unchanged.",
-    "backgroundName": "Background name",
-    "cancel": "Cancel",
-    "confirmDelete": "Delete background",
-    "consent": "I own this work or have permission from all rights holders to let Roxy host and distribute it publicly, including any required creator credit. I consent to uploading it for review.",
-    "custom": "Custom",
-    "customHint": "Your image, GIF, or video",
-    "delete": "Delete from My Backgrounds",
-    "deleteHint": "Delete this saved background from this device? If it is in use, your background will be cleared. This does not remove a published catalog wallpaper.",
+    "activeUses_one": "{{count}} dispositivo ativo",
+    "activeUses_other": "{{count}} dispositivos ativos",
+    "addCustom": "Adicionar Plano de Fundo Personalizado",
+    "addOwn": "Adicione o seu próprio",
+    "applied": "Plano de fundo salvo neste dispositivo. Seus efeitos e configurações de visibilidade não foram alterados.",
+    "backgroundName": "Nome do plano de fundo",
+    "cancel": "Cancelar",
+    "confirmDelete": "Excluir plano de fundo",
+    "consent": "Sou o proprietário desta obra ou tenho permissão de todos os detentores de direitos para permitir que a Roxy a hospede e distribua publicamente, incluindo qualquer crédito de criador exigido. Consinto em carregá-la para revisão.",
+    "custom": "Personalizado",
+    "customHint": "Sua imagem, GIF ou vídeo",
+    "delete": "Excluir de Meus Planos de Fundo",
+    "deleteHint": "Excluir este plano de fundo salvo deste dispositivo? Se estiver em uso, seu plano de fundo será limpo. Isso não remove um papel de parede de catálogo publicado.",
     "description": "Find a background that feels like you. Browse curated images and silent video loops, then keep a copy on this device.",
     "dimensions": "{{kind}} / {{width}} x {{height}}",
-    "empty": "No wallpapers found. Try another search or check back for new additions.",
+    "empty": "Nenhum papel de parede encontrado. Tente outra pesquisa ou volte para ver novas adições.",
     "errors": {
-      "changed": "Your background changed. Review it and confirm publication consent again.",
-      "invalid": "Check the title, permission details, and publication consent.",
-      "noBackground": "Choose and save a background before submitting it.",
-      "rateLimited": "The submission or request limit has been reached. Please try again later.",
-      "unavailable": "The wallpaper service is unavailable. Check your connection and try again.",
-      "unsupported": "This media could not be published. Use an image under 25 MB or a GIF/MP4/MOV up to 60 seconds."
+      "changed": "O seu plano de fundo foi alterado. Revise-o e confirme o consentimento de publicação novamente.",
+      "invalid": "Verifique o título, os detalhes da permissão e o consentimento de publicação.",
+      "noBackground": "Escolha e salve um plano de fundo antes de enviá-lo.",
+      "rateLimited": "O limite de envio ou solicitação foi atingido. Tente novamente mais tarde.",
+      "unavailable": "O serviço de papel de parede está indisponível. Verifique a sua conexão e tente novamente.",
+      "unsupported": "Este meio não pôde ser publicado. Use uma imagem com menos de 25 MB ou um GIF/MP4/MOV de até 60 segundos."
     },
-    "featured": "Featured",
+    "featured": "Em destaque",
     "fields": {
       "credit": "Required creator credit (if any)",
-      "description": "Description (optional)",
+      "description": "Descrição (opcional)",
       "license": "License / permission and original source",
       "tags": "Tags, separated by commas (optional)",
-      "title": "Wallpaper title"
+      "title": "Título do papel de parede"
     },
-    "generateTags": "Generate tags",
-    "inUse": "In use",
+    "generateTags": "Gerar tags",
+    "inUse": "Em uso",
     "kinds": {
-      "all": "All wallpapers",
-      "image": "Images",
-      "video": "Silent videos"
+      "all": "Todos os papéis de parede",
+      "image": "Imagens",
+      "video": "Vídeos silenciosos"
     },
-    "libraryFailed": "Could not load or update My Backgrounds. Try again.",
-    "licenseHint": "Choose only a license you are authorized to offer. Selecting a license does not grant rights to someone else's work. Include any attribution it requires.",
+    "libraryFailed": "Não foi possível carregar ou atualizar Meus Planos de Fundo. Tente novamente.",
+    "licenseHint": "Escolha apenas uma licença que você esteja autorizado a oferecer. A seleção de uma licença não concede direitos sobre o trabalho de outra pessoa. Inclua qualquer atribuição que ela exija.",
     "licenses": {
       "CC-BY-4": {
-        "0": "CC BY 4.0 - Attribution"
+        "0": "CC BY 4.0 - Atribuição"
       },
       "CC-BY-NC-4": {
-        "0": "CC BY-NC 4.0 - Attribution, non-commercial"
+        "0": "CC BY-NC 4.0 - Atribuição, não comercial"
       },
       "CC-BY-SA-4": {
-        "0": "CC BY-SA 4.0 - Attribution, share alike"
+        "0": "CC BY-SA 4.0 - Atribuição, partilha pela mesma licença"
       },
       "CC0-1": {
-        "0": "CC0 1.0 - Public domain dedication"
+        "0": "CC0 1.0 - Dedicação ao domínio público"
       },
-      "other": "Other / I have permission",
-      "placeholder": "Select a license..."
+      "other": "Outro / Tenho permissão",
+      "placeholder": "Selecionar uma licença..."
     },
-    "loading": "Loading wallpapers...",
-    "more": "Load more",
-    "mostUsed": "Most Used",
-    "myBackgrounds": "My Backgrounds are saved on this device. Select a custom card to rename or delete it.",
-    "newest": "Newest",
-    "permission": "Permission details and original source",
+    "loading": "Carregando papéis de parede...",
+    "more": "Carregar mais",
+    "mostUsed": "Mais usados",
+    "myBackgrounds": "Meus Planos de Fundo são salvos neste dispositivo. Selecione um cartão personalizado para renomeá-lo ou excluí-lo.",
+    "newest": "Mais recentes",
+    "permission": "Detalhes da permissão e fonte original",
     "privacy": "This uploads your current original background and the details below to Roxy, without an account or public submitter identity. Network addresses may be processed to prevent abuse. Videos and GIFs become silent MP4s, up to 60 seconds; source metadata is removed. Only approved submissions are public.",
     "publishHint": "Made something worth sharing? Submit your current background for the community catalog.",
-    "recentApproved": "Recent Approved",
-    "removeTag": "Remove tag {{tag}}",
-    "rename": "Rename",
-    "retry": "Retry catalog",
-    "search": "Search titles and tags",
-    "send": "Send for review",
-    "sort": "Sort wallpapers",
-    "submit": "Submit for review",
-    "submitted": "Submitted for staff review. Reference: {{id}}. Your local background has not changed.",
-    "tagPlaceholder": "Add a tag...",
-    "tagsHint": "Tags are created locally from your title and media type. Edit them, or press Enter or comma to add your own. Paste a comma-separated list to add several.",
-    "tagsTooLong": "Keep all tags under 200 characters in total.",
-    "title": "Wallpaper Workshop",
-    "type": "Wallpaper type",
-    "untitledCustom": "My background",
-    "use": "Use background",
-    "working": "Preparing..."
+    "recentApproved": "Aprovados recentemente",
+    "removeTag": "Remover tag {{tag}}",
+    "rename": "Renomear",
+    "retry": "Tentar novamente o catálogo",
+    "search": "Pesquisar títulos e tags",
+    "send": "Enviar para revisão",
+    "sort": "Classificar papéis de parede",
+    "submit": "Enviar para revisão",
+    "submitted": "Enviado para revisão da equipe. Referência: {{id}}. O seu plano de fundo local não foi alterado.",
+    "tagPlaceholder": "Adicionar uma tag...",
+    "tagsHint": "As tags são criadas localmente a partir do seu título e tipo de mídia. Edite-as ou pressione Enter ou vírgula para adicionar as suas próprias. Cole uma lista separada por vírgulas para adicionar várias.",
+    "tagsTooLong": "Mantenha todas as tags com menos de 200 caracteres no total.",
+    "title": "Oficina de Papéis de Parede",
+    "type": "Tipo de papel de parede",
+    "untitledCustom": "Meu plano de fundo",
+    "use": "Usar plano de fundo",
+    "working": "Preparando..."
   },
   "workstream": {
     "action": {

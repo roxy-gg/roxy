@@ -29,7 +29,7 @@
     "errors": {
       "invalidImage": "40 मेगापिक्सेल से कम का एक वैध PNG, JPEG, WebP या GIF चुनें।",
       "invalidVideo": "यह वीडियो नहीं चलाया जा सका। 40 मेगापिक्सल से कम का H.264 MP4 या MOV आज़माएँ।",
-      "libraryFull": "My Backgrounds is full (50 backgrounds or 350 MB). Delete a saved background before adding another.",
+      "libraryFull": "मेरे बैकग्राउंड भर गए हैं (50 बैकग्राउंड या 350 MB)। दूसरा जोड़ने से पहले एक सहेजा हुआ बैकग्राउंड हटाएँ।",
       "readFailed": "पृष्ठभूमि छवि को पढ़ा नहीं जा सका। इसे फिर से चुनने का प्रयास करें।",
       "saveFailed": "पृष्ठभूमि को सहेजा नहीं जा सका। आपकी पिछली सेटिंग्स रखी गई हैं।",
       "tooLarge": "यह छवि बहुत बड़ी है। 25 MB से कम का एक चुनें।"
@@ -53,14 +53,14 @@
     "reset": "प्रभाव रीसेट करें",
     "samplePrompt": "आप क्या बनाना चाहेंगे?",
     "sampleReply": "आपकी थीम बातचीत को केंद्रित रखती है।",
-    "save": "Save background",
-    "savedLocally": "Background saved on this device. Nothing was uploaded.",
-    "saving": "Saving...",
+    "save": "बैकग्राउंड सहेजें",
+    "savedLocally": "बैकग्राउंड इस डिवाइस पर सहेजा गया। कुछ भी अपलोड नहीं किया गया।",
+    "saving": "सहेजा जा रहा है...",
     "sessionOpacity": "वार्तालाप दृश्यता",
     "sessionOpacityHint": "आसान पढ़ने के लिए इसे कम रखें।",
     "sessionPreview": "बातचीत",
     "showOn": "पृष्ठभूमि दिखाएँ",
-    "sidebarDescription": "Adjust image effects, sidebar style, and chat visibility. Choose or upload a background in Background.",
+    "sidebarDescription": "छवि प्रभाव, साइडबार शैली और चैट दृश्यता समायोजित करें। बैकग्राउंड में एक बैकग्राउंड चुनें या अपलोड करें।",
     "sidebarHints": {
       "default": "साइडबार की ठोस थीम सतह रखें।",
       "dimmed": "एक गहरे साइडबार के नीचे छवि को विंडो में फैलाएँ।",
@@ -777,7 +777,7 @@
       "general": "सामान्य",
       "openRemote": "रिमोट एक्सेस प्रबंधित करें",
       "section": "सेटिंग्स अनुभाग",
-      "sidebar": "Sidebar",
+      "sidebar": "साइडबार",
       "theme": "थीम",
       "worktrees": "वर्कट्री कॉन्फ़िगरेशन"
     },
@@ -1156,88 +1156,88 @@
     "useModel": "मॉडल का उपयोग करें"
   },
   "wallpapers": {
-    "activeUses_one": "{{count}} active device",
-    "activeUses_other": "{{count}} active devices",
-    "addCustom": "Add Custom Background",
-    "addOwn": "Add your own",
-    "applied": "Background saved on this device. Your effects and visibility settings are unchanged.",
-    "backgroundName": "Background name",
-    "cancel": "Cancel",
-    "confirmDelete": "Delete background",
-    "consent": "I own this work or have permission from all rights holders to let Roxy host and distribute it publicly, including any required creator credit. I consent to uploading it for review.",
-    "custom": "Custom",
-    "customHint": "Your image, GIF, or video",
-    "delete": "Delete from My Backgrounds",
-    "deleteHint": "Delete this saved background from this device? If it is in use, your background will be cleared. This does not remove a published catalog wallpaper.",
+    "activeUses_one": "{{count}} सक्रिय डिवाइस",
+    "activeUses_other": "{{count}} सक्रिय डिवाइस",
+    "addCustom": "कस्टम बैकग्राउंड जोड़ें",
+    "addOwn": "अपना खुद का जोड़ें",
+    "applied": "बैकग्राउंड इस डिवाइस पर सहेजा गया। आपके प्रभाव और दृश्यता सेटिंग्स अपरिवर्तित हैं।",
+    "backgroundName": "बैकग्राउंड का नाम",
+    "cancel": "रद्द करें",
+    "confirmDelete": "बैकग्राउंड हटाएँ",
+    "consent": "मैं इस काम का मालिक हूँ या मेरे पास सभी अधिकार धारकों से अनुमति है कि Roxy इसे सार्वजनिक रूप से होस्ट और वितरित कर सके, जिसमें कोई भी आवश्यक निर्माता क्रेडिट शामिल है। मैं इसे समीक्षा के लिए अपलोड करने के लिए सहमत हूँ।",
+    "custom": "कस्टम",
+    "customHint": "आपकी छवि, GIF, या वीडियो",
+    "delete": "मेरे बैकग्राउंड से हटाएँ",
+    "deleteHint": "इस सहेजे गए बैकग्राउंड को इस डिवाइस से हटाएँ? यदि यह उपयोग में है, तो आपका बैकग्राउंड साफ़ हो जाएगा। यह प्रकाशित कैटलॉग वॉलपेपर को नहीं हटाता है।",
     "description": "Find a background that feels like you. Browse curated images and silent video loops, then keep a copy on this device.",
     "dimensions": "{{kind}} / {{width}} x {{height}}",
-    "empty": "No wallpapers found. Try another search or check back for new additions.",
+    "empty": "कोई वॉलपेपर नहीं मिला। कोई और खोज आज़माएँ या नए परिवर्धन के लिए दोबारा जाँच करें।",
     "errors": {
-      "changed": "Your background changed. Review it and confirm publication consent again.",
-      "invalid": "Check the title, permission details, and publication consent.",
-      "noBackground": "Choose and save a background before submitting it.",
-      "rateLimited": "The submission or request limit has been reached. Please try again later.",
-      "unavailable": "The wallpaper service is unavailable. Check your connection and try again.",
-      "unsupported": "This media could not be published. Use an image under 25 MB or a GIF/MP4/MOV up to 60 seconds."
+      "changed": "आपका बैकग्राउंड बदल गया। इसकी समीक्षा करें और प्रकाशन सहमति की फिर से पुष्टि करें।",
+      "invalid": "शीर्षक, अनुमति विवरण और प्रकाशन सहमति की जाँच करें।",
+      "noBackground": "इसे सबमिट करने से पहले एक बैकग्राउंड चुनें और सहेजें।",
+      "rateLimited": "सबमिशन या अनुरोध सीमा पहुँच गई है। कृपया बाद में पुनः प्रयास करें।",
+      "unavailable": "वॉलपेपर सेवा अनुपलब्ध है। अपना कनेक्शन जाँचें और पुनः प्रयास करें।",
+      "unsupported": "यह मीडिया प्रकाशित नहीं किया जा सका। 25 MB से कम की इमेज या 60 सेकंड तक का GIF/MP4/MOV उपयोग करें।"
     },
-    "featured": "Featured",
+    "featured": "विशेष रुप से प्रदर्शित",
     "fields": {
       "credit": "Required creator credit (if any)",
-      "description": "Description (optional)",
+      "description": "विवरण (वैकल्पिक)",
       "license": "License / permission and original source",
       "tags": "Tags, separated by commas (optional)",
-      "title": "Wallpaper title"
+      "title": "वॉलपेपर शीर्षक"
     },
-    "generateTags": "Generate tags",
-    "inUse": "In use",
+    "generateTags": "टैग जनरेट करें",
+    "inUse": "उपयोग में",
     "kinds": {
-      "all": "All wallpapers",
-      "image": "Images",
-      "video": "Silent videos"
+      "all": "सभी वॉलपेपर",
+      "image": "इमेज",
+      "video": "साइलेंट वीडियो"
     },
-    "libraryFailed": "Could not load or update My Backgrounds. Try again.",
-    "licenseHint": "Choose only a license you are authorized to offer. Selecting a license does not grant rights to someone else's work. Include any attribution it requires.",
+    "libraryFailed": "मेरे बैकग्राउंड लोड या अपडेट नहीं हो सके। पुनः प्रयास करें।",
+    "licenseHint": "केवल वही लाइसेंस चुनें जिसे आप प्रदान करने के लिए अधिकृत हैं। लाइसेंस का चयन करने से किसी और के काम के अधिकार नहीं मिलते हैं। इसमें आवश्यक कोई भी एट्रिब्यूशन शामिल करें।",
     "licenses": {
       "CC-BY-4": {
-        "0": "CC BY 4.0 - Attribution"
+        "0": "CC BY 4.0 - एट्रिब्यूशन"
       },
       "CC-BY-NC-4": {
-        "0": "CC BY-NC 4.0 - Attribution, non-commercial"
+        "0": "CC BY-NC 4.0 - एट्रिब्यूशन, गैर-व्यावसायिक"
       },
       "CC-BY-SA-4": {
-        "0": "CC BY-SA 4.0 - Attribution, share alike"
+        "0": "CC BY-SA 4.0 - एट्रिब्यूशन, शेयर अलाइक"
       },
       "CC0-1": {
-        "0": "CC0 1.0 - Public domain dedication"
+        "0": "CC0 1.0 - सार्वजनिक डोमेन समर्पण"
       },
-      "other": "Other / I have permission",
-      "placeholder": "Select a license..."
+      "other": "अन्य / मेरे पास अनुमति है",
+      "placeholder": "एक लाइसेंस चुनें..."
     },
-    "loading": "Loading wallpapers...",
-    "more": "Load more",
-    "mostUsed": "Most Used",
-    "myBackgrounds": "My Backgrounds are saved on this device. Select a custom card to rename or delete it.",
-    "newest": "Newest",
-    "permission": "Permission details and original source",
+    "loading": "वॉलपेपर लोड हो रहे हैं...",
+    "more": "और लोड करें",
+    "mostUsed": "सबसे अधिक उपयोग किया गया",
+    "myBackgrounds": "मेरे बैकग्राउंड इस डिवाइस पर सहेजे गए हैं। इसे नाम बदलने या हटाने के लिए एक कस्टम कार्ड चुनें।",
+    "newest": "नवीनतम",
+    "permission": "अनुमति विवरण और मूल स्रोत",
     "privacy": "This uploads your current original background and the details below to Roxy, without an account or public submitter identity. Network addresses may be processed to prevent abuse. Videos and GIFs become silent MP4s, up to 60 seconds; source metadata is removed. Only approved submissions are public.",
     "publishHint": "Made something worth sharing? Submit your current background for the community catalog.",
-    "recentApproved": "Recent Approved",
-    "removeTag": "Remove tag {{tag}}",
-    "rename": "Rename",
-    "retry": "Retry catalog",
-    "search": "Search titles and tags",
-    "send": "Send for review",
-    "sort": "Sort wallpapers",
-    "submit": "Submit for review",
-    "submitted": "Submitted for staff review. Reference: {{id}}. Your local background has not changed.",
-    "tagPlaceholder": "Add a tag...",
-    "tagsHint": "Tags are created locally from your title and media type. Edit them, or press Enter or comma to add your own. Paste a comma-separated list to add several.",
-    "tagsTooLong": "Keep all tags under 200 characters in total.",
-    "title": "Wallpaper Workshop",
-    "type": "Wallpaper type",
-    "untitledCustom": "My background",
-    "use": "Use background",
-    "working": "Preparing..."
+    "recentApproved": "हाल ही में स्वीकृत",
+    "removeTag": "टैग {{tag}} हटाएँ",
+    "rename": "नाम बदलें",
+    "retry": "कैटलॉग पुनः प्रयास करें",
+    "search": "शीर्षक और टैग खोजें",
+    "send": "समीक्षा के लिए भेजें",
+    "sort": "वॉलपेपर सॉर्ट करें",
+    "submit": "समीक्षा के लिए सबमिट करें",
+    "submitted": "कर्मचारी समीक्षा के लिए सबमिट किया गया। संदर्भ: {{id}}। आपका स्थानीय बैकग्राउंड नहीं बदला है।",
+    "tagPlaceholder": "एक टैग जोड़ें...",
+    "tagsHint": "टैग आपके शीर्षक और मीडिया प्रकार से स्थानीय रूप से बनाए जाते हैं। उन्हें संपादित करें, या अपना खुद का जोड़ने के लिए एंटर या कॉमा दबाएँ। कई जोड़ने के लिए कॉमा-सेपरेटेड सूची पेस्ट करें।",
+    "tagsTooLong": "सभी टैग कुल 200 वर्णों से कम रखें।",
+    "title": "वॉलपेपर वर्कशॉप",
+    "type": "वॉलपेपर प्रकार",
+    "untitledCustom": "मेरा बैकग्राउंड",
+    "use": "बैकग्राउंड का उपयोग करें",
+    "working": "तैयार हो रहा है..."
   },
   "workstream": {
     "action": {
