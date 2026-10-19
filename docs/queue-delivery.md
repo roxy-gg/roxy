@@ -32,10 +32,11 @@ explicit queues and scheduler deliveries. An eligible idle request is claimed
 synchronously, persisted to history, and announced as starting. Waiting cards
 describe actual waiting, not internal durability. No new tool option is needed.
 
-At most one claim per chat, at most four automated targets globally. FIFO uses
-the existing `(created_at, rowid)` order. Existing exceptions remain: failed or
-future machine work blocks automation but can be passed by the first user item;
-failed/future user heads cannot be passed. Stop remains a deliberate pause;
+At most one claim per chat, with no global concurrency cap across independent
+sessions and bots. FIFO uses the existing `(created_at, rowid)` order. Existing
+exceptions remain: failed or future machine work blocks automation but can be
+passed by the first user item; failed/future user heads cannot be passed.
+Stop remains a deliberate pause;
 new explicit sends or edits resume, but automatic results do not override Stop.
 
 `bot_invoke` stays in the caller's transcript and waits for caller release.
@@ -59,7 +60,7 @@ release/mutation tests cannot pass accidentally on the safety tick.
 | Scenario                          | Evidence                                                                                                                                                       |
 | --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | User to bot/project idle and busy | Synchronous claim, no waiting row, three images, FIFO, one prompt per delivery                                                                                 |
-| Independent sessions              | Four concurrent targets; fifth starts on released capacity                                                                                                     |
+| Independent sessions              | Eight concurrent session/bot targets start immediately without waiting for another target to finish                                                            |
 | Bot to bot/Roxy                   | Caller reservation prevents start; release starts named actor after caller history                                                                             |
 | Bot to project                    | Immediate send; real new git worktree; returned result with queued user prompt ahead of continuation                                                           |
 | Subagent completion               | Pending follow-up starts on run completion                                                                                                                     |
