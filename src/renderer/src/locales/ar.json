@@ -846,17 +846,13 @@
       "worktrees": "تكوين Worktree"
     },
     "notifications": {
-      "bundledSound": "Roxy's original chime",
       "completeDescription": "احصل على إشعار عندما ينتهي Roxy من الرد. مفيد للمهام الطويلة. لا يظهر إلا عندما لا يكون Roxy في المقدمة؛ انقر عليه للانتقال إلى تلك الجلسة.",
       "completeTitle": "اكتمال الردود",
       "defaultSound": "Default",
       "deleteSound": "Delete {{name}}",
       "heading": "الإشعارات",
       "importSound": "Import sound",
-      "libraryCount": "{{count}} / {{max}} custom sounds",
       "listenTo": "Listen to {{name}}",
-      "localCopy": "Imported sounds are copied into Roxy and kept after restarting. Importing or selecting a sound does not turn notifications on.",
-      "soundDetails": "{{format}} ? {{seconds}} s ? {{size}} KiB",
       "soundErrors": {
         "duration": "Choose a sound between 0.1 and 5 seconds long.",
         "invalidAudio": "This file could not be decoded. Choose an MP3 or a mono/stereo PCM WAV (16/24-bit, up to 48 kHz).",
@@ -865,11 +861,10 @@
         "saveFailed": "Roxy could not save the change. Try again.",
         "tooLarge": "Choose a file no larger than 2 MiB."
       },
+      "soundHint": "MP3 or WAV, up to 5 seconds and 2 MiB.",
       "soundLimits": "MP3 or PCM WAV (16/24-bit, up to 48 kHz), mono or stereo. 0.1 to 5 seconds, up to 2 MiB each.",
       "soundsTitle": "Notification sound",
-      "stopSound": "Stop sound",
-      "testNotification": "إشعار تجريبي",
-      "working": "Working..."
+      "testNotification": "إشعار تجريبي"
     },
     "privacy": {
       "description": "العدد والتوقيتات — تشغيل التطبيق، الأدوار المكتملة، عدد الخطوات والأدوات التي استغرقها الدور، عدد الرموز المميزة التي استخدمها وما يقرب من تكلفتها — مرتبطة بمعرف عشوائي تم إنشاؤه على هذا الجهاز. لا يتم تضمين مطالباتك، أو التعليمات البرمجية الخاصة بك، أو مسارات الملفات، أو أسماء المستودعات، أو أي نص خطأ.",

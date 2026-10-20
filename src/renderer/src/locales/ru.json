@@ -846,17 +846,13 @@
       "worktrees": "Настройка рабочих деревьев"
     },
     "notifications": {
-      "bundledSound": "Roxy's original chime",
       "completeDescription": "Получайте уведомление, когда Roxy завершит ответ. Полезно для длительных задач. Срабатывает, только когда Roxy не в фокусе; нажмите, чтобы перейти к этой сессии.",
       "completeTitle": "Завершение ответов",
       "defaultSound": "Default",
       "deleteSound": "Delete {{name}}",
       "heading": "Уведомления",
       "importSound": "Import sound",
-      "libraryCount": "{{count}} / {{max}} custom sounds",
       "listenTo": "Listen to {{name}}",
-      "localCopy": "Imported sounds are copied into Roxy and kept after restarting. Importing or selecting a sound does not turn notifications on.",
-      "soundDetails": "{{format}} ? {{seconds}} s ? {{size}} KiB",
       "soundErrors": {
         "duration": "Choose a sound between 0.1 and 5 seconds long.",
         "invalidAudio": "This file could not be decoded. Choose an MP3 or a mono/stereo PCM WAV (16/24-bit, up to 48 kHz).",
@@ -865,11 +861,10 @@
         "saveFailed": "Roxy could not save the change. Try again.",
         "tooLarge": "Choose a file no larger than 2 MiB."
       },
+      "soundHint": "MP3 or WAV, up to 5 seconds and 2 MiB.",
       "soundLimits": "MP3 or PCM WAV (16/24-bit, up to 48 kHz), mono or stereo. 0.1 to 5 seconds, up to 2 MiB each.",
       "soundsTitle": "Notification sound",
-      "stopSound": "Stop sound",
-      "testNotification": "Тестовое уведомление",
-      "working": "Working..."
+      "testNotification": "Тестовое уведомление"
     },
     "privacy": {
       "description": "Количество и время — запуски приложений, завершенные ходы, сколько шагов и инструментов занял ход, сколько токенов он использовал и примерно сколько это стоило — привязаны к случайному идентификатору, сгенерированному на этой машине. Никогда не ваши запросы, ваш код, пути к файлам, имена репозиториев или любой текст ошибки.",

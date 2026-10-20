@@ -11,7 +11,7 @@ still tests sound and toast explicitly, even when automatic notifications are of
 - MP3 or PCM WAV, mono/stereo. WAV accepts 16/24-bit PCM up to 48 kHz.
 - Maximum 2 MiB (2,097,152 bytes), duration 0.1 through 5 seconds inclusive.
 - Up to 20 custom sounds. Identical bytes reuse an existing entry.
-- Import adds an entry but does not select it. The user selects a radio option.
+- Import adds an entry but does not select it. The user selects it in the dropdown.
 - A bounded read and signature check run in main. Chromium validates metadata,
   actual decoding, duration and channel count in a temporary sandboxed renderer,
   with no preload, Node access or remote content and a 10-second timeout.
@@ -38,7 +38,7 @@ data. This does not keep Roxy running after quit or enable startup at login.
   process restores the selected sound after deleting the original file.
 - `npm run smoke:notification-sounds-ui`: actual settings component with real
   preload/main IPC and SQLite; native picker is stubbed. Checks opt-in behavior,
-  import/selection/reload, preview/stop, playback fallback, toast continuity,
+  import/selection/reload, preview/restart, playback fallback, toast continuity,
   deletion, cancellation, errors, untrusted callers and 390px/960px layouts.
   Screenshots are written under `test/.out/notification-sounds-*.png`.
 - The UI suite owns port 3100 and uses temporary user data, not the user's data.

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Play, Square, Trash2, Upload } from 'lucide-react'
+import { Play, Trash2, Upload } from 'lucide-react'
 import { Button, Switch } from './ui'
 import { useRoxyStore } from '../lib/store'
 import {
@@ -62,26 +62,15 @@ export function NotificationSettings(): JSX.Element {
     }
   }
 
-  const entries = [
-    {
-      id: null,
-      name: t('settings.notifications.defaultSound'),
-      detail: t('settings.notifications.bundledSound')
-    },
-    ...(library?.sounds ?? []).map((sound) => ({
-      id: sound.id,
-      name: sound.name,
-      detail: t('settings.notifications.soundDetails', {
-        format: sound.format.toUpperCase(),
-        seconds: sound.duration.toLocaleString(undefined, { maximumFractionDigits: 2 }),
-        size: Math.ceil(sound.bytes / 1024)
-      })
-    }))
-  ]
+  const selected = library?.sounds.find((sound) => sound.id === library.selectedId)
+  const selectedName = selected?.name ?? t('settings.notifications.defaultSound')
 
   return (
-    <div className="flex flex-col gap-4">
-      <div className="sq sq-xl sq-ring flex flex-col gap-3 rounded-xl border border-border bg-surface p-4 sm:flex-row sm:items-center sm:justify-between">
+    <section
+      className="sq sq-xl sq-ring rounded-xl border border-border bg-surface p-4"
+      aria-busy={busy}
+    >
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">
           <div className="text-sm font-medium text-text">
             {t('settings.notifications.completeTitle')}
@@ -109,30 +98,75 @@ export function NotificationSettings(): JSX.Element {
         </div>
       </div>
 
-      <section
-        className="rounded-xl border border-border bg-surface p-4"
-        aria-labelledby="notification-sounds-title"
-        aria-busy={busy}
-      >
-        <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="mt-4 border-t border-border pt-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h3 id="notification-sounds-title" className="text-sm font-medium text-text">
+            <label htmlFor="notification-sound" className="text-sm font-medium text-text">
               {t('settings.notifications.soundsTitle')}
-            </h3>
-            <p className="mt-1 text-xs text-text-muted">
-              {t('settings.notifications.soundLimits')}
+            </label>
+            <p
+              className="mt-0.5 text-xs text-text-muted"
+              title={t('settings.notifications.soundLimits')}
+            >
+              {t('settings.notifications.soundHint')}
             </p>
           </div>
-          <Button
-            size="sm"
-            disabled={busy || !library || library.sounds.length >= SOUND_MAX_COUNT}
-            onClick={() => void change(() => api.notifications.importSound())}
-          >
-            <Upload className="h-3.5 w-3.5" />
-            {t(busy ? 'settings.notifications.working' : 'settings.notifications.importSound')}
-          </Button>
+          <div className="flex min-w-0 items-center gap-1.5 sm:max-w-[60%]">
+            <select
+              id="notification-sound"
+              value={library?.selectedId ?? ''}
+              disabled={busy || !library}
+              className="sq sq-lg sq-ring h-9 min-w-0 flex-1 rounded-lg border border-border bg-surface-2 px-3 text-sm text-text outline-none focus:border-accent/70 sm:w-44"
+              onChange={(event) => {
+                const id = event.target.value || null
+                void change(() => api.notifications.selectSound(id))
+              }}
+            >
+              <option value="">{t('settings.notifications.defaultSound')}</option>
+              {library?.sounds.map((sound) => (
+                <option key={sound.id} value={sound.id}>
+                  {sound.name}
+                </option>
+              ))}
+            </select>
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={busy || !library}
+              aria-label={t('settings.notifications.listenTo', { name: selectedName })}
+              title={t('settings.notifications.listenTo', { name: selectedName })}
+              onClick={() => void playNotificationSound(library?.selectedId ?? null)}
+            >
+              <Play className="h-3.5 w-3.5" />
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={busy || !library || library.sounds.length >= SOUND_MAX_COUNT}
+              aria-label={t('settings.notifications.importSound')}
+              title={t(
+                library && library.sounds.length >= SOUND_MAX_COUNT
+                  ? 'settings.notifications.soundErrors.libraryFull'
+                  : 'settings.notifications.importSound'
+              )}
+              onClick={() => void change(() => api.notifications.importSound())}
+            >
+              <Upload className="h-3.5 w-3.5" />
+            </Button>
+            {selected && (
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={busy}
+                aria-label={t('settings.notifications.deleteSound', { name: selected.name })}
+                title={t('settings.notifications.deleteSound', { name: selected.name })}
+                onClick={() => void change(() => api.notifications.deleteSound(selected.id))}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </Button>
+            )}
+          </div>
         </div>
-        <p className="mt-3 text-xs text-text-muted">{t('settings.notifications.localCopy')}</p>
         {error && (
           <p role="alert" className="mt-3 text-xs text-danger">
             {t(`settings.notifications.soundErrors.${error}`)}
@@ -153,68 +187,7 @@ export function NotificationSettings(): JSX.Element {
             {t('common.retry')}
           </Button>
         )}
-        <div
-          className="mt-4 divide-y divide-border"
-          role="radiogroup"
-          aria-label={t('settings.notifications.soundsTitle')}
-        >
-          {entries.map((entry) => (
-            <div key={entry.id ?? 'default'} className="flex items-center gap-2 py-3">
-              <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-3">
-                <input
-                  type="radio"
-                  name="notification-sound"
-                  value={entry.id ?? 'default'}
-                  checked={!!library && library.selectedId === entry.id}
-                  disabled={busy || !library}
-                  className="shrink-0 accent-accent"
-                  onChange={() => void change(() => api.notifications.selectSound(entry.id))}
-                />
-                <span className="min-w-0">
-                  <span className="block truncate text-sm text-text" title={entry.name}>
-                    {entry.name}
-                  </span>
-                  <span className="block text-xs text-text-muted">{entry.detail}</span>
-                </span>
-              </label>
-              <Button
-                size="sm"
-                variant="ghost"
-                disabled={busy || !library}
-                aria-label={t('settings.notifications.listenTo', { name: entry.name })}
-                title={t('settings.notifications.listenTo', { name: entry.name })}
-                onClick={() => void playNotificationSound(entry.id)}
-              >
-                <Play className="h-3.5 w-3.5" />
-              </Button>
-              {entry.id && (
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  disabled={busy}
-                  aria-label={t('settings.notifications.deleteSound', { name: entry.name })}
-                  title={t('settings.notifications.deleteSound', { name: entry.name })}
-                  onClick={() => void change(() => api.notifications.deleteSound(entry.id!))}
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </Button>
-              )}
-            </div>
-          ))}
-        </div>
-        <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
-          <span className="text-xs text-text-muted">
-            {t('settings.notifications.libraryCount', {
-              count: library?.sounds.length ?? 0,
-              max: SOUND_MAX_COUNT
-            })}
-          </span>
-          <Button size="sm" variant="ghost" onClick={stopNotificationSound}>
-            <Square className="h-3 w-3" />
-            {t('settings.notifications.stopSound')}
-          </Button>
-        </div>
-      </section>
-    </div>
+      </div>
+    </section>
   )
 }

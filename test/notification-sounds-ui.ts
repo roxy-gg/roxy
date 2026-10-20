@@ -23,7 +23,7 @@ const evaluate = (code: string): Promise<any> =>
   window.webContents.executeJavaScript(`(async () => { ${code} })()`, true)
 async function until(code: string): Promise<void> {
   for (let i = 0; i < 200; i++) {
-    if (await evaluate(`return ${code}`)) return
+    if (await evaluate(`return !!(${code})`)) return
     await wait()
   }
   throw Error(
@@ -73,22 +73,27 @@ async function run(): Promise<void> {
     if (level >= 3) errors.push(message)
   })
   await window.loadURL(url)
-  await until(`document.querySelector('input[type=radio]:checked')`)
+  await until(`document.querySelector('#notification-sound:not(:disabled)')`)
   assert.equal(
     await evaluate(`return document.querySelector('[role=switch]').getAttribute('aria-checked')`),
     'false'
   )
   await button('Import sound')
-  await until(`document.querySelectorAll('input[type=radio]').length === 2`)
+  await until(`document.querySelectorAll('#notification-sound option').length === 2`)
   assert.equal(getSoundLibrary().selectedId, null)
   assert.equal(getSettings().notifyOnComplete, false)
-  await evaluate(`document.querySelectorAll('input[type=radio]')[1].click()`)
-  await until(`document.querySelectorAll('input[type=radio]')[1].checked`)
+  await evaluate(`const select = document.querySelector('#notification-sound');
+    select.value = select.options[1].value; select.dispatchEvent(new Event('change', { bubbles: true }));`)
+  await until(
+    `document.querySelector('#notification-sound').value !== '' && !document.querySelector('#notification-sound').disabled`
+  )
   const selected = getSoundLibrary().selectedId
   assert.ok(selected)
   await fs.rm(source)
   await window.reload()
-  await until(`document.querySelectorAll('input[type=radio]')[1]?.checked`)
+  await until(
+    `document.querySelector('#notification-sound')?.value === ${JSON.stringify(selected)}`
+  )
   await evaluate(`window.__audioSources = []; window.__audioPlays = 0; window.__audioStops = 0;
     window.__originalPlay = HTMLMediaElement.prototype.play;
     HTMLMediaElement.prototype.play = function() {
@@ -100,11 +105,15 @@ async function run(): Promise<void> {
   await button('Listen to Demo sound')
   await until(`window.__audioPlays === 1`)
   assert.ok(await evaluate(`return window.__audioSources[0].startsWith('data:audio/mpeg;base64,')`))
-  await button('Stop sound')
-  assert.ok(await evaluate(`return window.__audioStops > 0`))
+  await button('Listen to Demo sound')
+  await until(`window.__audioPlays === 2`)
+  assert.ok(
+    await evaluate(`return window.__audioStops > 0`),
+    'another preview stops the previous audio'
+  )
   assert.equal(getSettings().notifyOnComplete, false)
   await button('Test notification')
-  await until(`window.__audioPlays === 2`)
+  await until(`window.__audioPlays === 3`)
   assert.equal(toastCount, 1)
   // Rejected custom playback retries the bundled sound, without dropping the toast.
   await evaluate(`HTMLMediaElement.prototype.play = function() {
@@ -112,13 +121,13 @@ async function run(): Promise<void> {
     return this.src.startsWith('data:') ? Promise.reject(new Error('decode failed')) : Promise.resolve();
   };`)
   await button('Test notification')
-  await until(`window.__audioPlays === 4`)
+  await until(`window.__audioPlays === 5`)
   assert.equal(toastCount, 2)
   assert.ok(await evaluate(`return window.__audioSources.at(-1).includes('chime.wav')`))
   // Missing custom copy falls back before playback.
   await fs.rm(path.join(temp, 'notification-sounds', `${selected}.mp3`))
   await button('Test notification')
-  await until(`window.__audioPlays === 5`)
+  await until(`window.__audioPlays === 6`)
   assert.equal(toastCount, 3)
   assert.ok(await evaluate(`return window.__audioSources.at(-1).includes('chime.wav')`))
   await window.setContentSize(390, 800)
@@ -140,7 +149,7 @@ async function run(): Promise<void> {
     (await window.webContents.capturePage()).toPNG()
   )
   await button('Delete Demo sound')
-  await until(`document.querySelectorAll('input[type=radio]').length === 1`)
+  await until(`document.querySelectorAll('#notification-sound option').length === 1`)
   assert.equal(getSoundLibrary().selectedId, null)
   assert.equal(getSettings().notifyOnComplete, false)
   picked = ''
