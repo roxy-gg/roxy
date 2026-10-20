@@ -262,22 +262,14 @@ export function deliveryQueue(chatId: string): QueueItem[] {
                 ? ('delayed' as const)
                 : eligible?.id !== item.id
                   ? ('blocked' as const)
-                  : live.size >= 4
-                    ? ('capacity' as const)
-                    : undefined
+                  : undefined
         }
       : {})
   }))
 }
 
 function drainChat(chatId: string): void {
-  if (
-    live.size >= 4 ||
-    sessionBusy(chatId) ||
-    queuePaused(chatId) ||
-    subagentSnapshot(chatId) !== null
-  )
-    return
+  if (sessionBusy(chatId) || queuePaused(chatId) || subagentSnapshot(chatId) !== null) return
   const item = nextQueueItem(repo.listQueue(chatId))
   if (item) void deliver(item).catch((error) => console.error('[bots] delivery failed', error))
 }

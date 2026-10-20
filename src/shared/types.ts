@@ -378,7 +378,7 @@ export interface QueueItem {
   /** Claimed items remain durable until their result has been persisted. */
   state?: 'pending' | 'starting' | 'running' | 'failed'
   /** Live admission reason; derived, never persisted as a second state machine. */
-  waitReason?: 'paused' | 'busy' | 'capacity' | 'blocked' | 'delayed'
+  waitReason?: 'paused' | 'busy' | 'blocked' | 'delayed'
   /** Set when a bot, not the user, wrote this prompt — the transcript attributes it. */
   botId?: string
   botUsername?: string

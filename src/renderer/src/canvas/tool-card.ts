@@ -79,6 +79,7 @@ const TOOL_ICON: Record<string, IconName> = {
 
 export function toolIcon(tool: string): IconName {
   if (TOOL_ICON[tool]) return TOOL_ICON[tool]
+  if (tool.startsWith('rea_')) return 'scanEye'
   // An MCP tool arrives namespaced as `mcp__<server>__<tool>`; it is still an
   // MCP call and should read as one rather than as an unknown wrench.
   if (tool.startsWith('mcp__')) return 'network'

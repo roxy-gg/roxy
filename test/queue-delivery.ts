@@ -151,13 +151,20 @@ async function main(): Promise<void> {
     assert.equal(repo.listMessages(id).filter((m) => m.content === 'Second prompt').length, 1)
   }
 
-  // No global busy flag: four targets run, the fifth waits and starts on release.
+  // Independent sessions and bots start immediately, with no global concurrency cap.
   hold = true
-  const parallel = Array.from({ length: 5 }, (_, n) => repo.createChat({ title: `Parallel ${n}` }))
-  for (const chat of parallel) enqueuePrompt(chat.id, `Parallel ${chat.id}`)
-  assert.equal(automationSnapshot().length, 4)
-  assert.equal(deliveryQueue(parallel[4].id)[0].waitReason, 'capacity')
-  await until(() => replies.length === 4, 'four independent turns')
+  const parallel = [
+    ...Array.from({ length: 6 }, (_, n) => repo.createChat({ title: `Parallel ${n}` })),
+    repo.getChat(bot.chatId)!,
+    repo.getChat(guest.chatId)!
+  ]
+  for (const chat of parallel) {
+    assert.equal(enqueuePrompt(chat.id, `Parallel ${chat.id}`).state, 'starting')
+    assert.equal(deliveryQueue(chat.id)[0].waitReason, undefined)
+    assert.ok(!isVisibleQueueItem(deliveryQueue(chat.id)[0]))
+  }
+  assert.equal(automationSnapshot().length, parallel.length)
+  await until(() => replies.length === parallel.length, 'all independent turns start')
   hold = false
   replies.splice(0).forEach((reply) => reply())
   for (const chat of parallel) await idle(chat.id)

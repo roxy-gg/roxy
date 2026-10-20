@@ -1,5 +1,11 @@
 /** IPC channel names shared by the preload bridge and the main-process handlers. */
 export const CHANNELS = {
+  engineeringState: 'engineering:state',
+  engineeringChanged: 'engineering:changed',
+  engineeringInstall: 'engineering:install',
+  engineeringInstallAll: 'engineering:installAll',
+  engineeringUpdate: 'engineering:update',
+  engineeringCancel: 'engineering:cancel',
   voiceState: 'voice:state',
   voiceEvent: 'voice:event',
   voiceUpdate: 'voice:update',

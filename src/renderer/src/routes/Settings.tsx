@@ -1,8 +1,10 @@
+import { EngineeringTools } from '../components/EngineeringTools'
 import { useEffect, useId, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useTranslation, Trans } from 'react-i18next'
 import {
   Activity,
+  ScanEye,
   Bell,
   ChevronDown,
   DatabaseBackup,
@@ -71,6 +73,7 @@ const SETTINGS_GROUPS = [
     items: [
       { id: 'skills', label: 'sidebar.skills', icon: Lightbulb },
       { id: 'mcp', label: 'sidebar.mcpServers', icon: Plug },
+      { id: 'engineering', label: 'engineering.heading', icon: ScanEye },
       { id: 'backup', label: 'settings.backup.heading', icon: DatabaseBackup }
     ]
   },
@@ -347,6 +350,16 @@ export default function Settings(): JSX.Element {
         hidden={panel !== 'mcp'}
       >
         {(visited.has('mcp') || panel === 'mcp') && <Mcp active={panel === 'mcp'} />}
+      </div>
+      <div
+        id="settings-engineering-panel"
+        role="region"
+        aria-labelledby="settings-engineering"
+        hidden={panel !== 'engineering'}
+      >
+        {(visited.has('engineering') || panel === 'engineering') && (
+          <EngineeringTools active={panel === 'engineering'} />
+        )}
       </div>
       <div
         id="settings-activity-panel"

@@ -60,7 +60,10 @@ async function run(): Promise<void> {
   assert.equal(imported.state.sounds.length, 1)
   const sound = imported.state.sounds[0]
   assert.equal(sound.name, 'Original sound')
-  assert.ok(Math.abs(sound.duration - 0.5) < 0.001, 'decoded duration tolerates sample-rate rounding')
+  assert.ok(
+    Math.abs(sound.duration - 0.5) < 0.001,
+    'decoded duration tolerates sample-rate rounding'
+  )
   assert.equal(
     getDb().prepare("SELECT value FROM settings WHERE key = 'notify_on_complete'").get(),
     undefined
