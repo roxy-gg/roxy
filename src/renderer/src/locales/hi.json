@@ -863,7 +863,8 @@
       "soundHint": "MP3 or WAV, up to 5 seconds and 2 MiB.",
       "soundLimits": "MP3 or PCM WAV (16/24-bit, up to 48 kHz), mono or stereo. 0.1 to 5 seconds, up to 2 MiB each.",
       "soundsTitle": "Notification sound",
-      "testNotification": "परीक्षण सूचना"
+      "testNotification": "परीक्षण सूचना",
+      "testSound": "Test"
     },
     "privacy": {
       "description": "गणना और समय — ऐप लॉन्च, समाप्त मोड़, एक मोड़ में कितने कदम और उपकरण लगे, इसने कितने टोकन का उपयोग किया और मोटे तौर पर इसकी लागत कितनी थी — इस मशीन पर उत्पन्न एक यादृच्छिक आईडी से जुड़ा हुआ। कभी भी आपके प्रॉम्प्ट, आपका कोड, फ़ाइल पथ, रेपो नाम, या कोई त्रुटि पाठ नहीं।",

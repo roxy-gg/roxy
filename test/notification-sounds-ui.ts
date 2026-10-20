@@ -79,20 +79,21 @@ async function run(): Promise<void> {
     'false'
   )
   await button('Import sound')
-  await until(`document.querySelectorAll('#notification-sound option').length === 2`)
+  await until(`!document.querySelector('#notification-sound').disabled`)
+  await evaluate(`document.querySelector('#notification-sound').click()`)
+  await until(`document.querySelectorAll('[role=menuitemradio]').length === 2`)
   assert.equal(getSoundLibrary().selectedId, null)
   assert.equal(getSettings().notifyOnComplete, false)
-  await evaluate(`const select = document.querySelector('#notification-sound');
-    select.value = select.options[1].value; select.dispatchEvent(new Event('change', { bubbles: true }));`)
+  await evaluate(`document.querySelectorAll('[role=menuitemradio]')[1].click()`)
   await until(
-    `document.querySelector('#notification-sound').value !== '' && !document.querySelector('#notification-sound').disabled`
+    `document.querySelector('#notification-sound-value').textContent.trim() === 'Demo sound' && !document.querySelector('#notification-sound').disabled`
   )
   const selected = getSoundLibrary().selectedId
   assert.ok(selected)
   await fs.rm(source)
   await window.reload()
   await until(
-    `document.querySelector('#notification-sound')?.value === ${JSON.stringify(selected)}`
+    `document.querySelector('#notification-sound-value')?.textContent.trim() === 'Demo sound'`
   )
   await evaluate(`window.__audioSources = []; window.__audioPlays = 0; window.__audioStops = 0;
     window.__originalPlay = HTMLMediaElement.prototype.play;
@@ -142,6 +143,18 @@ async function run(): Promise<void> {
     true,
     'narrow layout does not overflow'
   )
+  await evaluate(`document.querySelector('#notification-sound').click()`)
+  await until(`document.querySelector('[role=menu]')`)
+  assert.equal(
+    await evaluate(`const rect = document.querySelector('[role=menu]').getBoundingClientRect();
+    return rect.left >= 0 && rect.right <= innerWidth && rect.bottom <= innerHeight;`),
+    true,
+    'menu fits the narrow viewport'
+  )
+  await evaluate(
+    `document.querySelector('[role=switch]').dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))`
+  )
+  await until(`!document.querySelector('[role=menu]')`)
   await fs.mkdir('test/.out', { recursive: true })
   await fs.writeFile(
     'test/.out/notification-sounds-mobile.png',
@@ -153,8 +166,33 @@ async function run(): Promise<void> {
     'test/.out/notification-sounds-desktop.png',
     (await window.webContents.capturePage()).toPNG()
   )
+  assert.equal(
+    await evaluate(`return document.querySelector('[aria-label="Delete Demo sound"]') === null`),
+    true,
+    'delete is only visible inside the menu'
+  )
+  await evaluate(`document.querySelector('#notification-sound').focus()`)
+  window.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Down' })
+  await until(
+    `document.querySelector('[role=menuitemradio][aria-checked=true]') === document.activeElement`
+  )
+  window.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Down' })
+  await until(`document.activeElement.getAttribute('aria-label') === 'Delete Demo sound'`)
+  window.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Home' })
+  await until(`document.activeElement.textContent.trim() === 'Default'`)
+  window.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Escape' })
+  await until(`!document.querySelector('[role=menu]')`)
+  assert.equal(await evaluate(`return document.activeElement.id`), 'notification-sound')
+  await evaluate(`document.querySelector('#notification-sound').click()`)
+  await until(`document.querySelector('[role=menu]')`)
+  await fs.writeFile(
+    'test/.out/notification-sounds-menu.png',
+    (await window.webContents.capturePage()).toPNG()
+  )
   await button('Delete Demo sound')
-  await until(`document.querySelectorAll('#notification-sound option').length === 1`)
+  await until(
+    `document.querySelector('#notification-sound-value').textContent.trim() === 'Default' && !document.querySelector('#notification-sound').disabled`
+  )
   assert.equal(getSoundLibrary().selectedId, null)
   assert.equal(getSettings().notifyOnComplete, false)
   picked = ''

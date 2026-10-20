@@ -781,6 +781,7 @@
       "completeTitle": "Response completions",
       "completeDescription": "Notify when a response is ready and Roxy isn't focused.",
       "testNotification": "Test notification",
+      "testSound": "Test",
       "soundsTitle": "Notification sound",
       "soundHint": "MP3 or WAV, up to 5 seconds and 2 MiB.",
       "defaultSound": "Default",

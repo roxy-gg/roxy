@@ -863,7 +863,8 @@
       "soundHint": "MP3 or WAV, up to 5 seconds and 2 MiB.",
       "soundLimits": "MP3 or PCM WAV (16/24-bit, up to 48 kHz), mono or stereo. 0.1 to 5 seconds, up to 2 MiB each.",
       "soundsTitle": "Notification sound",
-      "testNotification": "Notificação de teste"
+      "testNotification": "Notificação de teste",
+      "testSound": "Test"
     },
     "privacy": {
       "description": "Contagens e tempos — inicializações de aplicativos, turnos concluídos, quantos passos e ferramentas um turno levou, quantos tokens usou e aproximadamente quanto custou — vinculados a um ID aleatório gerado nesta máquina. Nunca seus prompts, seu código, caminhos de arquivo, nomes de repositórios ou qualquer texto de erro.",

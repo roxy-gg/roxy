@@ -863,7 +863,8 @@
       "soundHint": "MP3 or WAV, up to 5 seconds and 2 MiB.",
       "soundLimits": "MP3 or PCM WAV (16/24-bit, up to 48 kHz), mono or stereo. 0.1 to 5 seconds, up to 2 MiB each.",
       "soundsTitle": "Notification sound",
-      "testNotification": "测试通知"
+      "testNotification": "测试通知",
+      "testSound": "Test"
     },
     "privacy": {
       "description": "计数和时间 — 应用程序启动、完成的回合、一个回合所需的步骤和工具数量、使用的令牌数量以及大致成本 — 与此机器上生成的随机 ID 绑定。绝不包含您的提示、代码、文件路径、仓库名称或任何错误文本。",

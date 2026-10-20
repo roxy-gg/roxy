@@ -1,10 +1,12 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
-import { Play, Trash2, Upload } from 'lucide-react'
+import { Check, ChevronDown, Play, Trash2, Upload } from 'lucide-react'
 import { Button, Switch } from './ui'
 import { useRoxyStore } from '../lib/store'
 import { showCompletionNotification, stopNotificationSound } from '../lib/notify'
 import { api } from '../lib/api'
+import { useMenuAnchor } from '../lib/useMenuAnchor'
 import {
   SOUND_MAX_COUNT,
   type NotificationSoundError,
@@ -19,6 +21,29 @@ export function NotificationSettings(): JSX.Element {
   const [library, setLibrary] = useState<NotificationSoundLibrary | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<Exclude<NotificationSoundError, 'cancelled'> | null>(null)
+  const [open, setOpen] = useState(false)
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+  const anchor = useMenuAnchor(triggerRef, open, 280, { side: 'bottom', fixed: true })
+
+  useEffect(() => {
+    if (!open) return
+    menuRef.current?.querySelector<HTMLButtonElement>('[aria-checked="true"]')?.focus()
+    const onDown = (event: MouseEvent): void => {
+      if (
+        !triggerRef.current?.contains(event.target as Node) &&
+        !menuRef.current?.contains(event.target as Node)
+      )
+        setOpen(false)
+    }
+    window.addEventListener('mousedown', onDown, true)
+    return () => window.removeEventListener('mousedown', onDown, true)
+  }, [open])
+
+  function closeMenu(): void {
+    setOpen(false)
+    triggerRef.current?.focus()
+  }
 
   useEffect(() => {
     let active = true
@@ -44,6 +69,7 @@ export function NotificationSettings(): JSX.Element {
 
   async function change(operation: () => Promise<NotificationSoundResult>): Promise<void> {
     if (busy) return
+    closeMenu()
     setBusy(true)
     setError(null)
     stopNotificationSound()
@@ -74,29 +100,21 @@ export function NotificationSettings(): JSX.Element {
             {t('settings.notifications.completeDescription')}
           </p>
         </div>
-        <div className="flex shrink-0 items-center gap-3">
-          <Button
-            size="sm"
-            onClick={() => {
-              const { chats, activeChatId } = useRoxyStore.getState()
-              void showCompletionNotification(chats.find((chat) => chat.id === activeChatId))
-            }}
-          >
-            <Play className="h-3.5 w-3.5" />
-            {t('settings.notifications.testNotification')}
-          </Button>
-          <Switch
-            label={t('settings.notifications.completeTitle')}
-            checked={settings?.notifyOnComplete ?? false}
-            onChange={(value) => void setNotifyOnComplete(value)}
-          />
-        </div>
+        <Switch
+          label={t('settings.notifications.completeTitle')}
+          checked={settings?.notifyOnComplete ?? false}
+          onChange={(value) => void setNotifyOnComplete(value)}
+        />
       </div>
 
       <div className="mt-4 border-t border-border pt-4">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <label htmlFor="notification-sound" className="text-sm font-medium text-text">
+            <label
+              id="notification-sound-label"
+              htmlFor="notification-sound"
+              className="text-sm font-medium text-text"
+            >
               {t('settings.notifications.soundsTitle')}
             </label>
             <p
@@ -107,23 +125,43 @@ export function NotificationSettings(): JSX.Element {
             </p>
           </div>
           <div className="flex min-w-0 items-center gap-1.5 sm:max-w-[60%]">
-            <select
+            <button
+              ref={triggerRef}
+              type="button"
               id="notification-sound"
-              value={library?.selectedId ?? ''}
               disabled={busy || !library}
-              className="sq sq-lg sq-ring h-9 min-w-0 flex-1 rounded-lg border border-border bg-surface-2 px-3 text-sm text-text outline-none focus:border-accent/70 sm:w-44"
-              onChange={(event) => {
-                const id = event.target.value || null
-                void change(() => api.notifications.selectSound(id))
+              aria-labelledby="notification-sound-label notification-sound-value"
+              aria-haspopup="menu"
+              aria-expanded={open}
+              aria-controls={open ? 'notification-sound-menu' : undefined}
+              className="sq sq-lg sq-ring flex h-9 min-w-0 flex-1 items-center gap-3 rounded-lg border border-border bg-surface-2 px-3 text-sm text-text outline-none focus-visible:border-accent/70 sm:w-44"
+              onClick={() => setOpen(!open)}
+              onKeyDown={(event) => {
+                if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+                  event.preventDefault()
+                  setOpen(true)
+                }
               }}
             >
-              <option value="">{t('settings.notifications.defaultSound')}</option>
-              {library?.sounds.map((sound) => (
-                <option key={sound.id} value={sound.id}>
-                  {sound.name}
-                </option>
-              ))}
-            </select>
+              <span id="notification-sound-value" className="flex-1 truncate text-left">
+                {selected?.name ?? t('settings.notifications.defaultSound')}
+              </span>
+              <ChevronDown className="h-3.5 w-3.5 shrink-0 text-text-muted" />
+            </button>
+            <Button
+              size="sm"
+              className="h-9"
+              disabled={busy || !library}
+              aria-label={t('settings.notifications.testNotification')}
+              title={t('settings.notifications.testNotification')}
+              onClick={() => {
+                const { chats, activeChatId } = useRoxyStore.getState()
+                void showCompletionNotification(chats.find((chat) => chat.id === activeChatId))
+              }}
+            >
+              <Play className="h-3.5 w-3.5" />
+              {t('settings.notifications.testSound')}
+            </Button>
             <Button
               size="sm"
               variant="ghost"
@@ -138,18 +176,6 @@ export function NotificationSettings(): JSX.Element {
             >
               <Upload className="h-3.5 w-3.5" />
             </Button>
-            {selected && (
-              <Button
-                size="sm"
-                variant="ghost"
-                disabled={busy}
-                aria-label={t('settings.notifications.deleteSound', { name: selected.name })}
-                title={t('settings.notifications.deleteSound', { name: selected.name })}
-                onClick={() => void change(() => api.notifications.deleteSound(selected.id))}
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-              </Button>
-            )}
           </div>
         </div>
         {error && (
@@ -173,6 +199,91 @@ export function NotificationSettings(): JSX.Element {
           </Button>
         )}
       </div>
+      {open &&
+        library &&
+        createPortal(
+          <div
+            ref={menuRef}
+            id="notification-sound-menu"
+            role="menu"
+            aria-labelledby="notification-sound-label"
+            style={anchor}
+            className="sq-frame sq-lg sq-fill-elevated sq-ring edge edge-strong edge-panel animate-pop-in fixed z-50 overflow-y-auto rounded-lg border border-border bg-elevated p-1 shadow-float"
+            onBlur={(event) => {
+              if (
+                !event.currentTarget.contains(event.relatedTarget as Node) &&
+                !triggerRef.current?.contains(event.relatedTarget as Node)
+              )
+                setOpen(false)
+            }}
+            onKeyDown={(event) => {
+              if (event.key === 'Escape') {
+                event.preventDefault()
+                event.stopPropagation()
+                closeMenu()
+              } else if (event.key === 'Tab') {
+                closeMenu()
+              } else if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
+                event.preventDefault()
+                const items = Array.from(
+                  event.currentTarget.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')
+                )
+                const current = items.indexOf(document.activeElement as HTMLButtonElement)
+                const next =
+                  event.key === 'Home'
+                    ? 0
+                    : event.key === 'End'
+                      ? items.length - 1
+                      : (current + (event.key === 'ArrowDown' ? 1 : -1) + items.length) %
+                        items.length
+                items[next]?.focus()
+              }
+            }}
+          >
+            {[{ id: null, name: t('settings.notifications.defaultSound') }, ...library.sounds].map(
+              (sound) => (
+                <div
+                  key={sound.id ?? 'default'}
+                  role="none"
+                  className="flex items-center gap-1 rounded-md focus-within:bg-white/5 hover:bg-white/5"
+                >
+                  <button
+                    type="button"
+                    role="menuitemradio"
+                    aria-checked={library.selectedId === sound.id}
+                    tabIndex={-1}
+                    disabled={busy}
+                    title={sound.name}
+                    className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-2 text-left text-sm text-text outline-none focus-visible:ring-1 focus-visible:ring-accent"
+                    onClick={() => void change(() => api.notifications.selectSound(sound.id))}
+                  >
+                    <span className="h-3.5 w-3.5 shrink-0">
+                      {library.selectedId === sound.id && (
+                        <Check className="h-3.5 w-3.5 text-accent" />
+                      )}
+                    </span>
+                    <span className="truncate">{sound.name}</span>
+                  </button>
+                  {sound.id && (
+                    <button
+                      type="button"
+                      role="menuitem"
+                      tabIndex={-1}
+                      disabled={busy}
+                      aria-label={t('settings.notifications.deleteSound', { name: sound.name })}
+                      title={t('settings.notifications.deleteSound', { name: sound.name })}
+                      className="shrink-0 rounded-md p-2 text-text-subtle outline-none hover:bg-danger/10 hover:text-danger focus-visible:text-danger focus-visible:ring-1 focus-visible:ring-accent"
+                      onClick={() => void change(() => api.notifications.deleteSound(sound.id!))}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </div>
+              )
+            )}
+          </div>,
+          document.body
+        )}
     </section>
   )
 }

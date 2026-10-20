@@ -12,6 +12,9 @@ still tests sound and toast explicitly, even when automatic notifications are of
 - Maximum 2 MiB (2,097,152 bytes), duration 0.1 through 5 seconds inclusive.
 - Up to 20 custom sounds. Identical bytes reuse an existing entry.
 - Import adds an entry but does not select it. The user selects it in the dropdown.
+  Delete actions appear beside each custom sound inside that menu, not on the
+  settings card. Default cannot be deleted. The adjacent Test button tests both
+  the selected sound and the native notification.
 - A bounded read and signature check run in main. Chromium validates metadata,
   actual decoding, duration and channel count in a temporary sandboxed renderer,
   with no preload, Node access or remote content and a 10-second timeout.
