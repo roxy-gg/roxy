@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
-import { Check, ChevronDown, Play, Trash2, Upload } from 'lucide-react'
+import { Check, ChevronDown, Play, Upload, X } from 'lucide-react'
 import { Button, Switch } from './ui'
 import { useRoxyStore } from '../lib/store'
 import { showCompletionNotification, stopNotificationSound } from '../lib/notify'
@@ -272,10 +272,10 @@ export function NotificationSettings(): JSX.Element {
                       disabled={busy}
                       aria-label={t('settings.notifications.deleteSound', { name: sound.name })}
                       title={t('settings.notifications.deleteSound', { name: sound.name })}
-                      className="shrink-0 rounded-md p-2 text-text-subtle outline-none hover:bg-danger/10 hover:text-danger focus-visible:text-danger focus-visible:ring-1 focus-visible:ring-accent"
+                      className="shrink-0 rounded-md p-2 text-text-subtle outline-none hover:text-danger focus-visible:text-danger focus-visible:ring-1 focus-visible:ring-accent"
                       onClick={() => void change(() => api.notifications.deleteSound(sound.id!))}
                     >
-                      <Trash2 className="h-3.5 w-3.5" />
+                      <X className="h-3 w-3" strokeWidth={1.5} />
                     </button>
                   )}
                 </div>
