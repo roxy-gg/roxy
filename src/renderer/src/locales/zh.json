@@ -782,10 +782,30 @@
       "worktrees": "工作树配置"
     },
     "notifications": {
+      "bundledSound": "Roxy's original chime",
       "completeDescription": "当 Roxy 完成一次回复时收到通知。适合耗时较长的任务。仅在 Roxy 未处于焦点时触发；点击即可跳转到该会话。",
       "completeTitle": "回复完成",
+      "defaultSound": "Default",
+      "deleteSound": "Delete {{name}}",
       "heading": "通知",
-      "testNotification": "测试通知"
+      "importSound": "Import sound",
+      "libraryCount": "{{count}} / {{max}} custom sounds",
+      "listenTo": "Listen to {{name}}",
+      "localCopy": "Imported sounds are copied into Roxy and kept after restarting. Importing or selecting a sound does not turn notifications on.",
+      "soundDetails": "{{format}} ? {{seconds}} s ? {{size}} KiB",
+      "soundErrors": {
+        "duration": "Choose a sound between 0.1 and 5 seconds long.",
+        "invalidAudio": "This file could not be decoded. Choose an MP3 or a mono/stereo PCM WAV (16/24-bit, up to 48 kHz).",
+        "libraryFull": "Your library has 20 sounds. Delete one before importing another.",
+        "readFailed": "Roxy could not read this sound or load the library. Try again.",
+        "saveFailed": "Roxy could not save the change. Try again.",
+        "tooLarge": "Choose a file no larger than 2 MiB."
+      },
+      "soundLimits": "MP3 or PCM WAV (16/24-bit, up to 48 kHz), mono or stereo. 0.1 to 5 seconds, up to 2 MiB each.",
+      "soundsTitle": "Notification sound",
+      "stopSound": "Stop sound",
+      "testNotification": "测试通知",
+      "working": "Working..."
     },
     "privacy": {
       "description": "计数和时间 — 应用程序启动、完成的回合、一个回合所需的步骤和工具数量、使用的令牌数量以及大致成本 — 与此机器上生成的随机 ID 绑定。绝不包含您的提示、代码、文件路径、仓库名称或任何错误文本。",

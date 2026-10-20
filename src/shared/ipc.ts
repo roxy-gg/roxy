@@ -57,6 +57,12 @@ export const CHANNELS = {
    * a click can land with no renderer to push it to.
    */
   notifyTakePending: 'notify:takePending',
+  notifySoundsGet: 'notify:soundsGet',
+  notifySoundsImport: 'notify:soundsImport',
+  notifySoundsSelect: 'notify:soundsSelect',
+  notifySoundsDelete: 'notify:soundsDelete',
+  notifySoundsAudio: 'notify:soundsAudio',
+  notifySoundsChanged: 'notify:soundsChanged',
 
   providersList: 'providers:listConnected',
   providersConnect: 'providers:connect',

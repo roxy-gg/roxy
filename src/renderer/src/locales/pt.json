@@ -782,10 +782,30 @@
       "worktrees": "Configuração do worktree"
     },
     "notifications": {
+      "bundledSound": "Roxy's original chime",
       "completeDescription": "Receba uma notificação quando o Roxy terminar uma resposta. Útil para tarefas longas. Só é acionada quando o Roxy não está em foco; clique nela para ir para essa sessão.",
       "completeTitle": "Respostas concluídas",
+      "defaultSound": "Default",
+      "deleteSound": "Delete {{name}}",
       "heading": "Notificações",
-      "testNotification": "Notificação de teste"
+      "importSound": "Import sound",
+      "libraryCount": "{{count}} / {{max}} custom sounds",
+      "listenTo": "Listen to {{name}}",
+      "localCopy": "Imported sounds are copied into Roxy and kept after restarting. Importing or selecting a sound does not turn notifications on.",
+      "soundDetails": "{{format}} ? {{seconds}} s ? {{size}} KiB",
+      "soundErrors": {
+        "duration": "Choose a sound between 0.1 and 5 seconds long.",
+        "invalidAudio": "This file could not be decoded. Choose an MP3 or a mono/stereo PCM WAV (16/24-bit, up to 48 kHz).",
+        "libraryFull": "Your library has 20 sounds. Delete one before importing another.",
+        "readFailed": "Roxy could not read this sound or load the library. Try again.",
+        "saveFailed": "Roxy could not save the change. Try again.",
+        "tooLarge": "Choose a file no larger than 2 MiB."
+      },
+      "soundLimits": "MP3 or PCM WAV (16/24-bit, up to 48 kHz), mono or stereo. 0.1 to 5 seconds, up to 2 MiB each.",
+      "soundsTitle": "Notification sound",
+      "stopSound": "Stop sound",
+      "testNotification": "Notificação de teste",
+      "working": "Working..."
     },
     "privacy": {
       "description": "Contagens e tempos — inicializações de aplicativos, turnos concluídos, quantos passos e ferramentas um turno levou, quantos tokens usou e aproximadamente quanto custou — vinculados a um ID aleatório gerado nesta máquina. Nunca seus prompts, seu código, caminhos de arquivo, nomes de repositórios ou qualquer texto de erro.",

@@ -24,6 +24,7 @@ const renderer = load('../src/renderer/src/lib/notify.ts', {
   chime: 'chime.wav',
   NOTIFY_VOLUME: 0.7,
   Audio: class {
+    pause() {}
     async play() {}
   },
   document: { hasFocus: () => focused },
@@ -36,6 +37,8 @@ const renderer = load('../src/renderer/src/lib/notify.ts', {
   },
   api: {
     notifications: {
+      soundAudio: async () => null,
+      onSoundsChanged: () => () => {},
       toast: async (...args) => {
         calls.push(args)
       }

@@ -44,6 +44,10 @@ import type {
   ReasoningEffort
 } from '../../shared/types'
 import * as notifications from '../services/notifications'
+import {
+  registerNotificationSoundIpc,
+  resetNotificationSounds
+} from '../services/notification-sounds'
 import * as repo from '../db/repo'
 import * as copilot from '../services/copilot'
 import * as cliproxy from '../services/cliproxy'
@@ -251,6 +255,7 @@ export function registerIpc(): void {
   })
   app.once('before-quit', stopWallpaperUsage)
   registerVoiceIpc()
+  registerNotificationSoundIpc()
   // ---- settings ----
   ipcMain.handle(CHANNELS.settingsGetAll, () => repo.getSettings())
   ipcMain.handle(
@@ -287,6 +292,7 @@ export function registerIpc(): void {
   )
   ipcMain.handle(CHANNELS.settingsCompleteOnboarding, () => repo.completeOnboarding())
   ipcMain.handle(CHANNELS.settingsReset, async () => {
+    await resetNotificationSounds()
     await resetVoice()
     // "Wipes all providers" has to include the subscription tokens held by the
     // sidecar, which resetAll() can't see - they aren't in the database. Every

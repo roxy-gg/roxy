@@ -19,6 +19,7 @@ import type { ResolvedTheme } from '../shared/theme'
 import type { MotionPreference } from '../shared/motion'
 import type { BackgroundState } from '../shared/background'
 import type { VoiceEvent } from '../shared/voice'
+import type { NotificationSoundLibrary } from '../shared/notification-sounds'
 
 /**
  * The typed bridge exposed to the renderer as `window.roxy`. Every method maps
@@ -98,6 +99,17 @@ const roxy: RoxyApi = {
     setTelemetry: (enabled) => ipcRenderer.invoke(CHANNELS.settingsSetTelemetry, enabled)
   },
   notifications: {
+    soundLibrary: () => ipcRenderer.invoke(CHANNELS.notifySoundsGet),
+    importSound: () => ipcRenderer.invoke(CHANNELS.notifySoundsImport),
+    selectSound: (id) => ipcRenderer.invoke(CHANNELS.notifySoundsSelect, id),
+    deleteSound: (id) => ipcRenderer.invoke(CHANNELS.notifySoundsDelete, id),
+    soundAudio: (id) => ipcRenderer.invoke(CHANNELS.notifySoundsAudio, id),
+    onSoundsChanged: (callback) => {
+      const handler = (_event: Electron.IpcRendererEvent, state: NotificationSoundLibrary): void =>
+        callback(state)
+      ipcRenderer.on(CHANNELS.notifySoundsChanged, handler)
+      return () => ipcRenderer.removeListener(CHANNELS.notifySoundsChanged, handler)
+    },
     toast: (title, subtitle, body, chatId) =>
       ipcRenderer.invoke(CHANNELS.notifyToast, title, subtitle, body, chatId),
     takePendingActivation: () => ipcRenderer.invoke(CHANNELS.notifyTakePending),

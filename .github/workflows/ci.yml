@@ -145,6 +145,26 @@ jobs:
           ELECTRON_DISABLE_SANDBOX: '1'
         run: xvfb-run --auto-servernum npm run smoke:subagents
 
+      - name: Notification sound imports and persistence (Linux, via virtual display)
+        if: runner.os == 'Linux'
+        env:
+          ELECTRON_DISABLE_SANDBOX: '1'
+        run: xvfb-run --auto-servernum npm run smoke:notification-sounds
+
+      - name: Notification sound imports and persistence
+        if: runner.os != 'Linux'
+        run: npm run smoke:notification-sounds
+
+      - name: Notification sound settings and IPC (Linux, via virtual display)
+        if: runner.os == 'Linux'
+        env:
+          ELECTRON_DISABLE_SANDBOX: '1'
+        run: xvfb-run --auto-servernum npm run smoke:notification-sounds-ui
+
+      - name: Notification sound settings and IPC
+        if: runner.os != 'Linux'
+        run: npm run smoke:notification-sounds-ui
+
       - name: Subagent continuity suite
         if: runner.os != 'Linux'
         run: npm run smoke:subagents

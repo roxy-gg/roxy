@@ -5,6 +5,7 @@
 import type { Language } from './i18n'
 import type { VoiceDevice, VoiceEvent, VoiceResult, VoiceSettings, VoiceState } from './voice'
 import type { CatalogApi } from './catalog'
+import type { NotificationSoundLibrary, NotificationSoundResult } from './notification-sounds'
 import type {
   BackgroundResult,
   BackgroundSettings,
@@ -869,6 +870,13 @@ export interface RoxyApi {
     setTelemetry(enabled: boolean): Promise<boolean>
   }
   notifications: {
+    soundLibrary(): Promise<NotificationSoundLibrary>
+    importSound(): Promise<NotificationSoundResult>
+    selectSound(id: string | null): Promise<NotificationSoundResult>
+    deleteSound(id: string): Promise<NotificationSoundResult>
+    /** Omit id for the saved selection; null explicitly requests the bundled sound. */
+    soundAudio(id?: string | null): Promise<string | null>
+    onSoundsChanged(callback: (state: NotificationSoundLibrary) => void): () => void
     /**
      * Post a native OS toast for session `chatId`. All strings arrive already
      * translated: main has no i18next instance, so the renderer resolves them

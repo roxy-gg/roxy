@@ -20,20 +20,47 @@ import { api } from './api'
  * restart the chime instead of stacking copies of it on top of each other.
  */
 let element: HTMLAudioElement | null = null
+let playback = 0
+let subscribed = false
+
+export function stopNotificationSound(): void {
+  playback++
+  element?.pause()
+}
 
 /**
  * Play the notification chime.
  *
  * Playback failures must not interrupt the turn's cleanup.
  */
-export async function playNotificationSound(): Promise<void> {
+export async function playNotificationSound(id?: string | null): Promise<void> {
+  if (!subscribed) {
+    api.notifications.onSoundsChanged(stopNotificationSound)
+    subscribed = true
+  }
+  stopNotificationSound()
+  const revision = playback
+  let source = chime
   try {
-    element ??= new Audio(chime)
+    source = (await api.notifications.soundAudio(id)) ?? chime
+  } catch {
+    // Missing assets and IPC failures fall back to the bundled chime.
+  }
+  if (revision !== playback) return
+  try {
+    element ??= new Audio()
+    element.src = source
     element.volume = NOTIFY_VOLUME
     element.currentTime = 0
     await element.play()
   } catch {
-    // A silent notification is the acceptable failure here.
+    if (revision !== playback || source === chime || !element) return
+    try {
+      element.src = chime
+      await element.play()
+    } catch {
+      // A silent notification is the acceptable failure here.
+    }
   }
 }
 

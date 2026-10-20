@@ -782,10 +782,30 @@
       "worktrees": "वर्कट्री कॉन्फ़िगरेशन"
     },
     "notifications": {
+      "bundledSound": "Roxy's original chime",
       "completeDescription": "जब Roxy कोई प्रतिक्रिया पूरी कर ले तो सूचना पाएं। लंबे समय तक चलने वाले कार्यों के लिए उपयोगी। यह केवल तभी आती है जब Roxy फ़ोकस में न हो; उस सत्र पर जाने के लिए उस पर क्लिक करें।",
       "completeTitle": "प्रतिक्रिया पूर्ण होना",
+      "defaultSound": "Default",
+      "deleteSound": "Delete {{name}}",
       "heading": "सूचनाएं",
-      "testNotification": "परीक्षण सूचना"
+      "importSound": "Import sound",
+      "libraryCount": "{{count}} / {{max}} custom sounds",
+      "listenTo": "Listen to {{name}}",
+      "localCopy": "Imported sounds are copied into Roxy and kept after restarting. Importing or selecting a sound does not turn notifications on.",
+      "soundDetails": "{{format}} ? {{seconds}} s ? {{size}} KiB",
+      "soundErrors": {
+        "duration": "Choose a sound between 0.1 and 5 seconds long.",
+        "invalidAudio": "This file could not be decoded. Choose an MP3 or a mono/stereo PCM WAV (16/24-bit, up to 48 kHz).",
+        "libraryFull": "Your library has 20 sounds. Delete one before importing another.",
+        "readFailed": "Roxy could not read this sound or load the library. Try again.",
+        "saveFailed": "Roxy could not save the change. Try again.",
+        "tooLarge": "Choose a file no larger than 2 MiB."
+      },
+      "soundLimits": "MP3 or PCM WAV (16/24-bit, up to 48 kHz), mono or stereo. 0.1 to 5 seconds, up to 2 MiB each.",
+      "soundsTitle": "Notification sound",
+      "stopSound": "Stop sound",
+      "testNotification": "परीक्षण सूचना",
+      "working": "Working..."
     },
     "privacy": {
       "description": "गणना और समय — ऐप लॉन्च, समाप्त मोड़, एक मोड़ में कितने कदम और उपकरण लगे, इसने कितने टोकन का उपयोग किया और मोटे तौर पर इसकी लागत कितनी थी — इस मशीन पर उत्पन्न एक यादृच्छिक आईडी से जुड़ा हुआ। कभी भी आपके प्रॉम्प्ट, आपका कोड, फ़ाइल पथ, रेपो नाम, या कोई त्रुटि पाठ नहीं।",

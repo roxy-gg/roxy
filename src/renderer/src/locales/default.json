@@ -716,7 +716,27 @@
       "heading": "Notifications",
       "completeTitle": "Response completions",
       "completeDescription": "Get a notification when Roxy has finished a response. Useful for long-running tasks. Only fires when Roxy isn't focused; click it to jump to that session.",
-      "testNotification": "Test notification"
+      "testNotification": "Test notification",
+      "soundsTitle": "Notification sound",
+      "defaultSound": "Default",
+      "bundledSound": "Roxy's original chime",
+      "soundLimits": "MP3 or PCM WAV (16/24-bit, up to 48 kHz), mono or stereo. 0.1 to 5 seconds, up to 2 MiB each.",
+      "localCopy": "Imported sounds are copied into Roxy and kept after restarting. Importing or selecting a sound does not turn notifications on.",
+      "importSound": "Import sound",
+      "working": "Working...",
+      "soundDetails": "{{format}} / {{seconds}} s / {{size}} KiB",
+      "listenTo": "Listen to {{name}}",
+      "deleteSound": "Delete {{name}}",
+      "stopSound": "Stop sound",
+      "libraryCount": "{{count}} / {{max}} custom sounds",
+      "soundErrors": {
+        "tooLarge": "Choose a file no larger than 2 MiB.",
+        "invalidAudio": "This file could not be decoded. Choose an MP3 or a mono/stereo PCM WAV (16/24-bit, up to 48 kHz).",
+        "duration": "Choose a sound between 0.1 and 5 seconds long.",
+        "libraryFull": "Your library has 20 sounds. Delete one before importing another.",
+        "readFailed": "Roxy could not read this sound or load the library. Try again.",
+        "saveFailed": "Roxy could not save the change. Try again."
+      }
     },
     "workstreams": {
       "heading": "Workstreams",

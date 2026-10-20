@@ -782,10 +782,30 @@
       "worktrees": "ワークツリー設定"
     },
     "notifications": {
+      "bundledSound": "Roxy's original chime",
       "completeDescription": "Roxy が応答を完了したときに通知を受け取ります。時間のかかるタスクに便利です。Roxy がフォーカスされていないときにのみ通知され、クリックするとそのセッションに移動します。",
       "completeTitle": "応答の完了",
+      "defaultSound": "Default",
+      "deleteSound": "Delete {{name}}",
       "heading": "通知",
-      "testNotification": "テスト通知"
+      "importSound": "Import sound",
+      "libraryCount": "{{count}} / {{max}} custom sounds",
+      "listenTo": "Listen to {{name}}",
+      "localCopy": "Imported sounds are copied into Roxy and kept after restarting. Importing or selecting a sound does not turn notifications on.",
+      "soundDetails": "{{format}} ? {{seconds}} s ? {{size}} KiB",
+      "soundErrors": {
+        "duration": "Choose a sound between 0.1 and 5 seconds long.",
+        "invalidAudio": "This file could not be decoded. Choose an MP3 or a mono/stereo PCM WAV (16/24-bit, up to 48 kHz).",
+        "libraryFull": "Your library has 20 sounds. Delete one before importing another.",
+        "readFailed": "Roxy could not read this sound or load the library. Try again.",
+        "saveFailed": "Roxy could not save the change. Try again.",
+        "tooLarge": "Choose a file no larger than 2 MiB."
+      },
+      "soundLimits": "MP3 or PCM WAV (16/24-bit, up to 48 kHz), mono or stereo. 0.1 to 5 seconds, up to 2 MiB each.",
+      "soundsTitle": "Notification sound",
+      "stopSound": "Stop sound",
+      "testNotification": "テスト通知",
+      "working": "Working..."
     },
     "privacy": {
       "description": "アプリの起動、完了したターン、ターンにかかったステップとツールの数、使用されたトークンの数、おおよそのコストなど、このマシンで生成されたランダムなIDに関連付けられたカウントとタイミング。プロンプト、コード、ファイルパス、リポジトリ名、エラーテキストは決して含まれません。",
