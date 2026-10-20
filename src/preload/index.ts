@@ -1,3 +1,4 @@
+import type { EngineeringState } from '../shared/engineering-tools'
 import { contextBridge, ipcRenderer } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
 import { CHANNELS } from '../shared/ipc'
@@ -25,6 +26,20 @@ import type { VoiceEvent } from '../shared/voice'
  * to an ipcMain.handle channel registered in src/main/ipc/index.ts.
  */
 const roxy: RoxyApi = {
+  engineering: {
+    state: () => ipcRenderer.invoke(CHANNELS.engineeringState),
+    install: (id, consent, repair) =>
+      ipcRenderer.invoke(CHANNELS.engineeringInstall, id, consent, repair),
+    installAll: (consent) => ipcRenderer.invoke(CHANNELS.engineeringInstallAll, consent),
+    update: (patch) => ipcRenderer.invoke(CHANNELS.engineeringUpdate, patch),
+    cancel: () => ipcRenderer.invoke(CHANNELS.engineeringCancel),
+    onChanged: (callback) => {
+      const handler = (_event: Electron.IpcRendererEvent, state: EngineeringState): void =>
+        callback(state)
+      ipcRenderer.on(CHANNELS.engineeringChanged, handler)
+      return () => ipcRenderer.removeListener(CHANNELS.engineeringChanged, handler)
+    }
+  },
   voice: {
     state: () => ipcRenderer.invoke(CHANNELS.voiceState),
     update: (patch) => ipcRenderer.invoke(CHANNELS.voiceUpdate, patch),

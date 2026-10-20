@@ -1,3 +1,4 @@
+import { shutdownEngineeringTools } from './services/engineering-tools'
 import { app, shell, BrowserWindow, session } from 'electron'
 import { join } from 'path'
 import { optimizer, is } from '@electron-toolkit/utils'
@@ -189,7 +190,15 @@ app.on('window-all-closed', () => {
 // Last chance to send the queued events: 'before-quit' fires before windows
 // start tearing down, which gives the final flush a real (if not guaranteed)
 // window to reach the network. Losing it costs one app_close, nothing more.
-app.on('before-quit', () => {
+let engineeringQuit = false
+app.on('before-quit', (event) => {
+  if (!engineeringQuit) {
+    event.preventDefault()
+    engineeringQuit = true
+    void shutdownEngineeringTools()
+      .catch(console.error)
+      .finally(() => app.quit())
+  }
   shutdownVoice()
   stopAutomation()
   stopAllTurns()

@@ -1,3 +1,5 @@
+import { engineeringTurn } from '../services/engineering-tools'
+import { closeEngineeringSession } from '../services/engineering-runtime'
 /**
  * The agent loop — the thing that makes Roxy *do* the work instead of just
  * describing it. It gives the model the executable tools, streams its turn,
@@ -594,7 +596,8 @@ function buildSystemMessage(
   skillInfo?: string,
   asBotId?: string,
   contextLimit?: number,
-  asHost = false
+  asHost = false,
+  engineeringInfo?: string
 ): string {
   const bot = asHost ? undefined : asBotId ? getBot(asBotId) : chatId ? chatBot(chatId) : undefined
   const base = bot
@@ -625,6 +628,7 @@ function buildSystemMessage(
       : []),
     ...(skillInfo ? [skillInfo] : []),
     ...(mcpInfo ? [mcpInfo] : []),
+    ...(engineeringInfo ? [engineeringInfo] : []),
     ...(agentPrompt ? [agentPrompt] : [])
   ]
   // Who speaks this turn: Roxy herself, a bot in its own chat, or a bot invited
@@ -1386,6 +1390,10 @@ export async function runAgentTurn(opts: RunTurnOptions): Promise<void> {
     }
   }
   const parentSkillInfo = agentAllowsSkill(agent) ? skillInfo : undefined
+  const engineering =
+    toolCapable && cwd && !readOnly && agent.tools === 'all'
+      ? await engineeringTurn()
+      : { schemas: [] }
 
   // Prepend the system prompt. It's built here in the main process so it can see
   // the provider + model + workspace (and pick the right per-model prompt) and
@@ -1411,7 +1419,8 @@ export async function runAgentTurn(opts: RunTurnOptions): Promise<void> {
     parentSkillInfo,
     opts.asBotId,
     contextLimit,
-    opts.asHost
+    opts.asHost,
+    engineering.guidance
   )
   const systemMessage: ChatMessage = { role: 'system', content: systemText }
 
@@ -1460,7 +1469,12 @@ export async function runAgentTurn(opts: RunTurnOptions): Promise<void> {
     emitTool: emit,
     onText: (delta) => emit({ type: 'text', delta }),
     onReasoning: (delta) => emit({ type: 'reasoning', delta }),
-    tools: [...schemasFor(agent.tools, !readOnly), ...mcpSchemas, ...skillSchemas],
+    tools: [
+      ...schemasFor(agent.tools, !readOnly),
+      ...mcpSchemas,
+      ...skillSchemas,
+      ...engineering.schemas
+    ],
     mcpTools: mcpSchemas,
     skillTools: skillSchemas,
     skillInfo,
@@ -1584,6 +1598,55 @@ async function runLoop(o: LoopOptions): Promise<string> {
   // model step — "add a server and use it in the same breath". `baseTools` is
   // everything that ISN'T an MCP schema (built-ins + `task` + skill), captured by
   // reference so the rebuild is exact; `liveTools`/`liveMcpTools` start unchanged.
+  // OpenAI-compatible providers cap function catalogs at 128. Keep every native
+  // operation eligible, and let discovery rotate exact schemas into this turn.
+  const nativeTools = tools.filter((schema) => String(schema.function.name).startsWith('rea_'))
+  let selectedNative: string[] = []
+  const discovery = fn(
+    'rea_tools',
+    'Discover enabled native reverse engineering and connected MCP tools by query, or select exact function names with operations. Selected schemas are made callable on the next model step. This does not install tools or change settings. All enabled native and connected MCP tools remain discoverable even when provider function-count limits hide their schemas.',
+    {
+      query: str('Search enabled operations by name or capability.'),
+      operations: { type: 'array', items: { type: 'string' }, maxItems: 32 }
+    },
+    []
+  )
+  const presentTools = (schemas: ToolSchema[]): ToolSchema[] => {
+    if (!nativeTools.length) return schemas
+    const ordinary = schemas.filter(
+      (schema) =>
+        !String(schema.function.name).startsWith('rea_') &&
+        !String(schema.function.name).startsWith('mcp__')
+    )
+    const available = schemas.filter(
+      (schema) =>
+        String(schema.function.name).startsWith('rea_') ||
+        String(schema.function.name).startsWith('mcp__')
+    )
+    const priority = [
+      'rea_open_binary',
+      'rea_close_binary',
+      'rea_inspect_artifact',
+      'rea_analyze_javascript_application',
+      'rea_analyze_function',
+      'rea_inspect_analysis_view',
+      'rea_get_evidence_bundle',
+      'rea_export_evidence_bundle',
+      'rea_inspect_android_package',
+      'rea_list_adb_devices',
+      'rea_start_frida_session',
+      'rea_inspect_pcap_capture'
+    ]
+    const order = [...selectedNative, ...priority]
+    available.sort((a, b) => {
+      const ai = order.indexOf(a.function.name as string)
+      const bi = order.indexOf(b.function.name as string)
+      return (ai < 0 ? order.length : ai) - (bi < 0 ? order.length : bi)
+    })
+    const retained = ordinary.slice(0, 95)
+    const slots = 128 - retained.length - 1
+    return [...retained, discovery, ...available.slice(0, slots)]
+  }
   const mcpSet = new Set(mcpTools ?? [])
   const baseTools = tools.filter((t) => !mcpSet.has(t))
   let liveMcpTools = mcpTools ?? []
@@ -1607,7 +1670,7 @@ async function runLoop(o: LoopOptions): Promise<string> {
       signal,
       reasoning,
       effort,
-      liveTools,
+      presentTools(liveTools),
       onText,
       onReasoning,
       { onRetry: () => recordRetry(metricsId) }
@@ -1810,19 +1873,43 @@ async function runLoop(o: LoopOptions): Promise<string> {
         })
         let result: ToolResult
         try {
-          result = await runTool(tc.name, input, {
-            cwd,
-            sessionId,
-            botId,
-            delegationOwner: o.delegationOwner,
-            browserKey,
-            // Stop must reach INSIDE the tool, not just between calls. Without this
-            // the loop's `if (signal.aborted) break` above only fires once the
-            // current tool returns on its own, which is why Stop looked stuck
-            // during a long bash or a hanging fetch.
-            signal: callController.signal,
-            onChunk: (chunk) => emitTool({ type: 'tool-delta', callId: tc.id, chunk })
-          })
+          if (tc.name === 'rea_tools' && nativeTools.length) {
+            const current = await engineeringTurn()
+            const query = typeof input.query === 'string' ? input.query.toLowerCase() : ''
+            const names = Array.isArray(input.operations) ? input.operations : []
+            const found = [...current.schemas, ...liveMcpTools].filter((schema) =>
+              names.length
+                ? names.includes(schema.function.name)
+                : !query || JSON.stringify(schema.function).toLowerCase().includes(query)
+            )
+            result = { ok: true, output: JSON.stringify(found) }
+          } else if (
+            tc.name.startsWith('rea_') &&
+            !presentTools(liveTools).some((schema) => schema.function.name === tc.name)
+          ) {
+            result = {
+              ok: false,
+              output:
+                'This native function is not in the current agent catalog. Use rea_tools to discover an enabled operation first.'
+            }
+          } else
+            result = await runTool(tc.name, input, {
+              cwd,
+              sessionId,
+              botId,
+              delegationOwner: o.delegationOwner,
+              browserKey,
+              // Stop must reach INSIDE the tool, not just between calls. Without this
+              // the loop's `if (signal.aborted) break` above only fires once the
+              // current tool returns on its own, which is why Stop looked stuck
+              // during a long bash or a hanging fetch.
+              signal: callController.signal,
+              onChunk: (chunk) => emitTool({ type: 'tool-delta', callId: tc.id, chunk })
+            })
+          if (tc.name === 'rea_tools' && result.ok && Array.isArray(input.operations))
+            selectedNative = input.operations
+              .filter((name): name is string => typeof name === 'string')
+              .slice(0, 32)
           // Distinguish "the user cancelled this one call" from "Stop killed the
           // turn". Both abort the same signal, so the tool can't tell them apart —
           // only the registry knows which lever was pulled. The wording matters:
@@ -1971,6 +2058,7 @@ async function runSubagent(o: SubagentOptions): Promise<{
   // and seeded with the prompt UP FRONT so it shows in the sidebar (with its
   // badge) the moment it spins up — not only once it finishes.
   let subChatId: string | null = null
+  const analysisKey = `rea-delegate-${crypto.randomUUID()}`
   try {
     subChatId =
       parentChatId != null
@@ -2059,19 +2147,24 @@ async function runSubagent(o: SubagentOptions): Promise<{
     }
 
     try {
+      const engineering =
+        !isReadOnlyAgent(agent) && agent.tools === 'all' ? await engineeringTurn() : { schemas: [] }
       const text = await runLoop({
         providerId,
         copilotSession: o.copilotSession,
         vision,
         model,
         convo: [
-          { role: 'system', content: subagentSystemPrompt(agent, cwd, skillInfo) },
+          {
+            role: 'system',
+            content: subagentSystemPrompt(agent, cwd, skillInfo, engineering.guidance)
+          },
           { role: 'user', content: prompt || description }
         ],
         cwd,
         // Attribute the subagent's model calls to its own sub-session (or the
         // parent when it wasn't persisted), so its spend still lands in totals.
-        sessionId: subChatId ?? parentChatId ?? undefined,
+        sessionId: subChatId ?? analysisKey,
         delegationOwner: parentChatId ? { sessionId: parentChatId, ...o.parentActor } : undefined,
         // Inherit the parent's browser window so the project keeps ONE browser.
         browserKey,
@@ -2082,7 +2175,8 @@ async function runSubagent(o: SubagentOptions): Promise<{
         tools: [
           ...schemasFor(agent.tools, false),
           ...(isReadOnlyAgent(agent) ? [] : (mcpTools ?? [])),
-          ...(agentAllowsSkill(agent) ? (skillTools ?? []) : [])
+          ...(agentAllowsSkill(agent) ? (skillTools ?? []) : []),
+          ...engineering.schemas
         ],
         mcpTools,
         skillTools,
@@ -2160,6 +2254,7 @@ async function runSubagent(o: SubagentOptions): Promise<{
     return { status: state === 'error' ? 'failed' : state, report, subChatId }
   } finally {
     signal.removeEventListener('abort', cascade)
+    await closeEngineeringSession(subChatId ?? analysisKey)
   }
 }
 
@@ -2196,7 +2291,12 @@ function cancelledReport(description: string, partial: string): string {
 }
 
 /** A subagent's focused system prompt: who it is, that it starts blank, and to report back. */
-function subagentSystemPrompt(agent: AgentDef, cwd: string, skillInfo?: string): string {
+function subagentSystemPrompt(
+  agent: AgentDef,
+  cwd: string,
+  skillInfo?: string,
+  engineeringInfo?: string
+): string {
   // Prefer the agent's tuned prompt when
   // one is injected; otherwise fall back to a generic identity line.
   const injected = agent.promptFile ? agentPromptText[agent.promptFile] : undefined
@@ -2210,6 +2310,7 @@ function subagentSystemPrompt(agent: AgentDef, cwd: string, skillInfo?: string):
   }
   // Surface any discovered skills so the subagent can load one when it allows the tool.
   if (skillInfo && agentAllowsSkill(agent)) lines.push(skillInfo)
+  if (engineeringInfo) lines.push(engineeringInfo)
   // Attribute Roxy on any commit a bash-capable subagent makes (mirrors the lead agent).
   if (agentCanCommit(agent)) lines.push(GIT_COMMIT_TRAILER_PROMPT)
   if (cwd) lines.push(`The workspace folder is ${cwd}. Tool paths are relative to it.`)

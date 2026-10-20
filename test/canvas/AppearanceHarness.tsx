@@ -1,3 +1,8 @@
+import {
+  ENGINEERING_TOOLS,
+  engineeringPreferences,
+  type EngineeringState
+} from '../../src/shared/engineering-tools'
 import './BackgroundHarness'
 import { aggregateActivityDays } from '../../src/shared/activity'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
@@ -17,7 +22,59 @@ import {
   type ThemeFile
 } from '../../src/shared/theme'
 
+const engineeringCallbacks = new Set<(state: EngineeringState) => void>()
+let engineeringState: EngineeringState = {
+  supported: true,
+  unsupported: [],
+  platform: 'win32',
+  installed: [],
+  preferences: engineeringPreferences(null),
+  batch: null,
+  job: null,
+  error: null
+}
+const engineeringChanged = (): void => {
+  for (const callback of engineeringCallbacks) callback(structuredClone(engineeringState))
+}
+export function setEngineeringState(patch: Partial<EngineeringState>): void {
+  engineeringState = { ...engineeringState, ...patch }
+  engineeringChanged()
+}
 Object.assign(window.roxy, {
+  engineering: {
+    state: async () => structuredClone(engineeringState),
+    update: async (patch) => {
+      engineeringState.preferences = engineeringPreferences({
+        ...engineeringState.preferences,
+        ...patch
+      })
+      engineeringChanged()
+      return { ok: true }
+    },
+    install: async (id) => {
+      engineeringState.installed = [...new Set([...engineeringState.installed, 'rea', id])]
+      engineeringChanged()
+      return { ok: true }
+    },
+    installAll: async (consent) => {
+      if (!consent && !engineeringState.installed.includes('wireshark'))
+        return { ok: false, error: 'permission' }
+      engineeringState.installed = ENGINEERING_TOOLS.map(({ id }) => id)
+      engineeringState.preferences = {
+        enabled: true,
+        guidance: true,
+        groups: [...engineeringState.installed],
+        disabledCalls: []
+      }
+      engineeringChanged()
+      return { ok: true }
+    },
+    cancel: async () => {},
+    onChanged: (callback) => {
+      engineeringCallbacks.add(callback)
+      return () => engineeringCallbacks.delete(callback)
+    }
+  } satisfies typeof window.roxy.engineering,
   system: {
     ...window.roxy.system,
     getVersions: async () => ({ app: 'test', electron: 'test', chrome: 'test', node: 'test' })

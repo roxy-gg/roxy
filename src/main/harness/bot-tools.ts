@@ -1,3 +1,4 @@
+import { closeEngineeringSession } from '../services/engineering-runtime'
 import type { ToolResult } from '../../shared/types'
 import { HOST_USERNAME, type BotJobInput } from '../../shared/bots'
 import type { ToolContext } from './tools'
@@ -99,6 +100,7 @@ export async function runBotTool(
         endSubagentRuns(bot.chatId)
         killSessionBackground(bot.chatId)
         disposeSession(bot.chatId)
+        await closeEngineeringSession(bot.chatId)
         bots.removeBot(id)
         result = { deleted: id }
       } else throw new Error('Unknown bot action')
@@ -225,6 +227,7 @@ export async function runBotTool(
           endSubagentRuns(id)
           killSessionBackground(id)
           disposeSession(id)
+          await closeEngineeringSession(id)
           const release = claimTurn(id, new AbortController())!
           try {
             await removeWorktreeForChat(id)

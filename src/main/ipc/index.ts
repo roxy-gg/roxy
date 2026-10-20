@@ -1,3 +1,5 @@
+import { registerEngineeringIpc, resetEngineeringTools } from '../services/engineering-tools'
+import { closeEngineeringSession } from '../services/engineering-runtime'
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import { registerVoiceIpc, resetVoice } from '../services/voice'
 import { CHANNELS } from '../../shared/ipc'
@@ -251,6 +253,7 @@ export function registerIpc(): void {
   })
   app.once('before-quit', stopWallpaperUsage)
   registerVoiceIpc()
+  registerEngineeringIpc()
   // ---- settings ----
   ipcMain.handle(CHANNELS.settingsGetAll, () => repo.getSettings())
   ipcMain.handle(
@@ -288,6 +291,7 @@ export function registerIpc(): void {
   ipcMain.handle(CHANNELS.settingsCompleteOnboarding, () => repo.completeOnboarding())
   ipcMain.handle(CHANNELS.settingsReset, async () => {
     await resetVoice()
+    await resetEngineeringTools()
     // "Wipes all providers" has to include the subscription tokens held by the
     // sidecar, which resetAll() can't see - they aren't in the database. Every
     // sidecar-backed provider has to be named: disconnecting one now leaves the
@@ -438,6 +442,7 @@ export function registerIpc(): void {
     killSessionBackground(id)
     // Close this session's browser window (if any) so it doesn't linger orphaned.
     browser.disposeSession(id)
+    void closeEngineeringSession(id)
     // Remove this session's worktree, if it owns one no other session shares.
     // Fire-and-forget: deletion must never block on git, so a failure here is
     // logged and the session goes anyway (`git:prune-worktrees` sweeps up
@@ -1104,6 +1109,7 @@ export function registerIpc(): void {
       endSubagentRuns(bot.chatId)
       killSessionBackground(bot.chatId)
       browser.disposeSession(bot.chatId)
+      void closeEngineeringSession(bot.chatId)
     }
     bots.removeBot(id)
     notifyBots()

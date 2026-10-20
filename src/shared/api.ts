@@ -1,3 +1,9 @@
+import type {
+  EngineeringPreferences,
+  EngineeringResult,
+  EngineeringState,
+  EngineeringToolId
+} from './engineering-tools'
 /**
  * The typed contract exposed to the renderer as `window.roxy`.
  * Implemented in src/preload/index.ts, handled in src/main/ipc/*.
@@ -798,6 +804,18 @@ export interface ConfigImportResult {
 }
 
 export interface RoxyApi {
+  engineering: {
+    state(): Promise<EngineeringState>
+    install(
+      id: EngineeringToolId,
+      systemConsent?: boolean,
+      repair?: boolean
+    ): Promise<EngineeringResult>
+    installAll(systemConsent?: boolean): Promise<EngineeringResult>
+    update(patch: Partial<EngineeringPreferences>): Promise<EngineeringResult>
+    cancel(): Promise<void>
+    onChanged(callback: (state: EngineeringState) => void): () => void
+  }
   voice: {
     state(): Promise<VoiceState>
     update(patch: Partial<VoiceSettings>): Promise<VoiceResult<VoiceSettings>>
