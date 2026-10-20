@@ -786,7 +786,6 @@
       "defaultSound": "Default",
       "soundLimits": "MP3 or PCM WAV (16/24-bit, up to 48 kHz), mono or stereo. 0.1 to 5 seconds, up to 2 MiB each.",
       "importSound": "Import sound",
-      "listenTo": "Listen to {{name}}",
       "deleteSound": "Delete {{name}}",
       "soundErrors": {
         "tooLarge": "Choose a file no larger than 2 MiB.",

@@ -102,10 +102,15 @@ async function run(): Promise<void> {
     };
     const pause = HTMLMediaElement.prototype.pause;
     HTMLMediaElement.prototype.pause = function() { window.__audioStops++; return pause.call(this); };`)
-  await button('Listen to Demo sound')
+  assert.equal(
+    await evaluate(`return document.querySelectorAll('svg.lucide-play').length`),
+    1,
+    'only the notification test has a play button'
+  )
+  await button('Test notification')
   await until(`window.__audioPlays === 1`)
   assert.ok(await evaluate(`return window.__audioSources[0].startsWith('data:audio/mpeg;base64,')`))
-  await button('Listen to Demo sound')
+  await button('Test notification')
   await until(`window.__audioPlays === 2`)
   assert.ok(
     await evaluate(`return window.__audioStops > 0`),
@@ -114,7 +119,7 @@ async function run(): Promise<void> {
   assert.equal(getSettings().notifyOnComplete, false)
   await button('Test notification')
   await until(`window.__audioPlays === 3`)
-  assert.equal(toastCount, 1)
+  assert.equal(toastCount, 3)
   // Rejected custom playback retries the bundled sound, without dropping the toast.
   await evaluate(`HTMLMediaElement.prototype.play = function() {
     window.__audioSources.push(this.src); window.__audioPlays++;
@@ -122,13 +127,13 @@ async function run(): Promise<void> {
   };`)
   await button('Test notification')
   await until(`window.__audioPlays === 5`)
-  assert.equal(toastCount, 2)
+  assert.equal(toastCount, 4)
   assert.ok(await evaluate(`return window.__audioSources.at(-1).includes('chime.wav')`))
   // Missing custom copy falls back before playback.
   await fs.rm(path.join(temp, 'notification-sounds', `${selected}.mp3`))
   await button('Test notification')
   await until(`window.__audioPlays === 6`)
-  assert.equal(toastCount, 3)
+  assert.equal(toastCount, 5)
   assert.ok(await evaluate(`return window.__audioSources.at(-1).includes('chime.wav')`))
   await window.setContentSize(390, 800)
   await wait()

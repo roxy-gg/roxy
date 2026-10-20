@@ -3,11 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { Play, Trash2, Upload } from 'lucide-react'
 import { Button, Switch } from './ui'
 import { useRoxyStore } from '../lib/store'
-import {
-  playNotificationSound,
-  showCompletionNotification,
-  stopNotificationSound
-} from '../lib/notify'
+import { showCompletionNotification, stopNotificationSound } from '../lib/notify'
 import { api } from '../lib/api'
 import {
   SOUND_MAX_COUNT,
@@ -63,7 +59,6 @@ export function NotificationSettings(): JSX.Element {
   }
 
   const selected = library?.sounds.find((sound) => sound.id === library.selectedId)
-  const selectedName = selected?.name ?? t('settings.notifications.defaultSound')
 
   return (
     <section
@@ -129,16 +124,6 @@ export function NotificationSettings(): JSX.Element {
                 </option>
               ))}
             </select>
-            <Button
-              size="sm"
-              variant="ghost"
-              disabled={busy || !library}
-              aria-label={t('settings.notifications.listenTo', { name: selectedName })}
-              title={t('settings.notifications.listenTo', { name: selectedName })}
-              onClick={() => void playNotificationSound(library?.selectedId ?? null)}
-            >
-              <Play className="h-3.5 w-3.5" />
-            </Button>
             <Button
               size="sm"
               variant="ghost"

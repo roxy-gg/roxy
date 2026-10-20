@@ -852,7 +852,6 @@
       "deleteSound": "Delete {{name}}",
       "heading": "الإشعارات",
       "importSound": "Import sound",
-      "listenTo": "Listen to {{name}}",
       "soundErrors": {
         "duration": "Choose a sound between 0.1 and 5 seconds long.",
         "invalidAudio": "This file could not be decoded. Choose an MP3 or a mono/stereo PCM WAV (16/24-bit, up to 48 kHz).",
