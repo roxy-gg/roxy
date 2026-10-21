@@ -39,6 +39,19 @@ export default function Themes(): JSX.Element {
   // otherwise a later Save would silently overwrite the picked color.
   const [editorRev, setEditorRev] = useState(0)
   const [editorDirty, setEditorDirty] = useState(false)
+  // `error` is shared with activate / create / remove, so a good swatch save
+  // may only clear the message a swatch save put there, not someone else's.
+  const swatchError = useRef('')
+  const reportSwatchError = useCallback((message: string): void => {
+    if (message) {
+      swatchError.current = message
+      setError(message)
+      return
+    }
+    const mine = swatchError.current
+    swatchError.current = ''
+    if (mine) setError((current) => (current === mine ? '' : current))
+  }, [])
 
   const load = useCallback(async (refresh = false): Promise<void> => {
     const next = refresh ? await api.themes.refresh() : await api.themes.list()
@@ -191,7 +204,7 @@ export default function Themes(): JSX.Element {
                   if (themes) setData((d) => (d ? { ...d, themes } : d))
                   setEditorRev((r) => r + 1)
                 }}
-                onColorsError={setError}
+                onColorsError={reportSwatchError}
                 confirmingDelete={confirmDelete === t.id}
                 onActivate={() => void activate(t.id)}
                 onDuplicate={() => void create(t.id)}
