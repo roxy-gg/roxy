@@ -1027,6 +1027,8 @@
     "collapse": "折りたたむ",
     "colorHue": "Hue",
     "colorOpacity": "Opacity",
+    "colorSaturation": "Saturation and brightness",
+    "colorSaturationValue": "Saturation {{s}}%, brightness {{v}}%",
     "colorValue": "Color value",
     "colors": "色",
     "colorsBody": "任意のCSSカラー — 16進数、<code>rgb()</code>、<code>oklch()</code>、または<code>color-mix()</code>。省略したものは<code>extends</code>するテーマから継承されるため、テーマは3行で構成できます。",
@@ -1066,6 +1068,7 @@
     "saving": "保存中…",
     "showReference": "リファレンスを表示",
     "subtitle": "テーマは、アプリのデザイン要素（サーフェス、テキスト、アクセント、UIとコードのフォント）を再指定する小さなJSONファイルです。以下から1つ選択するか、複製して独自のテーマを作成してください。テーマはテーマフォルダから読み込まれるため、どのエディタでも編集でき、dotfilesにチェックインしたり、ファイルとして共有したりできます。",
+    "swatchesLocked": "Save or discard your JSON edits to pick colors here.",
     "title": "テーマ",
     "yourThemes": "あなたのテーマ"
   },

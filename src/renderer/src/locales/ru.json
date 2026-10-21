@@ -1027,6 +1027,8 @@
     "collapse": "Свернуть",
     "colorHue": "Hue",
     "colorOpacity": "Opacity",
+    "colorSaturation": "Saturation and brightness",
+    "colorSaturationValue": "Saturation {{s}}%, brightness {{v}}%",
     "colorValue": "Color value",
     "colors": "Цвета",
     "colorsBody": "Любой цвет CSS — hex, <code>rgb()</code>, <code>oklch()</code> или <code>color-mix()</code>. Все, что вы опустите, наследуется от темы, которую вы <code>extends</code>, поэтому тема может состоять из трех строк.",
@@ -1066,6 +1068,7 @@
     "saving": "Сохранение…",
     "showReference": "Показать справку",
     "subtitle": "Тема — это небольшой JSON-файл, который перенастраивает токены дизайна приложения: поверхности, текст, акценты и шрифты для пользовательского интерфейса и кода. Выберите одну из них ниже или продублируйте её, чтобы создать свою собственную. Темы читаются из вашей папки тем, поэтому их можно редактировать в любом редакторе, проверять в dotfiles и делиться ими как файлом.",
+    "swatchesLocked": "Save or discard your JSON edits to pick colors here.",
     "title": "Темы",
     "yourThemes": "Ваши темы"
   },

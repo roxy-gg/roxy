@@ -1150,6 +1150,9 @@
     "colorHue": "Hue",
     "colorOpacity": "Opacity",
     "colorValue": "Color value",
+    "colorSaturation": "Saturation and brightness",
+    "colorSaturationValue": "Saturation {{s}}%, brightness {{v}}%",
+    "swatchesLocked": "Save or discard your JSON edits to pick colors here.",
     "hideReference": "Hide reference",
     "showReference": "Show reference"
   },

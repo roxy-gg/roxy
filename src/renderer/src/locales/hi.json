@@ -1027,6 +1027,8 @@
     "collapse": "छोटा करें",
     "colorHue": "Hue",
     "colorOpacity": "Opacity",
+    "colorSaturation": "Saturation and brightness",
+    "colorSaturationValue": "Saturation {{s}}%, brightness {{v}}%",
     "colorValue": "Color value",
     "colors": "रंग",
     "colorsBody": "कोई भी CSS रंग — हेक्स, <code>rgb()</code>, <code>oklch()</code>, या <code>color-mix()</code>। जो कुछ भी आप छोड़ देते हैं वह उस थीम से विरासत में मिलता है जिसे आप <code>extends</code> करते हैं, इसलिए एक थीम तीन पंक्तियों जितनी लंबी हो सकती है।",
@@ -1066,6 +1068,7 @@
     "saving": "सहेजा जा रहा है…",
     "showReference": "संदर्भ दिखाएँ",
     "subtitle": "एक थीम एक छोटी JSON फ़ाइल है जो ऐप के डिज़ाइन टोकन — सतहों, टेक्स्ट, उच्चारण और UI और कोड के लिए फ़ॉन्ट को फिर से इंगित करती है। नीचे से एक चुनें, या अपना बनाने के लिए इसे डुप्लिकेट करें। थीम आपके थीम फ़ोल्डर से पढ़ी जाती हैं, इसलिए उन्हें किसी भी संपादक में संपादित किया जा सकता है, डॉटफ़ाइलों में चेक किया जा सकता है, और एक फ़ाइल के रूप में साझा किया जा सकता है।",
+    "swatchesLocked": "Save or discard your JSON edits to pick colors here.",
     "title": "थीम",
     "yourThemes": "आपकी थीम"
   },

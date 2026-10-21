@@ -1027,6 +1027,8 @@
     "collapse": "Recolher",
     "colorHue": "Hue",
     "colorOpacity": "Opacity",
+    "colorSaturation": "Saturation and brightness",
+    "colorSaturationValue": "Saturation {{s}}%, brightness {{v}}%",
     "colorValue": "Color value",
     "colors": "Cores",
     "colorsBody": "Qualquer cor CSS — hex, <code>rgb()</code>, <code>oklch()</code> ou um <code>color-mix()</code>. Tudo o que você deixar de fora é herdado do tema que você <code>extends</code>, então um tema pode ter três linhas.",
@@ -1066,6 +1068,7 @@
     "saving": "Salvando…",
     "showReference": "Mostrar referência",
     "subtitle": "Um tema é um pequeno arquivo JSON que redireciona os tokens de design do aplicativo — superfícies, texto, acentos e as fontes para a interface do usuário e para o código. Escolha um abaixo ou duplique-o para criar o seu próprio. Os temas são lidos da sua pasta de temas, para que possam ser editados em qualquer editor, verificados em dotfiles e compartilhados como um arquivo.",
+    "swatchesLocked": "Save or discard your JSON edits to pick colors here.",
     "title": "Temas",
     "yourThemes": "Seus temas"
   },

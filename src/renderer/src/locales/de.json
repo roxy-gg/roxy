@@ -1027,6 +1027,8 @@
     "collapse": "Einklappen",
     "colorHue": "Hue",
     "colorOpacity": "Opacity",
+    "colorSaturation": "Saturation and brightness",
+    "colorSaturationValue": "Saturation {{s}}%, brightness {{v}}%",
     "colorValue": "Color value",
     "colors": "Farben",
     "colorsBody": "Jede CSS-Farbe – Hex, <code>rgb()</code>, <code>oklch()</code> oder ein <code>color-mix()</code>. Alles, was Sie weglassen, wird vom Thema geerbt, das Sie <code>extends</code>, sodass ein Thema nur drei Zeilen lang sein kann.",
@@ -1066,6 +1068,7 @@
     "saving": "Speichern…",
     "showReference": "Referenz anzeigen",
     "subtitle": "Ein Design ist eine kleine JSON-Datei, die die Design-Tokens der App neu zuordnet – Oberflächen, Text, Akzente und die Schriftarten für die Benutzeroberfläche und für Code. Wählen Sie eines unten aus oder duplizieren Sie es, um Ihr eigenes zu erstellen. Designs werden aus Ihrem Design-Ordner gelesen, sodass sie in jedem Editor bearbeitet, in Dotfiles eingecheckt und als Datei geteilt werden können.",
+    "swatchesLocked": "Save or discard your JSON edits to pick colors here.",
     "title": "Designs",
     "yourThemes": "Ihre Designs"
   },

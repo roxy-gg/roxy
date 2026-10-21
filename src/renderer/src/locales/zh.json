@@ -1027,6 +1027,8 @@
     "collapse": "折叠",
     "colorHue": "Hue",
     "colorOpacity": "Opacity",
+    "colorSaturation": "Saturation and brightness",
+    "colorSaturationValue": "Saturation {{s}}%, brightness {{v}}%",
     "colorValue": "Color value",
     "colors": "颜色",
     "colorsBody": "任何 CSS 颜色 — hex、<code>rgb()</code>、<code>oklch()</code> 或 <code>color-mix()</code>。您省略的任何内容都将从您 <code>extends</code> 的主题继承，因此一个主题可以只有三行。",
@@ -1066,6 +1068,7 @@
     "saving": "正在保存…",
     "showReference": "显示参考",
     "subtitle": "主题是一个小型 JSON 文件，它重新指向应用程序的设计令牌——表面、文本、强调色以及 UI 和代码的字体。在下面选择一个，或复制它以创建您自己的主题。主题从您的主题文件夹中读取，因此可以在任何编辑器中编辑，检入点文件，并作为文件共享。",
+    "swatchesLocked": "Save or discard your JSON edits to pick colors here.",
     "title": "主题",
     "yourThemes": "您的主题"
   },

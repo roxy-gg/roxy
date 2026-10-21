@@ -329,6 +329,7 @@ import {
   type Rect
 } from '../src/renderer/src/lib/anchor'
 import { rowOffsets, visibleRange, OVERSCAN } from '../src/renderer/src/lib/windowing'
+import { formatColor, hsvaToRgba, parseCssColor, rgbaToHsva } from '../src/renderer/src/lib/color'
 import {
   buildModelIndex,
   buildProviderModelRows,
@@ -6687,6 +6688,52 @@ async function main(): Promise<void> {
     check(
       'quota: upstream error message is surfaced',
       quotaErrorMessage(500, '{"error":{"message":"boom"}}') === 'boom'
+    )
+  }
+
+  // ---- theme color picker math (renderer/lib/color) ---------------------------
+  {
+    const roundTrip = (hex: string): string => {
+      const rgba = parseCssColor(hex)
+      return rgba ? formatColor(hsvaToRgba(rgbaToHsva(rgba))) : 'unparsed'
+    }
+    for (const hex of ['#000000', '#ffffff', '#808080', '#4d8dff', '#d95757']) {
+      check(`color: ${hex} survives hex -> hsva -> hex`, roundTrip(hex) === hex)
+    }
+    const short = parseCssColor('#fff')
+    check(
+      'color: #rgb expands to #rrggbb',
+      !!short && short.r === 255 && short.g === 255 && short.b === 255 && short.a === 1
+    )
+    const withAlpha = parseCssColor('#ff000080')
+    check(
+      'color: #rrggbbaa keeps its alpha',
+      !!withAlpha && withAlpha.r === 255 && Math.abs(withAlpha.a - 128 / 255) < 1e-9
+    )
+    // The `border` value the built-in themes use.
+    const border = parseCssColor('rgba(255, 255, 255, 0.1)')
+    check(
+      'color: rgba() parses channels and alpha',
+      !!border && border.r === 255 && border.g === 255 && border.b === 255 && border.a === 0.1
+    )
+    check(
+      'color: formatColor writes rgba() below full opacity',
+      !!border && formatColor(border) === 'rgba(255, 255, 255, 0.1)'
+    )
+    check(
+      'color: formatColor writes #rrggbb at full opacity',
+      formatColor({ r: 77, g: 141, b: 255, a: 1 }) === '#4d8dff'
+    )
+    const grey = rgbaToHsva({ r: 128, g: 128, b: 128, a: 1 })
+    check('color: a grey has no saturation', grey.s === 0 && Math.abs(grey.v - 128 / 255) < 1e-9)
+    check(
+      'color: opacity round-trips through hsva',
+      rgbaToHsva({ r: 1, g: 2, b: 3, a: 0.25 }).a === 0.25
+    )
+    // No `document` here, so anything beyond hex / rgb() has nothing to parse it.
+    check(
+      'color: unparseable input returns null instead of throwing',
+      parseCssColor('nonsense') === null && parseCssColor('') === null
     )
   }
 

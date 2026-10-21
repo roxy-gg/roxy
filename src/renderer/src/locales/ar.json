@@ -1027,6 +1027,8 @@
     "collapse": "طي",
     "colorHue": "Hue",
     "colorOpacity": "Opacity",
+    "colorSaturation": "Saturation and brightness",
+    "colorSaturationValue": "Saturation {{s}}%, brightness {{v}}%",
     "colorValue": "Color value",
     "colors": "الألوان",
     "colorsBody": "أي لون CSS — سداسي عشري، <code>rgb()</code>، <code>oklch()</code>، أو <code>color-mix()</code>. أي شيء تتركه يتم توريثه من السمة التي <code>extends</code>، لذلك يمكن أن تكون السمة ثلاثة أسطر.",
@@ -1066,6 +1068,7 @@
     "saving": "جارٍ الحفظ...",
     "showReference": "إظهار المرجع",
     "subtitle": "السمة هي ملف JSON صغير يعيد توجيه رموز تصميم التطبيق — الأسطح، النص، اللمسات، والخطوط لواجهة المستخدم وللتعليمات البرمجية. اختر واحدة أدناه، أو قم بنسخها لإنشاء سمة خاصة بك. تُقرأ السمات من مجلد السمات الخاص بك، لذا يمكن تحريرها في أي محرر، والتحقق منها في ملفات الإعدادات، ومشاركتها كملف.",
+    "swatchesLocked": "Save or discard your JSON edits to pick colors here.",
     "title": "السمات",
     "yourThemes": "سماتك"
   },

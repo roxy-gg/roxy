@@ -1027,6 +1027,8 @@
     "collapse": "Réduire",
     "colorHue": "Hue",
     "colorOpacity": "Opacity",
+    "colorSaturation": "Saturation and brightness",
+    "colorSaturationValue": "Saturation {{s}}%, brightness {{v}}%",
     "colorValue": "Color value",
     "colors": "Couleurs",
     "colorsBody": "Toute couleur CSS — hex, <code>rgb()</code>, <code>oklch()</code>, ou un <code>color-mix()</code>. Tout ce que vous omettez est hérité du thème que vous <code>extends</code>, donc un thème peut ne faire que trois lignes.",
@@ -1066,6 +1068,7 @@
     "saving": "Enregistrement…",
     "showReference": "Afficher la référence",
     "subtitle": "Un thème est un petit fichier JSON qui redéfinit les jetons de conception de l'application — surfaces, texte, accents, et les polices pour l'interface utilisateur et le code. Choisissez-en un ci-dessous, ou dupliquez-le pour créer le vôtre. Les thèmes sont lus depuis votre dossier de thèmes, ils peuvent donc être modifiés dans n'importe quel éditeur, intégrés à des dotfiles et partagés en tant que fichier.",
+    "swatchesLocked": "Save or discard your JSON edits to pick colors here.",
     "title": "Thèmes",
     "yourThemes": "Vos thèmes"
   },

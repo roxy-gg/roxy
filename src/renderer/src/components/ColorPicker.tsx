@@ -1,4 +1,10 @@
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
+import {
+  useEffect,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type PointerEvent as ReactPointerEvent
+} from 'react'
 import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import { isSafeCssValue } from '@shared/theme'
@@ -24,6 +30,8 @@ function useDrag(onMove: (x: number, y: number) => void): {
     onPointerDown: (e: ReactPointerEvent<HTMLDivElement>) => void
     onPointerMove: (e: ReactPointerEvent<HTMLDivElement>) => void
     onPointerUp: (e: ReactPointerEvent<HTMLDivElement>) => void
+    onPointerCancel: () => void
+    onLostPointerCapture: () => void
   }
 } {
   const ref = useRef<HTMLDivElement>(null)
@@ -48,10 +56,22 @@ function useDrag(onMove: (x: number, y: number) => void): {
       onPointerUp: (e) => {
         dragging.current = false
         e.currentTarget.releasePointerCapture(e.pointerId)
+      },
+      // A cancelled gesture (touch interrupted, window blur) or capture taken
+      // away never delivers `pointerup`; without these `dragging` would stay
+      // true and the next hover would keep moving the handle.
+      onPointerCancel: () => {
+        dragging.current = false
+      },
+      onLostPointerCapture: () => {
+        dragging.current = false
       }
     }
   }
 }
+
+/** Arrow-key step for a slider-like control; Shift moves ten times as far. */
+const stepOf = (e: ReactKeyboardEvent, unit: number): number => (e.shiftKey ? unit * 10 : unit)
 
 /**
  * A color swatch that opens a picker.
@@ -65,14 +85,17 @@ export function ColorPicker({
   value,
   label,
   onChange,
-  shape = 'square'
+  disabled,
+  disabledHint
 }: {
   value: string
   /** Names the control for assistive tech and the hover title. */
   label: string
   onChange: (next: string) => void
-  /** `dot` matches the small round swatches on a theme card. */
-  shape?: 'square' | 'dot'
+  /** Show the color but don't open the picker. */
+  disabled?: boolean
+  /** Replaces the hover title while disabled, so the reason is visible. */
+  disabledHint?: string
 }): JSX.Element {
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
@@ -105,15 +128,30 @@ export function ColorPicker({
     if (parsed) setHsva(rgbaToHsva(parsed))
   }, [value])
 
+  // The close handlers below are registered once per open, so they would see
+  // the `draft` / `value` of the render that opened the popover. Reading the
+  // latest through a ref is what lets them commit what was actually typed.
+  const latest = useRef({ draft, value, commit: () => {}, revert: () => {} })
+
+  useEffect(() => {
+    if (disabled) setOpen(false)
+  }, [disabled])
+
   useEffect(() => {
     if (!open) return
     const onDown = (e: MouseEvent): void => {
       const target = e.target as Node
-      if (!rootRef.current?.contains(target) && !menuRef.current?.contains(target)) setOpen(false)
+      if (rootRef.current?.contains(target) || menuRef.current?.contains(target)) return
+      // Clicking away keeps a typed value. The input's own `blur` would do this,
+      // but the popover unmounts on this same event, so it can be gone first.
+      latest.current.commit()
+      setOpen(false)
     }
     const onKey = (e: KeyboardEvent): void => {
       if (e.key !== 'Escape') return
       e.stopPropagation()
+      // Escape cancels: unlike a click away, it throws the pending text out.
+      latest.current.revert()
       setOpen(false)
     }
     document.addEventListener('mousedown', onDown)
@@ -150,6 +188,8 @@ export function ColorPicker({
     }
   }
 
+  latest.current = { draft, value, commit: commitDraft, revert: () => setDraft(value) }
+
   const sv = useDrag((x, y) => emit({ ...hsva, s: x, v: 1 - y }))
   const hue = useDrag((x) => emit({ ...hsva, h: x * 360 }))
   const alpha = useDrag((x) => emit({ ...hsva, a: Math.round(x * 100) / 100 }))
@@ -161,16 +201,21 @@ export function ColorPicker({
     <div ref={rootRef} className="relative shrink-0">
       <button
         type="button"
-        title={label}
+        title={disabled && disabledHint ? disabledHint : label}
         aria-label={t('themes.pickColor', { name: label })}
         aria-haspopup="dialog"
         aria-expanded={open}
-        onClick={() => setOpen((v) => !v)}
+        // `aria-disabled` rather than `disabled`: it stays focusable and keeps
+        // its hover title, which is where the reason is shown.
+        aria-disabled={disabled || undefined}
+        onClick={() => {
+          if (!disabled) setOpen((v) => !v)
+        }}
         className={cn(
-          'press-scale block cursor-pointer overflow-hidden border outline-none focus-visible:ring-2 focus-visible:ring-accent/60',
-          shape === 'dot'
-            ? 'h-4 w-4 rounded-full border-border hover:border-border-strong'
-            : 'h-6 w-6 rounded-md border-border-strong'
+          'block h-4 w-4 overflow-hidden rounded-full border border-border outline-none focus-visible:ring-2 focus-visible:ring-accent/60',
+          disabled
+            ? 'cursor-not-allowed opacity-50'
+            : 'press-scale cursor-pointer hover:border-border-strong'
         )}
         style={{ background: CHECKER }}
       >
@@ -190,7 +235,30 @@ export function ColorPicker({
             <div
               ref={sv.ref}
               {...sv.handlers}
-              className="relative h-32 w-full cursor-crosshair touch-none rounded-lg"
+              // A 2D control has no ARIA role of its own; `slider` with the
+              // value spelled out in `aria-valuetext` is the closest honest one.
+              role="slider"
+              tabIndex={0}
+              aria-label={t('themes.colorSaturation')}
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={Math.round(hsva.s * 100)}
+              aria-valuetext={t('themes.colorSaturationValue', {
+                s: Math.round(hsva.s * 100),
+                v: Math.round(hsva.v * 100)
+              })}
+              onKeyDown={(e) => {
+                const step = stepOf(e, 0.01)
+                const next = { ...hsva }
+                if (e.key === 'ArrowLeft') next.s = clamp01(hsva.s - step)
+                else if (e.key === 'ArrowRight') next.s = clamp01(hsva.s + step)
+                else if (e.key === 'ArrowUp') next.v = clamp01(hsva.v + step)
+                else if (e.key === 'ArrowDown') next.v = clamp01(hsva.v - step)
+                else return
+                e.preventDefault()
+                emit(next)
+              }}
+              className="relative h-32 w-full cursor-crosshair touch-none rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
               style={{
                 backgroundColor: pure,
                 backgroundImage:
@@ -215,6 +283,7 @@ export function ColorPicker({
               thumb={pure}
               now={Math.round(hsva.h)}
               max={360}
+              onSet={(h) => emit({ ...hsva, h })}
             />
             <Slider
               label={t('themes.colorOpacity')}
@@ -224,6 +293,7 @@ export function ColorPicker({
               thumb={formatColor(hsvaToRgba(hsva))}
               now={Math.round(hsva.a * 100)}
               max={100}
+              onSet={(percent) => emit({ ...hsva, a: percent / 100 })}
             />
 
             <input
@@ -258,7 +328,8 @@ function Slider({
   track,
   thumb,
   now,
-  max
+  max,
+  onSet
 }: {
   label: string
   drag: ReturnType<typeof useDrag>
@@ -267,17 +338,31 @@ function Slider({
   thumb: string
   now: number
   max: number
+  /** Called with the new value (0..max) from the keyboard. */
+  onSet: (value: number) => void
 }): JSX.Element {
   return (
     <div
       ref={drag.ref}
       {...drag.handlers}
       role="slider"
+      tabIndex={0}
       aria-label={label}
       aria-valuemin={0}
       aria-valuemax={max}
       aria-valuenow={now}
-      className="relative h-3 w-full cursor-pointer touch-none rounded-full"
+      onKeyDown={(e) => {
+        const step = stepOf(e, 1)
+        let next: number
+        if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') next = now - step
+        else if (e.key === 'ArrowRight' || e.key === 'ArrowUp') next = now + step
+        else if (e.key === 'Home') next = 0
+        else if (e.key === 'End') next = max
+        else return
+        e.preventDefault()
+        onSet(Math.max(0, Math.min(max, next)))
+      }}
+      className="relative h-3 w-full cursor-pointer touch-none rounded-full outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
       style={{ background: track }}
     >
       <span
