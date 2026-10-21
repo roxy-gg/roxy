@@ -846,7 +846,7 @@
       "worktrees": "ワークツリー設定"
     },
     "notifications": {
-      "completeDescription": "Roxy が応答を完了したときに通知を受け取ります。時間のかかるタスクに便利です。Roxy がフォーカスされていないときにのみ通知され、クリックするとそのセッションに移動します。",
+      "completeHint": "Notify when a response is ready and Roxy isn't focused.",
       "completeTitle": "応答の完了",
       "defaultSound": "Default",
       "deleteSound": "Delete {{name}}",

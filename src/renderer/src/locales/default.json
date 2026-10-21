@@ -779,7 +779,7 @@
     "notifications": {
       "heading": "Notifications",
       "completeTitle": "Response completions",
-      "completeDescription": "Notify when a response is ready and Roxy isn't focused.",
+      "completeHint": "Notify when a response is ready and Roxy isn't focused.",
       "testNotification": "Test notification",
       "testSound": "Test",
       "soundsTitle": "Notification sound",

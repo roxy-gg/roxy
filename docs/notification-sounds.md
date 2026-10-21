@@ -41,7 +41,7 @@ data. This does not keep Roxy running after quit or enable startup at login.
   process restores the selected sound after deleting the original file.
 - `npm run smoke:notification-sounds-ui`: actual settings component with real
   preload/main IPC and SQLite; native picker is stubbed. Checks opt-in behavior,
-  import/selection/reload, preview/restart, playback fallback, toast continuity,
+  import/selection/reload, playback through the sole Test button, playback fallback, toast continuity,
   deletion, cancellation, errors, untrusted callers and 390px/960px layouts.
   Screenshots are written under `test/.out/notification-sounds-*.png`.
 - The UI suite owns port 3100 and uses temporary user data, not the user's data.

@@ -97,7 +97,7 @@ export function NotificationSettings(): JSX.Element {
             {t('settings.notifications.completeTitle')}
           </div>
           <p className="mt-0.5 text-xs text-text-muted">
-            {t('settings.notifications.completeDescription')}
+            {t('settings.notifications.completeHint')}
           </p>
         </div>
         <Switch
@@ -129,14 +129,18 @@ export function NotificationSettings(): JSX.Element {
               ref={triggerRef}
               type="button"
               id="notification-sound"
-              disabled={busy || !library}
+              disabled={!library}
+              aria-disabled={busy || !library}
               aria-labelledby="notification-sound-label notification-sound-value"
               aria-haspopup="menu"
               aria-expanded={open}
               aria-controls={open ? 'notification-sound-menu' : undefined}
               className="sq sq-lg sq-ring flex h-9 min-w-0 flex-1 items-center gap-3 rounded-lg border border-border bg-surface-2 px-3 text-sm text-text outline-none focus-visible:border-accent/70 sm:w-44"
-              onClick={() => setOpen(!open)}
+              onClick={() => {
+                if (!busy) setOpen(!open)
+              }}
               onKeyDown={(event) => {
+                if (busy) return
                 if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
                   event.preventDefault()
                   setOpen(true)
@@ -151,7 +155,7 @@ export function NotificationSettings(): JSX.Element {
             <Button
               size="sm"
               className="h-9"
-              disabled={busy || !library}
+              disabled={busy}
               aria-label={t('settings.notifications.testNotification')}
               title={t('settings.notifications.testNotification')}
               onClick={() => {

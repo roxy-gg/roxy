@@ -846,7 +846,7 @@
       "worktrees": "Настройка рабочих деревьев"
     },
     "notifications": {
-      "completeDescription": "Получайте уведомление, когда Roxy завершит ответ. Полезно для длительных задач. Срабатывает, только когда Roxy не в фокусе; нажмите, чтобы перейти к этой сессии.",
+      "completeHint": "Notify when a response is ready and Roxy isn't focused.",
       "completeTitle": "Завершение ответов",
       "defaultSound": "Default",
       "deleteSound": "Delete {{name}}",

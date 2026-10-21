@@ -846,7 +846,7 @@
       "worktrees": "Configuração do worktree"
     },
     "notifications": {
-      "completeDescription": "Receba uma notificação quando o Roxy terminar uma resposta. Útil para tarefas longas. Só é acionada quando o Roxy não está em foco; clique nela para ir para essa sessão.",
+      "completeHint": "Notify when a response is ready and Roxy isn't focused.",
       "completeTitle": "Respostas concluídas",
       "defaultSound": "Default",
       "deleteSound": "Delete {{name}}",

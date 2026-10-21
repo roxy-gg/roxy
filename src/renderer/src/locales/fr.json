@@ -846,7 +846,7 @@
       "worktrees": "Configuration de l'arborescence de travail"
     },
     "notifications": {
-      "completeDescription": "Recevez une notification lorsque Roxy a terminé une réponse. Utile pour les tâches longues. Ne se déclenche que lorsque Roxy n'est pas au premier plan ; cliquez dessus pour accéder à cette session.",
+      "completeHint": "Notify when a response is ready and Roxy isn't focused.",
       "completeTitle": "Réponses terminées",
       "defaultSound": "Default",
       "deleteSound": "Delete {{name}}",

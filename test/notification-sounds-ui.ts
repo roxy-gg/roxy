@@ -79,14 +79,26 @@ async function run(): Promise<void> {
     'false'
   )
   await button('Import sound')
-  await until(`!document.querySelector('#notification-sound').disabled`)
+  await until(
+    `document.querySelector('#notification-sound').getAttribute('aria-disabled') === 'false'`
+  )
   await evaluate(`document.querySelector('#notification-sound').click()`)
   await until(`document.querySelectorAll('[role=menuitemradio]').length === 2`)
   assert.equal(getSoundLibrary().selectedId, null)
   assert.equal(getSettings().notifyOnComplete, false)
-  await evaluate(`document.querySelectorAll('[role=menuitemradio]')[1].click()`)
+  await until(`document.activeElement === document.querySelector('[role=menuitemradio]')`)
+  window.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Down' })
+  await until(`document.activeElement.textContent.trim() === 'Demo sound'`)
+  window.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Enter' })
+  window.webContents.sendInputEvent({ type: 'char', keyCode: '\r' })
+  window.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Enter' })
   await until(
-    `document.querySelector('#notification-sound-value').textContent.trim() === 'Demo sound' && !document.querySelector('#notification-sound').disabled`
+    `document.querySelector('#notification-sound-value').textContent.trim() === 'Demo sound' && document.querySelector('#notification-sound').getAttribute('aria-disabled') === 'false'`
+  )
+  assert.equal(
+    await evaluate(`return document.activeElement.id`),
+    'notification-sound',
+    'keyboard selection retains focus'
   )
   const selected = getSoundLibrary().selectedId
   assert.ok(selected)
@@ -191,7 +203,12 @@ async function run(): Promise<void> {
   )
   await button('Delete Demo sound')
   await until(
-    `document.querySelector('#notification-sound-value').textContent.trim() === 'Default' && !document.querySelector('#notification-sound').disabled`
+    `document.querySelector('#notification-sound-value').textContent.trim() === 'Default' && document.querySelector('#notification-sound').getAttribute('aria-disabled') === 'false'`
+  )
+  assert.equal(
+    await evaluate(`return document.activeElement.id`),
+    'notification-sound',
+    'deletion retains focus'
   )
   assert.equal(getSoundLibrary().selectedId, null)
   assert.equal(getSettings().notifyOnComplete, false)
@@ -236,6 +253,22 @@ async function run(): Promise<void> {
     { ok: false, error: 'readFailed' }
   )
   unauthorized.destroy()
+  ipcMain.removeHandler(CHANNELS.notifySoundsGet)
+  ipcMain.handle(CHANNELS.notifySoundsGet, () => {
+    throw Error('Library unavailable')
+  })
+  await window.reload()
+  await until(`document.querySelector('[role=alert]')`)
+  assert.equal(
+    await evaluate(`return document.querySelector('[aria-label="Test notification"]').disabled`),
+    false,
+    'Test remains available without the library'
+  )
+  await evaluate(`window.__fallbackSource = null;
+    HTMLMediaElement.prototype.play = function() { window.__fallbackSource = this.src; return Promise.resolve(); };`)
+  await button('Test notification')
+  await until(`window.__fallbackSource?.includes('chime.wav')`)
+  assert.equal(toastCount, 6, 'library load failure does not block the toast')
   assert.deepEqual(errors, [])
   console.log(
     'Sound UI and real IPC: import, select, reload, preview, fallback, delete, cancel, errors, opt-in, untrusted caller, desktop/mobile passed'

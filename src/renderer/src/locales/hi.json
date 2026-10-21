@@ -846,7 +846,7 @@
       "worktrees": "वर्कट्री कॉन्फ़िगरेशन"
     },
     "notifications": {
-      "completeDescription": "जब Roxy कोई प्रतिक्रिया पूरी कर ले तो सूचना पाएं। लंबे समय तक चलने वाले कार्यों के लिए उपयोगी। यह केवल तभी आती है जब Roxy फ़ोकस में न हो; उस सत्र पर जाने के लिए उस पर क्लिक करें।",
+      "completeHint": "Notify when a response is ready and Roxy isn't focused.",
       "completeTitle": "प्रतिक्रिया पूर्ण होना",
       "defaultSound": "Default",
       "deleteSound": "Delete {{name}}",

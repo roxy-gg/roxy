@@ -846,7 +846,7 @@
       "worktrees": "تكوين Worktree"
     },
     "notifications": {
-      "completeDescription": "احصل على إشعار عندما ينتهي Roxy من الرد. مفيد للمهام الطويلة. لا يظهر إلا عندما لا يكون Roxy في المقدمة؛ انقر عليه للانتقال إلى تلك الجلسة.",
+      "completeHint": "Notify when a response is ready and Roxy isn't focused.",
       "completeTitle": "اكتمال الردود",
       "defaultSound": "Default",
       "deleteSound": "Delete {{name}}",
