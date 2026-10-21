@@ -122,6 +122,20 @@ window.roxy = {
       window.__canvasTest.opened.push(url)
     }
   },
+  notifications: {
+    soundLibrary: async () => ({ selectedId: null, sounds: [] }),
+    importSound: async () => ({ ok: false, error: 'cancelled' }),
+    selectSound: async (selectedId: string | null) => ({
+      ok: true,
+      state: { selectedId, sounds: [] }
+    }),
+    deleteSound: async () => ({ ok: true, state: { selectedId: null, sounds: [] } }),
+    soundAudio: async () => null,
+    onSoundsChanged: () => () => {},
+    toast: async () => {},
+    takePendingActivation: async () => null,
+    onActivated: () => () => {}
+  },
   clipboard: { hasContent: async () => false, exec: async () => {} }
 } as unknown as typeof window.roxy
 Object.defineProperty(navigator.clipboard, 'writeText', {

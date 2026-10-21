@@ -40,10 +40,10 @@ export function BotsSection({ rail = false }: { rail?: boolean }): JSX.Element {
    * scrolls (`overflow-y-auto`) and would clip anything positioned inside it.
    */
   const [tip, setTip] = useState<{ id: string; x: number; y: number } | null>(null)
-  const tipTimer = useRef<number>(0)
+  const tipTimer = useRef<ReturnType<typeof setTimeout>>()
   const showTip = (id: string, el: HTMLElement): void => {
-    window.clearTimeout(tipTimer.current)
-    tipTimer.current = window.setTimeout(() => {
+    clearTimeout(tipTimer.current)
+    tipTimer.current = setTimeout(() => {
       const rect = el.getBoundingClientRect()
       setTip(
         rail
@@ -53,10 +53,10 @@ export function BotsSection({ rail = false }: { rail?: boolean }): JSX.Element {
     }, 200)
   }
   const hideTip = (): void => {
-    window.clearTimeout(tipTimer.current)
+    clearTimeout(tipTimer.current)
     setTip(null)
   }
-  useEffect(() => () => window.clearTimeout(tipTimer.current), [])
+  useEffect(() => () => clearTimeout(tipTimer.current), [])
   const tipBot = bots.find((bot) => bot.id === tip?.id)
   const menuBot = bots.find((bot) => bot.id === menu?.botId)
   const closeMenu = (): void => {

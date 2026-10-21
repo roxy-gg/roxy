@@ -753,6 +753,7 @@ async function run() {
       'Motion',
       'Skills',
       'MCP',
+      'Reverse Engineering Tools',
       'Backup & restore',
       'Accounts',
       'Browser',
