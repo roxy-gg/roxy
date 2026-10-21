@@ -902,6 +902,16 @@
       "signedInLocally": "本地登录",
       "updateKey": "更新 API 密钥"
     },
+    "search": {
+      "clear": "Clear search",
+      "empty": "No settings found for {{query}}",
+      "heading": "Search results",
+      "hint": "Try a different word or a more general search.",
+      "keyboardHint": "Arrow keys to navigate, Enter to open, Esc to clear.",
+      "placeholder": "Search settings",
+      "results_one": "{{count}} setting found",
+      "results_other": "{{count}} settings found"
+    },
     "title": "设置",
     "workstreams": {
       "autoDescription": "每个会话都在自己的分支上使用自己的 git 工作树，因此并行会话不会相互覆盖或与您的编辑器冲突。文件夹在会话的第一个消息时创建，并且仅在 git 仓库中。关闭此选项可在项目文件夹中直接运行新会话。",

@@ -57,6 +57,9 @@ jobs:
       - name: Renderer usage preferences and Escape regression suite
         run: npm run smoke:ui-preferences
 
+      - name: Settings search matching, ranking and locale suite
+        run: npm run smoke:settings-search
+
       - name: Notification presentation and activation suite
         run: npm run smoke:notifications
 
@@ -193,6 +196,12 @@ jobs:
           ELECTRON_DISABLE_SANDBOX: '1'
         # The suite opens a 1440px window; Xvfb's default screen is only 1280px wide.
         run: xvfb-run --auto-servernum --server-args="-screen 0 1920x1080x24" npm run smoke:background-ui
+
+      - name: Settings search keyboard, navigation and theme suite
+        if: runner.os == 'Linux'
+        env:
+          ELECTRON_DISABLE_SANDBOX: '1'
+        run: xvfb-run --auto-servernum --server-args="-screen 0 1920x1080x24" npm run smoke:settings-search-ui
 
       - name: Bot strip ordering (real Chromium drag and keyboard)
         if: runner.os == 'Linux'

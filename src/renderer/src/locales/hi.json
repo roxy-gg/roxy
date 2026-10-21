@@ -902,6 +902,16 @@
       "signedInLocally": "स्थानीय रूप से साइन इन किया गया",
       "updateKey": "API कुंजी अपडेट करें"
     },
+    "search": {
+      "clear": "Clear search",
+      "empty": "No settings found for {{query}}",
+      "heading": "Search results",
+      "hint": "Try a different word or a more general search.",
+      "keyboardHint": "Arrow keys to navigate, Enter to open, Esc to clear.",
+      "placeholder": "Search settings",
+      "results_one": "{{count}} setting found",
+      "results_other": "{{count}} settings found"
+    },
     "title": "सेटिंग्स",
     "workstreams": {
       "autoDescription": "प्रत्येक सत्र अपनी शाखा पर अपनी git कार्यवृक्ष में काम करता है, इसलिए समानांतर सत्र एक-दूसरे को अधिलेखित नहीं कर सकते या आपके संपादक के साथ संघर्ष नहीं कर सकते। फ़ोल्डर सत्र के पहले संदेश पर बनाया जाता है, और केवल git रिपॉजिटरी में। नए सत्रों को सीधे प्रोजेक्ट फ़ोल्डर में चलाने के लिए इसे बंद करें।",

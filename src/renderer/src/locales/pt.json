@@ -902,6 +902,16 @@
       "signedInLocally": "sessão iniciada localmente",
       "updateKey": "Atualizar chave de API"
     },
+    "search": {
+      "clear": "Clear search",
+      "empty": "No settings found for {{query}}",
+      "heading": "Search results",
+      "hint": "Try a different word or a more general search.",
+      "keyboardHint": "Arrow keys to navigate, Enter to open, Esc to clear.",
+      "placeholder": "Search settings",
+      "results_one": "{{count}} setting found",
+      "results_other": "{{count}} settings found"
+    },
     "title": "Configurações",
     "workstreams": {
       "autoDescription": "Cada sessão funciona em seu próprio worktree git em sua própria branch, para que sessões paralelas não possam sobrescrever umas às outras ou entrar em conflito com seu editor. A pasta é criada na primeira mensagem da sessão e apenas em repositórios git. Desative isso para executar novas sessões diretamente na pasta do projeto.",

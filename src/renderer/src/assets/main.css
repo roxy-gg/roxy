@@ -597,6 +597,34 @@ body {
   background: var(--theme-selection, color-mix(in srgb, var(--color-accent) 30%, transparent));
 }
 
+.settings-search-match,
+.settings-search-target {
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--color-accent) 65%, transparent);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+.settings-search-match {
+  color: inherit;
+  background: transparent;
+}
+.settings-search-target {
+  scroll-margin-block: 2rem;
+  animation: settings-search-reveal 3s ease-out;
+}
+@keyframes settings-search-reveal {
+  0%,
+  35% {
+    background-color: color-mix(in srgb, var(--color-accent) 12%, transparent);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+[data-motion='reduced'] .settings-search-target {
+  animation: none;
+}
+
 /* Scrollbars.
  *
  * Thin, Cursor-like scrollbars, styled natively.

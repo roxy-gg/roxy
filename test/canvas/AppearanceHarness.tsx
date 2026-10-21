@@ -91,6 +91,12 @@ Object.assign(window.roxy, {
     onProxyChanged: () => () => {}
   },
   forge: { listHosts: async () => [] },
+  notifications: {
+    soundLibrary: async () => ({ selectedId: null, sounds: [] }),
+    onSoundsChanged: () => () => {},
+    soundAudio: async () => null,
+    toast: async () => {}
+  },
   activity: {
     stats: async () =>
       aggregateActivityDays(

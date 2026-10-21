@@ -902,6 +902,16 @@
       "signedInLocally": "ローカルでサインイン済み",
       "updateKey": "APIキーを更新"
     },
+    "search": {
+      "clear": "Clear search",
+      "empty": "No settings found for {{query}}",
+      "heading": "Search results",
+      "hint": "Try a different word or a more general search.",
+      "keyboardHint": "Arrow keys to navigate, Enter to open, Esc to clear.",
+      "placeholder": "Search settings",
+      "results_one": "{{count}} setting found",
+      "results_other": "{{count}} settings found"
+    },
     "title": "設定",
     "workstreams": {
       "autoDescription": "各セッションは独自のブランチで独自のgitワークツリーで動作するため、並行セッションが互いに上書きしたり、エディターと競合したりすることはありません。フォルダーはセッションの最初のメッセージで作成され、gitリポジトリ内でのみ作成されます。これをオフにすると、新しいセッションがプロジェクトフォルダーで直接実行されます。",
