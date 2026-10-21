@@ -1146,6 +1146,10 @@
     "fonts": "Fonts",
     "fontsBody": "<code>sans</code> is the UI font and <code>mono</code> is the code font — tool calls, terminal output, diffs and code blocks. Give one family, an array to build your own stack, or <code>\"system\"</code> for the platform’s native font. Fallbacks are appended automatically, so naming a font you don’t have degrades gracefully.",
     "example": "Example",
+    "pickColor": "Pick a color for {{name}}",
+    "colorHue": "Hue",
+    "colorOpacity": "Opacity",
+    "colorValue": "Color value",
     "hideReference": "Hide reference",
     "showReference": "Show reference"
   },
