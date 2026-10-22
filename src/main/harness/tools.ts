@@ -133,6 +133,7 @@ async function untilAborted<T>(
   signal: AbortSignal | undefined,
   work: () => Promise<T>
 ): Promise<T> {
+  if (signal?.aborted) throw new AbortError()
   const race = abortRace(signal)
   if (!race) return await work()
   // Swallow a late rejection from the losing side so an aborted turn can't
@@ -273,7 +274,15 @@ export async function runTool(
           runBrowserRead(str(input.selector) || undefined, browserKey(ctx))
         )
       case 'browser_console':
-        return runBrowserConsole(browserKey(ctx))
+        return runBrowserConsole(browserKey(ctx), input)
+      case 'browser_network':
+      case 'browser_network_request':
+      case 'browser_evaluate':
+      case 'browser_devtools':
+      case 'browser_debug_events':
+        return await untilAborted(ctx.signal, () =>
+          runBrowserDevtools(name, input, browserKey(ctx), ctx.signal)
+        )
       case 'browser_click':
         return await untilAborted(ctx.signal, () =>
           runBrowserClick(str(input.selector), browserKey(ctx))
@@ -336,7 +345,10 @@ export async function runTool(
         output: name.startsWith('cheat_')
           ? TOOL_ABORTED +
             ' A dispatched memory write or DLL load may already have executed or still be running. Cancellation does not unload or roll back target changes. Do not automatically retry.'
-          : TOOL_ABORTED
+          : ['browser_evaluate', 'browser_devtools'].includes(name)
+            ? TOOL_ABORTED +
+              ' The command may already have executed or still be running. Cancellation does not resume a paused page, stop profiling, or roll back changes. Do not automatically retry.'
+            : TOOL_ABORTED
       }
     return { ok: false, output: e instanceof Error ? e.message : String(e) }
   }
@@ -1184,16 +1196,74 @@ async function runBrowserRead(selector: string | undefined, key?: string): Promi
   return { ok: true, output: cap(html) }
 }
 
-function runBrowserConsole(key?: string): ToolResult {
-  const { entries, errors, warnings } = browser.getConsole(key)
+function runBrowserConsole(key: string | undefined, input: Record<string, unknown>): ToolResult {
+  const { entries, errors, warnings } = browser.getConsole(key, {
+    tabId: str(input.tabId) || undefined,
+    since: num(input.since),
+    limit: num(input.limit),
+    level: num(input.level)
+  })
   if (entries.length === 0) return { ok: true, output: 'No console messages captured yet.' }
   const lines = entries.map((e) => {
     const label = (CONSOLE_LEVELS[e.level] ?? 'log').toUpperCase()
     const loc = e.url ? ` (${e.url}${e.line ? `:${e.line}` : ''})` : ''
-    return `[${label}] ${e.message}${loc}`
+    return `[${label}] ${new Date(e.ts).toISOString()} [${e.tabId}] ${e.message}${loc}`
   })
   const header = `${entries.length} message(s) · ${errors} error(s), ${warnings} warning(s)`
   return { ok: errors === 0, output: `${header}\n${cap(lines.join('\n'))}` }
+}
+
+async function runBrowserDevtools(
+  name: string,
+  input: Record<string, unknown>,
+  key?: string,
+  signal?: AbortSignal
+): Promise<ToolResult> {
+  const { tabId, inspector } = browser.inspector(str(input.tabId) || undefined, key)
+  await inspector.ready
+  if (signal?.aborted) throw new AbortError()
+  let result: unknown
+  switch (name) {
+    case 'browser_network':
+      result = inspector.network({
+        url: str(input.url),
+        offset: num(input.offset),
+        limit: num(input.limit),
+        failed: input.failed === true
+      })
+      break
+    case 'browser_network_request':
+      result = await inspector.request(str(input.id), {
+        requestBody: input.requestBody === true,
+        responseBody: input.responseBody === true,
+        includeSensitive: input.includeSensitive === true,
+        maxChars: num(input.maxChars)
+      })
+      break
+    case 'browser_evaluate':
+      result = await inspector.evaluate(str(input.expression), num(input.timeout))
+      break
+    case 'browser_devtools': {
+      if (
+        input.params !== undefined &&
+        (!input.params || typeof input.params !== 'object' || Array.isArray(input.params))
+      ) {
+        throw new Error('browser_devtools: params must be an object')
+      }
+      result = await inspector.devtools(
+        str(input.method),
+        input.params as Record<string, unknown> | undefined
+      )
+      break
+    }
+    default:
+      result = inspector.debugEvents({
+        after: num(input.after),
+        limit: num(input.limit),
+        method: str(input.method)
+      })
+  }
+  return { ok: true, output: JSON.stringify({ tabId, result }) }
 }
 
 function runBrowserTabs(key?: string): ToolResult {

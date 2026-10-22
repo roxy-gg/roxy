@@ -180,6 +180,42 @@ export const TOOLS: ToolDef[] = [
     mutates: false,
     interruptible: false
   },
+  ...(
+    [
+      [
+        'browser_network',
+        'List captured network requests, status codes, failures and timing.',
+        false
+      ],
+      [
+        'browser_network_request',
+        'Inspect request headers, timing and optional request/response bodies.',
+        false
+      ],
+      [
+        'browser_evaluate',
+        'Evaluate JavaScript in a browser page and retrieve values or exceptions.',
+        true
+      ],
+      [
+        'browser_devtools',
+        'Run page-scoped Chrome DevTools Protocol commands for debugging and profiling.',
+        true
+      ],
+      [
+        'browser_debug_events',
+        'Read structured console, exception and debugger events for one tab.',
+        false
+      ]
+    ] as const
+  ).map(([id, description, mutates]) => ({
+    id,
+    name: id,
+    description,
+    category: 'Browser' as const,
+    mutates,
+    interruptible: true
+  })),
   {
     id: 'browser_click',
     name: 'browser_click',

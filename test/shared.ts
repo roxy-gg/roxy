@@ -461,9 +461,32 @@ check('tools non-empty', TOOLS.length > 0)
 check('tool ids unique', new Set(TOOLS.map((t) => t.id)).size === TOOLS.length)
 check(
   'browser tools registered',
-  ['browser_open', 'browser_screenshot', 'browser_read', 'browser_console', 'browser_tabs'].every(
-    (id) => Boolean(getTool(id))
-  )
+  [
+    'browser_open',
+    'browser_screenshot',
+    'browser_read',
+    'browser_console',
+    'browser_tabs',
+    'browser_network',
+    'browser_network_request',
+    'browser_evaluate',
+    'browser_devtools',
+    'browser_debug_events'
+  ].every((id) => Boolean(getTool(id)))
+)
+check(
+  'DevTools tools honor cancellation',
+  [
+    'browser_network',
+    'browser_network_request',
+    'browser_evaluate',
+    'browser_devtools',
+    'browser_debug_events'
+  ].every(isInterruptibleTool)
+)
+check(
+  'DevTools execution tools are marked mutating',
+  getTool('browser_evaluate')?.mutates === true && getTool('browser_devtools')?.mutates === true
 )
 check(
   'bot tools registered',
