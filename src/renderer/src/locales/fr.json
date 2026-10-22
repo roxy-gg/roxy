@@ -553,6 +553,7 @@
     "apiKey": "Clé API",
     "back": "Retour",
     "backToList": "Retour à la liste",
+    "backToSettings": "Back to Settings",
     "baseUrl": "URL de base",
     "clickToCopy": "Cliquez sur le code pour copier",
     "connect": "Connecter",
@@ -865,6 +866,12 @@
       "soundsTitle": "Notification sound",
       "testNotification": "Notification de test",
       "testSound": "Test"
+    },
+    "onboarding": {
+      "description": "Walk through onboarding again without resetting your providers, sessions, or settings.",
+      "heading": "Onboarding",
+      "replay": "Replay onboarding",
+      "title": "Revisit the setup flow"
     },
     "privacy": {
       "description": "Comptes et chronométrages — lancements d'applications, tours terminés, nombre d'étapes et d'outils qu'un tour a pris, nombre de jetons utilisés et coût approximatif — liés à un identifiant aléatoire généré sur cette machine. Jamais vos invites, votre code, les chemins de fichiers, les noms de dépôts ou tout texte d'erreur.",

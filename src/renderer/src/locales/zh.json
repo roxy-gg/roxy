@@ -553,6 +553,7 @@
     "apiKey": "API 密钥",
     "back": "返回",
     "backToList": "返回列表",
+    "backToSettings": "Back to Settings",
     "baseUrl": "基础 URL",
     "clickToCopy": "点击代码以复制",
     "connect": "连接",
@@ -865,6 +866,12 @@
       "soundsTitle": "Notification sound",
       "testNotification": "测试通知",
       "testSound": "Test"
+    },
+    "onboarding": {
+      "description": "Walk through onboarding again without resetting your providers, sessions, or settings.",
+      "heading": "Onboarding",
+      "replay": "Replay onboarding",
+      "title": "Revisit the setup flow"
     },
     "privacy": {
       "description": "计数和时间 — 应用程序启动、完成的回合、一个回合所需的步骤和工具数量、使用的令牌数量以及大致成本 — 与此机器上生成的随机 ID 绑定。绝不包含您的提示、代码、文件路径、仓库名称或任何错误文本。",

@@ -553,6 +553,7 @@
     "apiKey": "مفتاح API",
     "back": "رجوع",
     "backToList": "العودة إلى القائمة",
+    "backToSettings": "Back to Settings",
     "baseUrl": "عنوان URL الأساسي",
     "clickToCopy": "انقر على الرمز للنسخ",
     "connect": "اتصال",
@@ -865,6 +866,12 @@
       "soundsTitle": "Notification sound",
       "testNotification": "إشعار تجريبي",
       "testSound": "Test"
+    },
+    "onboarding": {
+      "description": "Walk through onboarding again without resetting your providers, sessions, or settings.",
+      "heading": "Onboarding",
+      "replay": "Replay onboarding",
+      "title": "Revisit the setup flow"
     },
     "privacy": {
       "description": "العدد والتوقيتات — تشغيل التطبيق، الأدوار المكتملة، عدد الخطوات والأدوات التي استغرقها الدور، عدد الرموز المميزة التي استخدمها وما يقرب من تكلفتها — مرتبطة بمعرف عشوائي تم إنشاؤه على هذا الجهاز. لا يتم تضمين مطالباتك، أو التعليمات البرمجية الخاصة بك، أو مسارات الملفات، أو أسماء المستودعات، أو أي نص خطأ.",

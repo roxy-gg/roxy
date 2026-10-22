@@ -553,6 +553,7 @@
     "apiKey": "Chave de API",
     "back": "Voltar",
     "backToList": "Voltar à lista",
+    "backToSettings": "Back to Settings",
     "baseUrl": "URL base",
     "clickToCopy": "Clique no código para copiar",
     "connect": "Conectar",
@@ -865,6 +866,12 @@
       "soundsTitle": "Notification sound",
       "testNotification": "Notificação de teste",
       "testSound": "Test"
+    },
+    "onboarding": {
+      "description": "Walk through onboarding again without resetting your providers, sessions, or settings.",
+      "heading": "Onboarding",
+      "replay": "Replay onboarding",
+      "title": "Revisit the setup flow"
     },
     "privacy": {
       "description": "Contagens e tempos — inicializações de aplicativos, turnos concluídos, quantos passos e ferramentas um turno levou, quantos tokens usou e aproximadamente quanto custou — vinculados a um ID aleatório gerado nesta máquina. Nunca seus prompts, seu código, caminhos de arquivo, nomes de repositórios ou qualquer texto de erro.",

@@ -535,6 +535,7 @@
     "responseReadyForSession": "Response ready: {{session}}"
   },
   "onboarding": {
+    "backToSettings": "Back to Settings",
     "welcomeTagline": "This might be a complete disaster. It might also be the best thing you use all year!",
     "continue": "Continue",
     "footerReady": "Nice — you can add more providers anytime in Settings.",
@@ -853,6 +854,12 @@
         "notAvailable": "You're on the latest version.",
         "idle": "Updates install automatically from GitHub."
       }
+    },
+    "onboarding": {
+      "heading": "Onboarding",
+      "title": "Revisit the setup flow",
+      "description": "Walk through onboarding again without resetting your providers, sessions, or settings.",
+      "replay": "Replay onboarding"
     },
     "danger": {
       "heading": "Danger zone",

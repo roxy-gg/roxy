@@ -553,6 +553,7 @@
     "apiKey": "Ключ API",
     "back": "Назад",
     "backToList": "Назад к списку",
+    "backToSettings": "Back to Settings",
     "baseUrl": "Базовый URL",
     "clickToCopy": "Нажмите на код, чтобы скопировать",
     "connect": "Подключить",
@@ -865,6 +866,12 @@
       "soundsTitle": "Notification sound",
       "testNotification": "Тестовое уведомление",
       "testSound": "Test"
+    },
+    "onboarding": {
+      "description": "Walk through onboarding again without resetting your providers, sessions, or settings.",
+      "heading": "Onboarding",
+      "replay": "Replay onboarding",
+      "title": "Revisit the setup flow"
     },
     "privacy": {
       "description": "Количество и время — запуски приложений, завершенные ходы, сколько шагов и инструментов занял ход, сколько токенов он использовал и примерно сколько это стоило — привязаны к случайному идентификатору, сгенерированному на этой машине. Никогда не ваши запросы, ваш код, пути к файлам, имена репозиториев или любой текст ошибки.",

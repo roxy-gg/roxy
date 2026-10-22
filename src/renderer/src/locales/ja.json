@@ -553,6 +553,7 @@
     "apiKey": "APIキー",
     "back": "戻る",
     "backToList": "リストに戻る",
+    "backToSettings": "Back to Settings",
     "baseUrl": "ベースURL",
     "clickToCopy": "クリックしてコードをコピー",
     "connect": "接続",
@@ -865,6 +866,12 @@
       "soundsTitle": "Notification sound",
       "testNotification": "テスト通知",
       "testSound": "Test"
+    },
+    "onboarding": {
+      "description": "Walk through onboarding again without resetting your providers, sessions, or settings.",
+      "heading": "Onboarding",
+      "replay": "Replay onboarding",
+      "title": "Revisit the setup flow"
     },
     "privacy": {
       "description": "アプリの起動、完了したターン、ターンにかかったステップとツールの数、使用されたトークンの数、おおよそのコストなど、このマシンで生成されたランダムなIDに関連付けられたカウントとタイミング。プロンプト、コード、ファイルパス、リポジトリ名、エラーテキストは決して含まれません。",

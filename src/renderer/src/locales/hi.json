@@ -553,6 +553,7 @@
     "apiKey": "API कुंजी",
     "back": "वापस",
     "backToList": "सूची पर वापस",
+    "backToSettings": "Back to Settings",
     "baseUrl": "बेस URL",
     "clickToCopy": "कॉपी करने के लिए कोड पर क्लिक करें",
     "connect": "कनेक्ट करें",
@@ -865,6 +866,12 @@
       "soundsTitle": "Notification sound",
       "testNotification": "परीक्षण सूचना",
       "testSound": "Test"
+    },
+    "onboarding": {
+      "description": "Walk through onboarding again without resetting your providers, sessions, or settings.",
+      "heading": "Onboarding",
+      "replay": "Replay onboarding",
+      "title": "Revisit the setup flow"
     },
     "privacy": {
       "description": "गणना और समय — ऐप लॉन्च, समाप्त मोड़, एक मोड़ में कितने कदम और उपकरण लगे, इसने कितने टोकन का उपयोग किया और मोटे तौर पर इसकी लागत कितनी थी — इस मशीन पर उत्पन्न एक यादृच्छिक आईडी से जुड़ा हुआ। कभी भी आपके प्रॉम्प्ट, आपका कोड, फ़ाइल पथ, रेपो नाम, या कोई त्रुटि पाठ नहीं।",

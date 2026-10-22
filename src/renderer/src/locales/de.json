@@ -553,6 +553,7 @@
     "apiKey": "API-Schlüssel",
     "back": "Zurück",
     "backToList": "Zurück zur Liste",
+    "backToSettings": "Back to Settings",
     "baseUrl": "Basis-URL",
     "clickToCopy": "Klicken Sie auf den Code, um ihn zu kopieren",
     "connect": "Verbinden",
@@ -865,6 +866,12 @@
       "soundsTitle": "Notification sound",
       "testNotification": "Testbenachrichtigung",
       "testSound": "Test"
+    },
+    "onboarding": {
+      "description": "Walk through onboarding again without resetting your providers, sessions, or settings.",
+      "heading": "Onboarding",
+      "replay": "Replay onboarding",
+      "title": "Revisit the setup flow"
     },
     "privacy": {
       "description": "Zählungen und Zeitangaben – App-Starts, abgeschlossene Züge, wie viele Schritte und Tools ein Zug benötigte, wie viele Token er verbrauchte und was er ungefähr kostete – verknüpft mit einer zufälligen ID, die auf diesem Gerät generiert wurde. Niemals Ihre Prompts, Ihr Code, Dateipfade, Repo-Namen oder Fehlermeldungen.",

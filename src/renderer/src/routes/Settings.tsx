@@ -20,6 +20,7 @@ import {
   PanelLeft,
   Plug,
   Plus,
+  RotateCcw,
   Shield,
   Sparkles,
   Trash2,
@@ -766,6 +767,20 @@ export default function Settings(): JSX.Element {
               })}
             </p>
           )}
+        </div>
+      </section>
+
+      <section hidden={panel !== 'about'} className="mb-8">
+        <h2 className={SECTION_HEADING}>{t('settings.onboarding.heading')}</h2>
+        <div className="flex flex-col gap-3 sq sq-xl sq-ring rounded-xl border border-border bg-surface p-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0">
+            <div className="text-sm font-medium text-text">{t('settings.onboarding.title')}</div>
+            <p className="mt-0.5 text-xs text-text-muted">{t('settings.onboarding.description')}</p>
+          </div>
+          <Button className="shrink-0" onClick={() => navigate('/onboarding')}>
+            <RotateCcw aria-hidden="true" className="h-3.5 w-3.5" />
+            {t('settings.onboarding.replay')}
+          </Button>
         </div>
       </section>
 
