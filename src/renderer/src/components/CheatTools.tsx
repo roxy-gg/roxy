@@ -86,12 +86,7 @@ export function CheatTools({ active = true }: { active?: boolean }): JSX.Element
           >
             <div className="flex items-center gap-3">
               <ScanLine aria-hidden="true" className="h-5 w-5 shrink-0 text-accent" />
-              <h3
-                id="settings-cheat-title"
-                className="min-w-0 flex-1 text-sm font-medium text-text"
-              >
-                {t('cheat.title')}
-              </h3>
+              <h3 className="min-w-0 flex-1 text-sm font-medium text-text">{t('cheat.title')}</h3>
               <Switch
                 label={t('cheat.enable')}
                 checked={state.preferences.enabled}

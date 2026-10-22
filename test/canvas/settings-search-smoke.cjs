@@ -150,6 +150,12 @@ app.whenReady().then(async () => {
     await until(`document.querySelectorAll('#settings-search-results button').length >= 1`)
     await click('#settings-search-results button')
     await until(`!!document.querySelector('#settings-cheat-title.settings-search-target')`)
+    await until(`!!document.querySelector('[data-cheat-control]')`)
+    assert.equal(
+      await evaluate(`return document.querySelectorAll('#settings-cheat-title').length`),
+      1,
+      'the search destination ID stays unique after Cheat Tools loads'
+    )
     await input('#settings-search', 'replay onboarding')
     await until(`document.querySelectorAll('#settings-search-results button').length === 1`)
     await click('#settings-search-results button')
