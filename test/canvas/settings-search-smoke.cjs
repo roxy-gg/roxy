@@ -146,6 +146,15 @@ app.whenReady().then(async () => {
       ),
       'unsaved-prefix'
     )
+    await input('#settings-search', 'cheat')
+    await until(`document.querySelectorAll('#settings-search-results button').length >= 1`)
+    await click('#settings-search-results button')
+    await until(`!!document.querySelector('#settings-cheat-title.settings-search-target')`)
+    await input('#settings-search', 'replay onboarding')
+    await until(`document.querySelectorAll('#settings-search-results button').length === 1`)
+    await click('#settings-search-results button')
+    await until(`!!document.querySelector('#settings-onboarding-title.settings-search-target')`)
+    assert.equal(await evaluate(`return document.activeElement.id`), 'settings-onboarding-title')
     await input('#settings-search', 'proxy password')
     await until(`document.querySelectorAll('#settings-search-results button').length === 1`)
     await click('#settings-search-results button')

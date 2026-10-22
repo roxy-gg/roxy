@@ -76,7 +76,9 @@ export function SettingsSearchResults({
               aria-selected={index === active}
               tabIndex={-1}
               onMouseDown={(event) => event.preventDefault()}
-              onMouseMove={() => onActive(index)}
+              onMouseEnter={() => {
+                if (index !== active) onActive(index)
+              }}
               onClick={() => onSelect(entry)}
               title={description}
               className={cn(

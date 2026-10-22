@@ -1,3 +1,4 @@
+import type { CheatPreferences, CheatResult, CheatSource, CheatState } from './cheat'
 import type {
   EngineeringPreferences,
   EngineeringResult,
@@ -805,6 +806,13 @@ export interface ConfigImportResult {
 }
 
 export interface RoxyApi {
+  cheat: {
+    state(): Promise<CheatState>
+    update(patch: Partial<CheatPreferences>): Promise<CheatResult>
+    download(id: CheatSource): Promise<CheatResult>
+    cancel(): Promise<void>
+    onChanged(callback: (state: CheatState) => void): () => void
+  }
   engineering: {
     state(): Promise<EngineeringState>
     install(

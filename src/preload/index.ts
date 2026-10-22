@@ -1,3 +1,4 @@
+import type { CheatState } from '../shared/cheat'
 import type { EngineeringState } from '../shared/engineering-tools'
 import { contextBridge, ipcRenderer } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
@@ -27,6 +28,18 @@ import type { NotificationSoundLibrary } from '../shared/notification-sounds'
  * to an ipcMain.handle channel registered in src/main/ipc/index.ts.
  */
 const roxy: RoxyApi = {
+  cheat: {
+    state: () => ipcRenderer.invoke(CHANNELS.cheatState),
+    update: (patch) => ipcRenderer.invoke(CHANNELS.cheatUpdate, patch),
+    download: (id) => ipcRenderer.invoke(CHANNELS.cheatDownload, id),
+    cancel: () => ipcRenderer.invoke(CHANNELS.cheatCancel),
+    onChanged: (callback) => {
+      const handler = (_event: Electron.IpcRendererEvent, state: CheatState): void =>
+        callback(state)
+      ipcRenderer.on(CHANNELS.cheatChanged, handler)
+      return () => ipcRenderer.removeListener(CHANNELS.cheatChanged, handler)
+    }
+  },
   engineering: {
     state: () => ipcRenderer.invoke(CHANNELS.engineeringState),
     install: (id, consent, repair) =>

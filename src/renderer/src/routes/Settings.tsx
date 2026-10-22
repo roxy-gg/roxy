@@ -1,30 +1,16 @@
 import { EngineeringTools } from '../components/EngineeringTools'
-import { useEffect, useId, useRef, useState } from 'react'
+import { CheatTools } from '../components/CheatTools'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useTranslation, Trans } from 'react-i18next'
 import {
-  Activity,
-  ScanEye,
-  Bell,
   ChevronDown,
-  DatabaseBackup,
-  GitBranch,
   Globe,
-  Image,
-  Info,
-  Languages,
-  Lightbulb,
   MonitorSmartphone,
-  Mic,
-  Palette,
-  PanelLeft,
-  Plug,
   Plus,
   Search,
-  Shield,
-  Sparkles,
+  RotateCcw,
   Trash2,
-  UserRound,
   X
 } from 'lucide-react'
 import type { AppVersions } from '@shared/types'
@@ -58,48 +44,11 @@ import { RemoteWorkspaceDialog } from '../components/RemoteWorkspaceDialog'
 import { SidebarNavItem } from '../components/SidebarFrame'
 import { SettingsSearchResults } from '../components/SettingsSearchResults'
 import { searchSettings, type SettingsSearchEntry } from '../lib/settings-search'
+import { SETTINGS_GROUPS, type SettingsSection } from '../lib/settings-navigation'
 import { prefersReducedMotion } from '../lib/motion'
 import Themes from './Themes'
 import Skills from './Skills'
 import Mcp from './Mcp'
-
-const SETTINGS_GROUPS = [
-  {
-    label: 'settings.navigation.theme',
-    items: [
-      { id: 'background', label: 'appearance.background', icon: Image },
-      { id: 'sidebar', label: 'settings.navigation.sidebar', icon: PanelLeft },
-      { id: 'colors', label: 'settings.navigation.colors', icon: Palette },
-      { id: 'motion', label: 'settings.motion.label', icon: Sparkles }
-    ]
-  },
-  {
-    label: 'settings.navigation.addOns',
-    items: [
-      { id: 'skills', label: 'sidebar.skills', icon: Lightbulb },
-      { id: 'mcp', label: 'sidebar.mcpServers', icon: Plug },
-      { id: 'engineering', label: 'engineering.heading', icon: ScanEye },
-      { id: 'backup', label: 'settings.backup.heading', icon: DatabaseBackup }
-    ]
-  },
-  {
-    label: 'settings.navigation.general',
-    items: [
-      { id: 'accounts', label: 'settings.navigation.accounts', icon: UserRound },
-      { id: 'browser', label: 'settings.browser.heading', icon: Globe },
-      { id: 'language', label: 'settings.language.heading', icon: Languages },
-      { id: 'voice', label: 'voice.heading', icon: Mic },
-      { id: 'worktrees', label: 'settings.navigation.worktrees', icon: GitBranch },
-      { id: 'notifications', label: 'settings.notifications.heading', icon: Bell },
-      { id: 'remote', label: 'sidebar.remoteWorkspace', icon: MonitorSmartphone },
-      { id: 'activity', label: 'settings.navigation.activity', icon: Activity },
-      { id: 'privacy', label: 'settings.privacy.heading', icon: Shield },
-      { id: 'about', label: 'settings.about.heading', icon: Info }
-    ]
-  }
-] as const
-
-type SettingsSection = (typeof SETTINGS_GROUPS)[number]['items'][number]['id']
 
 /** The section heading repeated down the page. */
 const SECTION_HEADING = 'mb-3 text-xs font-semibold uppercase tracking-wide text-text-subtle'
@@ -118,16 +67,24 @@ export default function Settings(): JSX.Element {
   const searchRef = useRef<HTMLInputElement>(null)
   const panelsRef = useRef<HTMLDivElement>(null)
   const searching = !!query.trim()
-  const searchResults = searching
-    ? searchSettings(
-        query,
-        t,
-        SETTINGS_GROUPS.flatMap((group) =>
-          group.items.map((item) => ({ section: item.id, label: item.label, group: group.label }))
-        ),
-        i18n.getFixedT('en')
-      )
-    : []
+  const searchResults = useMemo(
+    () =>
+      query.trim()
+        ? searchSettings(
+            query,
+            t,
+            SETTINGS_GROUPS.flatMap((group) =>
+              group.items.map((item) => ({
+                section: item.id,
+                label: item.label,
+                group: group.label
+              }))
+            ),
+            i18n.getFixedT('en')
+          )
+        : [],
+    [query, t, i18n, i18n.language]
+  )
   const active = Math.min(activeResult, Math.max(0, searchResults.length - 1))
   const selectResult = (entry: SettingsSearchEntry): void => {
     setSearchTarget({ ...entry })
@@ -541,6 +498,14 @@ export default function Settings(): JSX.Element {
           {(visited.has('engineering') || panel === 'engineering') && (
             <EngineeringTools active={panel === 'engineering'} />
           )}
+        </div>
+        <div
+          id="settings-cheat-panel"
+          role="region"
+          aria-labelledby="settings-cheat"
+          hidden={panel !== 'cheat'}
+        >
+          {(visited.has('cheat') || panel === 'cheat') && <CheatTools active={panel === 'cheat'} />}
         </div>
         <div
           id="settings-activity-panel"
@@ -971,6 +936,23 @@ export default function Settings(): JSX.Element {
           </div>
         </section>
 
+        <section hidden={panel !== 'about'} className="mb-8">
+          <h2 className={SECTION_HEADING}>{t('settings.onboarding.heading')}</h2>
+          <div className="flex flex-col gap-3 sq sq-xl sq-ring rounded-xl border border-border bg-surface p-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0">
+              <div id="settings-onboarding-title" className="text-sm font-medium text-text">
+                {t('settings.onboarding.title')}
+              </div>
+              <p className="mt-0.5 text-xs text-text-muted">
+                {t('settings.onboarding.description')}
+              </p>
+            </div>
+            <Button className="shrink-0" onClick={() => navigate('/onboarding')}>
+              <RotateCcw aria-hidden="true" className="h-3.5 w-3.5" />
+              {t('settings.onboarding.replay')}
+            </Button>
+          </div>
+        </section>
         <section hidden={panel !== 'about'} className="mt-8">
           <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-danger">
             {t('settings.danger.heading')}

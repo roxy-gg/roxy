@@ -259,6 +259,45 @@
     "settings": "Einstellungen",
     "working": "arbeitet"
   },
+  "cheat": {
+    "activeCalls_one": "{{count}} of {{total}} calls active",
+    "activeCalls_other": "{{count}} of {{total}} calls active",
+    "calls": "Available Native Tool Calls and Limits",
+    "catalogHelp": "Inspect every definition and choose which calls the agent receives. Individual selections are saved while the master switch is off. Disabled calls are excluded from model requests and discovery, and stale calls are blocked. Changes apply before the next model request; work already dispatched cannot be undone.",
+    "directAccess": "List and inspect processes, read and write memory, search byte patterns, follow pointer chains, inspect ReClass projects and DLLs, build DLLs and load them directly. No pending requests, approval IDs or two-minute expiry. Select the intended process before using tools. Only use software you own or are authorized to test.",
+    "directOverview": "Direct native Windows memory and DLL tools. Enabling this section allows writes and DLL execution without per-change approval.",
+    "disableAll": "Deselect All Calls",
+    "download": "Download Source",
+    "downloaded": "Source Downloaded",
+    "downloading": "Downloading source archive...",
+    "enable": "Enable Cheat Engineering Tools",
+    "enableAll": "Select All Calls",
+    "errors": {
+      "busy": "Another settings or download operation is running. Wait for it to finish.",
+      "download": "The source archive could not be downloaded, or the download was cancelled.",
+      "invalid": "The request is invalid or the patch request expired. Refresh and try again.",
+      "permission": "This action is not authorized. Enable the relevant tools and review the exact patch.",
+      "runtime": "The tools could not load or save their state. Refresh and try again.",
+      "unsupported": "Live memory tools currently support Windows x64 only. Source downloads remain available."
+    },
+    "exactSchema": "Exact Tool Definition",
+    "optionalSources": "Optional Upstream Source Downloads",
+    "products": {
+      "cheatEngine": "Reference source only, not a connected provider. Native reads, scans and controlled patches use an original Windows API helper, not Cheat Engine code. Review upstream licensing before building, redistributing or creating derivative integrations.",
+      "debuggers": "x64dbg and IDA Pro remain external tools, not connected providers. IDA requires an appropriate vendor license. Existing REA remains available for static analysis.",
+      "reclass": "Preferred structure workflow. Native tools can inspect .rcnet ZIP/Data.xml declarations without running ReClass.NET. Layout resolution, custom nodes, code generation and a live plugin bridge are not implemented. Upstream is MIT licensed; its dependencies have separate terms."
+    },
+    "prompt": "Exact Agent Prompt",
+    "promptHelp": "This is the exact Cheat Engineering text added to eligible build-agent system prompts. The enabled-call list updates with your selections. Enabled tools execute directly without per-call manual approval.",
+    "promptInactive": "No Cheat Engineering text or tool definitions are sent while the section is off, unsupported, or all calls are deselected. Plan mode does not receive this tool family.",
+    "refresh": "Load / Refresh Status",
+    "runtimeBoundaries": "Enabled calls run with Roxy's Windows user permissions, not unlimited or kernel access. Windows access checks, native x64 DLL loading, local-path validation and per-call resource budgets still apply. Reads/writes: 64 KiB per call; scans: 16 MiB and 512 matches; DLL files: 64 MiB. Page larger ranges across calls. No protection changes, privilege escalation, stealth, automatic DLL unload or rollback. Cancellation can leave writes committed or DLL execution running.",
+    "sourceNotice": "Downloads save commit-pinned upstream source ZIPs locally. Nothing is extracted, built, installed or executed. Recorded SHA-256 values identify received bytes; they are not independent signature verification. Downloading does not enable tools or authorize process access.",
+    "sources": "Tool Sources and Interoperability",
+    "title": "Cheat Engineering Tools",
+    "toolCatalog": "Native Tool Calls",
+    "vendor": "Official Project"
+  },
   "codeHosts": {
     "connected": "Verbunden",
     "noCredential": "Keine Anmeldeinformationen",
@@ -553,6 +592,7 @@
     "apiKey": "API-Schlüssel",
     "back": "Zurück",
     "backToList": "Zurück zur Liste",
+    "backToSettings": "Back to Settings",
     "baseUrl": "Basis-URL",
     "clickToCopy": "Klicken Sie auf den Code, um ihn zu kopieren",
     "connect": "Verbinden",
@@ -866,6 +906,12 @@
       "testNotification": "Testbenachrichtigung",
       "testSound": "Test"
     },
+    "onboarding": {
+      "description": "Walk through onboarding again without resetting your providers, sessions, or settings.",
+      "heading": "Onboarding",
+      "replay": "Replay onboarding",
+      "title": "Revisit the setup flow"
+    },
     "privacy": {
       "description": "Zählungen und Zeitangaben – App-Starts, abgeschlossene Züge, wie viele Schritte und Tools ein Zug benötigte, wie viele Token er verbrauchte und was er ungefähr kostete – verknüpft mit einer zufälligen ID, die auf diesem Gerät generiert wurde. Niemals Ihre Prompts, Ihr Code, Dateipfade, Repo-Namen oder Fehlermeldungen.",
       "heading": "Datenschutz",
@@ -1035,6 +1081,11 @@
     "builtIn": "Integriert",
     "close": "Schließen",
     "collapse": "Einklappen",
+    "colorHue": "Hue",
+    "colorOpacity": "Opacity",
+    "colorSaturation": "Saturation and brightness",
+    "colorSaturationValue": "Saturation {{s}}%, brightness {{v}}%",
+    "colorValue": "Color value",
     "colors": "Farben",
     "colorsBody": "Jede CSS-Farbe – Hex, <code>rgb()</code>, <code>oklch()</code> oder ein <code>color-mix()</code>. Alles, was Sie weglassen, wird vom Thema geerbt, das Sie <code>extends</code>, sodass ein Thema nur drei Zeilen lang sein kann.",
     "confirmDelete": "Dieses Design löschen?",
@@ -1063,6 +1114,7 @@
     "myTheme": "Mein Design",
     "newTheme": "Neues Design",
     "openFolder": "Ordner öffnen",
+    "pickColor": "Pick a color for {{name}}",
     "problemsFound": "Probleme gefunden",
     "reappliesHint": "Speichern wendet das Thema erneut an, falls es das aktive ist.",
     "rescan": "Neu scannen",
@@ -1072,6 +1124,7 @@
     "saving": "Speichern…",
     "showReference": "Referenz anzeigen",
     "subtitle": "Ein Design ist eine kleine JSON-Datei, die die Design-Tokens der App neu zuordnet – Oberflächen, Text, Akzente und die Schriftarten für die Benutzeroberfläche und für Code. Wählen Sie eines unten aus oder duplizieren Sie es, um Ihr eigenes zu erstellen. Designs werden aus Ihrem Design-Ordner gelesen, sodass sie in jedem Editor bearbeitet, in Dotfiles eingecheckt und als Datei geteilt werden können.",
+    "swatchesLocked": "Save or discard your JSON edits to pick colors here.",
     "title": "Designs",
     "yourThemes": "Ihre Designs"
   },

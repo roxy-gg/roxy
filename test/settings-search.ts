@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { createInstance } from 'i18next'
 import source from '../src/renderer/src/locales/default.json'
 import spanish from '../src/renderer/src/locales/es.json'
+import { SETTINGS_GROUPS } from '../src/renderer/src/lib/settings-navigation'
 import {
   SETTINGS_SEARCH,
   searchSettings,
@@ -16,11 +17,13 @@ async function main(): Promise<void> {
     fallbackLng: 'en',
     resources: { en: { translation: source }, es: { translation: spanish } }
   })
-  const pages = [...new Set(SETTINGS_SEARCH.map((entry) => entry.section))].map((section) => ({
-    section,
-    label: SETTINGS_SEARCH.find((entry) => entry.section === section)!.title,
-    group: 'settings.navigation.general'
-  })) satisfies SettingsSearchPage[]
+  const pages = SETTINGS_GROUPS.flatMap((group) =>
+    group.items.map((item) => ({
+      section: item.id,
+      label: item.label,
+      group: group.label
+    }))
+  ) satisfies SettingsSearchPage[]
   const search = (query: string) => searchSettings(query, i18n.t, pages, i18n.getFixedT('en'))
   assert.equal(search('  ').length, 0)
   assert.equal(search('does-not-exist-4937').length, 0)
@@ -52,7 +55,13 @@ async function main(): Promise<void> {
     0,
     'unavailable sections are excluded'
   )
-  assert.equal(new Set(SETTINGS_SEARCH.map((entry) => entry.section)).size, 18)
+  assert.deepEqual(
+    [...new Set(SETTINGS_SEARCH.map((entry) => entry.section))].sort(),
+    pages.map((page) => page.section).sort(),
+    'the search index and actual settings navigation must cover the same sections'
+  )
+  assert.equal(search('cheat')[0].entry.target, 'settings-cheat-title')
+  assert.equal(search('replay onboarding')[0].entry.target, 'settings-onboarding-title')
   for (const entry of SETTINGS_SEARCH) {
     assert(i18n.exists(entry.title), entry.title)
     assert(i18n.exists(entry.description), entry.description)
@@ -74,8 +83,8 @@ async function main(): Promise<void> {
   assert(search('idioma').some(({ entry }) => entry.section === 'language'))
   const englishResult = search('language')[0]
   assert.equal(englishResult.entry.section, 'language')
-  assert.equal(englishResult.englishMatch, 'Display language')
-  assert.equal(englishResult.title, i18n.t('settings.language.label'))
+  assert.equal(englishResult.englishMatch, 'Language')
+  assert.equal(englishResult.title, i18n.t('settings.language.heading'))
   assert.equal(englishResult.entry.target, 'settings-language-label')
   assert.equal(search('microfono')[0].entry.title, 'voice.microphone')
   assert.equal(search('microphone')[0].entry.title, 'voice.microphone')

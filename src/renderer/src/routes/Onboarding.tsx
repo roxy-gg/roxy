@@ -16,24 +16,37 @@ export default function Onboarding(): JSX.Element {
   const navigate = useNavigate()
   const providers = useRoxyStore((s) => s.providers)
   const bootstrap = useRoxyStore((s) => s.bootstrap)
+  const replay = useRoxyStore((s) => s.settings?.onboardingCompleted ?? false)
   const [step, setStep] = useState<Step>('welcome')
   const [finishing, setFinishing] = useState(false)
 
   const canFinish = providers.length > 0
 
   const finish = async (): Promise<void> => {
+    if (replay) {
+      navigate('/settings/about')
+      return
+    }
     setFinishing(true)
     await api.settings.completeOnboarding()
     await bootstrap()
     navigate('/')
   }
 
+  const backToSettings = replay && (
+    <Button variant="ghost" size="sm" onClick={() => navigate('/settings/about')}>
+      {t('onboarding.backToSettings')}
+    </Button>
+  )
+
   // The welcome screen is full-bleed artwork: no header chrome or footer, just
   // a draggable strip so the window still moves.
   if (step === 'welcome') {
     return (
       <div className="relative h-full w-full bg-bg">
-        <div className="titlebar absolute inset-x-0 top-0 z-10 h-14" />
+        <div className="titlebar reserve-controls-left reserve-controls-right absolute inset-x-0 top-0 z-10 flex h-14 items-center justify-end px-5">
+          {backToSettings}
+        </div>
         <WelcomeStep onContinue={() => setStep('provider')} />
       </div>
     )
@@ -41,7 +54,7 @@ export default function Onboarding(): JSX.Element {
 
   return (
     <div className="flex h-full w-full flex-col bg-bg">
-      <header className="titlebar reserve-controls-left reserve-controls-right flex h-14 shrink-0 items-center px-5">
+      <header className="titlebar reserve-controls-left reserve-controls-right flex h-14 shrink-0 items-center justify-between gap-3 px-5">
         <div className="flex items-center gap-2.5">
           <img
             src={roxy}
@@ -50,6 +63,7 @@ export default function Onboarding(): JSX.Element {
           />
           <span className="text-sm font-semibold">Roxy</span>
         </div>
+        {backToSettings}
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto">

@@ -1,3 +1,4 @@
+import { runCheatTool, cheatTurn } from '../services/cheat'
 import { runEngineeringTool, engineeringTurn } from '../services/engineering-tools'
 /**
  * The agent tool layer — the capabilities that make Roxy powerful. Each tool
@@ -197,7 +198,9 @@ export async function runTool(
   try {
     switch (name) {
       case 'rea_tools': {
-        const { schemas } = await engineeringTurn()
+        const engineering = await engineeringTurn()
+        const cheat = await cheatTurn()
+        const schemas = [...engineering.schemas, ...cheat.schemas]
         const query = typeof input.query === 'string' ? input.query.toLowerCase() : ''
         const names = Array.isArray(input.operations) ? input.operations : []
         return {
@@ -312,6 +315,8 @@ export async function runTool(
       case 'mcp':
         return await untilAborted(ctx.signal, () => runMcpTool(input, ctx.cwd))
       default:
+        if (name.startsWith('cheat_'))
+          return await runCheatTool(name, input, ctx.sessionId, ctx.botId ?? 'host', ctx.signal)
         if (name.startsWith('rea_'))
           return await runEngineeringTool(name, input, ctx.sessionId, ctx.cwd, ctx.signal)
         // Tools contributed by connected MCP servers use namespaced names
@@ -325,7 +330,14 @@ export async function runTool(
     // A tool cut short by Stop is not a failure to report to the model — the
     // turn is ending. Return it as a recognizable non-ok result so the card
     // reads "stopped" rather than surfacing a raw AbortError.
-    if (isAbort(e) || ctx.signal?.aborted) return { ok: false, output: TOOL_ABORTED }
+    if (isAbort(e) || ctx.signal?.aborted)
+      return {
+        ok: false,
+        output: name.startsWith('cheat_')
+          ? TOOL_ABORTED +
+            ' A dispatched memory write or DLL load may already have executed or still be running. Cancellation does not unload or roll back target changes. Do not automatically retry.'
+          : TOOL_ABORTED
+      }
     return { ok: false, output: e instanceof Error ? e.message : String(e) }
   }
 }

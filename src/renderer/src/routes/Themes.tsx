@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation, Trans } from 'react-i18next'
 import {
   Check,
@@ -24,6 +24,7 @@ import {
 import { api } from '../lib/api'
 import { cn } from '../lib/cn'
 import { Button, Textarea } from '../components/ui'
+import { ColorPicker } from '../components/ColorPicker'
 
 export default function Themes(): JSX.Element {
   const { t } = useTranslation()
@@ -32,6 +33,25 @@ export default function Themes(): JSX.Element {
   const [editing, setEditing] = useState<string | null>(null)
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
   const [error, setError] = useState('')
+  // Bumped when a card's color pickers rewrite the file, so an open editor
+  // re-reads it. The re-read is skipped while the editor has unsaved edits
+  // (those win), which is why the card's pickers are locked in that state:
+  // otherwise a later Save would silently overwrite the picked color.
+  const [editorRev, setEditorRev] = useState(0)
+  const [editorDirty, setEditorDirty] = useState(false)
+  // `error` is shared with activate / create / remove, so a good swatch save
+  // may only clear the message a swatch save put there, not someone else's.
+  const swatchError = useRef('')
+  const reportSwatchError = useCallback((message: string): void => {
+    if (message) {
+      swatchError.current = message
+      setError(message)
+      return
+    }
+    const mine = swatchError.current
+    swatchError.current = ''
+    if (mine) setError((current) => (current === mine ? '' : current))
+  }, [])
 
   const load = useCallback(async (refresh = false): Promise<void> => {
     const next = refresh ? await api.themes.refresh() : await api.themes.list()
@@ -177,6 +197,14 @@ export default function Themes(): JSX.Element {
                 active={t.id === activeId}
                 busy={busy === t.id}
                 editable
+                swatchesLocked={editing === t.id && editorDirty}
+                onColorsSaved={(themes) => {
+                  // `save` already rescanned and returns the fresh list, so
+                  // there is no need for a second round trip.
+                  if (themes) setData((d) => (d ? { ...d, themes } : d))
+                  setEditorRev((r) => r + 1)
+                }}
+                onColorsError={reportSwatchError}
                 confirmingDelete={confirmDelete === t.id}
                 onActivate={() => void activate(t.id)}
                 onDuplicate={() => void create(t.id)}
@@ -205,8 +233,10 @@ export default function Themes(): JSX.Element {
             <ThemeEditor
               key={editing}
               id={editing}
+              rev={editorRev}
               onClose={() => setEditing(null)}
               onSaved={() => void load(true)}
+              onDirtyChange={setEditorDirty}
             />
             <ThemeReference variant="panel" />
           </div>
@@ -252,11 +282,115 @@ function Swatches({ theme }: { theme: ThemeView }): JSX.Element {
   )
 }
 
+/**
+ * The swatches of a user theme, each one a color picker.
+ *
+ * Picking writes the color into the theme's own file -- the same file the JSON
+ * editor shows -- so this is a second way to edit it, not a separate store.
+ * Writes are debounced and serialized: dragging inside the picker fires dozens
+ * of changes a second, and each save rewrites the file, re-applies the theme if
+ * it is the active one (a live preview) and rescans the list.
+ */
+function EditableSwatches({
+  theme,
+  locked,
+  onSaved,
+  onError
+}: {
+  theme: ThemeView
+  /** The JSON editor for this theme has unsaved edits: show the colors, don't let them write. */
+  locked?: boolean
+  onSaved: (themes?: ThemeView[]) => void
+  onError: (message: string) => void
+}): JSX.Element {
+  const { t } = useTranslation()
+  // What the user has picked but the list hasn't caught up with yet. Without
+  // it a rescan landing mid-drag would hand the picker its OLD color back.
+  const [local, setLocal] = useState<Record<string, string>>({})
+  const pending = useRef<Record<string, string>>({})
+  const timer = useRef<ReturnType<typeof setTimeout>>()
+  const queue = useRef<Promise<void>>(Promise.resolve())
+  // Read through a ref so `flush` keeps one identity; the unmount flush below
+  // would otherwise fire on every re-render of the parent.
+  const latest = useRef({ onSaved, onError, t })
+  latest.current = { onSaved, onError, t }
+  const id = theme.id
+
+  const flush = useCallback((): void => {
+    clearTimeout(timer.current)
+    timer.current = undefined
+    const patch = pending.current
+    if (Object.keys(patch).length === 0) return
+    pending.current = {}
+    queue.current = queue.current.then(async () => {
+      const { onSaved, onError, t } = latest.current
+      try {
+        const source = await api.themes.read(id)
+        const doc: unknown = source ? JSON.parse(source) : null
+        if (!doc || typeof doc !== 'object' || Array.isArray(doc)) {
+          onError(t('themes.saveFailed'))
+          return
+        }
+        const file = doc as Record<string, unknown>
+        const existing =
+          file.colors && typeof file.colors === 'object' && !Array.isArray(file.colors)
+            ? (file.colors as Record<string, unknown>)
+            : {}
+        file.colors = { ...existing, ...patch }
+        const res = await api.themes.save(id, `${JSON.stringify(file, null, 2)}\n`)
+        if (!res.ok) {
+          onError(res.error ?? t('themes.saveFailed'))
+          return
+        }
+        // A good save supersedes an earlier failure banner.
+        onError('')
+        onSaved(res.themes)
+      } catch (err) {
+        console.error('Could not save the theme colors', err)
+        onError(t('themes.saveFailed'))
+      } finally {
+        if (!timer.current && Object.keys(pending.current).length === 0) setLocal({})
+      }
+    })
+  }, [id])
+
+  // Leaving the page inside the debounce window must not drop the last color.
+  useEffect(() => flush, [flush])
+
+  const pick = (key: string, value: string): void => {
+    setLocal((prev) => ({ ...prev, [key]: value }))
+    pending.current[key] = value
+    clearTimeout(timer.current)
+    timer.current = setTimeout(flush, 300)
+  }
+
+  return (
+    <div className="flex shrink-0 items-center gap-1">
+      {SWATCH_KEYS.map((key) => {
+        const value = local[key] ?? theme.swatches[key] ?? 'transparent'
+        return (
+          <ColorPicker
+            key={key}
+            disabled={locked}
+            disabledHint={t('themes.swatchesLocked')}
+            label={THEME_COLOR_TOKENS.find((tok) => tok.key === key)?.label ?? key}
+            value={value}
+            onChange={(next) => pick(key, next)}
+          />
+        )
+      })}
+    </div>
+  )
+}
+
 function ThemeCard({
   theme,
   active,
   busy,
   editable,
+  swatchesLocked,
+  onColorsSaved,
+  onColorsError,
   confirmingDelete,
   onActivate,
   onDuplicate,
@@ -269,6 +403,11 @@ function ThemeCard({
   active: boolean
   busy: boolean
   editable?: boolean
+  /** The theme's JSON editor has unsaved edits, so swatch picks are disabled. */
+  swatchesLocked?: boolean
+  /** User themes only: called after a swatch pick has been written to the file. */
+  onColorsSaved?: (themes?: ThemeView[]) => void
+  onColorsError?: (message: string) => void
   confirmingDelete?: boolean
   onActivate: () => void
   onDuplicate: () => void
@@ -304,7 +443,16 @@ function ThemeCard({
             {theme.description ?? t('themes.appearanceTheme', { appearance: theme.appearance })}
           </p>
         </div>
-        <Swatches theme={theme} />
+        {editable && onColorsSaved && onColorsError ? (
+          <EditableSwatches
+            theme={theme}
+            locked={swatchesLocked}
+            onSaved={onColorsSaved}
+            onError={onColorsError}
+          />
+        ) : (
+          <Swatches theme={theme} />
+        )}
       </div>
 
       <div className="flex items-center gap-1">
@@ -368,12 +516,18 @@ function ThemeCard({
  */
 function ThemeEditor({
   id,
+  rev,
   onClose,
-  onSaved
+  onSaved,
+  onDirtyChange
 }: {
   id: string
+  /** Changes when the file was rewritten elsewhere (the card's color pickers). */
+  rev: number
   onClose: () => void
   onSaved: () => void
+  /** Reports unsaved edits, so the card's color pickers can lock while they exist. */
+  onDirtyChange?: (dirty: boolean) => void
 }): JSX.Element {
   const { t } = useTranslation()
   const [source, setSource] = useState<string | null>(null)
@@ -385,15 +539,25 @@ function ThemeEditor({
   const [expanded, setExpanded] = useState(false)
   const lineCount = source?.split('\n').length ?? 0
 
+  // Unsaved typing wins: re-reading would throw away what the user is writing.
+  const dirtyRef = useRef(false)
+  dirtyRef.current = dirty
+
+  // Tell the page, and clear it on unmount: a closed editor has nothing unsaved.
+  useEffect(() => {
+    onDirtyChange?.(dirty)
+  }, [dirty, onDirtyChange])
+  useEffect(() => () => onDirtyChange?.(false), [onDirtyChange])
+
   useEffect(() => {
     let alive = true
     void api.themes.read(id).then((text) => {
-      if (alive) setSource(text ?? '')
+      if (alive && !dirtyRef.current) setSource(text ?? '')
     })
     return () => {
       alive = false
     }
-  }, [id])
+  }, [id, rev])
 
   const save = async (): Promise<void> => {
     if (source === null) return

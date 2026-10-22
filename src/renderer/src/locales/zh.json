@@ -259,6 +259,45 @@
     "settings": "设置",
     "working": "正在工作"
   },
+  "cheat": {
+    "activeCalls_one": "{{count}} of {{total}} calls active",
+    "activeCalls_other": "{{count}} of {{total}} calls active",
+    "calls": "Available Native Tool Calls and Limits",
+    "catalogHelp": "Inspect every definition and choose which calls the agent receives. Individual selections are saved while the master switch is off. Disabled calls are excluded from model requests and discovery, and stale calls are blocked. Changes apply before the next model request; work already dispatched cannot be undone.",
+    "directAccess": "List and inspect processes, read and write memory, search byte patterns, follow pointer chains, inspect ReClass projects and DLLs, build DLLs and load them directly. No pending requests, approval IDs or two-minute expiry. Select the intended process before using tools. Only use software you own or are authorized to test.",
+    "directOverview": "Direct native Windows memory and DLL tools. Enabling this section allows writes and DLL execution without per-change approval.",
+    "disableAll": "Deselect All Calls",
+    "download": "Download Source",
+    "downloaded": "Source Downloaded",
+    "downloading": "Downloading source archive...",
+    "enable": "Enable Cheat Engineering Tools",
+    "enableAll": "Select All Calls",
+    "errors": {
+      "busy": "Another settings or download operation is running. Wait for it to finish.",
+      "download": "The source archive could not be downloaded, or the download was cancelled.",
+      "invalid": "The request is invalid or the patch request expired. Refresh and try again.",
+      "permission": "This action is not authorized. Enable the relevant tools and review the exact patch.",
+      "runtime": "The tools could not load or save their state. Refresh and try again.",
+      "unsupported": "Live memory tools currently support Windows x64 only. Source downloads remain available."
+    },
+    "exactSchema": "Exact Tool Definition",
+    "optionalSources": "Optional Upstream Source Downloads",
+    "products": {
+      "cheatEngine": "Reference source only, not a connected provider. Native reads, scans and controlled patches use an original Windows API helper, not Cheat Engine code. Review upstream licensing before building, redistributing or creating derivative integrations.",
+      "debuggers": "x64dbg and IDA Pro remain external tools, not connected providers. IDA requires an appropriate vendor license. Existing REA remains available for static analysis.",
+      "reclass": "Preferred structure workflow. Native tools can inspect .rcnet ZIP/Data.xml declarations without running ReClass.NET. Layout resolution, custom nodes, code generation and a live plugin bridge are not implemented. Upstream is MIT licensed; its dependencies have separate terms."
+    },
+    "prompt": "Exact Agent Prompt",
+    "promptHelp": "This is the exact Cheat Engineering text added to eligible build-agent system prompts. The enabled-call list updates with your selections. Enabled tools execute directly without per-call manual approval.",
+    "promptInactive": "No Cheat Engineering text or tool definitions are sent while the section is off, unsupported, or all calls are deselected. Plan mode does not receive this tool family.",
+    "refresh": "Load / Refresh Status",
+    "runtimeBoundaries": "Enabled calls run with Roxy's Windows user permissions, not unlimited or kernel access. Windows access checks, native x64 DLL loading, local-path validation and per-call resource budgets still apply. Reads/writes: 64 KiB per call; scans: 16 MiB and 512 matches; DLL files: 64 MiB. Page larger ranges across calls. No protection changes, privilege escalation, stealth, automatic DLL unload or rollback. Cancellation can leave writes committed or DLL execution running.",
+    "sourceNotice": "Downloads save commit-pinned upstream source ZIPs locally. Nothing is extracted, built, installed or executed. Recorded SHA-256 values identify received bytes; they are not independent signature verification. Downloading does not enable tools or authorize process access.",
+    "sources": "Tool Sources and Interoperability",
+    "title": "Cheat Engineering Tools",
+    "toolCatalog": "Native Tool Calls",
+    "vendor": "Official Project"
+  },
   "codeHosts": {
     "connected": "已连接",
     "noCredential": "无凭据",
@@ -553,6 +592,7 @@
     "apiKey": "API 密钥",
     "back": "返回",
     "backToList": "返回列表",
+    "backToSettings": "Back to Settings",
     "baseUrl": "基础 URL",
     "clickToCopy": "点击代码以复制",
     "connect": "连接",
@@ -866,6 +906,12 @@
       "testNotification": "测试通知",
       "testSound": "Test"
     },
+    "onboarding": {
+      "description": "Walk through onboarding again without resetting your providers, sessions, or settings.",
+      "heading": "Onboarding",
+      "replay": "Replay onboarding",
+      "title": "Revisit the setup flow"
+    },
     "privacy": {
       "description": "计数和时间 — 应用程序启动、完成的回合、一个回合所需的步骤和工具数量、使用的令牌数量以及大致成本 — 与此机器上生成的随机 ID 绑定。绝不包含您的提示、代码、文件路径、仓库名称或任何错误文本。",
       "heading": "隐私",
@@ -1035,6 +1081,11 @@
     "builtIn": "内置",
     "close": "关闭",
     "collapse": "折叠",
+    "colorHue": "Hue",
+    "colorOpacity": "Opacity",
+    "colorSaturation": "Saturation and brightness",
+    "colorSaturationValue": "Saturation {{s}}%, brightness {{v}}%",
+    "colorValue": "Color value",
     "colors": "颜色",
     "colorsBody": "任何 CSS 颜色 — hex、<code>rgb()</code>、<code>oklch()</code> 或 <code>color-mix()</code>。您省略的任何内容都将从您 <code>extends</code> 的主题继承，因此一个主题可以只有三行。",
     "confirmDelete": "删除此主题？",
@@ -1063,6 +1114,7 @@
     "myTheme": "我的主题",
     "newTheme": "新建主题",
     "openFolder": "打开文件夹",
+    "pickColor": "Pick a color for {{name}}",
     "problemsFound": "发现问题",
     "reappliesHint": "如果主题是活动的，保存将重新应用它。",
     "rescan": "重新扫描",
@@ -1072,6 +1124,7 @@
     "saving": "正在保存…",
     "showReference": "显示参考",
     "subtitle": "主题是一个小型 JSON 文件，它重新指向应用程序的设计令牌——表面、文本、强调色以及 UI 和代码的字体。在下面选择一个，或复制它以创建您自己的主题。主题从您的主题文件夹中读取，因此可以在任何编辑器中编辑，检入点文件，并作为文件共享。",
+    "swatchesLocked": "Save or discard your JSON edits to pick colors here.",
     "title": "主题",
     "yourThemes": "您的主题"
   },

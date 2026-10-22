@@ -1,7 +1,8 @@
 import type { ParseKeys, TFunction } from 'i18next'
+import type { SettingsSection } from './settings-navigation'
 
 type SearchEntry = {
-  section: string
+  section: SettingsSection
   title: ParseKeys
   description: ParseKeys
   target?: string
@@ -109,6 +110,13 @@ export const SETTINGS_SEARCH = [
     title: 'settings.backup.heading',
     description: 'settings.backup.description',
     terms: ['configBackup.export', 'configBackup.import']
+  },
+  {
+    section: 'cheat',
+    title: 'cheat.title',
+    description: 'cheat.directOverview',
+    target: 'settings-cheat-title',
+    terms: ['cheat.enable', 'cheat.toolCatalog', 'cheat.sources', 'cheat.prompt']
   },
   {
     section: 'accounts',
@@ -231,11 +239,18 @@ export const SETTINGS_SEARCH = [
     title: 'settings.danger.resetTitle',
     description: 'settings.danger.resetDescription',
     target: 'settings-reset-title'
+  },
+  {
+    section: 'about',
+    title: 'settings.onboarding.title',
+    description: 'settings.onboarding.description',
+    target: 'settings-onboarding-title',
+    terms: ['settings.onboarding.replay', 'settings.onboarding.heading']
   }
 ] as const satisfies readonly SearchEntry[]
 
 export type SettingsSearchPage = {
-  section: (typeof SETTINGS_SEARCH)[number]['section']
+  section: SettingsSection
   label: ParseKeys
   group: ParseKeys
 }
