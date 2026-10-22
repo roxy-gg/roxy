@@ -11,6 +11,20 @@ await build({
     {
       name: 'native-runtime-boundary',
       setup(plugin) {
+        plugin.onResolve({ filter: /services\/cheat$/ }, () => ({
+          path: 'cheat',
+          namespace: 'cheat-test'
+        }))
+        plugin.onLoad({ filter: /.*/, namespace: 'cheat-test' }, () => ({
+          contents: `
+            export const cheatTurn = async () => globalThis.__nativeTest.cheat;
+            export const closeCheatSession = () => {};
+            export const runCheatTool = async (name, input, sessionId, actor) => {
+              globalThis.__nativeTest.executions.push({ name, input, sessionId, actor });
+              return { ok: true, output: 'cheat handler result' };
+            };
+          `
+        }))
         plugin.onResolve(
           { filter: /services\/engineering-tools$|^\.\/engineering-tools$/ },
           () => ({ path: 'engineering', namespace: 'native-test' })

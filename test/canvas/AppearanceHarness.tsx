@@ -3,6 +3,7 @@ import {
   engineeringPreferences,
   type EngineeringState
 } from '../../src/shared/engineering-tools'
+import { cheatPreferences, type CheatState } from '../../src/shared/cheat'
 import './BackgroundHarness'
 import { aggregateActivityDays } from '../../src/shared/activity'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
@@ -23,6 +24,17 @@ import {
 } from '../../src/shared/theme'
 
 const engineeringCallbacks = new Set<(state: EngineeringState) => void>()
+const cheatCallbacks = new Set<(state: CheatState) => void>()
+let cheatState: CheatState = {
+  supported: true,
+  preferences: cheatPreferences(null),
+  sources: {},
+  downloading: null
+}
+export function setCheatState(patch: Partial<CheatState>): void {
+  cheatState = { ...cheatState, ...patch }
+  for (const callback of cheatCallbacks) callback(structuredClone(cheatState))
+}
 let engineeringState: EngineeringState = {
   supported: true,
   unsupported: [],
@@ -41,6 +53,33 @@ export function setEngineeringState(patch: Partial<EngineeringState>): void {
   engineeringChanged()
 }
 Object.assign(window.roxy, {
+  notifications: {
+    onSoundsChanged: () => () => {},
+    soundLibrary: async () => ({ selectedId: null, sounds: [] })
+  },
+  cheat: {
+    state: async () => structuredClone(cheatState),
+    update: async (patch) => {
+      setCheatState({
+        preferences: cheatPreferences({ ...cheatState.preferences, ...patch })
+      })
+      return { ok: true }
+    },
+    download: async (id) => {
+      setCheatState({
+        sources: {
+          ...cheatState.sources,
+          [id]: { path: '/test/source.zip', bytes: 100, sha256: 'a'.repeat(64) }
+        }
+      })
+      return { ok: true }
+    },
+    cancel: async () => {},
+    onChanged: (callback) => {
+      cheatCallbacks.add(callback)
+      return () => cheatCallbacks.delete(callback)
+    }
+  } satisfies typeof window.roxy.cheat,
   engineering: {
     state: async () => structuredClone(engineeringState),
     update: async (patch) => {

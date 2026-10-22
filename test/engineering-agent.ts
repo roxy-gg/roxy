@@ -14,6 +14,7 @@ import {
   type EngineeringSchema
 } from '../src/shared/engineering-tools'
 import type { ChatMessage } from '../src/shared/api'
+import { CHEAT_SCHEMAS } from '../src/shared/cheat'
 const temp = mkdtempSync(path.join(tmpdir(), 'roxy-engineering-agent-'))
 app.setPath('userData', temp)
 process.env.ROXY_TRACK_DISABLE = '1'
@@ -21,6 +22,7 @@ process.env.ROXY_SKILLS = '0'
 process.env.ROXY_MCP = '0'
 app.on('window-all-closed', () => undefined)
 const native = {
+  cheat: { schemas: [] as EngineeringSchema[], guidance: undefined as string | undefined },
   turn: { schemas: [] as EngineeringSchema[], guidance: undefined as string | undefined },
   executions: [] as { name: string; sessionId: string }[]
 }
@@ -222,6 +224,122 @@ async function main(): Promise<void> {
       return response({ content: 'Batch complete.' })
     }
     await turn(host.id)
+    native.turn = { schemas: [], guidance: undefined }
+    native.cheat = {
+      schemas: CHEAT_SCHEMAS,
+      guidance: '<cheat-engineering>Lab test guidance</cheat-engineering>'
+    }
+    for (const chatId of [host.id, bot.chatId]) {
+      step = 0
+      transport = (body) => {
+        assert(has(body, 'cheat_open_process'))
+        assert(has(body, 'rea_tools'), 'Discovery works without REA enabled')
+        assert(prompt(body).includes('Lab test guidance'))
+        assert(!has(body, 'rea_open_binary'))
+        if (++step === 1) return call('cheat_open_process', { pid: 42 })
+        assert(
+          body.messages.some(
+            (m) => m.role === 'tool' && String(m.content).includes('cheat handler result')
+          )
+        )
+        return response({ content: 'Lab tool executed.' })
+      }
+      await turn(chatId)
+      assert.equal(native.executions.at(-1)?.sessionId, chatId)
+      assert.equal(native.executions.at(-1)?.name, 'cheat_open_process')
+    }
+    for (const [name, input] of [
+      ['cheat_inspect_dll', { path: 'C:\\lab\\fixture.dll' }],
+      ['cheat_build_dll', { sources: ['C:\\lab\\fixture.cpp'], name: 'fixture' }],
+      ['cheat_load_dll', { path: 'C:\\lab\\fixture.dll' }],
+      ['cheat_write_memory', { address: '0x1234', data: '0102' }]
+    ] as const) {
+      step = 0
+      transport = (body) => {
+        assert(has(body, name), 'DLL tool reaches the real model catalog')
+        return ++step === 1
+          ? call(name, input)
+          : response({ content: 'DLL tool dispatch checked.' })
+      }
+      await turn(host.id)
+      assert.equal(native.executions.at(-1)?.name, name)
+      assert.equal(native.executions.at(-1)?.sessionId, host.id)
+    }
+    const cheatBefore = native.executions.length
+    step = 0
+    transport = (body) => {
+      assert(!has(body, 'cheat_open_process'))
+      assert(!prompt(body).includes('Lab test guidance'))
+      return ++step === 1
+        ? call('cheat_open_process', { pid: 42 })
+        : response({ content: 'Plan call rejected.' })
+    }
+    await turn(host.id, 'plan')
+    assert.equal(native.executions.length, cheatBefore)
+    native.turn = { schemas, guidance: undefined }
+    step = 0
+    transport = (body) => {
+      assert((body.tools?.length ?? 0) <= 128)
+      if (++step === 1)
+        return call('rea_tools', { operations: ['cheat_inspect_reclass', 'cheat_load_dll'] })
+      assert(has(body, 'cheat_inspect_reclass'))
+      assert(has(body, 'cheat_load_dll'))
+      return response({ content: 'Combined native discovery verified.' })
+    }
+    await turn(host.id)
+    // Re-resolve settings before every model step, including mid-turn disable.
+    native.turn = { schemas: [], guidance: undefined }
+    const active = {
+      schemas: CHEAT_SCHEMAS,
+      guidance: '<cheat-engineering>Live cheat prompt</cheat-engineering>'
+    }
+    native.cheat = active
+    step = 0
+    transport = (body) => {
+      if (++step === 1) {
+        assert(has(body, 'cheat_load_dll'))
+        assert(prompt(body).includes('Live cheat prompt'))
+        native.cheat = { schemas: [], guidance: undefined }
+        return call('rea_tools', { operations: ['cheat_load_dll'] })
+      }
+      assert(!body.tools?.some((tool) => tool.function.name.startsWith('cheat_')))
+      assert(!prompt(body).includes('Live cheat prompt'))
+      return response({ content: 'Mid-turn disable applied.' })
+    }
+    await turn(host.id)
+    native.cheat = active
+    step = 0
+    transport = (body) => {
+      if (++step === 1) {
+        native.cheat = {
+          schemas: CHEAT_SCHEMAS.filter(({ function: f }) => f.name !== 'cheat_load_dll'),
+          guidance: '<cheat-engineering>Selected cheat prompt</cheat-engineering>'
+        }
+        return call('rea_tools', { operations: ['cheat_load_dll', 'cheat_read_memory'] })
+      }
+      assert(!has(body, 'cheat_load_dll'))
+      assert(has(body, 'cheat_read_memory'))
+      assert(prompt(body).includes('Selected cheat prompt'))
+      assert(!prompt(body).includes('Live cheat prompt'))
+      const found = JSON.parse(
+        String(body.messages.filter((message) => message.role === 'tool').at(-1)?.content)
+      )
+      assert(!found.some((schema) => schema.function.name === 'cheat_load_dll'))
+      return response({ content: 'Per-call discovery filter applied.' })
+    }
+    await turn(bot.chatId)
+    native.cheat = { schemas: [], guidance: undefined }
+    const staleBefore = native.executions.length
+    step = 0
+    transport = (body) => {
+      assert(!body.tools?.some((tool) => tool.function.name.startsWith('cheat_')))
+      assert(!prompt(body).includes('cheat-engineering'))
+      return ++step === 1
+        ? call('cheat_load_dll', { path: 'C:\\lab\\fixture.dll' })
+        : response({ content: 'Disabled stale call refused.' })
+    }
+    await turn(host.id)
+    assert.equal(native.executions.length, staleBefore)
     console.log(
       'ENGINEERING AGENT OK: real host/bot request schemas and prompts, independent controls, next-turn rebuild, Plan gate, discovery rotation under 128 functions, exact native dispatch, delegated guidance'
     )

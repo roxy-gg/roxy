@@ -1,10 +1,12 @@
 import { EngineeringTools } from '../components/EngineeringTools'
+import { CheatTools } from '../components/CheatTools'
 import { useEffect, useId, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useTranslation, Trans } from 'react-i18next'
 import {
   Activity,
   ScanEye,
+  ScanLine,
   Bell,
   ChevronDown,
   DatabaseBackup,
@@ -74,6 +76,7 @@ const SETTINGS_GROUPS = [
       { id: 'skills', label: 'sidebar.skills', icon: Lightbulb },
       { id: 'mcp', label: 'sidebar.mcpServers', icon: Plug },
       { id: 'engineering', label: 'engineering.heading', icon: ScanEye },
+      { id: 'cheat', label: 'cheat.title', icon: ScanLine },
       { id: 'backup', label: 'settings.backup.heading', icon: DatabaseBackup }
     ]
   },
@@ -360,6 +363,14 @@ export default function Settings(): JSX.Element {
         {(visited.has('engineering') || panel === 'engineering') && (
           <EngineeringTools active={panel === 'engineering'} />
         )}
+      </div>
+      <div
+        id="settings-cheat-panel"
+        role="region"
+        aria-labelledby="settings-cheat"
+        hidden={panel !== 'cheat'}
+      >
+        {(visited.has('cheat') || panel === 'cheat') && <CheatTools active={panel === 'cheat'} />}
       </div>
       <div
         id="settings-activity-panel"

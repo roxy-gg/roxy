@@ -1,5 +1,10 @@
 /** IPC channel names shared by the preload bridge and the main-process handlers. */
 export const CHANNELS = {
+  cheatState: 'cheat:state',
+  cheatChanged: 'cheat:changed',
+  cheatUpdate: 'cheat:update',
+  cheatDownload: 'cheat:download',
+  cheatCancel: 'cheat:cancel',
   engineeringState: 'engineering:state',
   engineeringChanged: 'engineering:changed',
   engineeringInstall: 'engineering:install',

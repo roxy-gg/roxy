@@ -259,6 +259,45 @@
     "settings": "Configurações",
     "working": "trabalhando"
   },
+  "cheat": {
+    "activeCalls_one": "{{count}} of {{total}} calls active",
+    "activeCalls_other": "{{count}} of {{total}} calls active",
+    "calls": "Available Native Tool Calls and Limits",
+    "catalogHelp": "Inspect every definition and choose which calls the agent receives. Individual selections are saved while the master switch is off. Disabled calls are excluded from model requests and discovery, and stale calls are blocked. Changes apply before the next model request; work already dispatched cannot be undone.",
+    "directAccess": "List and inspect processes, read and write memory, search byte patterns, follow pointer chains, inspect ReClass projects and DLLs, build DLLs and load them directly. No pending requests, approval IDs or two-minute expiry. Select the intended process before using tools. Only use software you own or are authorized to test.",
+    "directOverview": "Direct native Windows memory and DLL tools. Enabling this section allows writes and DLL execution without per-change approval.",
+    "disableAll": "Deselect All Calls",
+    "download": "Download Source",
+    "downloaded": "Source Downloaded",
+    "downloading": "Downloading source archive...",
+    "enable": "Enable Cheat Engineering Tools",
+    "enableAll": "Select All Calls",
+    "errors": {
+      "busy": "Another settings or download operation is running. Wait for it to finish.",
+      "download": "The source archive could not be downloaded, or the download was cancelled.",
+      "invalid": "The request is invalid or the patch request expired. Refresh and try again.",
+      "permission": "This action is not authorized. Enable the relevant tools and review the exact patch.",
+      "runtime": "The tools could not load or save their state. Refresh and try again.",
+      "unsupported": "Live memory tools currently support Windows x64 only. Source downloads remain available."
+    },
+    "exactSchema": "Exact Tool Definition",
+    "optionalSources": "Optional Upstream Source Downloads",
+    "products": {
+      "cheatEngine": "Reference source only, not a connected provider. Native reads, scans and controlled patches use an original Windows API helper, not Cheat Engine code. Review upstream licensing before building, redistributing or creating derivative integrations.",
+      "debuggers": "x64dbg and IDA Pro remain external tools, not connected providers. IDA requires an appropriate vendor license. Existing REA remains available for static analysis.",
+      "reclass": "Preferred structure workflow. Native tools can inspect .rcnet ZIP/Data.xml declarations without running ReClass.NET. Layout resolution, custom nodes, code generation and a live plugin bridge are not implemented. Upstream is MIT licensed; its dependencies have separate terms."
+    },
+    "prompt": "Exact Agent Prompt",
+    "promptHelp": "This is the exact Cheat Engineering text added to eligible build-agent system prompts. The enabled-call list updates with your selections. Enabled tools execute directly without per-call manual approval.",
+    "promptInactive": "No Cheat Engineering text or tool definitions are sent while the section is off, unsupported, or all calls are deselected. Plan mode does not receive this tool family.",
+    "refresh": "Load / Refresh Status",
+    "runtimeBoundaries": "Enabled calls run with Roxy's Windows user permissions, not unlimited or kernel access. Windows access checks, native x64 DLL loading, local-path validation and per-call resource budgets still apply. Reads/writes: 64 KiB per call; scans: 16 MiB and 512 matches; DLL files: 64 MiB. Page larger ranges across calls. No protection changes, privilege escalation, stealth, automatic DLL unload or rollback. Cancellation can leave writes committed or DLL execution running.",
+    "sourceNotice": "Downloads save commit-pinned upstream source ZIPs locally. Nothing is extracted, built, installed or executed. Recorded SHA-256 values identify received bytes; they are not independent signature verification. Downloading does not enable tools or authorize process access.",
+    "sources": "Tool Sources and Interoperability",
+    "title": "Cheat Engineering Tools",
+    "toolCatalog": "Native Tool Calls",
+    "vendor": "Official Project"
+  },
   "codeHosts": {
     "connected": "Conectado",
     "noCredential": "Nenhuma credencial",

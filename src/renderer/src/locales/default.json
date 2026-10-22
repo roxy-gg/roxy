@@ -1,4 +1,43 @@
 {
+  "cheat": {
+    "toolCatalog": "Native Tool Calls",
+    "activeCalls_one": "{{count}} of {{total}} calls active",
+    "activeCalls_other": "{{count}} of {{total}} calls active",
+    "catalogHelp": "Inspect every definition and choose which calls the agent receives. Individual selections are saved while the master switch is off. Disabled calls are excluded from model requests and discovery, and stale calls are blocked. Changes apply before the next model request; work already dispatched cannot be undone.",
+    "enableAll": "Select All Calls",
+    "disableAll": "Deselect All Calls",
+    "exactSchema": "Exact Tool Definition",
+    "promptHelp": "This is the exact Cheat Engineering text added to eligible build-agent system prompts. The enabled-call list updates with your selections. Enabled tools execute directly without per-call manual approval.",
+    "promptInactive": "No Cheat Engineering text or tool definitions are sent while the section is off, unsupported, or all calls are deselected. Plan mode does not receive this tool family.",
+    "optionalSources": "Optional Upstream Source Downloads",
+    "title": "Cheat Engineering Tools",
+    "enable": "Enable Cheat Engineering Tools",
+    "sources": "Tool Sources and Interoperability",
+    "sourceNotice": "Downloads save commit-pinned upstream source ZIPs locally. Nothing is extracted, built, installed or executed. Recorded SHA-256 values identify received bytes; they are not independent signature verification. Downloading does not enable tools or authorize process access.",
+    "vendor": "Official Project",
+    "download": "Download Source",
+    "downloaded": "Source Downloaded",
+    "downloading": "Downloading source archive...",
+    "refresh": "Load / Refresh Status",
+    "calls": "Available Native Tool Calls and Limits",
+    "products": {
+      "reclass": "Preferred structure workflow. Native tools can inspect .rcnet ZIP/Data.xml declarations without running ReClass.NET. Layout resolution, custom nodes, code generation and a live plugin bridge are not implemented. Upstream is MIT licensed; its dependencies have separate terms.",
+      "cheatEngine": "Reference source only, not a connected provider. Native reads, scans and controlled patches use an original Windows API helper, not Cheat Engine code. Review upstream licensing before building, redistributing or creating derivative integrations.",
+      "debuggers": "x64dbg and IDA Pro remain external tools, not connected providers. IDA requires an appropriate vendor license. Existing REA remains available for static analysis."
+    },
+    "errors": {
+      "invalid": "The request is invalid. Refresh and try again.",
+      "permission": "Enable Cheat Engineering Tools to use this action.",
+      "unsupported": "Live memory tools currently support Windows x64 only. Source downloads remain available.",
+      "busy": "Another settings or download operation is running. Wait for it to finish.",
+      "runtime": "The tools could not load or save their state. Refresh and try again.",
+      "download": "The source archive could not be downloaded, or the download was cancelled."
+    },
+    "directOverview": "Direct native Windows memory and DLL tools. Enabling this section allows writes and DLL execution without per-change approval.",
+    "directAccess": "List and inspect processes, read and write memory, search byte patterns, follow pointer chains, inspect ReClass projects and DLLs, build DLLs and load them directly. No pending requests, approval IDs or two-minute expiry. Select the intended process before using tools. Only use software you own or are authorized to test.",
+    "runtimeBoundaries": "Enabled calls run with Roxy's Windows user permissions, not unlimited or kernel access. Windows access checks, native x64 DLL loading, local-path validation and per-call resource budgets still apply. Reads/writes: 64 KiB per call; scans: 16 MiB and 512 matches; DLL files: 64 MiB. Page larger ranges across calls. No protection changes, privilege escalation, stealth, automatic DLL unload or rollback. Cancellation can leave writes committed or DLL execution running.",
+    "prompt": "Exact Agent Prompt"
+  },
   "engineering": {
     "heading": "Reverse Engineering Tools",
     "repair": "Repair",

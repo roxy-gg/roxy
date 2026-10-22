@@ -1,4 +1,5 @@
 import { engineeringTurn } from '../services/engineering-tools'
+import { cheatTurn, closeCheatSession } from '../services/cheat'
 import { closeEngineeringSession } from '../services/engineering-runtime'
 /**
  * The agent loop — the thing that makes Roxy *do* the work instead of just
@@ -1394,6 +1395,8 @@ export async function runAgentTurn(opts: RunTurnOptions): Promise<void> {
     toolCapable && cwd && !readOnly && agent.tools === 'all'
       ? await engineeringTurn()
       : { schemas: [] }
+  const cheat =
+    toolCapable && cwd && !readOnly && agent.tools === 'all' ? await cheatTurn() : { schemas: [] }
 
   // Prepend the system prompt. It's built here in the main process so it can see
   // the provider + model + workspace (and pick the right per-model prompt) and
@@ -1420,7 +1423,7 @@ export async function runAgentTurn(opts: RunTurnOptions): Promise<void> {
     opts.asBotId,
     contextLimit,
     opts.asHost,
-    engineering.guidance
+    [engineering.guidance, cheat.guidance].filter(Boolean).join('\n') || undefined
   )
   const systemMessage: ChatMessage = { role: 'system', content: systemText }
 
@@ -1473,9 +1476,12 @@ export async function runAgentTurn(opts: RunTurnOptions): Promise<void> {
       ...schemasFor(agent.tools, !readOnly),
       ...mcpSchemas,
       ...skillSchemas,
-      ...engineering.schemas
+      ...engineering.schemas,
+      ...cheat.schemas
     ],
     mcpTools: mcpSchemas,
+    cheatEligible: toolCapable && !!cwd && !readOnly && agent.tools === 'all',
+    initialCheatGuidance: cheat.guidance,
     skillTools: skillSchemas,
     skillInfo,
     readOnly,
@@ -1488,6 +1494,9 @@ export async function runAgentTurn(opts: RunTurnOptions): Promise<void> {
 }
 
 interface LoopOptions {
+  /** Refresh this optional family between model steps, never in Plan/limited agents. */
+  cheatEligible?: boolean
+  initialCheatGuidance?: string
   delegationOwner?: ToolContext['delegationOwner']
   /** The connected provider — re-resolved each call so Copilot's token can refresh. */
   providerId: string
@@ -1600,11 +1609,12 @@ async function runLoop(o: LoopOptions): Promise<string> {
   // reference so the rebuild is exact; `liveTools`/`liveMcpTools` start unchanged.
   // OpenAI-compatible providers cap function catalogs at 128. Keep every native
   // operation eligible, and let discovery rotate exact schemas into this turn.
-  const nativeTools = tools.filter((schema) => String(schema.function.name).startsWith('rea_'))
+  const isNative = (name: string): boolean => name.startsWith('rea_') || name.startsWith('cheat_')
+  let activeCheatGuidance = o.initialCheatGuidance
   let selectedNative: string[] = []
   const discovery = fn(
     'rea_tools',
-    'Discover enabled native reverse engineering and connected MCP tools by query, or select exact function names with operations. Selected schemas are made callable on the next model step. This does not install tools or change settings. All enabled native and connected MCP tools remain discoverable even when provider function-count limits hide their schemas.',
+    'Discover enabled native reverse engineering (rea_*), cheat engineering lab (cheat_*) and connected MCP tools by query, or select exact function names with operations. Selected schemas are made callable on the next model step. This does not install tools or change settings. All enabled native and connected MCP tools remain discoverable even when provider function-count limits hide their schemas.',
     {
       query: str('Search enabled operations by name or capability.'),
       operations: { type: 'array', items: { type: 'string' }, maxItems: 32 }
@@ -1612,18 +1622,20 @@ async function runLoop(o: LoopOptions): Promise<string> {
     []
   )
   const presentTools = (schemas: ToolSchema[]): ToolSchema[] => {
-    if (!nativeTools.length) return schemas
+    if (!schemas.some((schema) => isNative(String(schema.function.name)))) return schemas
     const ordinary = schemas.filter(
       (schema) =>
-        !String(schema.function.name).startsWith('rea_') &&
-        !String(schema.function.name).startsWith('mcp__')
+        !isNative(String(schema.function.name)) && !String(schema.function.name).startsWith('mcp__')
     )
     const available = schemas.filter(
       (schema) =>
-        String(schema.function.name).startsWith('rea_') ||
-        String(schema.function.name).startsWith('mcp__')
+        isNative(String(schema.function.name)) || String(schema.function.name).startsWith('mcp__')
     )
     const priority = [
+      'cheat_list_processes',
+      'cheat_open_process',
+      'cheat_close_process',
+      'cheat_read_memory',
       'rea_open_binary',
       'rea_close_binary',
       'rea_inspect_artifact',
@@ -1648,7 +1660,7 @@ async function runLoop(o: LoopOptions): Promise<string> {
     return [...retained, discovery, ...available.slice(0, slots)]
   }
   const mcpSet = new Set(mcpTools ?? [])
-  const baseTools = tools.filter((t) => !mcpSet.has(t))
+  let baseTools = tools.filter((t) => !mcpSet.has(t))
   let liveMcpTools = mcpTools ?? []
   let liveTools = tools
 
@@ -1656,6 +1668,21 @@ async function runLoop(o: LoopOptions): Promise<string> {
   // finishes with prose (no tool calls) or the user stops it (signal aborts).
   for (;;) {
     if (signal.aborted) return lastText
+    if (o.cheatEligible) {
+      const current = await cheatTurn()
+      const keep = (schema: ToolSchema): boolean =>
+        !String(schema.function.name).startsWith('cheat_')
+      baseTools = [...baseTools.filter(keep), ...current.schemas]
+      liveTools = [...liveTools.filter(keep), ...current.schemas]
+      if (activeCheatGuidance !== current.guidance) {
+        const system = convo.find((message) => message.role === 'system')
+        if (system && typeof system.content === 'string') {
+          if (activeCheatGuidance) system.content = system.content.replace(activeCheatGuidance, '')
+          if (current.guidance) system.content += '\n' + current.guidance
+        }
+        activeCheatGuidance = current.guidance
+      }
+    }
     if (
       o.copilotSession !== undefined &&
       repo.getCopilotSessionKey(providerId) !== o.copilotSession
@@ -1873,18 +1900,23 @@ async function runLoop(o: LoopOptions): Promise<string> {
         })
         let result: ToolResult
         try {
-          if (tc.name === 'rea_tools' && nativeTools.length) {
+          if (
+            tc.name === 'rea_tools' &&
+            presentTools(liveTools).some((schema) => schema.function.name === 'rea_tools')
+          ) {
             const current = await engineeringTurn()
+            const cheat = await cheatTurn()
             const query = typeof input.query === 'string' ? input.query.toLowerCase() : ''
             const names = Array.isArray(input.operations) ? input.operations : []
-            const found = [...current.schemas, ...liveMcpTools].filter((schema) =>
-              names.length
-                ? names.includes(schema.function.name)
-                : !query || JSON.stringify(schema.function).toLowerCase().includes(query)
+            const found = [...current.schemas, ...cheat.schemas, ...liveMcpTools].filter(
+              (schema) =>
+                names.length
+                  ? names.includes(schema.function.name)
+                  : !query || JSON.stringify(schema.function).toLowerCase().includes(query)
             )
             result = { ok: true, output: JSON.stringify(found) }
           } else if (
-            tc.name.startsWith('rea_') &&
+            isNative(tc.name) &&
             !presentTools(liveTools).some((schema) => schema.function.name === tc.name)
           ) {
             result = {
@@ -2149,6 +2181,8 @@ async function runSubagent(o: SubagentOptions): Promise<{
     try {
       const engineering =
         !isReadOnlyAgent(agent) && agent.tools === 'all' ? await engineeringTurn() : { schemas: [] }
+      const cheat =
+        !isReadOnlyAgent(agent) && agent.tools === 'all' ? await cheatTurn() : { schemas: [] }
       const text = await runLoop({
         providerId,
         copilotSession: o.copilotSession,
@@ -2157,7 +2191,12 @@ async function runSubagent(o: SubagentOptions): Promise<{
         convo: [
           {
             role: 'system',
-            content: subagentSystemPrompt(agent, cwd, skillInfo, engineering.guidance)
+            content: subagentSystemPrompt(
+              agent,
+              cwd,
+              skillInfo,
+              [engineering.guidance, cheat.guidance].filter(Boolean).join('\n') || undefined
+            )
           },
           { role: 'user', content: prompt || description }
         ],
@@ -2176,9 +2215,12 @@ async function runSubagent(o: SubagentOptions): Promise<{
           ...schemasFor(agent.tools, false),
           ...(isReadOnlyAgent(agent) ? [] : (mcpTools ?? [])),
           ...(agentAllowsSkill(agent) ? (skillTools ?? []) : []),
-          ...engineering.schemas
+          ...engineering.schemas,
+          ...cheat.schemas
         ],
         mcpTools,
+        cheatEligible: !isReadOnlyAgent(agent) && agent.tools === 'all',
+        initialCheatGuidance: cheat.guidance,
         skillTools,
         skillInfo,
         reasoning,
@@ -2255,6 +2297,7 @@ async function runSubagent(o: SubagentOptions): Promise<{
   } finally {
     signal.removeEventListener('abort', cascade)
     await closeEngineeringSession(subChatId ?? analysisKey)
+    closeCheatSession(subChatId ?? analysisKey)
   }
 }
 
