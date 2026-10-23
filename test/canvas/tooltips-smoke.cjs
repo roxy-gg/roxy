@@ -7,7 +7,28 @@ app.setPath('userData', temp)
 let server
 let win
 const wait = (ms = 80) => new Promise((resolve) => setTimeout(resolve, ms))
-const evaluate = (code) => win.webContents.executeJavaScript(`(async () => { ${code} })()`, true)
+// Last page call or wait reached. A hang leaves no log by itself, so the watchdog prints this.
+let lastStep = 'startup'
+const evaluate = (code) => {
+  lastStep = `evaluate: ${code.replace(/\s+/g, ' ').slice(0, 140)}`
+  return win.webContents.executeJavaScript(`(async () => { ${code} })()`, true)
+}
+async function waitForActive(id, label, timeout = 3000) {
+  lastStep = `waitForActive: ${label}`
+  const started = Date.now()
+  let actual = null
+  while (Date.now() - started < timeout) {
+    actual = await evaluate(`return document.activeElement?.id ?? null`)
+    if (actual === id) return
+    await wait(50)
+  }
+  assert.fail(`${label}: expected focus on #${id}, got #${actual}`)
+}
+function detachDebugger() {
+  try {
+    win?.webContents.debugger.detach()
+  } catch {}
+}
 const tip = () =>
   evaluate(`return document.querySelector('[data-app-tooltip]')?.textContent ?? null`)
 async function waitForAttr(selector, attr, expected, label, timeout = 3000) {
@@ -227,12 +248,7 @@ async function run() {
   await evaluate(`document.querySelector('#described').focus()`)
   win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Tab' })
   win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Tab' })
-  await wait()
-  assert.equal(
-    await evaluate(`return document.activeElement.id`),
-    'second',
-    'Tab reaches the next trigger'
-  )
+  await waitForActive('second', 'Tab reaches the next trigger')
   await waitForTip('Second action', 'keyboard focus opens')
   await evaluate(`document.querySelector('#second').remove()`)
   await waitForNoTip('removed target closes tooltip')
@@ -263,15 +279,26 @@ async function run() {
   console.log(
     'Themed tooltip lifecycle, dynamic titles, accessibility, disabled buttons, canvas regions, bounds, and live themes: OK'
   )
+  detachDebugger()
   win.destroy()
   await server.close()
 }
+const watchdog = setTimeout(() => {
+  console.error(`TOOLTIPS SMOKE TIMEOUT after 120s. Last step: ${lastStep}`)
+  app.exit(1)
+}, 120000)
 app
   .whenReady()
   .then(run)
-  .then(() => app.quit())
+  .then(() => {
+    clearTimeout(watchdog)
+    app.exit(0)
+  })
   .catch(async (error) => {
+    clearTimeout(watchdog)
     console.error(error)
+    console.error(`Last step: ${lastStep}`)
+    detachDebugger()
     await server?.close()
     app.exit(1)
   })
