@@ -499,7 +499,10 @@ function activity(parts: MessagePart[], t: TFunction): { label: string; step: nu
   if (last.type === 'image') return { label: t('transcript.activityImage'), step }
   // Prose: the delegate is writing its report — show its last line so the
   // conclusion can be watched forming rather than a static "writing…".
-  const line = last.text.trim().split('\n').filter(Boolean).pop()
+  const line =
+    last.type === 'text' && typeof last.text === 'string'
+      ? last.text.trim().split('\n').filter(Boolean).pop()
+      : undefined
   return { label: line ? line.slice(0, 120) : t('transcript.activityWriting'), step }
 }
 

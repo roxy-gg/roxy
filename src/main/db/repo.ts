@@ -9,6 +9,7 @@ import { DEFAULT_LANGUAGE, normalizeLanguage } from '../../shared/i18n'
 import type { Language } from '../../shared/i18n'
 import { DEFAULT_MOTION, normalizeMotion, type MotionPreference } from '../../shared/motion'
 import { isVisibleQueueItem } from '../../shared/queue'
+import { normalizeMessageParts } from '../../shared/parts'
 import { sessionBusy } from '../services/turn-state'
 import type {
   AddMessageInput,
@@ -1284,8 +1285,7 @@ export function reorderProjects(orderedPaths: string[]): void {
 function parseParts(raw: string | null, content: string): MessagePart[] {
   if (raw) {
     try {
-      const parsed = JSON.parse(raw)
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed as MessagePart[]
+      return normalizeMessageParts(JSON.parse(raw), content)
     } catch {
       // corrupt JSON — fall through to the text fallback
     }
@@ -1316,7 +1316,7 @@ export function listMessages(chatId: string): Message[] {
 export function addMessage(input: AddMessageInput): Message {
   const id = input.id ?? randomUUID()
   const now = Date.now()
-  const parts: MessagePart[] = input.parts ?? [{ type: 'text', text: input.content }]
+  const parts = normalizeMessageParts(input.parts, input.content)
   const partsJson = JSON.stringify(parts)
   const db = getDb()
   const tx = db.transaction(() => {

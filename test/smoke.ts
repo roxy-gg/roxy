@@ -519,6 +519,66 @@ async function main(): Promise<void> {
     msgs[0].parts.length === 1 && userPart.type === 'text' && userPart.text === 'hi'
   )
 
+  // Old or malformed part payloads must not blank the renderer on session load.
+  const damagedChat = repo.createChat({ title: 'damaged parts', kind: 'main', workspacePath: ws })
+  const damaged = repo.addMessage({
+    chatId: damagedChat.id,
+    role: 'assistant',
+    content: 'Recovered body.'
+  })
+  for (const raw of [
+    '{broken',
+    'null',
+    '{}',
+    '[]',
+    JSON.stringify([{ type: 'text' }]),
+    JSON.stringify([{ type: 'future-part' }])
+  ]) {
+    getDb().prepare('UPDATE messages SET parts = ? WHERE id = ?').run(raw, damaged.id)
+    check(
+      'messages: unreadable parts fall back to the saved body',
+      JSON.stringify(repo.listMessages(damagedChat.id)[0].parts) ===
+        JSON.stringify([{ type: 'text', text: 'Recovered body.' }])
+    )
+    check(
+      'messages: recovery never rewrites the original saved payload',
+      (
+        getDb().prepare('SELECT parts FROM messages WHERE id = ?').get(damaged.id) as {
+          parts: string
+        }
+      ).parts === raw
+    )
+  }
+  const validText = { type: 'text', text: 'Preserved text.' }
+  const task = {
+    type: 'tool',
+    tool: 'task',
+    state: 'done',
+    callId: 'nested',
+    children: [null, { type: 'text' }, validText]
+  }
+  const mixed = [null, { type: 'future-part' }, { type: 'text' }, validText, task]
+  getDb()
+    .prepare('UPDATE messages SET parts = ? WHERE id = ?')
+    .run(JSON.stringify(mixed), damaged.id)
+  const expected = JSON.stringify([validText, { ...task, children: [validText] }])
+  check(
+    'messages: valid siblings and nested text survive recovery',
+    JSON.stringify(repo.listMessages(damagedChat.id)[0].parts) === expected
+  )
+  const added = repo.addMessage({
+    chatId: damagedChat.id,
+    role: 'assistant',
+    content: 'Preserved text.',
+    parts: mixed as unknown as MessagePart[]
+  })
+  check(
+    'messages: new writes return and persist the same normalized parts',
+    JSON.stringify(added.parts) === expected &&
+      JSON.stringify(repo.listMessages(damagedChat.id)[1].parts) === expected
+  )
+  repo.removeChat(damagedChat.id)
+
   // ---- fork: copy a session's context into a new one ----
   //
   // The point of a fork is that the copy can carry on a conversation the source

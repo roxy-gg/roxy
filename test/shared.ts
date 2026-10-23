@@ -137,6 +137,7 @@ import {
 } from '../src/shared/tool-history'
 import {
   PartsFold,
+  normalizeMessageParts,
   partsToContent,
   streamSignature,
   countStreamedChars,
@@ -1808,6 +1809,74 @@ for (const bad of [
       }
     })()
   )
+}
+
+// Persisted JSON is untyped, including nested delegate transcripts.
+{
+  const text = { type: 'text', text: 'Readable.' }
+  const image = { type: 'image', dataUrl: 'data:image/png;base64,AA==', mediaType: 'image/png' }
+  const task = {
+    type: 'tool',
+    tool: 'task',
+    state: 'done',
+    callId: 't1',
+    input: { tasks: [] },
+    title: 'Explore',
+    output: 'Complete.',
+    children: [null, { type: 'future-part' }, { type: 'text' }, text]
+  }
+  const raw = [
+    null,
+    false,
+    42,
+    'text',
+    [],
+    {},
+    { type: 'future-part', text: 'Not prose.' },
+    { type: 'text' },
+    { type: 'text', text: null },
+    { type: 'reasoning', text: 42 },
+    { type: 'image' },
+    { type: 'tool', state: 'done' },
+    { type: 'tool', tool: 'read', state: 'unknown' },
+    text,
+    image,
+    task
+  ]
+  const before = JSON.stringify(raw)
+  check(
+    'parts: rejects unsupported/malformed parts and cleans nested children without losing valid data',
+    JSON.stringify(normalizeMessageParts(raw, 'Fallback.')) ===
+      JSON.stringify([text, image, { ...task, children: [text] }])
+  )
+  check('parts: reading does not mutate saved data', JSON.stringify(raw) === before)
+  for (const value of [undefined, null, {}, [], [{ type: 'text' }]]) {
+    check(
+      'parts: falls back to saved content when no supported parts survive',
+      JSON.stringify(normalizeMessageParts(value, 'Saved content.')) ===
+        JSON.stringify([{ type: 'text', text: 'Saved content.' }])
+    )
+  }
+  check('parts: an empty nested transcript stays empty', normalizeMessageParts([]).length === 0)
+}
+{
+  for (const type of ['text', 'reasoning'] as const) {
+    const fold = new PartsFold()
+    fold.apply({ type: 'tool-start', callId: 'task', tool: 'task', title: 'Explore' })
+    const before = fold.parts
+    for (const delta of [undefined, null, 42, {}, '']) {
+      fold.apply({ type, delta } as never)
+      fold.apply({ type: 'tool-child', callId: 'task', event: { type, delta } } as never)
+    }
+    check(
+      'fold: invalid/empty prose deltas do not create top-level or nested parts',
+      fold.parts === before
+    )
+    fold.apply({ type, delta: 'Valid.' })
+    const valid = fold.parts
+    fold.apply({ type, delta: undefined } as never)
+    check('fold: invalid deltas do not corrupt existing prose', fold.parts === valid)
+  }
 }
 
 // ---- PartsFold: one fold for local / remote / main, incl. nested subagents ----
