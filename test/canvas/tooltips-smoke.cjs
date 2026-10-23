@@ -279,9 +279,19 @@ async function run() {
   console.log(
     'Themed tooltip lifecycle, dynamic titles, accessibility, disabled buttons, canvas regions, bounds, and live themes: OK'
   )
-  detachDebugger()
-  win.destroy()
-  await server.close()
+}
+// Skipping teardown aborts Electron on macOS (exit 134), but on Windows CI it has hung after the
+// assertions passed. Run it bounded, then leave through a forced exit that cannot block.
+async function shutdown() {
+  setTimeout(() => process.exit(0), 8000)
+  await Promise.race([
+    (async () => {
+      detachDebugger()
+      win?.destroy()
+      await server?.close()
+    })().catch(() => {}),
+    wait(3000)
+  ])
 }
 const watchdog = setTimeout(() => {
   console.error(`TOOLTIPS SMOKE TIMEOUT after 120s. Last step: ${lastStep}`)
@@ -290,8 +300,12 @@ const watchdog = setTimeout(() => {
 app
   .whenReady()
   .then(run)
-  .then(() => {
+  .then(async () => {
     clearTimeout(watchdog)
+    await shutdown()
+    try {
+      rmSync(temp, { recursive: true, force: true })
+    } catch {}
     app.exit(0)
   })
   .catch(async (error) => {
