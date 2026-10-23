@@ -169,6 +169,16 @@ jobs:
         if: runner.os != 'Linux'
         run: npm run smoke:subagents
 
+      - name: Themed tooltip interactions (Linux, via virtual display)
+        if: runner.os == 'Linux'
+        env:
+          ELECTRON_DISABLE_SANDBOX: '1'
+        run: xvfb-run --auto-servernum npm run smoke:tooltips
+
+      - name: Themed tooltip interactions
+        if: runner.os != 'Linux'
+        run: npm run smoke:tooltips
+
       - name: Canvas interactions (real Chromium input and clipboard menus)
         if: runner.os == 'Linux'
         env:

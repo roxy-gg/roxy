@@ -40,10 +40,10 @@ async function run() {
     const { createServer } = await import('vite')
     server = await createServer({
       configFile: path.join(__dirname, 'vite.config.mjs'),
-      server: { port: 3105, strictPort: true }
+      server: { port: 3114, strictPort: true }
     })
     await server.listen()
-    url = 'http://localhost:3105/?bots'
+    url = 'http://localhost:3114/?bots'
   }
   win = new BrowserWindow({
     width: 1280,

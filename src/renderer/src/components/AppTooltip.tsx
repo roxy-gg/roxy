@@ -73,6 +73,9 @@ export function Tooltip({
       onPointerEnter={(event) => {
         if (event.pointerType !== 'touch') show()
       }}
+      onPointerMove={(event) => {
+        if (event.pointerType !== 'touch') show()
+      }}
       onPointerLeave={hide}
       onFocus={(event) => {
         if (event.target.matches(':focus-visible')) show(true)
@@ -158,6 +161,7 @@ export function AppTooltip(): JSX.Element | null {
       let latestTitle = title
       let label: string | null = null
       const describe = target.getAttribute('aria-describedby')
+      let description: string | null = describe
       const setLabel = (value: string): void => {
         if (
           (label !== null && target.getAttribute('aria-label') === label) ||
@@ -170,7 +174,22 @@ export function AppTooltip(): JSX.Element | null {
         }
       }
       setLabel(text)
-      target.setAttribute('aria-describedby', [describe, id].filter(Boolean).join(' '))
+      const setDescription = (value: string): void => {
+        const labelledBy = target.getAttribute('aria-labelledby')
+        const name = labelledBy
+          ? labelledBy
+              .split(/\s+/)
+              .map((key) => document.getElementById(key)?.textContent ?? '')
+              .join(' ')
+          : (target.getAttribute('aria-label') ?? target.textContent ?? '')
+        const next = name.trim() === value ? describe : [describe, id].filter(Boolean).join(' ')
+        if (target.getAttribute('aria-describedby') === description) {
+          if (next === null) target.removeAttribute('aria-describedby')
+          else target.setAttribute('aria-describedby', next)
+          description = next
+        }
+      }
+      setDescription(text)
       target.setAttribute('title', '')
       const observer = new MutationObserver((records) => {
         if (!current || current.target !== target) return
@@ -184,6 +203,7 @@ export function AppTooltip(): JSX.Element | null {
         target.setAttribute('title', '')
         observer.takeRecords()
         setLabel(next)
+        setDescription(next)
         current = { ...current, content: next, rect: target.getBoundingClientRect() }
         if (visible) setShown(current)
       })
@@ -196,7 +216,7 @@ export function AppTooltip(): JSX.Element | null {
         else target.setAttribute('title', latestTitle)
         if (label !== null && target.getAttribute('aria-label') === label)
           target.removeAttribute('aria-label')
-        if (target.getAttribute('aria-describedby') === [describe, id].filter(Boolean).join(' ')) {
+        if (target.getAttribute('aria-describedby') === description) {
           if (describe === null) target.removeAttribute('aria-describedby')
           else target.setAttribute('aria-describedby', describe)
         }
@@ -219,6 +239,14 @@ export function AppTooltip(): JSX.Element | null {
         fromTitle(target, true)
       }
     }
+    const onScroll = (event: Event): void => {
+      if (
+        current &&
+        (event.target === document ||
+          (event.target instanceof Node && event.target.contains(current.target)))
+      )
+        hide()
+    }
     const onRequest = (event: Event): void => {
       const { target, tip } = (
         event as CustomEvent<{ target: HTMLElement; tip: Omit<TooltipRequest, 'target'> | null }>
@@ -234,13 +262,14 @@ export function AppTooltip(): JSX.Element | null {
     }, 300)
     document.addEventListener(EVENT, onRequest)
     document.addEventListener('pointerover', onOver, true)
+    document.addEventListener('pointermove', onOver, true)
     document.addEventListener('pointerout', onOut, true)
     document.addEventListener('pointerdown', dismiss, true)
     document.addEventListener('pointercancel', dismiss, true)
     document.addEventListener('focusin', onFocus, true)
     document.addEventListener('focusout', hide, true)
     document.addEventListener('keydown', dismiss, true)
-    document.addEventListener('scroll', dismiss, true)
+    document.addEventListener('scroll', onScroll, true)
     document.addEventListener('wheel', dismiss, { capture: true, passive: true })
     window.addEventListener('blur', dismiss)
     window.addEventListener('resize', dismiss)
@@ -249,13 +278,14 @@ export function AppTooltip(): JSX.Element | null {
       hide()
       document.removeEventListener(EVENT, onRequest)
       document.removeEventListener('pointerover', onOver, true)
+      document.removeEventListener('pointermove', onOver, true)
       document.removeEventListener('pointerout', onOut, true)
       document.removeEventListener('pointerdown', dismiss, true)
       document.removeEventListener('pointercancel', dismiss, true)
       document.removeEventListener('focusin', onFocus, true)
       document.removeEventListener('focusout', hide, true)
       document.removeEventListener('keydown', dismiss, true)
-      document.removeEventListener('scroll', dismiss, true)
+      document.removeEventListener('scroll', onScroll, true)
       document.removeEventListener('wheel', dismiss, true)
       window.removeEventListener('blur', dismiss)
       window.removeEventListener('resize', dismiss)

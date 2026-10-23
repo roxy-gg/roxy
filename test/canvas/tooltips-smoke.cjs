@@ -44,13 +44,20 @@ async function run() {
   assert.equal(await tip(), 'Initial action')
   assert.deepEqual(
     await evaluate(
-      `const e = document.querySelector('#native'); return [e.title, e.getAttribute('aria-label'), !!document.getElementById(e.getAttribute('aria-describedby'))]`
+      `const e = document.querySelector('#native'); return [e.title, e.getAttribute('aria-label'), e.getAttribute('aria-describedby')]`
     ),
-    ['', 'Initial action', true]
+    ['', 'Initial action', null]
   )
   await evaluate(`window.__setTooltipTitle('Updated action')`)
   await wait()
   assert.equal(await tip(), 'Updated action', 'React title updates while hovered')
+  assert.deepEqual(
+    await evaluate(
+      `const e = document.querySelector('#native'); return [e.getAttribute('aria-label'), e.getAttribute('aria-describedby')]`
+    ),
+    ['Updated action', null],
+    'dynamic accessible name is not repeated as a description'
+  )
   await evaluate(`window.__setTooltipTitle(undefined)`)
   await wait()
   assert.equal(await tip(), null)
@@ -62,6 +69,38 @@ async function run() {
   await hover('#second')
   await wait(600)
   assert.equal(await tip(), 'Second action')
+  await evaluate(`document.querySelector('#unrelated-scroll').scrollTop = 20`)
+  await wait()
+  assert.equal(await tip(), 'Second action', 'unrelated auto-scroll does not close the tooltip')
+  await hover('#scroll-trigger')
+  await wait(600)
+  assert.equal(await tip(), 'Scrollable action')
+  await evaluate(`document.querySelector('#trigger-scroll').scrollTop = 2`)
+  await wait()
+  assert.equal(await tip(), null, 'scrolling a trigger ancestor closes the tooltip')
+  await hover('#scroll-trigger', 0.55)
+  await wait(600)
+  assert.equal(await tip(), 'Scrollable action', 'pointer movement reopens after scrolling')
+  await hover('#named')
+  assert.equal(
+    await evaluate(`return document.querySelector('#named').getAttribute('aria-describedby')`),
+    null,
+    'explicit matching accessible name is not repeated'
+  )
+  await hover('#described')
+  assert.equal(
+    await evaluate(
+      `const e = document.querySelector('#described'); return e.getAttribute('aria-describedby').split(' ').length`
+    ),
+    2,
+    'additional detail preserves existing description'
+  )
+  await hover('#second')
+  assert.equal(
+    await evaluate(`return document.querySelector('#described').getAttribute('aria-describedby')`),
+    'existing-description',
+    'existing description is restored'
+  )
   await hover('#rich')
   assert.match(await tip(), /Rich description/, 'warm hover opens immediately')
   win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Escape' })
@@ -126,12 +165,16 @@ async function run() {
   win.show()
   win.focus()
   await wait(250)
-  await evaluate(`document.activeElement?.blur()`)
+  await leave()
+  await evaluate(`document.querySelector('#described').focus()`)
   win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Tab' })
   win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Tab' })
   await wait()
-  await evaluate(`document.querySelector('#second').focus()`)
-  await wait()
+  assert.equal(
+    await evaluate(`return document.activeElement.id`),
+    'second',
+    'Tab reaches the next trigger'
+  )
   assert.equal(await tip(), 'Second action', 'keyboard focus opens immediately')
   await evaluate(`document.querySelector('#second').remove()`)
   await wait(350)
