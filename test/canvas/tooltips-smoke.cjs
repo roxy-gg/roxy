@@ -301,6 +301,10 @@ app
   .whenReady()
   .then(run)
   .then(async () => {
+    // Windows CI: every assertion passes and the OK line prints, then the process never exits.
+    // Detaching the debugger there is synchronous and can block the loop, so none of the timers
+    // below would fire. Leave at once; the OS reclaims the window and the temp dir is disposable.
+    if (process.platform === 'win32' || process.env.TOOLTIPS_FAST_EXIT) process.exit(0)
     clearTimeout(watchdog)
     await shutdown()
     try {
