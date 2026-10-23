@@ -10,6 +10,26 @@ const wait = (ms = 80) => new Promise((resolve) => setTimeout(resolve, ms))
 const evaluate = (code) => win.webContents.executeJavaScript(`(async () => { ${code} })()`, true)
 const tip = () =>
   evaluate(`return document.querySelector('[data-app-tooltip]')?.textContent ?? null`)
+async function waitForEvent(name, timeout = 3000) {
+  const started = Date.now()
+  while (Date.now() - started < timeout) {
+    if (await evaluate(`return window.__tipEvents.includes(${JSON.stringify(name)})`)) return
+    await wait(50)
+  }
+  assert.fail(
+    `event ${name} never fired. Events: ${await evaluate(`return JSON.stringify(window.__tipEvents)`)}`
+  )
+}
+async function waitForNoTip(label, timeout = 3000) {
+  const started = Date.now()
+  let actual = null
+  while (Date.now() - started < timeout) {
+    actual = await tip()
+    if (actual === null) return
+    await wait(50)
+  }
+  assert.fail(`${label}: tooltip still showing "${actual}"`)
+}
 async function waitForTip(expected, label = 'tooltip', timeout = 3000) {
   const started = Date.now()
   let actual = null
@@ -88,13 +108,13 @@ async function run() {
   await hover('#second')
   await waitForTip('Second action')
   await evaluate(`document.querySelector('#unrelated-scroll').scrollTop = 20`)
-  await wait()
+  await waitForEvent('scroll:unrelated-scroll')
   assert.equal(await tip(), 'Second action', 'unrelated auto-scroll does not close the tooltip')
   await hover('#scroll-trigger')
   await waitForTip('Scrollable action')
   await evaluate(`document.querySelector('#trigger-scroll').scrollTop = 2`)
-  await wait()
-  assert.equal(await tip(), null, 'scrolling a trigger ancestor closes the tooltip')
+  await waitForEvent('scroll:trigger-scroll')
+  await waitForNoTip('scrolling a trigger ancestor closes the tooltip')
   await hover('#scroll-trigger', 0.55)
   await waitForTip('Scrollable action', 'pointer movement reopens after scrolling')
   await hover('#named')
@@ -192,8 +212,7 @@ async function run() {
   )
   assert.equal(await tip(), 'Second action', 'keyboard focus opens immediately')
   await evaluate(`document.querySelector('#second').remove()`)
-  await wait(350)
-  assert.equal(await tip(), null, 'removed target closes tooltip')
+  await waitForNoTip('removed target closes tooltip')
   await leave()
   win.setContentSize(280, 240)
   await wait()
