@@ -155,6 +155,8 @@
     "forward": "Avancer",
     "newTab": "Nouvel onglet",
     "proxy": "Proxy du navigateur",
+    "reload": "Reload",
+    "stop": "Stop",
     "urlPlaceholder": "Rechercher ou saisir une URL"
   },
   "catalog": {
@@ -342,8 +344,9 @@
     "queuePlaceholderStop": "Mettre un message de suivi en file d’attente… (Échap pour arrêter)",
     "removeImage": "Supprimer l'image",
     "send": "Envoyer",
+    "sendOnlyTo": "Send only to @{{username}}",
     "sendTo": "Envoyer à @{{username}}",
-    "sendToHint": "Envoyer uniquement à ce collaborateur. Entrée envoie toujours à Roxy.",
+    "sendToRoxy": "Send to Roxy",
     "stop": "Arrêter (Échap)"
   },
   "configBackup": {

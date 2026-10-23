@@ -155,6 +155,8 @@
     "forward": "आगे",
     "newTab": "नया टैब",
     "proxy": "ब्राउज़र प्रॉक्सी",
+    "reload": "Reload",
+    "stop": "Stop",
     "urlPlaceholder": "खोजें या यूआरएल दर्ज करें"
   },
   "catalog": {
@@ -342,8 +344,9 @@
     "queuePlaceholderStop": "अगला संदेश कतार में जोड़ें… (रोकने के लिए Esc)",
     "removeImage": "छवि हटाएँ",
     "send": "भेजें",
+    "sendOnlyTo": "Send only to @{{username}}",
     "sendTo": "@{{username}} को भेजें",
-    "sendToHint": "केवल इस सहयोगी को भेजें। दर्ज करने पर भी रॉक्सी को भेजा जाएगा।",
+    "sendToRoxy": "Send to Roxy",
     "stop": "रोकें (Esc)"
   },
   "configBackup": {

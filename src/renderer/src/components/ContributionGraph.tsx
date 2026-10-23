@@ -14,7 +14,9 @@
  * width so the full year of data spans edge-to-edge (with proportional gaps and
  * corners, clamped so cells stay readable and never balloon).
  */
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
+import { useTranslation } from 'react-i18next'
+import { updateTooltip } from './AppTooltip'
 import type { ActivityDay, ActivityStats } from '@shared/types'
 import { BAYER, OFF_TIER, bloomLayerStyle, clamp01, easeOutCubic } from './dither-kit/dither-paint'
 import { PALETTE, rgb } from './dither-kit/palette'
@@ -194,10 +196,11 @@ function monthLabels(columns: Cell[][], step: number): { text: string; left: num
  */
 export function ContributionGraph({ data }: { data: ActivityStats }): JSX.Element {
   const { reduced: reduce } = useMotion()
+  const { t, i18n } = useTranslation()
   const { ref: wrapRef, size } = useChartDimensions<HTMLDivElement>()
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const bloomRef = useRef<HTMLCanvasElement>(null)
-  const [hover, setHover] = useState<{ day: ActivityDay; x: number; y: number } | null>(null)
+
   const hoverIndexRef = useRef<number>(-1)
   const scheduleRef = useRef<() => void>(() => {})
   // Play the entrance sweep once (on mount); later re-renders from a resize or a
@@ -300,6 +303,7 @@ export function ContributionGraph({ data }: { data: ActivityStats }): JSX.Elemen
   }, [columns, gridW, gridH, step, cellSize, radius, size.width, reduce])
 
   const onPointerMove = (e: React.PointerEvent<HTMLCanvasElement>): void => {
+    if (e.pointerType === 'touch') return
     const rect = e.currentTarget.getBoundingClientRect()
     const x = e.clientX - rect.left
     const y = e.clientY - rect.top
@@ -312,9 +316,28 @@ export function ContributionGraph({ data }: { data: ActivityStats }): JSX.Elemen
     if (index === hoverIndexRef.current) return // same cell (or still empty) — no churn
     hoverIndexRef.current = index
     if (cell?.day && index !== -1) {
-      setHover({ day: cell.day, x: c * step + cellSize / 2, y: row * step })
+      updateTooltip(e.currentTarget, {
+        key: cell.day.date,
+        content: (
+          <span>
+            {t('settings.activity.turnCount', { count: cell.day.count, value: cell.day.count })}
+            <span className="text-text-subtle">
+              {' · '}
+              {parseLocalDate(cell.day.date).toLocaleDateString(
+                i18n.resolvedLanguage || i18n.language,
+                {
+                  weekday: 'short',
+                  month: 'short',
+                  day: 'numeric'
+                }
+              )}
+            </span>
+          </span>
+        ),
+        rect: new DOMRect(rect.left + c * step, rect.top + row * step, cellSize, cellSize)
+      })
     } else {
-      setHover(null)
+      updateTooltip(e.currentTarget, null)
     }
     scheduleRef.current()
   }
@@ -322,7 +345,7 @@ export function ContributionGraph({ data }: { data: ActivityStats }): JSX.Elemen
   const onPointerLeave = (): void => {
     if (hoverIndexRef.current === -1) return
     hoverIndexRef.current = -1
-    setHover(null)
+    if (canvasRef.current) updateTooltip(canvasRef.current, null)
     scheduleRef.current()
   }
 
@@ -370,23 +393,6 @@ export function ContributionGraph({ data }: { data: ActivityStats }): JSX.Elemen
             className="pointer-events-none absolute inset-0"
             style={bloom ?? { opacity: 0 }}
           />
-          {hover && (
-            <div
-              className="animate-fade-in pointer-events-none absolute z-10 -translate-x-1/2 -translate-y-full whitespace-nowrap sq-frame sq-lg sq-fill-elevated sq-ring edge edge-strong edge-panel rounded-lg border border-border bg-elevated px-2 py-1 text-[11px] text-text shadow-float"
-              style={{ left: hover.x, top: hover.y - 6 }}
-            >
-              <span className="font-semibold tabular-nums">{hover.day.count}</span>{' '}
-              {hover.day.count === 1 ? 'turn' : 'turns'}
-              <span className="text-text-subtle">
-                {' · '}
-                {parseLocalDate(hover.day.date).toLocaleDateString(undefined, {
-                  weekday: 'short',
-                  month: 'short',
-                  day: 'numeric'
-                })}
-              </span>
-            </div>
-          )}
         </div>
       </div>
     </div>

@@ -803,6 +803,7 @@ export function WallpaperWorkshop({
                         <button
                           type="button"
                           aria-label={t('wallpapers.removeTag', { tag })}
+                          title={t('wallpapers.removeTag', { tag })}
                           className="shrink-0 rounded p-1 text-text-muted hover:text-text focus-visible:outline-2 focus-visible:outline-accent"
                           onClick={() => {
                             tagsEdited.current = true

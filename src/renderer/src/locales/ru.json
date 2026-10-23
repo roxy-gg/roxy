@@ -155,6 +155,8 @@
     "forward": "Вперед",
     "newTab": "Новая вкладка",
     "proxy": "Прокси браузера",
+    "reload": "Reload",
+    "stop": "Stop",
     "urlPlaceholder": "Поиск или ввод URL"
   },
   "catalog": {
@@ -342,8 +344,9 @@
     "queuePlaceholderStop": "Добавить следующий запрос в очередь… (Esc — остановить)",
     "removeImage": "Удалить изображение",
     "send": "Отправить",
+    "sendOnlyTo": "Send only to @{{username}}",
     "sendTo": "Отправить @{{username}}",
-    "sendToHint": "Отправить только этому соавтору. Ввод по-прежнему отправляет Roxy.",
+    "sendToRoxy": "Send to Roxy",
     "stop": "Остановить (Esc)"
   },
   "configBackup": {
