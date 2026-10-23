@@ -80,7 +80,7 @@ export default function Settings(): JSX.Element {
                 group: group.label
               }))
             ),
-            i18n.getFixedT('en')
+            LANGUAGES.map(({ code }) => i18n.getFixedT(code))
           )
         : [],
     [query, t, i18n, i18n.language]

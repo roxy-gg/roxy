@@ -239,9 +239,59 @@ app.whenReady().then(async () => {
         `return document.querySelectorAll('#settings-search-results button').length`
       )) <= 20
     )
+    const registry = '/@fs/' + path.resolve('src/shared/i18n.ts').replaceAll('\\', '/')
+    const languages = await evaluate(`return (await import(${JSON.stringify(registry)})).LANGUAGES`)
+    await evaluate(`await (await import(${JSON.stringify(base + '/i18n.ts')})).applyLanguage('en')`)
+    for (const { code } of languages) {
+      const query = await evaluate(
+        `return (await import(${JSON.stringify(base + '/i18n.ts')})).default.getFixedT(${JSON.stringify(code)})('settings.language.heading')`
+      )
+      await input('#settings-search', query)
+      await until(
+        `document.querySelector('#settings-search-results button')?.textContent.includes(${JSON.stringify(query)})`
+      )
+      assert(
+        await evaluate(
+          `return document.querySelector('#settings-search-results button mark')?.textContent.length > 0`
+        ),
+        `${code}: translated match is visible and highlighted in English UI`
+      )
+      await click('#settings-search-results button')
+      await until(`!!document.querySelector('#settings-language-label.settings-search-target')`)
+      assert.equal(await evaluate(`return document.documentElement.lang`), 'en')
+    }
+    for (const [index, language] of languages.entries()) {
+      await evaluate(
+        `await (await import(${JSON.stringify(base + '/i18n.ts')})).applyLanguage(${JSON.stringify(language.code)})`
+      )
+      const queryLanguage = languages[(index + 1) % languages.length].code
+      const query = await evaluate(
+        `return (await import(${JSON.stringify(base + '/i18n.ts')})).default.getFixedT(${JSON.stringify(queryLanguage)})('settings.language.heading')`
+      )
+      await input('#settings-search', query)
+      await until(
+        `document.querySelector('#settings-search-results button')?.textContent.includes(${JSON.stringify(query)})`
+      )
+      await click('#settings-search-results button')
+      await until(`!!document.querySelector('#settings-language-label.settings-search-target')`)
+      assert.equal(await evaluate(`return document.documentElement.lang`), language.code)
+      assert.equal(
+        await evaluate(`return document.documentElement.dir`),
+        language.rtl ? 'rtl' : 'ltr'
+      )
+      assert.equal(await evaluate(`return document.querySelector('#settings-search').value`), query)
+      for (const width of [360, 1440]) {
+        win.setContentSize(width, 900)
+        await wait()
+        assert(
+          await evaluate(`return document.documentElement.scrollWidth <= innerWidth`),
+          `${language.code}: no page overflow at ${width}px`
+        )
+      }
+    }
     assert.equal(errors.length, 0, errors.join('\n'))
     console.log(
-      'Settings search UI: sidebar, keyboard/Enter, drafts, empty/Escape, themes, mobile, bilingual matching and temporary/reduced-motion highlight passed'
+      'Settings search UI: sidebar, keyboard/Enter, drafts, empty/Escape, themes, mobile, all Settings languages/RTL and temporary/reduced-motion highlight passed'
     )
   } catch (error) {
     console.error(error)

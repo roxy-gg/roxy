@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { createInstance } from 'i18next'
-import source from '../src/renderer/src/locales/default.json'
-import spanish from '../src/renderer/src/locales/es.json'
+import { LANGUAGES } from '../src/shared/i18n'
+import { resources } from '../src/renderer/src/i18n'
 import { SETTINGS_GROUPS } from '../src/renderer/src/lib/settings-navigation'
 import {
   SETTINGS_SEARCH,
@@ -15,7 +15,7 @@ async function main(): Promise<void> {
   await i18n.init({
     lng: 'en',
     fallbackLng: 'en',
-    resources: { en: { translation: source }, es: { translation: spanish } }
+    resources
   })
   const pages = SETTINGS_GROUPS.flatMap((group) =>
     group.items.map((item) => ({
@@ -24,7 +24,8 @@ async function main(): Promise<void> {
       group: group.label
     }))
   ) satisfies SettingsSearchPage[]
-  const search = (query: string) => searchSettings(query, i18n.t, pages, i18n.getFixedT('en'))
+  const languages = LANGUAGES.map(({ code }) => i18n.getFixedT(code))
+  const search = (query: string) => searchSettings(query, i18n.t, pages, languages)
   assert.equal(search('  ').length, 0)
   assert.equal(search('does-not-exist-4937').length, 0)
   assert.equal(search('BRANCH prefix')[0].entry.title, 'settings.workstreams.prefixTitle')
@@ -43,7 +44,7 @@ async function main(): Promise<void> {
       group: 'settings.navigation.general'
     }
   ] as const
-  const pageResults = searchSettings('language', i18n.t, languagePage, i18n.getFixedT('en'))
+  const pageResults = searchSettings('language', i18n.t, languagePage, languages)
   assert.equal(
     pageResults[0].title,
     'Language',
@@ -83,7 +84,7 @@ async function main(): Promise<void> {
   assert(search('idioma').some(({ entry }) => entry.section === 'language'))
   const englishResult = search('language')[0]
   assert.equal(englishResult.entry.section, 'language')
-  assert.equal(englishResult.englishMatch, 'Language')
+  assert.equal(englishResult.matchedTitle, 'Language')
   assert.equal(englishResult.title, i18n.t('settings.language.heading'))
   assert.equal(englishResult.entry.target, 'settings-language-label')
   assert.equal(search('microfono')[0].entry.title, 'voice.microphone')
@@ -92,7 +93,35 @@ async function main(): Promise<void> {
     new Set(search('idioma').map((result) => result.entry.section + result.title)).size,
     search('idioma').length
   )
-  console.log('Settings search: matching, ranking, locales, markup and highlight ranges passed')
+  for (const display of LANGUAGES) {
+    await i18n.changeLanguage(display.code)
+    for (const queryLanguage of LANGUAGES) {
+      const translate = i18n.getFixedT(queryLanguage.code)
+      const query = translate('voice.microphone')
+      const result = search(query)[0]
+      const context = `${queryLanguage.code} query in ${display.code} UI`
+      assert.equal(result.entry.title, 'voice.microphone', context)
+      assert.equal(result.title, i18n.t('voice.microphone'), context)
+      assert.equal(result.entry.target, 'settings-voice-microphone', context)
+      assert.equal(result.matchedTitle, query === result.title ? undefined : query, context)
+      assert.equal(i18n.language, display.code, 'search never changes the UI language')
+      for (const key of ['voice.microphoneBody', 'voice.openPrivacy'] as const) {
+        assert(
+          search(translate(key)).some(({ entry }) => entry.title === 'voice.microphone'),
+          `${context}: translated descriptions and extra terms are searchable`
+        )
+      }
+      assert(
+        search(translate('settings.navigation.general')).some(
+          ({ entry }) => entry.section === 'language'
+        ),
+        `${context}: translated locations are searchable`
+      )
+    }
+  }
+  console.log(
+    'Settings search: matching, ranking, all Settings languages, markup and highlight ranges passed'
+  )
 }
 
 void main()

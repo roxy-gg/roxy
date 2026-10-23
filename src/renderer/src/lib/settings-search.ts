@@ -264,7 +264,7 @@ export type SettingsSearchResult = {
   title: string
   description: string
   location: string
-  englishMatch?: string
+  matchedTitle?: string
 }
 
 export function normalizeSettingsSearch(value: string): string {
@@ -303,7 +303,7 @@ export function searchSettings(
   query: string,
   t: TFunction,
   pages: readonly SettingsSearchPage[],
-  english: TFunction = t
+  languages: readonly TFunction[] = []
 ): SettingsSearchResult[] {
   const terms = normalizeSettingsSearch(query).trim().split(/\s+/).filter(Boolean)
   if (!terms.length) return []
@@ -332,16 +332,18 @@ export function searchSettings(
       const title = plain(entry.title)
       const description = plain(entry.description)
       const location = [plain(page.group), plain(page.label)].join(' / ')
-      const englishTitle = plain(entry.title, english)
-      const titles = [title, englishTitle].map(normalizeSettingsSearch)
+      const translatedTitles = [
+        title,
+        ...languages.map((translate) => plain(entry.title, translate))
+      ]
+      const titles = translatedTitles.map(normalizeSettingsSearch)
       const fields = [
         ...titles,
-        description,
-        plain(entry.description, english),
-        location,
-        plain(page.group, english),
-        plain(page.label, english),
-        ...(entry.terms ?? []).flatMap((key) => [plain(key), plain(key, english)])
+        ...[t, ...languages].flatMap((translate) =>
+          [entry.description, page.group, page.label, ...(entry.terms ?? [])].map((key) =>
+            plain(key, translate)
+          )
+        )
       ].map(normalizeSettingsSearch)
       if (!terms.every((term) => fields.some((field) => field.includes(term)))) return null
       // Prefer the exact label, then prefixes/word starts, before descriptive matches.
@@ -369,10 +371,12 @@ export function searchSettings(
         title,
         description,
         location,
-        englishMatch:
+        matchedTitle:
           !terms.some((term) => titles[0].includes(term)) &&
-          terms.some((term) => titles[1].includes(term))
-            ? englishTitle
+          titles.some((title) => terms.some((term) => title.includes(term)))
+            ? translatedTitles[
+                titles.findIndex((title) => terms.some((term) => title.includes(term)))
+              ]
             : undefined,
         score
       }

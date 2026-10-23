@@ -67,7 +67,7 @@ export function SettingsSearchResults({
         aria-label={t('settings.search.heading')}
         className="flex max-h-[32dvh] flex-col gap-0.5 overflow-y-auto sm:max-h-none sm:overflow-visible"
       >
-        {results.map(({ entry, title, description, location, englishMatch }, index) => (
+        {results.map(({ entry, title, description, location, matchedTitle }, index) => (
           <li role="none" key={entry.section + entry.title}>
             <button
               id={'settings-search-result-' + index}
@@ -90,9 +90,9 @@ export function SettingsSearchResults({
                 <span className="block text-xs font-medium leading-relaxed text-text">
                   <Match text={title} query={query} />
                 </span>
-                {englishMatch && (
-                  <span className="mt-0.5 block text-[11px] text-text-muted">
-                    <Match text={englishMatch} query={query} />
+                {matchedTitle && (
+                  <span dir="auto" className="mt-0.5 block text-[11px] text-text-muted">
+                    <Match text={matchedTitle} query={query} />
                   </span>
                 )}
                 <span className="mt-1 block text-[10px] leading-relaxed text-text-subtle">
