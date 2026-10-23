@@ -155,6 +155,8 @@
     "forward": "Adelante",
     "newTab": "Pestaña nueva",
     "proxy": "Proxy del navegador",
+    "reload": "Reload",
+    "stop": "Stop",
     "urlPlaceholder": "Busca o escribe una URL"
   },
   "catalog": {
@@ -342,8 +344,9 @@
     "queuePlaceholderStop": "Pon un mensaje de seguimiento en cola… (Esc para detener)",
     "removeImage": "Quitar la imagen",
     "send": "Enviar",
+    "sendOnlyTo": "Send only to @{{username}}",
     "sendTo": "Enviar a @{{username}}",
-    "sendToHint": "Enviar solo a este colaborador. Intro sigue enviando a Roxy.",
+    "sendToRoxy": "Send to Roxy",
     "stop": "Detener (Esc)"
   },
   "configBackup": {

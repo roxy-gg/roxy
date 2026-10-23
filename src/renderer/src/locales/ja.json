@@ -155,6 +155,8 @@
     "forward": "進む",
     "newTab": "新しいタブ",
     "proxy": "ブラウザプロキシ",
+    "reload": "Reload",
+    "stop": "Stop",
     "urlPlaceholder": "検索またはURLを入力"
   },
   "catalog": {
@@ -342,8 +344,9 @@
     "queuePlaceholderStop": "次のメッセージをキューに追加…（Esc で停止）",
     "removeImage": "画像を削除",
     "send": "送信",
+    "sendOnlyTo": "Send only to @{{username}}",
     "sendTo": "@{{username}}に送信",
-    "sendToHint": "この共同作業者にのみ送信します。Enterキーを押すとRoxyにも送信されます。",
+    "sendToRoxy": "Send to Roxy",
     "stop": "停止 (Esc)"
   },
   "configBackup": {

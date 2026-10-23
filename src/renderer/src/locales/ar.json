@@ -155,6 +155,8 @@
     "forward": "إلى الأمام",
     "newTab": "علامة تبويب جديدة",
     "proxy": "وكيل المتصفح",
+    "reload": "Reload",
+    "stop": "Stop",
     "urlPlaceholder": "بحث أو إدخال عنوان URL"
   },
   "catalog": {
@@ -342,8 +344,9 @@
     "queuePlaceholderStop": "ضع متابعة في قائمة الانتظار… (Esc للإيقاف)",
     "removeImage": "إزالة الصورة",
     "send": "إرسال",
+    "sendOnlyTo": "Send only to @{{username}}",
     "sendTo": "إرسال إلى @{{username}}",
-    "sendToHint": "أرسل إلى هذا المتعاون فقط. الإدخال لا يزال يرسل إلى Roxy.",
+    "sendToRoxy": "Send to Roxy",
     "stop": "إيقاف (Esc)"
   },
   "configBackup": {
