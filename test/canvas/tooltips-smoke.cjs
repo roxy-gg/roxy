@@ -10,6 +10,20 @@ const wait = (ms = 80) => new Promise((resolve) => setTimeout(resolve, ms))
 const evaluate = (code) => win.webContents.executeJavaScript(`(async () => { ${code} })()`, true)
 const tip = () =>
   evaluate(`return document.querySelector('[data-app-tooltip]')?.textContent ?? null`)
+async function waitForTip(expected, label = 'tooltip', timeout = 3000) {
+  const started = Date.now()
+  let actual = null
+  while (Date.now() - started < timeout) {
+    actual = await tip()
+    if (expected instanceof RegExp ? expected.test(actual ?? '') : actual === expected)
+      return actual
+    await wait(50)
+  }
+  const page = await evaluate(
+    `return JSON.stringify({ events: window.__tipEvents ?? [], pointerMoves: window.__pointerMoves ?? 0, hasFocus: document.hasFocus() })`
+  )
+  assert.fail(`${label}: expected ${expected}, got ${actual}. Page state: ${page}`)
+}
 async function hover(selector, side = 0.5) {
   const point = await evaluate(
     `const r = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(); return { x: Math.round(r.left + r.width * ${side}), y: Math.round(r.top + r.height / 2) }`
@@ -37,11 +51,16 @@ async function run() {
 
   await win.loadURL('http://localhost:3105/?tooltips')
   await wait(1000)
+  await evaluate(
+    `window.__tipEvents = []; window.__pointerMoves = 0
+     for (const type of ['blur', 'resize']) window.addEventListener(type, () => window.__tipEvents.push(type))
+     document.addEventListener('scroll', (event) => window.__tipEvents.push('scroll:' + (event.target.id || 'document')), true)
+     document.addEventListener('pointermove', () => { window.__pointerMoves += 1 }, true)`
+  )
 
   await hover('#native')
   assert.equal(await tip(), null, 'cold hover waits')
-  await wait(600)
-  assert.equal(await tip(), 'Initial action')
+  await waitForTip('Initial action')
   assert.deepEqual(
     await evaluate(
       `const e = document.querySelector('#native'); return [e.title, e.getAttribute('aria-label'), e.getAttribute('aria-describedby')]`
@@ -67,20 +86,17 @@ async function run() {
     'removed title stays removed'
   )
   await hover('#second')
-  await wait(600)
-  assert.equal(await tip(), 'Second action')
+  await waitForTip('Second action')
   await evaluate(`document.querySelector('#unrelated-scroll').scrollTop = 20`)
   await wait()
   assert.equal(await tip(), 'Second action', 'unrelated auto-scroll does not close the tooltip')
   await hover('#scroll-trigger')
-  await wait(600)
-  assert.equal(await tip(), 'Scrollable action')
+  await waitForTip('Scrollable action')
   await evaluate(`document.querySelector('#trigger-scroll').scrollTop = 2`)
   await wait()
   assert.equal(await tip(), null, 'scrolling a trigger ancestor closes the tooltip')
   await hover('#scroll-trigger', 0.55)
-  await wait(600)
-  assert.equal(await tip(), 'Scrollable action', 'pointer movement reopens after scrolling')
+  await waitForTip('Scrollable action', 'pointer movement reopens after scrolling')
   await hover('#named')
   assert.equal(
     await evaluate(`return document.querySelector('#named').getAttribute('aria-describedby')`),
@@ -111,12 +127,10 @@ async function run() {
   assert.equal(await tip(), null, 'Escape stays dismissed until the trigger is left')
   await leave()
   await hover('#disabled')
-  await wait(500)
-  assert.equal(await tip(), 'Disabled description')
+  await waitForTip('Disabled description')
   await leave()
   await hover('#virtual', 0.25)
-  await wait(500)
-  assert.equal(await tip(), 'Left region')
+  await waitForTip('Left region')
   await hover('#virtual', 0.75)
   assert.equal(await tip(), 'Right region', 'moving inside one canvas changes hit region')
   await leave()
@@ -125,8 +139,7 @@ async function run() {
   )
   win.webContents.sendInputEvent({ type: 'mouseMove', ...activityPoint })
 
-  await wait(600)
-  assert.match(await tip(), /^3 turns/, 'activity graph uses the shared localized tooltip')
+  await waitForTip(/^3 turns/, 'activity graph uses the shared localized tooltip')
   await evaluate(
     `document.querySelector('canvas').dispatchEvent(new WheelEvent('wheel', { bubbles: true }))`
   )
@@ -134,7 +147,7 @@ async function run() {
   assert.equal(await tip(), null, 'wheel dismisses without waiting for scroll')
   await leave()
   await hover('#bounded')
-  await wait(500)
+  await waitForTip('Browser toolbar action')
   assert.ok(
     await evaluate(
       `const r = document.querySelector('[data-app-tooltip]').getBoundingClientRect(); return r.top >= 8 && r.bottom <= 72`
@@ -143,7 +156,7 @@ async function run() {
   )
   await leave()
   await hover('#edge')
-  await wait(500)
+  await waitForTip(/^Long tooltip/)
   assert.ok(
     await evaluate(
       `const r = document.querySelector('[data-app-tooltip]').getBoundingClientRect(); return r.left >= 8 && r.right <= innerWidth - 8 && r.top >= 8 && r.bottom <= innerHeight - 8`
@@ -161,6 +174,8 @@ async function run() {
   await evaluate(`window.dispatchEvent(new Event('blur'))`)
   await wait()
   assert.equal(await tip(), null, 'window blur closes tooltip')
+  await hover('#edge', 0.45)
+  await waitForTip(/^Long tooltip/, 'window blur does not block reopening')
   await leave()
   win.show()
   win.focus()
@@ -183,7 +198,7 @@ async function run() {
   win.setContentSize(280, 240)
   await wait()
   await hover('#edge')
-  await wait(600)
+  await waitForTip(/^Long tooltip/)
   assert.ok(
     await evaluate(
       `const r = document.querySelector('[data-app-tooltip]').getBoundingClientRect(); return r.left >= 8 && r.right <= innerWidth - 8 && r.top >= 8 && r.bottom <= innerHeight - 8`
@@ -193,9 +208,11 @@ async function run() {
   await evaluate(`window.dispatchEvent(new Event('resize'))`)
   await wait()
   assert.equal(await tip(), null, 'resize dismisses')
+  await hover('#edge', 0.45)
+  await waitForTip(/^Long tooltip/, 'resize does not block reopening')
   await evaluate(`document.querySelector('#tooltip-dialog').showModal()`)
   await hover('#dialog-trigger')
-  await wait(600)
+  await waitForTip('Modal action')
   assert.equal(
     await evaluate(`return !!document.querySelector('#tooltip-dialog [data-app-tooltip]')`),
     true,

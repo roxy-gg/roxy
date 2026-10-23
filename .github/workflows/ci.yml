@@ -173,7 +173,7 @@ jobs:
         if: runner.os == 'Linux'
         env:
           ELECTRON_DISABLE_SANDBOX: '1'
-        run: xvfb-run --auto-servernum npm run smoke:tooltips
+        run: xvfb-run --auto-servernum --server-args="-screen 0 1280x1024x24" npm run smoke:tooltips
 
       - name: Themed tooltip interactions
         if: runner.os != 'Linux'

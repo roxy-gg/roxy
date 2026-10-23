@@ -271,8 +271,8 @@ export function AppTooltip(): JSX.Element | null {
     document.addEventListener('keydown', dismiss, true)
     document.addEventListener('scroll', onScroll, true)
     document.addEventListener('wheel', dismiss, { capture: true, passive: true })
-    window.addEventListener('blur', dismiss)
-    window.addEventListener('resize', dismiss)
+    window.addEventListener('blur', hide)
+    window.addEventListener('resize', hide)
     return () => {
       window.clearInterval(poll)
       hide()
@@ -287,8 +287,8 @@ export function AppTooltip(): JSX.Element | null {
       document.removeEventListener('keydown', dismiss, true)
       document.removeEventListener('scroll', onScroll, true)
       document.removeEventListener('wheel', dismiss, true)
-      window.removeEventListener('blur', dismiss)
-      window.removeEventListener('resize', dismiss)
+      window.removeEventListener('blur', hide)
+      window.removeEventListener('resize', hide)
     }
   }, [id])
 
