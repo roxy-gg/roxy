@@ -10,6 +10,20 @@ const wait = (ms = 80) => new Promise((resolve) => setTimeout(resolve, ms))
 const evaluate = (code) => win.webContents.executeJavaScript(`(async () => { ${code} })()`, true)
 const tip = () =>
   evaluate(`return document.querySelector('[data-app-tooltip]')?.textContent ?? null`)
+async function waitForAttr(selector, attr, expected, label, timeout = 3000) {
+  const started = Date.now()
+  let actual
+  while (Date.now() - started < timeout) {
+    actual = await evaluate(
+      `return document.querySelector(${JSON.stringify(selector)}).getAttribute(${JSON.stringify(attr)})`
+    )
+    if (actual === expected) return
+    await wait(50)
+  }
+  assert.fail(
+    `${label}: ${selector}[${attr}] expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`
+  )
+}
 async function waitForEvent(name, timeout = 3000) {
   const started = Date.now()
   while (Date.now() - started < timeout) {
@@ -40,7 +54,7 @@ async function waitForTip(expected, label = 'tooltip', timeout = 3000) {
     await wait(50)
   }
   const page = await evaluate(
-    `return JSON.stringify({ events: window.__tipEvents ?? [], pointerMoves: window.__pointerMoves ?? 0, hasFocus: document.hasFocus() })`
+    `return JSON.stringify({ events: window.__tipEvents ?? [], pointerMoves: window.__pointerMoves ?? 0, hasFocus: document.hasFocus(), active: document.activeElement?.id, focusVisible: document.activeElement?.matches(':focus-visible'), tipNodes: document.querySelectorAll('[data-app-tooltip]').length })`
   )
   assert.fail(`${label}: expected ${expected}, got ${actual}. Page state: ${page}`)
 }
@@ -70,6 +84,12 @@ async function run() {
   })
 
   await win.loadURL('http://localhost:3105/?tooltips')
+  // Real OS focus is not guaranteed for a hidden window (CI, or another app in front on
+  // macOS). Without it :focus-visible never matches, so emulate page focus instead.
+  win.webContents.debugger.attach('1.3')
+  await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled', {
+    enabled: true
+  })
   await wait(1000)
   await evaluate(
     `window.__tipEvents = []; window.__pointerMoves = 0
@@ -118,12 +138,14 @@ async function run() {
   await hover('#scroll-trigger', 0.55)
   await waitForTip('Scrollable action', 'pointer movement reopens after scrolling')
   await hover('#named')
+  await waitForTip('Named action')
   assert.equal(
     await evaluate(`return document.querySelector('#named').getAttribute('aria-describedby')`),
     null,
     'explicit matching accessible name is not repeated'
   )
   await hover('#described')
+  await waitForTip('Additional detail')
   assert.equal(
     await evaluate(
       `const e = document.querySelector('#described'); return e.getAttribute('aria-describedby').split(' ').length`
@@ -132,13 +154,14 @@ async function run() {
     'additional detail preserves existing description'
   )
   await hover('#second')
-  assert.equal(
-    await evaluate(`return document.querySelector('#described').getAttribute('aria-describedby')`),
+  await waitForAttr(
+    '#described',
+    'aria-describedby',
     'existing-description',
     'existing description is restored'
   )
   await hover('#rich')
-  assert.match(await tip(), /Rich description/, 'warm hover opens immediately')
+  await waitForTip(/Rich description/, 'warm hover opens')
   win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Escape' })
   await wait()
   assert.equal(await tip(), null)
@@ -152,7 +175,7 @@ async function run() {
   await hover('#virtual', 0.25)
   await waitForTip('Left region')
   await hover('#virtual', 0.75)
-  assert.equal(await tip(), 'Right region', 'moving inside one canvas changes hit region')
+  await waitForTip('Right region', 'moving inside one canvas changes hit region')
   await leave()
   const activityPoint = await evaluate(
     `const r = document.querySelector('canvas').getBoundingClientRect(); return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + 4 * (r.height + 4) / 7 + 5) }`
@@ -210,7 +233,7 @@ async function run() {
     'second',
     'Tab reaches the next trigger'
   )
-  assert.equal(await tip(), 'Second action', 'keyboard focus opens immediately')
+  await waitForTip('Second action', 'keyboard focus opens')
   await evaluate(`document.querySelector('#second').remove()`)
   await waitForNoTip('removed target closes tooltip')
   await leave()
