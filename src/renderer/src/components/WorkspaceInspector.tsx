@@ -344,6 +344,7 @@ export function WorkspaceFileCanvas({
     null
   )
   const [copied, setCopied] = useState(false)
+  const refreshComparison = useRef<(() => void) | null>(null)
   const host = useRef<HTMLDivElement>(null)
   const [height, setHeight] = useState(400)
   useEffect(() => {
@@ -359,18 +360,34 @@ export function WorkspaceFileCanvas({
   useEffect(() => {
     if (!selection.comparison) return
     let cancelled = false
-    void api.workspace
-      .read(sessionId, selection.rootId, selection.path, selection.comparison)
-      .then((value) => {
-        if (!cancelled) setResult(value)
-      })
-      .catch(() => {
-        if (!cancelled) setResult({ ok: false, reason: 'unavailable' })
-      })
+    let reading = false
+    const refresh = (): void => {
+      // Polling must not cancel a slow first read or queue overlapping Git processes.
+      if (reading) return
+      reading = true
+      void api.workspace
+        .read(sessionId, selection.rootId, selection.path, true)
+        .then((value) => {
+          if (!cancelled) setResult(value)
+        })
+        .catch(() => {
+          if (!cancelled) setResult({ ok: false, reason: 'unavailable' })
+        })
+        .finally(() => {
+          reading = false
+        })
+    }
+    setResult(null)
+    refreshComparison.current = refresh
+    refresh()
     return () => {
       cancelled = true
+      refreshComparison.current = null
     }
-  }, [sessionId, selection, snapshot])
+  }, [sessionId, selection.rootId, selection.path, selection.comparison])
+  useEffect(() => {
+    refreshComparison.current?.()
+  }, [snapshot])
   useEffect(() => {
     if (!copied) return
     const timer = setTimeout(() => setCopied(false), 1200)

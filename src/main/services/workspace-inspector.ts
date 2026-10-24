@@ -132,8 +132,7 @@ function rootFor(sessionId: string, rootId: string): string {
   return root.directory
 }
 
-/** Reject static links and metadata paths; this is not a sandbox against concurrent local writers. */
-async function safePath(root: string, relative: string): Promise<string> {
+function relativeParts(relative: string): string[] {
   if (
     typeof relative !== 'string' ||
     relative.includes('\0') ||
@@ -145,6 +144,12 @@ async function safePath(root: string, relative: string): Promise<string> {
   const parts = relative ? relative.split('/') : []
   if (parts.some((part) => !part || part === '.' || part === '..' || part.toLowerCase() === '.git'))
     throw new InspectionError('unsafe')
+  return parts
+}
+
+/** Reject static links and metadata paths; this is not a sandbox against concurrent local writers. */
+async function safePath(root: string, relative: string): Promise<string> {
+  const parts = relativeParts(relative)
   const realRoot = await nativeRealpath(root)
   let target = realRoot
   for (const part of parts) {
@@ -474,21 +479,35 @@ export async function readWorkspace(
     let before = ''
     let after = ''
     if (comparison) {
-      const snapshot = await inspectWorkspace(sessionId)
-      const change = snapshot.roots
-        .find((candidate) => candidate.id === rootId)
-        ?.changes.find((candidate) => candidate.path === relative)
-      if (!change) throw new InspectionError('unavailable')
-      const head = await headFor(root)
+      relativeParts(relative)
+      if (!relative) throw new InspectionError('unsafe')
+      // Opening one file must not wait for status/counts across every session repo.
+      const [status, head] = await Promise.all([
+        git(root, [
+          'status',
+          '--porcelain=v1',
+          '-z',
+          '--untracked-files=all',
+          '--no-renames',
+          '--ignore-submodules=all',
+          '--',
+          relative
+        ]),
+        headFor(root)
+      ])
+      const records = status.toString('utf8').split('\0').filter(Boolean)
+      if (!records.length || records.some((row) => row.slice(3) !== relative))
+        throw new InspectionError('unavailable')
+      const flags = records.length > 1 ? ' M' : records[0].slice(0, 2)
       if (head) {
         const entry = (await git(root, ['ls-tree', '-z', head, '--', relative])).toString()
         if (entry) {
-          const match = /^(100644|100755) blob ([a-f0-9]+)\t/.exec(entry)
-          if (!match) throw new InspectionError('unsafe')
+          const match = /^(100644|100755) blob ([a-f0-9]+)\t([\s\S]+)\0$/.exec(entry)
+          if (!match || match[3] !== relative) throw new InspectionError('unsafe')
           before = text(await git(root, ['cat-file', 'blob', match[2]], FILE_LIMIT))
         }
       }
-      if (change.status !== 'deleted') after = await readText(root, relative)
+      if (flags[1] !== 'D' && flags !== 'D ') after = await readText(root, relative)
     } else after = await readText(root, relative)
     return { ok: true, before, after, ...(!comparison ? { revision: revision(after) } : {}) }
   } catch (error) {

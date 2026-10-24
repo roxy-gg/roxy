@@ -209,6 +209,48 @@ app.whenReady().then(async () => {
       )
     )
     await screenshot('diff')
+    // A slow read survives repeated snapshot refreshes instead of restarting forever.
+    await click('[aria-label="Back to chat"]')
+    await evaluate(`window.__slowOriginalRead = window.roxy.workspace.read;
+      window.__slowReads = [];
+      window.roxy.workspace.read = (...args) => new Promise(resolve => {
+        window.__slowReads.push(() => window.__slowOriginalRead(...args).then(resolve));
+      });`)
+    await click('#workspace-inspector section button')
+    await until('window.__slowReads.length > 0')
+    const pendingReads = await evaluate('return window.__slowReads.length')
+    for (let i = 0; i < 3; i++) {
+      await evaluate('window.dispatchEvent(new Event("focus"))')
+      await wait()
+    }
+    assert.equal(
+      await evaluate('return window.__slowReads.length'),
+      pendingReads,
+      'snapshot refreshes do not start overlapping comparison reads'
+    )
+    await evaluate('await Promise.all(window.__slowReads.map(finish => finish()))')
+    await until(`!!document.querySelector('[data-workspace-canvas] [data-canvas-surface]')`)
+    assert(
+      await evaluate(
+        `return document.querySelector('[data-workspace-canvas]').textContent.includes('WorkspaceSummary')`
+      ),
+      'the first read still paints after newer snapshots arrive'
+    )
+    // Settled comparisons still refresh without remounting the canvas.
+    await evaluate(`window.__diffCanvas = document.querySelector('[data-workspace-canvas] canvas');
+      window.roxy.workspace.read = async (...args) => ({
+        ...await window.__slowOriginalRead(...args), after: 'const refreshedDiff = true;\\n'
+      });
+      window.dispatchEvent(new Event('focus'));`)
+    await until(
+      `document.querySelector('[data-workspace-canvas] [data-canvas-surface]')?.textContent.includes('refreshedDiff')`
+    )
+    assert(
+      await evaluate(
+        `return window.__diffCanvas === document.querySelector('[data-workspace-canvas] canvas')`
+      )
+    )
+    await evaluate('window.roxy.workspace.read = window.__slowOriginalRead')
     await evaluate(
       `document.querySelector('[data-workspace-canvas] [data-canvas-surface]').focus()`
     )

@@ -69,6 +69,10 @@ async function main(): Promise<void> {
     before: '',
     after: 'literal\n'
   })
+  assert.deepEqual(await readWorkspace(chat.id, snapshot.id, 'binary.bin', true), {
+    ok: false,
+    reason: 'binary'
+  })
   assert.equal((await readWorkspace(chat.id, snapshot.id, 'binary.bin', false)).ok, false)
   const entries = await listWorkspace(chat.id, snapshot.id, '')
   assert(entries.ok)
@@ -86,6 +90,10 @@ async function main(): Promise<void> {
     'a\\b'
   ]) {
     assert.deepEqual(await readWorkspace(chat.id, snapshot.id, invalid, false), {
+      ok: false,
+      reason: 'unsafe'
+    })
+    assert.deepEqual(await readWorkspace(chat.id, snapshot.id, invalid, true), {
       ok: false,
       reason: 'unsafe'
     })
@@ -177,6 +185,11 @@ async function main(): Promise<void> {
   await fs.writeFile(path.join(root, '.gitattributes'), 'file.txt filter=probe\n')
   const noHooks = (await inspectWorkspace(chat.id)).roots[0]
   assert.equal(noHooks.unavailable, false)
+  assert.deepEqual(await readWorkspace(chat.id, snapshot.id, 'file.txt', true), {
+    ok: true,
+    before: 'one\ntwo\n',
+    after: 'one\ntwo\n'
+  })
   for (const name of ['hook-ran.txt', 'filter-ran.txt', 'process-ran.txt']) {
     await assert.rejects(fs.access(path.join(root, name)))
   }
@@ -192,6 +205,11 @@ async function main(): Promise<void> {
     cancelledAdd.changes.find((entry) => entry.path === 'cancelled.txt'),
     { path: 'cancelled.txt', status: 'deleted', additions: 0, deletions: 0 }
   )
+  assert.deepEqual(await readWorkspace(chat.id, snapshot.id, 'cancelled.txt', true), {
+    ok: true,
+    before: '',
+    after: ''
+  })
   if (process.platform === 'win32') {
     const alias = path.join(root, 'GIT~1')
     if (
@@ -245,6 +263,33 @@ async function main(): Promise<void> {
     await readWorkspace(composite.id, compositeSnapshot.roots[0].id, 'file.txt', false),
     { ok: true, before: '', after: 'isolated\n', revision: revision('isolated\n') }
   )
+  // Opening a comparison must stay file-scoped, even in a multi-repo session.
+  const childProcess = require('node:child_process') as typeof import('node:child_process')
+  const originalExecFile = childProcess.execFile
+  const commands: { cwd: string; args: string[] }[] = []
+  Object.assign(childProcess, {
+    execFile: (...args: unknown[]) => {
+      commands.push({ cwd: (args[2] as { cwd: string }).cwd, args: args[1] as string[] })
+      return Reflect.apply(originalExecFile, childProcess, args)
+    }
+  })
+  try {
+    const started = performance.now()
+    assert.deepEqual(
+      await readWorkspace(composite.id, compositeSnapshot.roots[0].id, 'file.txt', true),
+      { ok: true, before: 'one\ntwo\n', after: 'isolated\n' }
+    )
+    console.log(`File-only comparison: ${Math.round(performance.now() - started)}ms`)
+    assert(commands.length > 0)
+    assert(commands.every((command) => command.cwd === worktreePath))
+    assert(!commands.some((command) => command.args.includes('diff')))
+    const statuses = commands.filter((command) => command.args.includes('status'))
+    assert.equal(statuses.length, 1)
+    assert.deepEqual(statuses[0].args.slice(-2), ['--', 'file.txt'])
+    assert(!commands.some((command) => command.args.includes('symbolic-ref')))
+  } finally {
+    Object.assign(childProcess, { execFile: originalExecFile })
+  }
   // Writes target only existing, bounded UTF-8 files in the current session root.
   const worktreeIndex = execFileSync('git', ['write-tree'], {
     cwd: worktreePath,
