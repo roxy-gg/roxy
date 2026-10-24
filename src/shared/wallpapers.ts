@@ -6,6 +6,8 @@ export interface Wallpaper {
   credit: string
   license: string
   kind: 'image' | 'video'
+  /** Older catalogs omit this and use PNG images or MP4 videos. */
+  mime?: 'image/png' | 'image/gif' | 'video/mp4'
   width: number
   height: number
   bytes: number

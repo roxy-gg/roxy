@@ -54,6 +54,27 @@ assert.equal(calls[0].url.searchParams.get('sort'), 'mostUsed')
 assert.equal(result.entries[0].posterUrl, `https://roxy.gg/api/wallpapers/${id}/poster`)
 assert.equal(result.entries[0].mediaUrl, `https://roxy.gg/api/wallpapers/${id}/media`)
 assert.deepEqual(await client.download(id), { bytes, extension: '.png' })
+for (const [kind, mime, extension] of [
+  ['image', 'image/gif', '.gif'],
+  ['video', 'video/mp4', '.mp4']
+] as const) {
+  const animated = new WallpaperClient('https://roxy.gg', async (url) =>
+    String(url).endsWith('/media')
+      ? new Response(bytes, { headers: { 'Content-Type': mime } })
+      : Response.json({ ...entry, kind, mime, duration: 1 })
+  )
+  assert.deepEqual(await animated.download(id), { bytes, extension })
+  const wrongType = new WallpaperClient('https://roxy.gg', async (url) =>
+    String(url).endsWith('/media')
+      ? new Response(bytes, { headers: { 'Content-Type': 'image/png' } })
+      : Response.json({ ...entry, kind, mime, duration: 1 })
+  )
+  await assert.rejects(() => wrongType.download(id), 'animated media MIME must match metadata')
+}
+const invalidMime = new WallpaperClient('https://roxy.gg', async () =>
+  Response.json({ ...entry, mime: 'text/html' })
+)
+await assert.rejects(() => invalidMime.download(id))
 assert.equal(
   await client.isPublished(id),
   true,

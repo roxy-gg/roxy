@@ -252,13 +252,14 @@ async function retainCustomBackground(
     .webp({ quality: 75 })
     .toBuffer()
   if (thumbnail.length > 256 * 1024) throw Error('Invalid thumbnail')
-  const entry: CustomBackground = existing ?? {
+  const entry: CustomBackground = {
     id,
     title,
-    thumbnail: `data:image/webp;base64,${thumbnail.toString('base64')}`,
     kind: image.startsWith('data:video/') ? 'video' : 'image',
-    bytes,
-    createdAt: Date.now()
+    createdAt: Date.now(),
+    ...existing,
+    thumbnail: `data:image/webp;base64,${thumbnail.toString('base64')}`,
+    bytes
   }
   await fs.mkdir(libraryDirectory(), { recursive: true })
   const file = path.join(libraryDirectory(), `${id}.json`)
@@ -585,7 +586,7 @@ export async function importBackground(
         const video = document.querySelector('video');
         const timer = setTimeout(() => reject(new Error('decode timeout')), 15000);
         video.onerror = () => { clearTimeout(timer); reject(new Error('unsupported video')); };
-        video.onloadeddata = () => {
+        const capture = () => {
           try {
             if (!video.videoWidth || !video.videoHeight || video.videoWidth * video.videoHeight > ${MAX_PIXELS} || !Number.isFinite(video.duration)) throw new Error('invalid dimensions');
             const scale = Math.min(1, 2048 / Math.max(video.videoWidth, video.videoHeight));
@@ -595,6 +596,15 @@ export async function importBackground(
             canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
             clearTimeout(timer); resolve(canvas.toDataURL('image/png'));
           } catch (error) { clearTimeout(timer); reject(error); }
+        };
+        video.onloadeddata = () => {
+          if (!Number.isFinite(video.duration) || video.duration <= 0) {
+            clearTimeout(timer); reject(new Error('invalid duration')); return;
+          }
+          video.onloadeddata = null;
+          video.onseeked = capture;
+          // Opening frames can be blank; capture a decoded frame inside the clip.
+          video.currentTime = Math.min(1, video.duration / 2);
         };
         video.src = ${JSON.stringify(image)}; video.load();
       })`),

@@ -140,6 +140,10 @@ export class WallpaperClient {
         throw Error('Invalid wallpaper')
     if (!Number.isFinite(raw.duration) || raw.duration < 0 || raw.duration > 60)
       throw Error('Invalid wallpaper')
+    const mime =
+      raw.mime === undefined ? (raw.kind === 'video' ? 'video/mp4' : 'image/png') : raw.mime
+    if (!(raw.kind === 'video' ? ['video/mp4'] : ['image/png', 'image/gif']).includes(mime))
+      throw Error('Invalid wallpaper media type')
     return {
       id: raw.id,
       title: raw.title,
@@ -148,6 +152,7 @@ export class WallpaperClient {
       credit: raw.credit,
       license: raw.license,
       kind: raw.kind,
+      mime,
       width: raw.width,
       height: raw.height,
       bytes: raw.bytes,
@@ -315,12 +320,16 @@ export class WallpaperClient {
     if (wallpaper.id !== id) throw Error('Mismatched wallpaper')
     const media = await this.request(`/api/wallpapers/${id}/media`, MAX_BYTES)
     if (
-      media.type !== (wallpaper.kind === 'video' ? 'video/mp4' : 'image/png') ||
+      media.type !== wallpaper.mime ||
       media.bytes.length !== wallpaper.bytes ||
       createHash('sha256').update(media.bytes).digest('hex') !== wallpaper.sha256
     )
       throw Error('Invalid wallpaper media')
-    return { bytes: media.bytes, extension: wallpaper.kind === 'video' ? '.mp4' : '.png' }
+    return {
+      bytes: media.bytes,
+      extension:
+        wallpaper.mime === 'video/mp4' ? '.mp4' : wallpaper.mime === 'image/gif' ? '.gif' : '.png'
+    }
   }
 
   async isPublished(id: string): Promise<boolean> {

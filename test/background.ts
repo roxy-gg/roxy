@@ -13,6 +13,8 @@ import {
   normalizeBackground
 } from '../src/shared/background'
 import * as service from '../src/main/services/background'
+import { WallpaperClient } from '../src/main/services/wallpapers'
+import { createHash } from 'node:crypto'
 
 async function run(): Promise<void> {
   app.on('window-all-closed', () => {})
@@ -166,6 +168,55 @@ async function run(): Promise<void> {
 
     assert.equal(gifMeta.loop, 0, 'GIFs always loop even if the original has a finite loop')
     assert.ok(gif.state.poster?.startsWith('data:image/png;base64,'))
+    const download = async (media: Buffer, mime: string, kind: 'image' | 'video') => {
+      const client = new WallpaperClient('https://roxy.gg', async (url) =>
+        String(url).endsWith('/media')
+          ? new Response(new Uint8Array(media), { headers: { 'Content-Type': mime } })
+          : Response.json({
+              id: catalogId,
+              title: 'Animated round trip',
+              description: '',
+              tags: '',
+              credit: '',
+              license: 'MIT',
+              kind,
+              mime,
+              width: 96,
+              height: 64,
+              duration: 1,
+              bytes: media.length,
+              sha256: createHash('sha256').update(media).digest('hex'),
+              featured: false
+            })
+      )
+      const downloaded = await client.download(catalogId)
+      const file = path.join(directory, `downloaded${downloaded.extension}`)
+      await fs.writeFile(file, downloaded.bytes)
+      const result = await service.importBackground(
+        file,
+        undefined,
+        service.reserveBackgroundImport(),
+        catalogId
+      )
+      assert.ok(result.ok)
+      assert.equal(result.state.catalogId, catalogId)
+      await fs.rm(file)
+      return result.state
+    }
+    const downloadedGif = await download(
+      Buffer.from(gif.state.image!.split(',')[1], 'base64'),
+      'image/gif',
+      'image'
+    )
+    assert.ok(downloadedGif.image?.startsWith('data:image/gif;'))
+    assert.equal(
+      (
+        await sharp(Buffer.from(downloadedGif.image!.split(',')[1], 'base64'), {
+          animated: true
+        }).metadata()
+      ).pages,
+      2
+    )
     for (const extension of ['mp4', 'mov']) {
       const videoInput = path.join(directory, `clip.${extension}`)
       await fs.copyFile(
@@ -181,6 +232,15 @@ async function run(): Promise<void> {
       ).metadata()
       assert.equal(frame.width, 96)
       assert.equal(frame.height, 64)
+      if (extension === 'mp4') {
+        const downloaded = await download(await fs.readFile(videoInput), 'video/mp4', 'video')
+        assert.equal(
+          downloaded.image,
+          result.state.image,
+          'catalog video keeps the verified animated media'
+        )
+        assert.ok(downloaded.poster?.startsWith('data:image/png;'))
+      }
       await service.updateBackground({ sidebarOpacity: 37 })
       await fs.rm(videoInput)
       await new Promise<void>((resolve, reject) => {
@@ -218,6 +278,24 @@ async function run(): Promise<void> {
       { ok: false, error: 'invalidVideo' },
       'unsupported MOV codec is rejected'
     )
+    const blackIntro = await service.importBackground(
+      path.join(process.cwd(), 'test/fixtures/background-black-intro.mp4')
+    )
+    assert.ok(blackIntro.ok)
+    for (const preview of [
+      blackIntro.state.poster!,
+      (await service.listCustomBackgrounds())[0].thumbnail
+    ]) {
+      const { data: pixel } = await sharp(Buffer.from(preview.split(',')[1], 'base64'))
+        .resize(1, 1)
+        .removeAlpha()
+        .raw()
+        .toBuffer({ resolveWithObject: true })
+      assert.ok(
+        pixel[0] > 200 && pixel[1] < 40 && pixel[2] < 40,
+        'video preview seeks past the black opening frame'
+      )
+    }
     await fs.writeFile(path.join(directory, 'restored.png'), data)
     await service.importBackground(input)
     const updated = await service.updateBackground({
@@ -435,6 +513,12 @@ async function run(): Promise<void> {
       error: 'readFailed'
     })
     const asset = path.join(directory, 'chat-backgrounds', `${first.id}.json`)
+    const stalePreview = JSON.parse(
+      await fs.readFile(path.join(directory, 'chat-background.json'), 'utf8')
+    )
+    stalePreview.library.find((entry: { id: string }) => entry.id === first.id).thumbnail =
+      'data:image/webp;base64,AAAA'
+    await fs.writeFile(path.join(directory, 'chat-background.json'), JSON.stringify(stalePreview))
     await fs.writeFile(asset, '{}')
     assert.equal(
       (await service.applyCustomBackground(first.id)).ok,
@@ -447,6 +531,11 @@ async function run(): Promise<void> {
       'reupload repairs a damaged retained asset'
     )
     assert.ok((await service.applyCustomBackground(first.id)).ok)
+    assert.equal(
+      (await service.listCustomBackgrounds())[0].thumbnail,
+      first.thumbnail,
+      'reupload repairs stale previews'
+    )
     assert.equal(
       (await service.listCustomBackgrounds())[0].title,
       'Blue flowers',

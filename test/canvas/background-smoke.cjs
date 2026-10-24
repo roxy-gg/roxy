@@ -328,6 +328,28 @@ async function run() {
     await click('[aria-labelledby="background-effect-label"] button:nth-child(1)')
     await click('[aria-label="Sidebar background"] button:nth-child(1)')
   }
+  await evaluate(`const video=document.querySelector('#main-sidebar-harness video');
+    const play=HTMLMediaElement.prototype.play;
+    HTMLMediaElement.prototype.play=function(){return Promise.reject(new DOMException('Test playback failure','NotSupportedError'))};
+    video.dispatchEvent(new Event('loadeddata'));
+    await new Promise(resolve=>setTimeout(resolve,0));
+    HTMLMediaElement.prototype.play=play;`)
+  await until(
+    `!document.querySelector('#main-sidebar-harness video') && document.querySelector('#main-sidebar-harness .chat-wallpaper img')`
+  )
+  assert.equal(
+    await evaluate(
+      `return document.querySelector('#main-sidebar-harness .chat-wallpaper img').src === (JSON.parse(localStorage.getItem('roxy.test.background'))).poster`
+    ),
+    true,
+    'rejected playback falls back to the still poster'
+  )
+  await click('#background-background-tab')
+  assert.equal(
+    await evaluate(`return !!document.querySelector('#wallpaper-settings [role="alert"]')`),
+    true,
+    'playback failure is visible in Background settings'
+  )
   await win.loadURL(`${url}?background&motion-race`)
   await until(
     `document.documentElement.dataset.motion === 'reduced' && document.querySelector('#main-sidebar-harness .chat-wallpaper img')`
