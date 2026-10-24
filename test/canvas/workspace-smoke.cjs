@@ -392,6 +392,37 @@ app.whenReady().then(async () => {
     )
     await key('Escape')
     await evaluate(`window.roxy.workspace.read = window.__originalRead`)
+    for (const [additions, deletions] of [
+      [0, 0],
+      [5, 0],
+      [0, 3]
+    ]) {
+      await evaluate(`window.roxy.workspace.inspect = async (...args) => {
+        const snapshot = structuredClone(await window.__originalInspect(...args));
+        for (const root of snapshot.roots) {
+          root.changes = root.changes.slice(0, 1).map(change => ({...change, additions:${additions}, deletions:${deletions}}));
+        }
+        return snapshot;
+      };
+      window.dispatchEvent(new Event('focus'));`)
+      await until(
+        additions || deletions
+          ? `document.querySelector('[data-workspace-toggle]')?.textContent === '+${additions}-${deletions}'`
+          : `document.querySelector('[data-workspace-toggle]')?.textContent === ''`
+      )
+      assert(await evaluate(`return !!document.querySelector('[data-workspace-toggle] svg')`))
+      if (!additions && !deletions) {
+        assert.equal(
+          await evaluate(`return document.querySelector('[data-workspace-toggle]').title`),
+          'Files and changes'
+        )
+        await click('[data-workspace-toggle]')
+        await until(`!document.querySelector('#workspace-inspector')`)
+        await click('[data-workspace-toggle]')
+        await until(`!!document.querySelector('#workspace-inspector')`)
+      }
+    }
+    await evaluate('window.roxy.workspace.inspect = window.__originalInspect')
     assert.equal(errors.length, 0, errors.join('\n'))
     console.log(
       'WORKSPACE UI OK: closed default, header totals, dock/overlay, preserved transcript/draft, diff, file tree/refresh, file preview/copy, tab arrows/Escape/focus, narrow layouts'
