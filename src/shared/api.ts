@@ -1,3 +1,4 @@
+import type { WorkspaceInspectorApi } from './workspace-inspector'
 import type { CheatPreferences, CheatResult, CheatSource, CheatState } from './cheat'
 import type {
   EngineeringPreferences,
@@ -1133,6 +1134,7 @@ export interface RoxyApi {
     /** Import a config bundle chosen via an open dialog (overwrites by name/id). */
     import(): Promise<ConfigImportResult>
   }
+  workspace: WorkspaceInspectorApi
   tools: {
     run(sessionId: string, name: string, input: Record<string, unknown>): Promise<ToolResult>
     /**

@@ -238,7 +238,8 @@ createRoot(document.getElementById('root')!).render(
       <Suspense>
         <BackgroundHarness />
       </Suspense>
-    ) : new URLSearchParams(location.search).has('bots') ? (
+    ) : new URLSearchParams(location.search).has('bots') ||
+      new URLSearchParams(location.search).has('workspace') ? (
       <Suspense>
         <BotsHarness />
       </Suspense>

@@ -32,6 +32,13 @@ import { WorkstreamStrip } from './WorkstreamStrip'
 import { QueuedMessage } from './QueuedMessage'
 import { UsageMeter } from './UsageMeter'
 import { QuotaMeter } from './QuotaMeter'
+import {
+  useWorkspaceInspection,
+  WorkspaceFileCanvas,
+  WorkspaceInspector,
+  WorkspaceSummary,
+  type WorkspaceSelection
+} from './WorkspaceInspector'
 import { upstreamFor } from '@shared/cliproxy'
 import { planSource } from '@shared/quota'
 import {
@@ -165,6 +172,19 @@ export function ChatView(): JSX.Element {
     setInfoOpen(false)
   }, [activeChatId])
   const activeChat = chats.find((c) => c.id === activeChatId)
+  const [inspectorSession, setInspectorSession] = useState<string | null>(null)
+  const inspectorOpen = inspectorSession === activeChatId && !!activeChatId
+  const inspection = useWorkspaceInspection(activeChat, inspectorOpen)
+  const [selectedFile, setSelectedFile] = useState<{
+    sessionId: string
+    selection: WorkspaceSelection
+  } | null>(null)
+  const fileSelection =
+    inspectorOpen &&
+    selectedFile?.sessionId === activeChatId &&
+    inspection.snapshot?.roots.some((root) => root.id === selectedFile.selection.rootId)
+      ? selectedFile.selection
+      : null
   const queueHasUserRequests = queue.some(
     (item) => !item.scheduleId && (item.fromUser || !item.sourceChatId)
   )
@@ -177,6 +197,13 @@ export function ChatView(): JSX.Element {
   const parentChat = activeChat?.parentId
     ? chats.find((c) => c.id === activeChat.parentId)
     : undefined
+  const previousFile = useRef(false)
+  useLayoutEffect(() => {
+    if (previousFile.current && !fileSelection) {
+      document.querySelector<HTMLButtonElement>('[data-workspace-toggle]')?.focus()
+    }
+    previousFile.current = !!fileSelection
+  }, [fileSelection])
   const activeBot = bots.find((bot) => bot.chatId === activeChatId)
   const botPaneOpen = !!activeBot && botSettings?.botId === activeBot.id
   const sessionTasks = activeChat?.tasks ?? []
@@ -221,6 +248,8 @@ export function ChatView(): JSX.Element {
   return (
     <div
       className="@container/chat relative flex h-full min-w-0 flex-1 bg-bg"
+      data-inspector-open={inspectorOpen || undefined}
+      data-file-open={!!fileSelection || undefined}
       data-shared-pane={
         (background.settings.sidebarStyle !== 'default' && !!background.rendered) || undefined
       }
@@ -247,7 +276,10 @@ export function ChatView(): JSX.Element {
         {wallpaper && background.settings.sidebarStyle === 'default' && (
           <ChatBackground empty={isEmpty} />
         )}
-        <header className="titlebar reserve-controls-right flex h-12 shrink-0 items-center justify-between gap-3 px-4">
+        <header
+          {...(fileSelection ? { inert: '' } : {})}
+          className="titlebar reserve-controls-right flex h-12 shrink-0 items-center justify-between gap-3 px-4"
+        >
           {activeBot ? (
             <div className="flex min-w-0 items-center gap-2">
               <BotAvatar username={activeBot.username} size={28} />
@@ -260,7 +292,7 @@ export function ChatView(): JSX.Element {
               ) : (
                 <FolderOpen className="h-4 w-4 shrink-0 text-text-muted" />
               )}
-              <span className="shrink-0 text-sm font-medium">{activeChat.title}</span>
+              <span className="min-w-0 truncate text-sm font-medium">{activeChat.title}</span>
               {/* A delegate's session is only legible in context — who sent it, and
                 a way back. The folder path is the parent's business. */}
               {isSub ? (
@@ -354,144 +386,192 @@ export function ChatView(): JSX.Element {
                 <UsageMeter provider={provider} />
               )
             ) : null}
+            {!activeBot &&
+              activeChat.kind !== 'bot' &&
+              (activeChat.workspacePath || parentChat?.workspacePath) && (
+                <WorkspaceSummary
+                  snapshot={inspection.snapshot}
+                  failed={inspection.failed}
+                  open={inspectorOpen}
+                  onToggle={() => {
+                    setInspectorSession(inspectorOpen ? null : activeChat.id)
+                    if (inspectorOpen) setSelectedFile(null)
+                  }}
+                />
+              )}
           </div>
         </header>
 
-        {infoOpen && <SessionInfo chat={activeChat} />}
+        <div className="relative isolate flex min-h-0 min-w-0 flex-1">
+          <div
+            {...(fileSelection ? { inert: '' } : {})}
+            className="flex min-h-0 min-w-0 flex-1 flex-col"
+          >
+            {infoOpen && <SessionInfo chat={activeChat} />}
 
-        {messagesError ? (
-          // A failed load used to be indistinguishable from an empty session:
-          // silent, blank, and with no way back other than clicking away and
-          // returning. Name it and make it recoverable.
-          <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
-            <p className="max-w-xs text-sm text-text-muted">{t('chat.loadFailed')}</p>
-            <Button variant="ghost" onClick={() => void selectChat(activeChat.id)}>
-              <RotateCw className="h-4 w-4" /> {t('common.retry')}
-            </Button>
-          </div>
-        ) : loading ? (
-          // Deliberately blank: a transcript read is a local SQLite query, so it
-          // resolves within a frame or two and a spinner would be a flash of
-          // chrome rather than information. This branch exists to stop the EMPTY
-          // state from claiming the session has no messages
-          // before we know that.
-          <div className="min-h-0 flex-1" />
-        ) : isEmpty ? (
-          <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-6 text-center">
-            {activeBot ? (
-              <div className="flex flex-col items-center gap-4">
-                <BotAvatar username={activeBot.username} size={56} />
-                <div className="flex max-w-xs flex-col gap-2">
-                  <p className="text-sm font-medium text-text">
-                    {t('bots.talkingTo', { username: activeBot.username })}
-                  </p>
-                  <p className="text-sm text-text-muted">{t('bots.intro')}</p>
-                </div>
+            {messagesError ? (
+              // A failed load used to be indistinguishable from an empty session:
+              // silent, blank, and with no way back other than clicking away and
+              // returning. Name it and make it recoverable.
+              <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
+                <p className="max-w-xs text-sm text-text-muted">{t('chat.loadFailed')}</p>
+                <Button variant="ghost" onClick={() => void selectChat(activeChat.id)}>
+                  <RotateCw className="h-4 w-4" /> {t('common.retry')}
+                </Button>
+              </div>
+            ) : loading ? (
+              // Deliberately blank: a transcript read is a local SQLite query, so it
+              // resolves within a frame or two and a spinner would be a flash of
+              // chrome rather than information. This branch exists to stop the EMPTY
+              // state from claiming the session has no messages
+              // before we know that.
+              <div className="min-h-0 flex-1" />
+            ) : isEmpty ? (
+              <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-6 text-center">
+                {activeBot ? (
+                  <div className="flex flex-col items-center gap-4">
+                    <BotAvatar username={activeBot.username} size={56} />
+                    <div className="flex max-w-xs flex-col gap-2">
+                      <p className="text-sm font-medium text-text">
+                        {t('bots.talkingTo', { username: activeBot.username })}
+                      </p>
+                      <p className="text-sm text-text-muted">{t('bots.intro')}</p>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-sm text-text-muted"></p>
+                )}
               </div>
             ) : (
-              <p className="text-sm text-text-muted"></p>
+              <CanvasTranscript
+                transparent={wallpaper}
+                messages={messages}
+                streaming={streaming}
+                chatId={activeChatId}
+                pinSignal={sentMessageSignal}
+                onCancelSubagent={(subChatId) => void cancelSubagent(subChatId)}
+                onCancelTool={(callId) => void cancelToolCall(callId)}
+              />
             )}
-          </div>
-        ) : (
-          <CanvasTranscript
-            transparent={wallpaper}
-            messages={messages}
-            streaming={streaming}
-            chatId={activeChatId}
-            pinSignal={sentMessageSignal}
-            onCancelSubagent={(subChatId) => void cancelSubagent(subChatId)}
-            onCancelTool={(callId) => void cancelToolCall(callId)}
-          />
-        )}
-        {/* The fade overlaps the scroller without adding layout space. The last
+            {/* The fade overlaps the scroller without adding layout space. The last
           message's own bottom padding keeps its text clear of the fade, and
           mr-2.5 leaves the scrollbar uncovered. */}
-        <div
-          aria-hidden
-          className={cn(
-            'pointer-events-none relative z-10 -mt-2 mr-2.5 h-2 shrink-0',
-            !wallpaper && 'bg-gradient-to-b from-transparent to-bg'
-          )}
-        />
+            <div
+              aria-hidden
+              className={cn(
+                'pointer-events-none relative z-10 -mt-2 mr-2.5 h-2 shrink-0',
+                !wallpaper && 'bg-gradient-to-b from-transparent to-bg'
+              )}
+            />
 
-        {deliveryIssues.length > 0 && (
-          <div className={cn('px-4 pt-2', !wallpaper && 'bg-bg')}>
-            <div className="mx-auto max-w-3xl">
-              <p className="mb-1 text-xs text-danger">{t('queue.deliveryIssues')}</p>
-              <QueueList>
-                {deliveryIssues.map((item, i) => (
-                  <QueuedMessage
-                    key={item.id}
-                    item={item}
-                    index={i}
-                    total={deliveryIssues.length}
-                  />
-                ))}
-              </QueueList>
-            </div>
-          </div>
-        )}
-        {queue.length > 0 && (
-          <div data-waiting-queue className={cn('px-4 pt-2', !wallpaper && 'bg-bg')}>
-            <div className="mx-auto max-w-3xl">
-              <Queue>
-                <QueueSection defaultOpen>
-                  <QueueSectionTrigger>
-                    <QueueSectionLabel
-                      label={t('chat.queued')}
-                      count={queue.length}
-                      icon={<ListTree className="h-3.5 w-3.5 text-text-subtle" />}
-                    />
-                    {sending && queueHasUserRequests && (
-                      <span className="ml-auto text-[10px] text-text-subtle">
-                        {t('chat.runsAfterReply')}
-                      </span>
-                    )}
-                  </QueueSectionTrigger>
-                  <QueueSectionContent>
-                    <QueueList>
-                      {queue.map((item, i) => (
-                        <QueuedMessage
-                          key={item.id}
-                          item={item}
-                          index={i}
-                          total={queue.length}
-                          pending={!!optimisticQueue?.some((entry) => entry.id === item.id)}
+            {deliveryIssues.length > 0 && (
+              <div className={cn('px-4 pt-2', !wallpaper && 'bg-bg')}>
+                <div className="mx-auto max-w-3xl">
+                  <p className="mb-1 text-xs text-danger">{t('queue.deliveryIssues')}</p>
+                  <QueueList>
+                    {deliveryIssues.map((item, i) => (
+                      <QueuedMessage
+                        key={item.id}
+                        item={item}
+                        index={i}
+                        total={deliveryIssues.length}
+                      />
+                    ))}
+                  </QueueList>
+                </div>
+              </div>
+            )}
+            {queue.length > 0 && (
+              <div data-waiting-queue className={cn('px-4 pt-2', !wallpaper && 'bg-bg')}>
+                <div className="mx-auto max-w-3xl">
+                  <Queue>
+                    <QueueSection defaultOpen>
+                      <QueueSectionTrigger>
+                        <QueueSectionLabel
+                          label={t('chat.queued')}
+                          count={queue.length}
+                          icon={<ListTree className="h-3.5 w-3.5 text-text-subtle" />}
                         />
-                      ))}
-                    </QueueList>
-                  </QueueSectionContent>
-                </QueueSection>
-              </Queue>
-            </div>
-          </div>
-        )}
+                        {sending && queueHasUserRequests && (
+                          <span className="ml-auto text-[10px] text-text-subtle">
+                            {t('chat.runsAfterReply')}
+                          </span>
+                        )}
+                      </QueueSectionTrigger>
+                      <QueueSectionContent>
+                        <QueueList>
+                          {queue.map((item, i) => (
+                            <QueuedMessage
+                              key={item.id}
+                              item={item}
+                              index={i}
+                              total={queue.length}
+                              pending={!!optimisticQueue?.some((entry) => entry.id === item.id)}
+                            />
+                          ))}
+                        </QueueList>
+                      </QueueSectionContent>
+                    </QueueSection>
+                  </Queue>
+                </div>
+              </div>
+            )}
 
-        {provider?.seedId === 'github-copilot' && (
-          <CopilotReconnect
-            key={provider.id}
-            connectionId={provider.id}
-            needed={copilotNeedsReauthentication[provider.id] ?? false}
-            onConnected={refreshProviders}
-          />
-        )}
+            {provider?.seedId === 'github-copilot' && (
+              <CopilotReconnect
+                key={provider.id}
+                connectionId={provider.id}
+                needed={copilotNeedsReauthentication[provider.id] ?? false}
+                onConnected={refreshProviders}
+              />
+            )}
 
-        {/* A subagent's session can now be stopped from its own composer: the Stop
+            {/* A subagent's session can now be stopped from its own composer: the Stop
           cancels the DELEGATE (there is no local request here to abort), which
           is what the button visibly means in this view. */}
-        <Composer
-          key={activeChatId}
-          chatId={activeChat.id}
-          onSend={submit}
-          variant={activeChat.kind === 'bot' ? 'bot' : 'session'}
-          sending={sending || subagentRunning}
-          onStop={
-            subagentRunning && activeChatId ? () => void cancelSubagent(activeChatId) : () => stop()
-          }
-        />
+            <Composer
+              key={activeChatId}
+              chatId={activeChat.id}
+              onSend={submit}
+              variant={activeChat.kind === 'bot' ? 'bot' : 'session'}
+              sending={sending || subagentRunning}
+              onStop={
+                subagentRunning && activeChatId
+                  ? () => void cancelSubagent(activeChatId)
+                  : () => stop()
+              }
+            />
 
-        {!activeBot && activeChat.kind !== 'bot' && <WorkstreamStrip />}
+            {!activeBot && activeChat.kind !== 'bot' && <WorkstreamStrip />}
+          </div>
+        </div>
+        {fileSelection && (
+          <WorkspaceFileCanvas
+            key={
+              activeChat.id + fileSelection.rootId + fileSelection.path + fileSelection.comparison
+            }
+            sessionId={activeChat.id}
+            selection={fileSelection}
+            snapshot={inspection.snapshot}
+            onBack={() => {
+              setSelectedFile(null)
+            }}
+          />
+        )}
       </div>
+      {inspectorOpen && (
+        <WorkspaceInspector
+          key={activeChat.id + (inspection.snapshot?.roots.map((root) => root.id).join(',') ?? '')}
+          sessionId={activeChat.id}
+          snapshot={inspection.snapshot}
+          failed={inspection.failed}
+          onSelect={(selection) => setSelectedFile({ sessionId: activeChat.id, selection })}
+          onClose={() => {
+            setInspectorSession(null)
+            setSelectedFile(null)
+          }}
+        />
+      )}
     </div>
   )
 }

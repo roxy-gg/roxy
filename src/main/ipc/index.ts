@@ -1,3 +1,4 @@
+import { inspectWorkspace, listWorkspace, readWorkspace } from '../services/workspace-inspector'
 import { registerCheatIpc, resetCheatTools, closeCheatSession } from '../services/cheat'
 import { registerEngineeringIpc, resetEngineeringTools } from '../services/engineering-tools'
 import { closeEngineeringSession } from '../services/engineering-runtime'
@@ -1457,6 +1458,24 @@ export function registerIpc(): void {
     if (title) browser.setLabel(key, title)
     await browser.navigate(`http://localhost:${port}`, key)
   })
+
+  ipcMain.handle(CHANNELS.workspaceInspect, (event, sessionId: string) =>
+    trustedWallpaper(event) ? inspectWorkspace(sessionId) : { roots: [] }
+  )
+  ipcMain.handle(
+    CHANNELS.workspaceList,
+    (event, sessionId: string, rootId: string, directory: string) =>
+      trustedWallpaper(event)
+        ? listWorkspace(sessionId, rootId, directory)
+        : { ok: false, reason: 'unsafe' }
+  )
+  ipcMain.handle(
+    CHANNELS.workspaceRead,
+    (event, sessionId: string, rootId: string, file: string, comparison: boolean) =>
+      trustedWallpaper(event)
+        ? readWorkspace(sessionId, rootId, file, comparison === true)
+        : { ok: false, reason: 'unsafe' }
+  )
 
   // ---- git (worktree-backed sessions) ----
   // Every handler degrades instead of throwing: a folder that isn't a repo, or a

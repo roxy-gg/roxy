@@ -313,6 +313,9 @@ export const CHANNELS = {
   servicesRestart: 'services:restart',
   servicesOpen: 'services:open',
 
+  workspaceInspect: 'workspace:inspect',
+  workspaceList: 'workspace:list',
+  workspaceRead: 'workspace:read',
   gitAvailable: 'git:available',
   gitStatus: 'git:status',
   gitStatusMulti: 'git:status-multi',

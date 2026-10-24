@@ -5,16 +5,17 @@ import type { Chat, Message, MessagePart, QueueItem } from '../../src/shared/typ
 import { useRoxyStore } from '../../src/renderer/src/lib/store'
 import Chat from '../../src/renderer/src/routes/Chat'
 
+const workspaceFixture = new URLSearchParams(location.search).has('workspace')
 const baseChat: Chat = {
   id: 'project-chat',
-  title: 'Project session',
+  title: workspaceFixture ? 'Git Changes and File Explorer' : 'Project session',
   kind: 'main',
   providerId: null,
   model: null,
   agentId: null,
   reasoningEffort: null,
   contextLimit: null,
-  workspacePath: null,
+  workspacePath: workspaceFixture ? '/projects/roxy' : null,
   worktreePath: null,
   repos: null,
   worktreePending: null,
@@ -365,6 +366,139 @@ Object.assign(window.roxy, {
   })
 }
 
+if (workspaceFixture) {
+  const changes = [
+    {
+      path: 'src/renderer/src/components/ChatView.tsx',
+      status: 'modified',
+      additions: 36,
+      deletions: 12
+    },
+    {
+      path: 'src/renderer/src/components/WorkspaceInspector.tsx',
+      status: 'added',
+      additions: 72,
+      deletions: 0
+    },
+    {
+      path: 'src/main/services/workspace-inspector.ts',
+      status: 'added',
+      additions: 18,
+      deletions: 0
+    },
+    { path: 'src/renderer/src/assets/main.css', status: 'modified', additions: 0, deletions: 21 }
+  ] as const
+  const before =
+    'export function ChatView() {\n  return (\n    <main className="conversation">\n      <Transcript />\n      <Composer />\n    </main>\n  )\n}\n'
+  const after =
+    'export function ChatView() {\n  const [inspectorOpen, setInspectorOpen] = useState(false)\n\n  return (\n    <main className="conversation">\n      <WorkspaceSummary onClick={() => setInspectorOpen(!inspectorOpen)} />\n      <Transcript />\n      <Composer />\n      {inspectorOpen && <WorkspaceInspector />}\n    </main>\n  )\n}\n'
+  Object.assign(window.roxy, {
+    workspace: {
+      inspect: async () => ({
+        roots: [
+          {
+            id: 'roxy',
+            name: 'roxy',
+            branch: 'roxy/git-changes-and-file-explorer',
+            isRepo: true,
+            unavailable: false,
+            partial: false,
+            changes
+          }
+        ]
+      }),
+      list: async (_sessionId: string, _rootId: string, directory: string) => {
+        const paths = [
+          'src/renderer/src/components/ChatView.tsx',
+          'src/renderer/src/components/WorkspaceInspector.tsx',
+          'src/renderer/src/assets/main.css',
+          'src/main/services/workspace-inspector.ts',
+          '.github/workflows/build.yml',
+          'docs/README.md',
+          'script/dev.mjs',
+          'test/workspace-inspector.ts',
+          'AGENTS.md',
+          'README.md',
+          'package.json',
+          'tsconfig.json'
+        ]
+        const children = new Map<string, { name: string; path: string; kind: string }>()
+        for (const path of paths) {
+          if (directory && !path.startsWith(directory + '/')) continue
+          const tail = directory ? path.slice(directory.length + 1) : path
+          const name = tail.split('/')[0]
+          children.set(name, {
+            name,
+            path: directory ? directory + '/' + name : name,
+            kind: tail.includes('/') ? 'directory' : 'file'
+          })
+        }
+        return {
+          ok: true,
+          partial: false,
+          entries: [...children.values()].sort(
+            (a, b) =>
+              Number(b.kind === 'directory') - Number(a.kind === 'directory') ||
+              a.name.localeCompare(b.name)
+          )
+        }
+      },
+      read: async (_sessionId: string, _rootId: string, file: string, comparison: boolean) => ({
+        ok: true,
+        before: comparison ? before : '',
+        after: file.endsWith('.json') ? '{\n  "name": "roxy",\n  "version": "1.0.21"\n}\n' : after
+      })
+    },
+    git: {
+      available: async () => true,
+      status: async () => ({
+        isRepo: true,
+        root: '/projects/roxy',
+        branch: 'roxy/git-changes-and-file-explorer',
+        dirty: true,
+        changed: 4,
+        ahead: 0,
+        behind: 0,
+        hasUpstream: false,
+        defaultBranch: 'main'
+      }),
+      projectRepos: async () => ({ layout: 'single', roots: ['/projects/roxy'] })
+    },
+    forge: { status: async () => null },
+    services: { list: async () => [] },
+    context: { instructions: async () => [] }
+  })
+  messages = [
+    {
+      id: 'workspace-user',
+      chatId: baseChat.id,
+      role: 'user',
+      createdAt: 1,
+      content:
+        'Add a compact Git summary and a file explorer, but keep the conversation front and center.',
+      parts: [
+        {
+          type: 'text',
+          text: 'Add a compact Git summary and a file explorer, but keep the conversation front and center.'
+        }
+      ]
+    },
+    {
+      id: 'workspace-assistant',
+      chatId: baseChat.id,
+      role: 'assistant',
+      createdAt: 2,
+      content: 'The workspace inspector stays out of your way until you need it.',
+      parts: [
+        {
+          type: 'text',
+          text: 'The workspace inspector stays out of your way until you need it.\n\nClick the **+126 -33** in the titlebar to review changes, or switch to **Files** to explore the project. Each changed file opens a read-only diff.\n\nThe conversation remains the main workspace. Nothing is staged, edited, or committed from the inspector.'
+        }
+      ]
+    }
+  ]
+}
+
 export function BotsHarness(): JSX.Element {
   const [ready, setReady] = useState(false)
   useEffect(() => {
@@ -392,14 +526,25 @@ export function BotsHarness(): JSX.Element {
       } as ReturnType<typeof useRoxyStore.getState>['settings'],
       activeChatId: baseChat.id,
       messagesChatId: baseChat.id,
-      gitAvailable: false
+      gitAvailable: workspaceFixture,
+      messages: workspaceFixture ? messages : [],
+      usageStats: workspaceFixture
+        ? ({ providers: [], updatedAt: Date.now() } as unknown as ReturnType<
+            typeof useRoxyStore.getState
+          >['usageStats'])
+        : null
     })
+    if (workspaceFixture) {
+      useRoxyStore.setState((state) => ({
+        providers: state.providers.map((provider) => ({ ...provider, auth: 'api-key' }))
+      }))
+    }
     setReady(true)
   }, [])
   if (!ready) return <></>
   return (
     <HashRouter>
-      <div className="bar">
+      <div className="bar" style={workspaceFixture ? { display: 'none' } : undefined}>
         <button
           id="busy"
           onClick={() => useRoxyStore.setState({ sendingChats: { 'project-chat': true } })}

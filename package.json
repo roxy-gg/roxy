@@ -85,7 +85,9 @@
     "smoke:canvas": "electron test/canvas/smoke.cjs && electron test/canvas/mentions-smoke.cjs && electron test/canvas/subagents-smoke.cjs",
     "smoke:animation": "electron test/canvas/animation.cjs",
     "perf:canvas": "electron test/canvas/performance.cjs",
-    "smoke:diff": "esbuild test/canvas/diff.ts --bundle --platform=node --format=cjs --packages=external --outfile=test/.out/diff.cjs && node test/.out/diff.cjs"
+    "smoke:diff": "esbuild test/canvas/diff.ts --bundle --platform=node --format=cjs --packages=external --outfile=test/.out/diff.cjs && node test/.out/diff.cjs",
+    "smoke:workspace": "esbuild test/workspace-inspector.ts --bundle --platform=node --format=cjs --packages=external --outfile=test/.out/workspace-inspector.cjs && electron test/.out/workspace-inspector.cjs",
+    "smoke:workspace-ui": "electron test/canvas/workspace-smoke.cjs"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^2.0.85",
