@@ -15,6 +15,7 @@ import {
   type EditorDocument
 } from '../lib/workspace-editor'
 import type { WorkspaceSelection } from './WorkspaceInspector'
+import { FileIcon } from './FileIcon'
 
 export default function FileEditor({
   sessionId,
@@ -248,6 +249,7 @@ export default function FileEditor({
         >
           <ArrowLeft className="h-3.5 w-3.5" />
         </button>
+        <FileIcon path={selection.path} />
         <span title={selection.path} className="min-w-0 flex-1 truncate font-mono text-[11px]">
           {selection.path}
         </span>

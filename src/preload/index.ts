@@ -110,6 +110,8 @@ const roxy: RoxyApi = {
     setReasoningEffort: (level) => ipcRenderer.invoke(CHANNELS.settingsSetReasoningEffort, level),
     setContextLimit: (limit) => ipcRenderer.invoke(CHANNELS.settingsSetContextLimit, limit),
     setAutoWorkstream: (enabled) => ipcRenderer.invoke(CHANNELS.settingsSetAutoWorkstream, enabled),
+    setFreshWorkstream: (enabled) =>
+      ipcRenderer.invoke(CHANNELS.settingsSetFreshWorkstream, enabled),
     setBranchPrefix: (prefix) => ipcRenderer.invoke(CHANNELS.settingsSetBranchPrefix, prefix),
     setNotifyOnComplete: (enabled) =>
       ipcRenderer.invoke(CHANNELS.settingsSetNotifyOnComplete, enabled),
@@ -213,6 +215,8 @@ const roxy: RoxyApi = {
     deleteCustom: (id) => ipcRenderer.invoke(CHANNELS.backgroundDeleteCustom, id),
     renameCustom: (id, title) => ipcRenderer.invoke(CHANNELS.backgroundRenameCustom, id, title),
     thumbnail: (id, sha256) => ipcRenderer.invoke(CHANNELS.backgroundThumbnail, id, sha256),
+    preview: (id) => ipcRenderer.invoke(CHANNELS.backgroundPreview, id),
+    previewCustom: (id) => ipcRenderer.invoke(CHANNELS.backgroundPreviewCustom, id),
     search: (input) => ipcRenderer.invoke(CHANNELS.backgroundSearch, input),
     applyCatalog: (id) => ipcRenderer.invoke(CHANNELS.backgroundApplyCatalog, id),
     submit: (input) => ipcRenderer.invoke(CHANNELS.backgroundSubmit, input),

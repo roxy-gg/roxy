@@ -389,6 +389,44 @@ async function run() {
   await key('Escape')
   check('Escape dismisses the image preview', await evaluate('!document.querySelector("dialog")'))
   await clickDom('#top')
+  const screenshotHeader = `r.action.type==='toggle' && r.action.id==='m2/12'`
+  const screenshotImage = `r.action.type==='image' && r.action.src.startsWith('data:image/svg+xml,')`
+  const collapsedScreenshotHeight = await probe('return scene.height')
+  check(
+    'screenshot starts collapsed without a preview or metadata',
+    await probe(`
+      return !scene.blocks.flatMap(b=>b.regions).some(r=>${screenshotImage}) &&
+        !scene.blocks.flatMap(b=>b.selectable).some(l=>l.text.includes('Captured a 640x360 screenshot'));
+    `)
+  )
+  await activate(screenshotHeader)
+  check(
+    'screenshot header expands both preview and metadata',
+    await probe(`
+      return scene.blocks.flatMap(b=>b.regions).some(r=>${screenshotImage}) &&
+        scene.blocks.flatMap(b=>b.selectable).some(l=>l.text.includes('Captured a 640x360 screenshot'));
+    `)
+  )
+  await activate(screenshotImage)
+  check(
+    'expanded screenshot opens the image rather than metadata',
+    await evaluate('document.querySelector("dialog")?.open===true')
+  )
+  await key('Escape')
+  await wait()
+  check(
+    'Escape dismisses the screenshot preview',
+    await evaluate('!document.querySelector("dialog")')
+  )
+  await activate(screenshotHeader)
+  check(
+    'collapsing screenshot removes the preview and its reserved space',
+    await probe(`
+      return scene.height===${collapsedScreenshotHeight} &&
+        !scene.blocks.flatMap(b=>b.regions).some(r=>${screenshotImage});
+    `)
+  )
+  await clickDom('#top')
   const settled = await probe('return probe.debug.layouts')
   await probe('el.scrollTop += 30')
   await wait()

@@ -111,6 +111,38 @@ app.whenReady().then(async () => {
     await until(`!!document.querySelector('#settings-branch-prefix.settings-search-target')`)
     assert.equal(await evaluate(`return document.activeElement.id`), 'settings-branch-prefix')
     await screenshot('desktop-dark')
+    const freshSwitch =
+      '#settings-worktrees-panel [role="switch"][aria-label="Auto-reset new workstreams to remote main"]'
+    assert.equal(
+      await evaluate(
+        `return document.querySelector(${JSON.stringify(freshSwitch)}).getAttribute('aria-checked')`
+      ),
+      'false'
+    )
+    await click(freshSwitch)
+    await until(
+      `document.querySelector(${JSON.stringify(freshSwitch)}).getAttribute('aria-checked') === 'true'`
+    )
+    await click(freshSwitch)
+    await until(
+      `document.querySelector(${JSON.stringify(freshSwitch)}).getAttribute('aria-checked') === 'false'`
+    )
+    for (const width of [360, 1440]) {
+      win.setContentSize(width, 900)
+      await wait()
+      assert(
+        await evaluate(`return document.documentElement.scrollWidth <= innerWidth`),
+        `workstream settings do not overflow at ${width}px`
+      )
+      assert(
+        await evaluate(
+          `const r = document.querySelector(${JSON.stringify(freshSwitch)}).getBoundingClientRect(); return r.width > 0 && r.left >= 0 && r.right <= innerWidth`
+        ),
+        `fresh toggle is accessible at ${width}px`
+      )
+      await screenshot('fresh-workstreams-' + width)
+    }
+    win.setContentSize(1200, 900)
     assert(
       await evaluate(
         `return document.querySelector('#settings-search-results').closest('[data-sidebar-frame]') !== null`

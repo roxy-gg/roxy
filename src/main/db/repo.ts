@@ -126,6 +126,7 @@ export function getSettings(): AppSettings {
     // someone turns it OFF ('0'), which keeps existing installs opted in
     // without a migration.
     autoWorkstream: map.get('auto_workstream') !== '0',
+    freshWorkstream: map.get('fresh_workstream') === '1',
     // `?? DEFAULT` and not `|| DEFAULT`: an EMPTY string is a deliberate
     // "no prefix", and must survive a round trip through settings.
     branchPrefix: map.get('branch_prefix') ?? DEFAULT_BRANCH_PREFIX,
@@ -261,6 +262,11 @@ export function setMotion(value: MotionPreference): AppSettings {
 export function setAutoWorkstream(enabled: boolean): AppSettings {
   // Store only the OFF state; see getSettings for why.
   setSetting('auto_workstream', enabled ? null : '0')
+  return getSettings()
+}
+
+export function setFreshWorkstream(enabled: boolean): AppSettings {
+  setSetting('fresh_workstream', enabled ? '1' : null)
   return getSettings()
 }
 

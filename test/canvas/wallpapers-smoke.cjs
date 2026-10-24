@@ -54,7 +54,12 @@ app.whenReady().then(async () => {
       width: 1000,
       height: 1000,
       show: false,
-      webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true }
+      webPreferences: {
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: true,
+        backgroundThrottling: false
+      }
     })
     const errors = []
     win.webContents.on('console-message', (_e, level, message) => {
@@ -107,6 +112,11 @@ app.whenReady().then(async () => {
       await evaluate(`return !!document.querySelector('#actions button[title]')`),
       true,
       'submit sits next to reset effects'
+    )
+    assert.equal(
+      await evaluate(`return window.__wallpapers.previews.length`),
+      0,
+      'grid never fetches animation'
     )
     await evaluate(`document.querySelector('button[aria-pressed]').click()`)
     await until(`document.querySelector('h4')`)
@@ -231,11 +241,69 @@ app.whenReady().then(async () => {
     )
     await evaluate(`document.querySelectorAll('button[aria-pressed]')[1].click()`)
     await until(`!!document.querySelector('h4')`)
+    await evaluate(`document.querySelector('[data-wallpaper-preview]').scrollIntoView()`)
+    await until(`document.querySelector('[data-wallpaper-preview] video')?.videoWidth===96`)
     assert.equal(
-      await evaluate(`return document.querySelector('video')`),
-      null,
-      'video selection remains thumbnail-only'
+      await evaluate(
+        `const v=document.querySelector('[data-wallpaper-preview] video');return v.loop && v.muted && v.playsInline && !v.paused`
+      ),
+      true
     )
+    assert.equal(
+      await evaluate(`return window.__wallpapers.applied.length`),
+      1,
+      'preview never applies'
+    )
+    const times = []
+    for (let i = 0; i < 30; i++) {
+      times.push(
+        await evaluate(
+          `return document.querySelector('[data-wallpaper-preview] video').currentTime`
+        )
+      )
+      await wait(100)
+    }
+    assert.ok(
+      times.some((time, index) => index && time < times[index - 1]),
+      'video loops back to start'
+    )
+    await evaluate(`document.querySelectorAll('button[aria-pressed]')[2].click()`)
+    await until(
+      `document.querySelector('[data-wallpaper-preview] img')?.src.startsWith('data:image/gif;')`
+    )
+    const colors = new Set()
+    for (let i = 0; i < 12; i++) {
+      const rect = await evaluate(
+        `const img=document.querySelector('[data-wallpaper-preview] img');await img.decode();const r=img.getBoundingClientRect();return {x:Math.round(r.x),y:Math.round(r.y),width:Math.round(r.width),height:Math.round(r.height)}`
+      )
+      colors.add((await win.webContents.capturePage(rect)).toPNG().toString('base64'))
+      await wait(100)
+    }
+    assert.ok(colors.size > 1, 'GIF preview changes frames')
+    await evaluate(
+      `window.__wallpapers.previewDelay=300;document.querySelectorAll('button[aria-pressed]')[1].click()`
+    )
+    await evaluate(`document.querySelectorAll('button[aria-pressed]')[0].click()`)
+    await wait(500)
+    assert.equal(
+      await evaluate(`return !!document.querySelector('[data-wallpaper-preview] video')`),
+      false,
+      'late selection is ignored'
+    )
+    await evaluate(
+      `window.__wallpapers.previewDelay=0;window.__wallpapers.previewFail=true;document.querySelectorAll('button[aria-pressed]')[1].click()`
+    )
+    await wait(100)
+    assert.equal(
+      await evaluate(`return !!document.querySelector('[data-wallpaper-preview] img')`),
+      true,
+      'failed preview retains thumbnail'
+    )
+    await evaluate(
+      `window.__wallpapers.previewFail=false;document.querySelectorAll('button[aria-pressed]')[0].click();`
+    )
+    await evaluate(`document.querySelectorAll('button[aria-pressed]')[1].click()`)
+    await until(`!!document.querySelector('[data-wallpaper-preview] video')`)
     assert.equal(
       await evaluate(
         `return performance.getEntriesByType('resource').some(entry=>entry.name.includes('do-not-load'))`
@@ -244,11 +312,26 @@ app.whenReady().then(async () => {
     )
     await click('Reduce motion')
     await until(`!document.querySelector('video')`)
+    const previewCount = await evaluate(`return window.__wallpapers.previews.length`)
+    await evaluate(`document.querySelectorAll('button[aria-pressed]')[3].click()`)
+    await wait(100)
+    assert.equal(
+      await evaluate(`return window.__wallpapers.previews.length`),
+      previewCount,
+      'reduced motion does not fetch previews'
+    )
+    await click('Full motion')
+    await until(`!!document.querySelector('[data-wallpaper-preview] video')`)
     const searches = await evaluate(`return window.__wallpapers.searches.length`)
     await click('Toggle active')
     await wait(400)
     assert.equal(await evaluate(`return window.__wallpapers.searches.length`), searches)
     assert.equal(await evaluate(`return document.querySelector('input[type=search]')`), null)
+    assert.equal(
+      await evaluate(`return document.querySelector('[data-wallpaper-preview] video')`),
+      null,
+      'inactive view releases media'
+    )
     await click('Toggle active')
     await until(`document.querySelectorAll('button[aria-pressed]').length===10`)
     await evaluate(`window.__wallpapers.fail=true`)
@@ -453,6 +536,15 @@ app.whenReady().then(async () => {
       await click('Add Custom Background')
       await until(submitVisible)
       await click('Submit for review')
+      const custom = await evaluate(`return (await window.roxy.background.get()).customId`)
+      await evaluate(
+        `document.querySelector('[data-custom-id="${custom}"]').click();document.querySelector('[data-wallpaper-preview]').scrollIntoView()`
+      )
+      await until(
+        media === 'video'
+          ? `document.querySelector('[data-wallpaper-preview] video')?.videoWidth===96`
+          : `document.querySelector('[data-wallpaper-preview] img')?.src.startsWith('data:image/gif;')`
+      )
       await until(`document.querySelector('button[aria-label="Remove tag ${media}"]')`)
       assert.equal(
         await evaluate(`return document.querySelector('input[type=checkbox]').checked`),

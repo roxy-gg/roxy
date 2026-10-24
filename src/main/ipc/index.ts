@@ -285,6 +285,9 @@ export function registerIpc(): void {
   ipcMain.handle(CHANNELS.settingsSetAutoWorkstream, (_e, enabled: boolean) =>
     repo.setAutoWorkstream(enabled)
   )
+  ipcMain.handle(CHANNELS.settingsSetFreshWorkstream, (_e, enabled: boolean) =>
+    repo.setFreshWorkstream(enabled)
+  )
   ipcMain.handle(CHANNELS.settingsSetLanguage, (_e, language: Language) =>
     repo.setLanguage(language)
   )
@@ -716,6 +719,16 @@ export function registerIpc(): void {
   ipcMain.handle(CHANNELS.backgroundThumbnail, (event, id: string, sha256: string) =>
     trustedWallpaper(event)
       ? wallpaperClient.result(() => wallpaperClient.thumbnail(id, sha256))
+      : { ok: false, error: 'invalid' }
+  )
+  ipcMain.handle(CHANNELS.backgroundPreview, (event, id: string) =>
+    trustedWallpaper(event)
+      ? wallpaperClient.result(() => wallpaperClient.preview(id))
+      : { ok: false, error: 'invalid' }
+  )
+  ipcMain.handle(CHANNELS.backgroundPreviewCustom, (event, id: string) =>
+    trustedWallpaper(event)
+      ? wallpaperClient.result(() => background.previewCustomBackground(id))
       : { ok: false, error: 'invalid' }
   )
   const backgroundSubmissions = new Set<string>()

@@ -21,6 +21,7 @@ import {
 } from '../src/main/services/automation'
 import { isVisibleQueueItem, nextQueueItem } from '../src/shared/queue'
 import { messageImages } from '../src/shared/attachments'
+import { runSessionTurn } from '../src/main/services/session-turn'
 
 app.setPath('userData', mkdtempSync(path.join(tmpdir(), 'roxy-delivery-')))
 process.env.ROXY_TRACK_DISABLE = '1'
@@ -205,6 +206,30 @@ async function main(): Promise<void> {
     { stdio: 'ignore' }
   )
   repo.createChat({ title: 'Project registration', workspacePath: root })
+  repo.setFreshWorkstream(true)
+  const freshBlocked = repo.createChat({
+    title: 'Fresh mode requires a remote',
+    workspacePath: root,
+    worktree: { mode: 'new' }
+  })
+  const beforeFresh = requests.length
+  const freshTurn = await runSessionTurn(
+    {
+      sessionId: freshBlocked.id,
+      requestId: 'fresh-workstream-fixture',
+      providerId: provider.id,
+      model: 'fixture-model',
+      messages: [{ role: 'user', content: 'Do not run against local code' }]
+    },
+    () => {},
+    new AbortController().signal
+  )
+  assert.equal(freshTurn.ok, false, 'fresh mode blocks a turn without a reachable remote')
+  assert.match(freshTurn.error!, /fresh remote workstream/)
+  assert.equal(requests.length, beforeFresh, 'blocked worktree must not make a model request')
+  assert.ok(repo.getChat(freshBlocked.id)?.worktreePending, 'blocked turn remains retryable')
+  assert.equal(repo.getChat(freshBlocked.id)?.worktreePath, null)
+  repo.setFreshWorkstream(false)
   const created = await runTool(
     'session_manage',
     { action: 'create', project: root, title: 'New workstream fixture' },

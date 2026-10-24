@@ -167,6 +167,7 @@ export default function Settings(): JSX.Element {
   const refreshProviders = useRoxyStore((s) => s.refreshProviders)
   const reorderProviders = useRoxyStore((s) => s.reorderProviders)
   const setAutoWorkstream = useRoxyStore((s) => s.setAutoWorkstream)
+  const setFreshWorkstream = useRoxyStore((s) => s.setFreshWorkstream)
   const telemetryEnabled = useRoxyStore((s) => s.telemetryEnabled)
   const setTelemetryEnabled = useRoxyStore((s) => s.setTelemetryEnabled)
   const setBranchPrefix = useRoxyStore((s) => s.setBranchPrefix)
@@ -723,6 +724,25 @@ export default function Settings(): JSX.Element {
             <Switch
               checked={settings?.autoWorkstream ?? true}
               onChange={(v) => void setAutoWorkstream(v)}
+            />
+          </div>
+
+          <div className="mt-3 flex flex-col gap-3 sq sq-xl sq-ring rounded-xl border border-border bg-surface p-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0">
+              <div id="settings-fresh-worktree" className="text-sm font-medium text-text">
+                {t('settings.workstreams.freshTitle')}
+              </div>
+              <p className="mt-0.5 text-xs text-text-muted">
+                {t('settings.workstreams.freshDescription')}
+              </p>
+              <p className="mt-2 text-xs text-text-subtle">
+                {t('settings.workstreams.freshFootnote')}
+              </p>
+            </div>
+            <Switch
+              label={t('settings.workstreams.freshTitle')}
+              checked={settings?.freshWorkstream ?? false}
+              onChange={(v) => void setFreshWorkstream(v)}
             />
           </div>
 

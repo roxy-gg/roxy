@@ -163,6 +163,23 @@ async function run(): Promise<void> {
       animated: true
     }).metadata()
     assert.equal(gifMeta.pages, 2)
+    const gifId = gif.state.customId!
+    await service.removeBackground()
+    const beforePreview = await service.getBackground()
+    const gifPreview = await service.previewCustomBackground(gifId)
+    assert.ok(gifPreview?.startsWith('data:image/webp;'))
+    const gifPreviewInfo = await sharp(Buffer.from(gifPreview.split(',')[1], 'base64'), {
+      animated: true
+    }).metadata()
+    assert.equal(gifPreviewInfo.pages, 2)
+    assert.equal(gifPreviewInfo.loop, 0)
+    assert.deepEqual(
+      await service.getBackground(),
+      beforePreview,
+      'previewing inactive GIF is read-only'
+    )
+    await service.applyCustomBackground(gifId)
+    await assert.rejects(() => service.previewCustomBackground('../escape'))
     assert.deepEqual(gifMeta.delay, [100, 100])
     assert.equal((await service.getBackground()).image, gif.state.image)
 
@@ -232,6 +249,16 @@ async function run(): Promise<void> {
       ).metadata()
       assert.equal(frame.width, 96)
       assert.equal(frame.height, 64)
+      const beforeVideoPreview = await service.getBackground()
+      assert.equal(
+        await service.previewCustomBackground(result.state.customId!),
+        result.state.image
+      )
+      assert.deepEqual(
+        await service.getBackground(),
+        beforeVideoPreview,
+        'local video preview does not apply'
+      )
       if (extension === 'mp4') {
         const downloaded = await download(await fs.readFile(videoInput), 'video/mp4', 'video')
         assert.equal(
@@ -459,6 +486,11 @@ async function run(): Promise<void> {
       second.id,
       'approval of another item never switches selection'
     )
+    assert.equal(
+      await service.previewCustomBackground(first.id),
+      null,
+      'published stills need no animated preview'
+    )
     await service.applyCustomBackground(first.id)
     assert.equal((await service.getBackground()).customPublished, true)
     await assert.rejects(
@@ -492,6 +524,10 @@ async function run(): Promise<void> {
       'publication badges do not report a local upload as catalog use'
     )
     await service.deleteCustomBackground(second.id)
+    await assert.rejects(
+      () => service.previewCustomBackground(second.id),
+      'deleted media cannot be previewed'
+    )
     await assert.rejects(
       () => service.getCustomSubmission(second.id),
       'deleted saved media cannot be submitted'

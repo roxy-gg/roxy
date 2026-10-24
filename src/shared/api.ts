@@ -878,6 +878,7 @@ export interface RoxyApi {
     setReasoningEffort(level: ReasoningEffort): Promise<AppSettings>
     setContextLimit(limit: number | null): Promise<AppSettings>
     setAutoWorkstream(enabled: boolean): Promise<AppSettings>
+    setFreshWorkstream(enabled: boolean): Promise<AppSettings>
     setBranchPrefix(prefix: string): Promise<AppSettings>
     /** Notify when a turn finishes: chime + OS toast, or nothing. */
     setNotifyOnComplete(enabled: boolean): Promise<AppSettings>
@@ -1005,6 +1006,8 @@ export interface RoxyApi {
     deleteCustom(id: string): Promise<BackgroundResult>
     renameCustom(id: string, title: string): Promise<BackgroundResult>
     thumbnail(id: string, sha256: string): Promise<WallpaperResult<string>>
+    preview(id: string): Promise<WallpaperResult<string | null>>
+    previewCustom(id: string): Promise<WallpaperResult<string | null>>
     search(input: WallpaperQuery): Promise<WallpaperResult<WallpaperPage>>
     applyCatalog(id: string): Promise<WallpaperResult<BackgroundResult | null>>
     submit(input: WallpaperSubmitRequest): Promise<WallpaperResult<{ id: string }>>
