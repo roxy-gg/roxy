@@ -8,7 +8,6 @@ import {
   FolderOpen,
   GitBranch,
   GitCompareArrows,
-  Loader2,
   PanelRight,
   Pencil
 } from 'lucide-react'
@@ -223,7 +222,7 @@ function Directory({
   directory?: string
   depth?: number
   onSelect: (selection: WorkspaceSelection) => void
-}): JSX.Element {
+}): JSX.Element | null {
   const { t } = useTranslation()
   const [result, setResult] = useState<InspectionResult<{
     entries: WorkspaceEntry[]
@@ -243,8 +242,7 @@ function Directory({
       cancelled = true
     }
   }, [sessionId, root, directory])
-  if (!result)
-    return <div className="px-3 py-2 text-[11px] text-text-subtle">{t('inspector.loading')}</div>
+  if (!result) return null
   if (!result.ok)
     return (
       <div role="status" className="px-3 py-2 text-[11px] text-text-subtle">
@@ -687,12 +685,6 @@ export function WorkspaceInspector({
         aria-labelledby={`inspector-tab-${tab}`}
         className="min-h-0 flex-1 overflow-auto px-2 py-2"
       >
-        {!snapshot && !failed && (
-          <div className="flex items-center gap-2 p-3 text-xs text-text-subtle">
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            {t('inspector.loading')}
-          </div>
-        )}
         {failed && (
           <p role="status" className="p-3 text-xs text-text-subtle">
             {t('inspector.unavailable')}
