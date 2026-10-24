@@ -76,7 +76,14 @@ app.whenReady().then(async () => {
       'if (!window.__originalInspect) { window.__originalInspect = window.roxy.workspace.inspect; window.roxy.workspace.inspect = async (...args) => structuredClone(await window.__originalInspect(...args)); }'
     )
     await click('[data-workspace-toggle]')
-    await until(`!!document.querySelector('#workspace-inspector section button')`)
+    await until(`!!document.querySelector('#workspace-inspector button[title="src"]')`)
+    assert.equal(
+      await evaluate(
+        `return document.querySelector('#inspector-tab-files').getAttribute('aria-selected')`
+      ),
+      'true',
+      'the +/- summary opens the full file tree by default'
+    )
     assert.equal(
       await evaluate(
         `return getComputedStyle(document.querySelector('#workspace-inspector')).position`
@@ -178,14 +185,23 @@ app.whenReady().then(async () => {
     await until(
       'document.querySelector("#workspace-inspector").getBoundingClientRect().width === 330'
     )
+    await click('#inspector-tab-changes')
     await click('[aria-label="Close files and changes"]')
     await click('[data-workspace-toggle]')
     await until(
       'document.querySelector("#workspace-inspector").getBoundingClientRect().width === 330'
     )
+    assert.equal(
+      await evaluate(
+        `return document.querySelector('#inspector-tab-files').getAttribute('aria-selected')`
+      ),
+      'true',
+      'reopening defaults to Files even after viewing Changes'
+    )
     await evaluate(
       'document.querySelector("#workspace-inspector [role=separator]").dispatchEvent(new MouseEvent("dblclick",{bubbles:true}))'
     )
+    await click('#inspector-tab-changes')
     await screenshot('changes')
     const changeIcon = await evaluate(
       `return document.querySelector('#workspace-inspector section button[title="src/renderer/src/components/ChatView.tsx"] svg').innerHTML`
@@ -666,11 +682,19 @@ app.whenReady().then(async () => {
           await evaluate(`return document.querySelector('[data-workspace-toggle]').title`),
           'Files and changes'
         )
-        await click('[data-workspace-toggle]')
-        await until(`!document.querySelector('#workspace-inspector')`)
-        await click('[data-workspace-toggle]')
-        await until(`!!document.querySelector('#workspace-inspector')`)
       }
+      await click('#inspector-tab-changes')
+      await click('[data-workspace-toggle]')
+      await until(`!document.querySelector('#workspace-inspector')`)
+      await click('[data-workspace-toggle]')
+      await until(`!!document.querySelector('#workspace-inspector button[title="src"]')`)
+      assert.equal(
+        await evaluate(
+          `return document.querySelector('#inspector-tab-files').getAttribute('aria-selected')`
+        ),
+        'true',
+        `Files is the default with +${additions}/-${deletions}`
+      )
     }
     await evaluate('window.roxy.workspace.inspect = window.__originalInspect')
     assert.equal(errors.length, 0, errors.join('\n'))

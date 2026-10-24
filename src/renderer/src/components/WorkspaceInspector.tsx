@@ -499,7 +499,7 @@ export function WorkspaceInspector({
   onClose: () => void
 }): JSX.Element {
   const { t } = useTranslation()
-  const [tab, setTab] = useState<'changes' | 'files'>('changes')
+  const [tab, setTab] = useState<'changes' | 'files'>('files')
   const panel = useRef<HTMLElement>(null)
   const summary = totals(snapshot)
   const defaultWidth =
