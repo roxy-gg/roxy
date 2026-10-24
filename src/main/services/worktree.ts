@@ -6,8 +6,8 @@
  * LAZILY, on a session's first turn. Creating it when the session is created
  * would litter the disk with directories for every composer someone opened and
  * abandoned. And because it happens on the turn path, failure must be soft — a
- * missing git binary, a locked index or an offline fetch degrades to "run in the
- * project folder", never to a turn that won't start.
+ * missing git binary, a locked index or an offline fetch normally degrades to
+ * the project folder. Opt-in fresh mode instead preserves the intent for retry.
  */
 import {
   DEFAULT_BRANCH_PREFIX,
@@ -103,8 +103,10 @@ export interface MaterializeResult {
    * session. Undefined and `[]` both mean "not composite"; see shared/repos.ts.
    */
   repos?: RepoLink[]
-  /** Set when we fell back to the project folder; safe to show the user. */
+  /** A creation failure or warning, safe to show the user. */
   error?: string
+  /** Fresh mode must never run in the project folder after a failed checkout. */
+  blocked?: boolean
 }
 
 /**
@@ -112,7 +114,8 @@ export interface MaterializeResult {
  *
  * Called on the turn path, so it returns quickly when there's nothing to do
  * (the overwhelmingly common case: no pending intent). The intent is cleared
- * on success or failure. A stopped turn preserves the intent if checkout has
+ * on success or a soft failure. Fresh mode keeps it on failure for retry.
+ * A stopped turn preserves the intent if checkout has
  * not begun, so the next turn can try again instead of running in place.
  */
 export async function materializePendingWorktree(
@@ -141,18 +144,31 @@ export async function materializePendingWorktree(
     return { ok: false }
   }
 
-  const result = await createForWorkspace(workspace, intent, chat.title, signal)
+  const requireFresh =
+    intent.mode === 'new' && !intent.baseRef?.trim() && repo.getSettings().freshWorkstream
+  const result = await createForWorkspace(workspace, intent, chat.title, signal, requireFresh)
   // Cancellation before checkout preserves the intent for the next turn.
   if (signal?.aborted && !result.worktreePath) return { ok: false }
-  // Clear the intent either way: fulfilled, or failed and falling back.
-  repo.setChatWorktreePending(chatId, null)
-  if (!result.ok || !result.worktreePath) return result
+  if (requireFresh && !result.ok) {
+    return {
+      ...result,
+      blocked: true,
+      error: `Could not start a fresh remote workstream. ${result.error ?? ''} Retry, or turn off auto-reset in Workstreams settings.`
+    }
+  }
+  if (!result.ok || !result.worktreePath) {
+    repo.setChatWorktreePending(chatId, null)
+    return result
+  }
 
   repo.setChatWorktree(chatId, {
     worktreePath: result.worktreePath,
     branch: result.branch ?? null,
     repos: result.repos ?? null
   })
+  // Persist the checkout before clearing intent, so a failed DB write cannot
+  // let fresh mode fall back to the shared project folder.
+  repo.setChatWorktreePending(chatId, null)
 
   // Give the session its own dev port before the setup script runs, so an
   // install that builds against a port sees the right one. Allocation failure
@@ -196,7 +212,8 @@ async function createForWorkspace(
   workspace: string,
   intent: WorktreeIntent,
   title: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  requireFresh = false
 ): Promise<MaterializeResult> {
   if (signal?.aborted) return { ok: false }
   if (!(await git.isGitAvailable(signal))) {
@@ -211,8 +228,21 @@ async function createForWorkspace(
   if (layout === 'none') {
     return { ok: false, error: 'This folder isn’t a git repository, so the session runs in place.' }
   }
+  // Preflight every remote before creating trees, so failed fetches are retryable.
+  const freshBases = new Map<string, { baseRef: string; baseBranch: string; requireNew: true }>()
+  if (requireFresh) {
+    for (const root of roots) {
+      const fresh = await git.freshWorktreeBase(root, signal)
+      if (!fresh.ok) return { ok: false, error: `${path.basename(root)}: ${fresh.error}` }
+      freshBases.set(normalizePath(root), {
+        baseRef: fresh.baseRef,
+        baseBranch: fresh.baseBranch,
+        requireNew: true
+      })
+    }
+  }
   if (layout === 'multi') {
-    return createComposite(workspace, roots, intent, title, signal)
+    return createComposite(workspace, roots, intent, title, signal, freshBases)
   }
 
   const root = (await git.repoRoot(workspace, signal)) ?? roots[0]
@@ -233,7 +263,10 @@ async function createForWorkspace(
       const baseRef = intent.baseRef?.trim()
         ? ((await git.resolveCommit(root, intent.baseRef.trim(), signal)) ?? undefined)
         : undefined
-      const r = await git.createWorktree({ repoRoot: root, branch, baseRef }, signal)
+      const r = await git.createWorktree(
+        { repoRoot: root, branch, baseRef, ...freshBases.get(normalizePath(root)) },
+        signal
+      )
       if (!r.ok || !r.worktree)
         return { ok: false, error: r.error ?? 'Could not create the worktree.' }
       return { ok: true, worktreePath: r.worktree.path, branch: r.worktree.branch ?? branch }
@@ -278,7 +311,8 @@ async function createComposite(
   roots: string[],
   intent: WorktreeIntent,
   title: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  freshBases = new Map<string, { baseRef: string; baseBranch: string; requireNew: true }>()
 ): Promise<MaterializeResult> {
   try {
     // `attach`/`fromBranch` name one branch; `new` derives one free everywhere.
@@ -321,6 +355,7 @@ async function createComposite(
                     undefined)
                   : undefined,
                 path: link.worktreePath,
+                ...freshBases.get(normalizePath(link.root)),
                 exactPath: true
               },
               signal

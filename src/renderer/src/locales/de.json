@@ -988,6 +988,9 @@
     "workstreams": {
       "autoDescription": "Jede Sitzung arbeitet in einem eigenen Git-Worktree auf einem eigenen Branch, sodass parallele Sitzungen sich nicht gegenseitig überschreiben oder mit Ihrem Editor in Konflikt geraten können. Der Ordner wird bei der ersten Nachricht der Sitzung und nur in Git-Repositories erstellt. Deaktivieren Sie dies, um neue Sitzungen direkt im Projektordner auszuführen.",
       "autoTitle": "Neue Sitzungen erhalten einen eigenen Workstream",
+      "freshDescription": "Power-user option. On the first message, fetch origin and start the new workstream exactly at origin/main (or the repository's default branch). If the remote cannot be refreshed, the session waits for you to retry instead of using stale code.",
+      "freshFootnote": "Off by default. Only applies to new workstreams, not sessions in the project folder, forks, selected branches, or existing workstreams. Your project folder and other sessions are never reset.",
+      "freshTitle": "Auto-reset new workstreams to remote main",
       "heading": "Workstreams",
       "prefixAriaLabel": "Branch-Präfix",
       "prefixDescription": "Neue Workstreams erhalten einen Branch, der nach der Sitzung benannt ist. Dies ist das, was davor steht – verwenden Sie Ihre Initialen, <code>wip</code>, oder lassen Sie es leer für kein Präfix.",

@@ -988,6 +988,9 @@
     "workstreams": {
       "autoDescription": "每个会话都在自己的分支上使用自己的 git 工作树，因此并行会话不会相互覆盖或与您的编辑器冲突。文件夹在会话的第一个消息时创建，并且仅在 git 仓库中。关闭此选项可在项目文件夹中直接运行新会话。",
       "autoTitle": "新会话获取自己的工作流",
+      "freshDescription": "Power-user option. On the first message, fetch origin and start the new workstream exactly at origin/main (or the repository's default branch). If the remote cannot be refreshed, the session waits for you to retry instead of using stale code.",
+      "freshFootnote": "Off by default. Only applies to new workstreams, not sessions in the project folder, forks, selected branches, or existing workstreams. Your project folder and other sessions are never reset.",
+      "freshTitle": "Auto-reset new workstreams to remote main",
       "heading": "工作流",
       "prefixAriaLabel": "分支前缀",
       "prefixDescription": "新工作流的分支以会话命名。这是它前面的内容 — 使用您的首字母缩写、<code>wip</code>，或者清除它以不使用任何前缀。",

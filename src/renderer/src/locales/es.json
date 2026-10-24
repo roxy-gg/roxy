@@ -988,6 +988,9 @@
     "workstreams": {
       "autoDescription": "Cada sesión trabaja en su propio worktree de git, en su propia rama, para que las sesiones en paralelo no se pisen entre sí ni entren en conflicto con tu editor. La carpeta se crea con el primer mensaje de la sesión, y solo en repositorios git. Desactiva esto para que las sesiones nuevas se ejecuten directamente en la carpeta del proyecto.",
       "autoTitle": "Cada sesión nueva tiene su propio flujo de trabajo",
+      "freshDescription": "Power-user option. On the first message, fetch origin and start the new workstream exactly at origin/main (or the repository's default branch). If the remote cannot be refreshed, the session waits for you to retry instead of using stale code.",
+      "freshFootnote": "Off by default. Only applies to new workstreams, not sessions in the project folder, forks, selected branches, or existing workstreams. Your project folder and other sessions are never reset.",
+      "freshTitle": "Auto-reset new workstreams to remote main",
       "heading": "Flujos de trabajo",
       "prefixAriaLabel": "Prefijo de rama",
       "prefixDescription": "Los flujos de trabajo nuevos crean una rama con el nombre de la sesión. Esto es lo que va delante: usa tus iniciales, <code>wip</code>, o bórralo para no usar ningún prefijo.",

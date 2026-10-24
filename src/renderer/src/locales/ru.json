@@ -988,6 +988,9 @@
     "workstreams": {
       "autoDescription": "Каждая сессия работает в своем собственном git worktree на своей собственной ветке, поэтому параллельные сессии не могут перезаписывать друг друга или конфликтовать с вашим редактором. Папка создается при первом сообщении сессии и только в репозиториях git. Отключите это, чтобы запускать новые сессии непосредственно в папке проекта.",
       "autoTitle": "Новые сессии получают свой рабочий поток",
+      "freshDescription": "Power-user option. On the first message, fetch origin and start the new workstream exactly at origin/main (or the repository's default branch). If the remote cannot be refreshed, the session waits for you to retry instead of using stale code.",
+      "freshFootnote": "Off by default. Only applies to new workstreams, not sessions in the project folder, forks, selected branches, or existing workstreams. Your project folder and other sessions are never reset.",
+      "freshTitle": "Auto-reset new workstreams to remote main",
       "heading": "Рабочие потоки",
       "prefixAriaLabel": "Префикс ветки",
       "prefixDescription": "Новые рабочие потоки получают ветку, названную в честь сессии. Это то, что идет перед ней — используйте свои инициалы, <code>wip</code>, или очистите для отсутствия префикса.",

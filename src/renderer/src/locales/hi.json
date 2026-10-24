@@ -988,6 +988,9 @@
     "workstreams": {
       "autoDescription": "प्रत्येक सत्र अपनी शाखा पर अपनी git कार्यवृक्ष में काम करता है, इसलिए समानांतर सत्र एक-दूसरे को अधिलेखित नहीं कर सकते या आपके संपादक के साथ संघर्ष नहीं कर सकते। फ़ोल्डर सत्र के पहले संदेश पर बनाया जाता है, और केवल git रिपॉजिटरी में। नए सत्रों को सीधे प्रोजेक्ट फ़ोल्डर में चलाने के लिए इसे बंद करें।",
       "autoTitle": "नए सत्रों को अपनी कार्यधारा मिलती है",
+      "freshDescription": "Power-user option. On the first message, fetch origin and start the new workstream exactly at origin/main (or the repository's default branch). If the remote cannot be refreshed, the session waits for you to retry instead of using stale code.",
+      "freshFootnote": "Off by default. Only applies to new workstreams, not sessions in the project folder, forks, selected branches, or existing workstreams. Your project folder and other sessions are never reset.",
+      "freshTitle": "Auto-reset new workstreams to remote main",
       "heading": "कार्यधाराएँ",
       "prefixAriaLabel": "शाखा उपसर्ग",
       "prefixDescription": "नई कार्यधाराओं को सत्र के नाम पर एक शाखा मिलती है। यह वह है जो इसके सामने आता है — अपने आद्याक्षर, <code>wip</code> का उपयोग करें, या बिल्कुल भी उपसर्ग के लिए इसे साफ़ करें।",

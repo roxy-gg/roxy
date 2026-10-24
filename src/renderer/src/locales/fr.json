@@ -988,6 +988,9 @@
     "workstreams": {
       "autoDescription": "Chaque session fonctionne dans son propre worktree git sur sa propre branche, de sorte que les sessions parallèles ne peuvent pas s'écraser mutuellement ou interférer avec votre éditeur. Le dossier est créé lors du premier message de la session, et uniquement dans les dépôts git. Désactivez cette option pour exécuter de nouvelles sessions directement dans le dossier du projet.",
       "autoTitle": "Les nouvelles sessions obtiennent leur propre flux de travail",
+      "freshDescription": "Power-user option. On the first message, fetch origin and start the new workstream exactly at origin/main (or the repository's default branch). If the remote cannot be refreshed, the session waits for you to retry instead of using stale code.",
+      "freshFootnote": "Off by default. Only applies to new workstreams, not sessions in the project folder, forks, selected branches, or existing workstreams. Your project folder and other sessions are never reset.",
+      "freshTitle": "Auto-reset new workstreams to remote main",
       "heading": "Flux de travail",
       "prefixAriaLabel": "Préfixe de branche",
       "prefixDescription": "Les nouveaux flux de travail obtiennent une branche nommée d'après la session. C'est ce qui la précède — utilisez vos initiales, <code>wip</code>, ou effacez-le pour n'avoir aucun préfixe.",

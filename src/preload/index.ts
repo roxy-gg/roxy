@@ -110,6 +110,8 @@ const roxy: RoxyApi = {
     setReasoningEffort: (level) => ipcRenderer.invoke(CHANNELS.settingsSetReasoningEffort, level),
     setContextLimit: (limit) => ipcRenderer.invoke(CHANNELS.settingsSetContextLimit, limit),
     setAutoWorkstream: (enabled) => ipcRenderer.invoke(CHANNELS.settingsSetAutoWorkstream, enabled),
+    setFreshWorkstream: (enabled) =>
+      ipcRenderer.invoke(CHANNELS.settingsSetFreshWorkstream, enabled),
     setBranchPrefix: (prefix) => ipcRenderer.invoke(CHANNELS.settingsSetBranchPrefix, prefix),
     setNotifyOnComplete: (enabled) =>
       ipcRenderer.invoke(CHANNELS.settingsSetNotifyOnComplete, enabled),

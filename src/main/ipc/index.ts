@@ -280,6 +280,9 @@ export function registerIpc(): void {
   ipcMain.handle(CHANNELS.settingsSetAutoWorkstream, (_e, enabled: boolean) =>
     repo.setAutoWorkstream(enabled)
   )
+  ipcMain.handle(CHANNELS.settingsSetFreshWorkstream, (_e, enabled: boolean) =>
+    repo.setFreshWorkstream(enabled)
+  )
   ipcMain.handle(CHANNELS.settingsSetLanguage, (_e, language: Language) =>
     repo.setLanguage(language)
   )

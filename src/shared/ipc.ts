@@ -41,6 +41,7 @@ export const CHANNELS = {
   settingsSetReasoningEffort: 'settings:setReasoningEffort',
   settingsSetContextLimit: 'settings:setContextLimit',
   settingsSetAutoWorkstream: 'settings:setAutoWorkstream',
+  settingsSetFreshWorkstream: 'settings:setFreshWorkstream',
   settingsSetBranchPrefix: 'settings:setBranchPrefix',
   settingsSetLanguage: 'settings:setLanguage',
   settingsSetMotion: 'settings:setMotion',

@@ -155,6 +155,10 @@ Object.assign(window.roxy, {
   }
 })
 useRoxyStore.setState({ providers: [], refreshProviders: async () => {} })
+window.roxy.settings.setFreshWorkstream = async (enabled) => ({
+  ...useRoxyStore.getState().settings!,
+  freshWorkstream: enabled
+})
 
 let activeId = DEFAULT_THEME_ID
 const custom: ThemeFile[] = []
