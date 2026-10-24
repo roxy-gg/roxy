@@ -93,7 +93,7 @@ export function NotificationSettings(): JSX.Element {
     >
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">
-          <div className="text-sm font-medium text-text">
+          <div id="settings-notifications-complete" className="text-sm font-medium text-text">
             {t('settings.notifications.completeTitle')}
           </div>
           <p className="mt-0.5 text-xs text-text-muted">

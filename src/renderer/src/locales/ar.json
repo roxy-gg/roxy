@@ -951,6 +951,16 @@
       "signedInLocally": "تم تسجيل الدخول محليًا",
       "updateKey": "تحديث مفتاح API"
     },
+    "search": {
+      "clear": "Clear search",
+      "empty": "No settings found for {{query}}",
+      "heading": "Search results",
+      "hint": "Try a different word or a more general search.",
+      "keyboardHint": "Arrow keys to navigate, Enter to open, Esc to clear.",
+      "placeholder": "Search settings",
+      "results_one": "{{count}} setting found",
+      "results_other": "{{count}} settings found"
+    },
     "title": "الإعدادات",
     "workstreams": {
       "autoDescription": "تعمل كل جلسة في شجرة عمل git خاصة بها على فرعها الخاص، لذا لا يمكن للجلسات المتوازية أن تتجاوز بعضها البعض أو تتعارض مع محرر النصوص الخاص بك. يتم إنشاء المجلد عند الرسالة الأولى للجلسة، وفقط في مستودعات git. قم بإيقاف تشغيل هذا لتشغيل الجلسات الجديدة مباشرة في مجلد المشروع.",

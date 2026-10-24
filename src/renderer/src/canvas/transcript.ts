@@ -513,6 +513,7 @@ export function layoutParts(
     }
 
     if (part.type === 'reasoning') {
+      if (typeof part.text !== 'string') return
       cursor += layoutReasoning(
         builder,
         part.text,
@@ -544,7 +545,8 @@ export function layoutParts(
       return
     }
 
-    if (part.text.trim() === '') return
+    // Unknown persisted part kinds are not prose, even if they carry a text field.
+    if (part.type !== 'text' || typeof part.text !== 'string' || part.text.trim() === '') return
     cursor += layoutMarkdown(builder, part.text, x, cursor, width, {
       color: palette.text,
       size: FONT_SIZE.body
@@ -756,7 +758,8 @@ export class BlockCache {
         (n, message) =>
           n +
           message.parts.reduce(
-            (size, part) => size + (part.type === 'text' ? part.text.length : 0),
+            (size, part) =>
+              size + (part.type === 'text' && typeof part.text === 'string' ? part.text.length : 0),
             0
           ),
         0
@@ -765,7 +768,10 @@ export class BlockCache {
     return (
       this.units + (streaming?.length ?? 0) > 128 ||
       this.characters > 60000 ||
-      (streaming?.some((part) => part.type === 'text' && part.text.length > 60000) ?? false)
+      (streaming?.some(
+        (part) => part.type === 'text' && typeof part.text === 'string' && part.text.length > 60000
+      ) ??
+        false)
     )
   }
   private entries = new Map<

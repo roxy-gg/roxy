@@ -507,6 +507,69 @@ const longInput = (messages: Message[], state = view()) => ({
   viewport: { top: 0, height: 600, tail: true, targetId: undefined as string | undefined }
 })
 
+check('invalid prose and unknown parts cannot blank retained or windowed transcripts', () => {
+  const invalid = [
+    { type: 'text' },
+    { type: 'text', text: null },
+    { type: 'text', text: 42 },
+    { type: 'reasoning' },
+    { type: 'future-part', text: 'Not prose.' },
+    { type: 'future-part' }
+  ] as unknown as MessagePart[]
+  const message: Message = {
+    id: 'invalid-parts',
+    chatId: 'test',
+    role: 'assistant',
+    content: 'Still readable.',
+    parts: [...invalid, { type: 'text', text: 'Still readable.' }],
+    createdAt: 0
+  }
+  for (const messages of [[message], [...longMessages, message]]) {
+    const input = longInput(messages)
+    const scene = layoutTranscript(
+      { ...input, viewport: messages.length === 1 ? undefined : input.viewport },
+      new BlockCache()
+    )
+    assert.ok(Number.isFinite(scene.height))
+    assert.ok(scene.blocks.at(-1)!.selectable.some((line) => line.text === 'Still readable.'))
+    assert.ok(!scene.blocks.at(-1)!.selectable.some((line) => line.text === 'Not prose.'))
+    assert.equal(!!scene.window, messages.length > 1)
+  }
+  const scene = layoutTranscript(
+    {
+      ...longInput([]),
+      streaming: [
+        {
+          type: 'tool',
+          tool: 'task',
+          state: 'running',
+          input: { tasks: [] },
+          children: [...invalid, { type: 'text', text: 'Delegate survived.' }]
+        }
+      ]
+    },
+    new BlockCache()
+  )
+  assert.ok(scene.blocks[0].selectable.some((line) => line.text === 'Delegate survived.'))
+  for (const last of invalid) {
+    const nested = layoutTranscript(
+      {
+        ...longInput([]),
+        streaming: [
+          {
+            type: 'tool',
+            tool: 'task',
+            state: 'running',
+            children: [{ type: 'text', text: 'Working.' }, last]
+          }
+        ]
+      },
+      new BlockCache()
+    )
+    assert.ok(Number.isFinite(nested.height))
+  }
+})
+
 check('transcript tails add no extra space after the last message', () => {
   for (const messages of [longMessages.slice(0, 2), longMessages]) {
     for (const streaming of [null, [], [{ type: 'text', text: 'Still writing.' }]] satisfies (

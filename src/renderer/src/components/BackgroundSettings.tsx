@@ -243,7 +243,9 @@ export function BackgroundSettings({
             <p className="mt-2 text-xs text-text-muted">{t(`background.hints.${draft.effect}`)}</p>
           </div>
           <div className="border-t border-border p-4">
-            <div className="mb-3 text-xs font-medium text-text">{t('background.sidebarStyle')}</div>
+            <div id="settings-sidebar-style" className="mb-3 text-xs font-medium text-text">
+              {t('background.sidebarStyle')}
+            </div>
             <div
               role="group"
               aria-label={t('background.sidebarStyle')}
@@ -278,7 +280,11 @@ export function BackgroundSettings({
             </p>
           </div>
           <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border p-4">
-            <label htmlFor="background-scope" className="text-xs font-medium">
+            <label
+              id="settings-background-scope"
+              htmlFor="background-scope"
+              className="text-xs font-medium"
+            >
               {t('background.showOn')}
             </label>
             <select
@@ -297,7 +303,11 @@ export function BackgroundSettings({
               className="flex flex-col gap-3 border-t border-border p-4 @min-[560px]:flex-row @min-[560px]:items-center @min-[560px]:justify-between"
             >
               <div className="min-w-0 flex-1">
-                <label htmlFor={`background-${key}`} className="text-xs font-medium">
+                <label
+                  id={`settings-${key}`}
+                  htmlFor={`background-${key}`}
+                  className="text-xs font-medium"
+                >
                   {t(`background.${key}`)}
                 </label>
                 <p className="mt-1 text-xs text-text-muted">{t(`background.${key}Hint`)}</p>
@@ -350,7 +360,11 @@ export function BackgroundSettings({
           ))}
           <div className="flex items-center justify-between gap-4 border-t border-border p-4">
             <div>
-              <label htmlFor="background-glass" className="text-xs font-medium">
+              <label
+                id="settings-background-glass"
+                htmlFor="background-glass"
+                className="text-xs font-medium"
+              >
                 {t('background.glass')}
               </label>
               <p className="mt-1 text-xs text-text-muted">{t('background.glassHint')}</p>

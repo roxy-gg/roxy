@@ -720,6 +720,16 @@
     "openPort": "Open localhost:{{port}} in this session's browser"
   },
   "settings": {
+    "search": {
+      "placeholder": "Search settings",
+      "clear": "Clear search",
+      "heading": "Search results",
+      "results_one": "{{count}} setting found",
+      "results_other": "{{count}} settings found",
+      "empty": "No settings found for {{query}}",
+      "hint": "Try a different word or a more general search.",
+      "keyboardHint": "Arrow keys to navigate, Enter to open, Esc to clear."
+    },
     "navigation": {
       "theme": "Theme",
       "addOns": "Add-Ons",

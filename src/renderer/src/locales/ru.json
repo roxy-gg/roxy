@@ -951,6 +951,16 @@
       "signedInLocally": "выполнен вход локально",
       "updateKey": "Обновить ключ API"
     },
+    "search": {
+      "clear": "Clear search",
+      "empty": "No settings found for {{query}}",
+      "heading": "Search results",
+      "hint": "Try a different word or a more general search.",
+      "keyboardHint": "Arrow keys to navigate, Enter to open, Esc to clear.",
+      "placeholder": "Search settings",
+      "results_one": "{{count}} setting found",
+      "results_other": "{{count}} settings found"
+    },
     "title": "Настройки",
     "workstreams": {
       "autoDescription": "Каждая сессия работает в своем собственном git worktree на своей собственной ветке, поэтому параллельные сессии не могут перезаписывать друг друга или конфликтовать с вашим редактором. Папка создается при первом сообщении сессии и только в репозиториях git. Отключите это, чтобы запускать новые сессии непосредственно в папке проекта.",

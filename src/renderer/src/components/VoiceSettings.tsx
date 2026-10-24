@@ -254,7 +254,10 @@ export function VoiceSettings(): JSX.Element {
         disabled={!enabled || busy}
         className="space-y-4 rounded-xl border border-border p-4 disabled:opacity-50"
       >
-        <legend className="px-1 text-xs font-semibold text-text-subtle">
+        <legend
+          id="settings-voice-microphone"
+          className="px-1 text-xs font-semibold text-text-subtle"
+        >
           {t('voice.microphone')}
         </legend>
         <p className="text-xs leading-relaxed text-text-muted">{t('voice.microphoneBody')}</p>
@@ -310,7 +313,7 @@ export function VoiceSettings(): JSX.Element {
         disabled={!enabled || busy}
         className="space-y-3 rounded-xl border border-border p-4 disabled:opacity-50"
       >
-        <legend className="px-1 text-xs font-semibold text-text-subtle">
+        <legend id="settings-voice-hotkeys" className="px-1 text-xs font-semibold text-text-subtle">
           {t('voice.hotkeys')}
         </legend>
         <p className="text-xs leading-relaxed text-text-muted">{t('voice.hotkeysBody')}</p>

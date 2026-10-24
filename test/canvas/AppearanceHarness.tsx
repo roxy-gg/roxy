@@ -53,10 +53,6 @@ export function setEngineeringState(patch: Partial<EngineeringState>): void {
   engineeringChanged()
 }
 Object.assign(window.roxy, {
-  notifications: {
-    onSoundsChanged: () => () => {},
-    soundLibrary: async () => ({ selectedId: null, sounds: [] })
-  },
   cheat: {
     state: async () => structuredClone(cheatState),
     update: async (patch) => {
@@ -130,6 +126,12 @@ Object.assign(window.roxy, {
     onProxyChanged: () => () => {}
   },
   forge: { listHosts: async () => [] },
+  notifications: {
+    soundLibrary: async () => ({ selectedId: null, sounds: [] }),
+    onSoundsChanged: () => () => {},
+    soundAudio: async () => null,
+    toast: async () => {}
+  },
   activity: {
     stats: async () =>
       aggregateActivityDays(

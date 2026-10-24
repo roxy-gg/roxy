@@ -951,6 +951,16 @@
       "signedInLocally": "connecté localement",
       "updateKey": "Mettre à jour la clé API"
     },
+    "search": {
+      "clear": "Clear search",
+      "empty": "No settings found for {{query}}",
+      "heading": "Search results",
+      "hint": "Try a different word or a more general search.",
+      "keyboardHint": "Arrow keys to navigate, Enter to open, Esc to clear.",
+      "placeholder": "Search settings",
+      "results_one": "{{count}} setting found",
+      "results_other": "{{count}} settings found"
+    },
     "title": "Paramètres",
     "workstreams": {
       "autoDescription": "Chaque session fonctionne dans son propre worktree git sur sa propre branche, de sorte que les sessions parallèles ne peuvent pas s'écraser mutuellement ou interférer avec votre éditeur. Le dossier est créé lors du premier message de la session, et uniquement dans les dépôts git. Désactivez cette option pour exécuter de nouvelles sessions directement dans le dossier du projet.",

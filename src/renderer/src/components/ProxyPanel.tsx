@@ -15,7 +15,13 @@ const EMPTY: BrowserProxyConfig = {
   hasPassword: false
 }
 
-export function ProxyPanel({ compact = false }: { compact?: boolean }): JSX.Element {
+export function ProxyPanel({
+  compact = false,
+  titleId
+}: {
+  compact?: boolean
+  titleId?: string
+}): JSX.Element {
   const { t } = useTranslation()
   const [saved, setSaved] = useState(EMPTY)
   const [enabled, setEnabled] = useState(false)
@@ -126,7 +132,7 @@ export function ProxyPanel({ compact = false }: { compact?: boolean }): JSX.Elem
     <div className={cn('bg-surface', compact ? 'flex min-h-0 flex-1 flex-col' : '')}>
       <div className={cn('flex items-start justify-between gap-4', compact ? 'px-4 py-3' : 'p-4')}>
         <div className="min-w-0">
-          <div className="flex items-center gap-2 text-sm font-medium text-text">
+          <div id={titleId} className="flex items-center gap-2 text-sm font-medium text-text">
             <ShieldCheck
               className={cn('h-4 w-4', saved.enabled ? 'text-success' : 'text-text-subtle')}
             />

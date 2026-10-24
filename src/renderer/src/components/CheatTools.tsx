@@ -59,7 +59,9 @@ export function CheatTools({ active = true }: { active?: boolean }): JSX.Element
   return (
     <div className="space-y-5" data-cheat-tools>
       <header>
-        <h2 className="text-sm font-semibold text-text">{t('cheat.title')}</h2>
+        <h2 id="settings-cheat-title" className="text-sm font-semibold text-text">
+          {t('cheat.title')}
+        </h2>
         <p className="mt-1 text-xs leading-relaxed text-text-muted">{t('cheat.directOverview')}</p>
       </header>
       {error && (

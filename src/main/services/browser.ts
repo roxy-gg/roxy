@@ -32,6 +32,7 @@ import type { BrowserState, BrowserTab } from '../../shared/api'
 import { attachNativeContextMenu } from './context-menu'
 import { BROWSER_PARTITION, ensureApplied as ensureProxyApplied } from './browser-proxy'
 import type { ResolvedTheme } from '../../shared/theme'
+import { BrowserDevtools } from './browser-devtools'
 
 /** Persisted session â†’ cookies, localStorage and logins survive app restarts. */
 export const PARTITION = BROWSER_PARTITION
@@ -51,6 +52,7 @@ export function setAppIcon(p: string): void {
 }
 
 export interface ConsoleEntry {
+  tabId: string
   /** 0=verbose, 1=info, 2=warning, 3=error (Electron's console level). */
   level: number
   message: string
@@ -64,6 +66,7 @@ export interface ConsoleEntry {
 interface Tab {
   id: string
   view: BrowserView
+  inspector: BrowserDevtools
   /** The real URL represented by our internal load-error document. */
   errorUrl?: string
   errorPageUrl?: string
@@ -127,9 +130,9 @@ function windowTitle(s: Session): string {
   return s.label ? `Roxy Browser â€” ${s.label}` : 'Roxy Browser'
 }
 
-function ensureWindow(s: Session): BrowserWindow {
+function ensureWindow(s: Session, rawUrl?: string, load = true): BrowserWindow {
   if (s.win && !s.win.isDestroyed()) {
-    if (!activeView(s)) createTab(s)
+    if (!activeView(s)) createTab(s, rawUrl, load)
     return s.win
   }
   s.consoleLog = []
@@ -188,12 +191,13 @@ function ensureWindow(s: Session): BrowserWindow {
 
   win.on('resize', () => layout(s))
   win.on('closed', () => {
+    for (const tab of s.tabs) tab.inspector.dispose()
     // The window is gone (user hit X, or we closed it). Drop the session so a
     // later browser_* call lazily spins up a fresh one for this key.
     sessions.delete(s.key)
   })
 
-  createTab(s)
+  createTab(s, rawUrl, load)
   return win
 }
 
@@ -228,7 +232,7 @@ export function setChromeHeight(height: number, key: string = DEFAULT_KEY): void
 }
 
 /** Create a tab (optionally at a URL) and make it active. Assumes a window. */
-function createTab(s: Session, rawUrl?: string): string {
+function createTab(s: Session, rawUrl?: string, load = true): string {
   if (!s.win || s.win.isDestroyed()) return ''
   const view = new BrowserView({
     webPreferences: {
@@ -239,16 +243,22 @@ function createTab(s: Session, rawUrl?: string): string {
     }
   })
   const id = `tab-${++s.tabSeq}`
-  const tab: Tab = { id, view, errorSeq: 0 }
+  const tab: Tab = { id, view, inspector: new BrowserDevtools(view.webContents), errorSeq: 0 }
   s.tabs.push(tab)
   s.win.addBrowserView(view)
   wireTab(s, tab)
   s.activeTabId = id
   layout(s)
   pushTabs(s)
-  void ensureProxyApplied()
-    .then(() => view.webContents.loadURL(rawUrl ? normalizeUrl(rawUrl) : HOME_URL))
-    .catch(() => undefined)
+  if (load) {
+    void Promise.all([tab.inspector.ready, ensureProxyApplied()])
+      .then(() => {
+        if (!view.webContents.isDestroyed())
+          return view.webContents.loadURL(rawUrl ? normalizeUrl(rawUrl) : HOME_URL)
+        return undefined
+      })
+      .catch(() => undefined)
+  }
   return id
 }
 
@@ -408,7 +418,14 @@ function wireTab(s: Session, tab: Tab): void {
   // themed menu into, so these pages get the NATIVE right-click editing menu.
   attachNativeContextMenu(wc)
   wc.on('console-message', (_e, level, message, line, sourceId) => {
-    s.consoleLog.push({ level, message, line, url: sourceId, ts: Date.now() })
+    s.consoleLog.push({
+      tabId: tab.id,
+      level,
+      message: message.slice(0, 16_000),
+      line,
+      url: sourceId.slice(0, 4_000),
+      ts: Date.now()
+    })
     if (s.consoleLog.length > MAX_CONSOLE) s.consoleLog = s.consoleLog.slice(-MAX_CONSOLE)
   })
   const onNav = (): void => {
@@ -432,10 +449,15 @@ function wireTab(s: Session, tab: Tab): void {
   wc.on('did-fail-load', (_e, errorCode, errorDescription, validatedURL, isMainFrame) => {
     if (isMainFrame && errorCode !== -3 /* not a benign ERR_ABORTED */) {
       s.consoleLog.push({
+        tabId: tab.id,
         level: 3,
-        message: `Failed to load ${validatedURL}: ${errorDescription} (${errorCode})`,
+        message: `Failed to load ${validatedURL}: ${errorDescription} (${errorCode})`.slice(
+          0,
+          16_000
+        ),
         ts: Date.now()
       })
+      if (s.consoleLog.length > MAX_CONSOLE) s.consoleLog = s.consoleLog.slice(-MAX_CONSOLE)
       if (validatedURL !== tab.errorPageUrl && !validatedURL.startsWith('chrome-error://')) {
         void showLoadError(s, tab, validatedURL, errorCode, errorDescription)
       }
@@ -530,8 +552,9 @@ export async function open(
   key: string = DEFAULT_KEY
 ): Promise<{ url: string; title: string; error?: string }> {
   const s = getSession(key)
-  ensureWindow(s)
+  ensureWindow(s, undefined, false)
   const wc = pageContents(key)
+  const target = inspector(undefined, key)
   const url = normalizeUrl(rawUrl)
   // Show the window so you can watch the agent browse, but DON'T steal focus
   // (showInactive) â€” the agent driving the browser shouldn't yank you out of
@@ -541,7 +564,7 @@ export async function open(
   s.win?.showInactive()
   let error: string | undefined
   try {
-    await ensureProxyApplied()
+    await Promise.all([target.inspector.ready, ensureProxyApplied()])
     await wc.loadURL(url)
   } catch (e) {
     error = e instanceof Error ? e.message : String(e)
@@ -589,16 +612,44 @@ export async function getHtml(selector?: string, key: string = DEFAULT_KEY): Pro
   return typeof html === 'string' ? html : String(html)
 }
 
-export function getConsole(key: string = DEFAULT_KEY): {
+export function getConsole(
+  key: string = DEFAULT_KEY,
+  options?: { tabId?: string; since?: number; limit?: number; level?: number }
+): {
   entries: ConsoleEntry[]
   errors: number
   warnings: number
 } {
   const s = peek(key)
-  const log = s?.consoleLog ?? []
+  const tabId = options ? inspector(options.tabId, key).tabId : undefined
+  const log = (s?.consoleLog ?? [])
+    .filter(
+      (entry) =>
+        (!tabId || entry.tabId === tabId) &&
+        (!options?.since || entry.ts >= options.since) &&
+        (options?.level === undefined || entry.level >= options.level)
+    )
+    .slice(-Math.max(1, Math.min(MAX_CONSOLE, Math.floor(options?.limit ?? MAX_CONSOLE))))
   const errors = log.filter((e) => e.level >= 3).length
   const warnings = log.filter((e) => e.level === 2).length
   return { entries: [...log], errors, warnings }
+}
+
+/** Resolve once so an active-tab switch during an async call cannot retarget it. */
+export function inspector(
+  tabId?: string,
+  key: string = DEFAULT_KEY
+): { tabId: string; inspector: BrowserDevtools } {
+  const s = peek(key)
+  const tab = s?.tabs.find((entry) => entry.id === (tabId ?? s.activeTabId))
+  if (!tab || tab.view.webContents.isDestroyed()) {
+    throw new Error(
+      tabId
+        ? `No open tab with id ${tabId} in this chat.`
+        : 'No browser is open. Use browser_open first.'
+    )
+  }
+  return { tabId: tab.id, inspector: tab.inspector }
 }
 
 export function currentUrl(key: string = DEFAULT_KEY): string | null {
@@ -659,8 +710,8 @@ export function applyThemeToErrorPages(theme: ResolvedTheme): void {
 /** Open a new tab (optionally at a URL) and make it active. */
 export function newTab(rawUrl?: string, key: string = DEFAULT_KEY): void {
   const s = getSession(key)
-  ensureWindow(s)
-  createTab(s, rawUrl)
+  if (!s.win || s.win.isDestroyed()) ensureWindow(s, rawUrl)
+  else createTab(s, rawUrl)
 }
 
 /** Switch the visible tab. */
@@ -693,6 +744,8 @@ export function closeTab(id: string, key: string = DEFAULT_KEY): void {
   const idx = s.tabs.findIndex((t) => t.id === id)
   if (idx === -1) return
   const [tab] = s.tabs.splice(idx, 1)
+  tab.inspector.dispose()
+  s.consoleLog = s.consoleLog.filter((entry) => entry.tabId !== id)
   if (s.win && !s.win.isDestroyed()) s.win.removeBrowserView(tab.view)
   try {
     tab.view.webContents.close()
@@ -720,19 +773,16 @@ export function openWindow(key: string = DEFAULT_KEY): void {
   if (s.win?.isMinimized()) s.win.restore()
   s.win?.show()
   s.win?.focus()
-  if (!pageContents(key).getURL()) {
-    void ensureProxyApplied()
-      .then(() => pageContents(key).loadURL(HOME_URL))
-      .catch(() => undefined)
-  }
 }
 
 export async function navigate(rawUrl: string, key: string = DEFAULT_KEY): Promise<void> {
   const s = getSession(key)
-  ensureWindow(s)
+  ensureWindow(s, undefined, false)
+  const wc = pageContents(key)
+  const target = inspector(undefined, key)
   try {
-    await ensureProxyApplied()
-    await pageContents(key).loadURL(normalizeUrl(rawUrl))
+    await Promise.all([target.inspector.ready, ensureProxyApplied()])
+    await wc.loadURL(normalizeUrl(rawUrl))
   } catch {
     // surfaced via did-fail-load / the toolbar
   }

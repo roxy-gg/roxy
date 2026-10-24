@@ -951,6 +951,16 @@
       "signedInLocally": "sesión iniciada localmente",
       "updateKey": "Actualizar clave de API"
     },
+    "search": {
+      "clear": "Clear search",
+      "empty": "No settings found for {{query}}",
+      "heading": "Search results",
+      "hint": "Try a different word or a more general search.",
+      "keyboardHint": "Arrow keys to navigate, Enter to open, Esc to clear.",
+      "placeholder": "Search settings",
+      "results_one": "{{count}} setting found",
+      "results_other": "{{count}} settings found"
+    },
     "title": "Ajustes",
     "workstreams": {
       "autoDescription": "Cada sesión trabaja en su propio worktree de git, en su propia rama, para que las sesiones en paralelo no se pisen entre sí ni entren en conflicto con tu editor. La carpeta se crea con el primer mensaje de la sesión, y solo en repositorios git. Desactiva esto para que las sesiones nuevas se ejecuten directamente en la carpeta del proyecto.",

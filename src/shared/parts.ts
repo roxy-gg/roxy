@@ -15,6 +15,34 @@ import type { LlmChildEvent, LlmEvent } from './api'
 import type { MessagePart } from './types'
 import { previewText } from './context'
 
+/** Validate persisted/IPC parts before they reach layout or history replay. */
+export function normalizeMessageParts(value: unknown, content?: string): MessagePart[] {
+  const parts: MessagePart[] = []
+  if (Array.isArray(value)) {
+    for (const candidate of value) {
+      if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) continue
+      const part = candidate as Record<string, unknown>
+      if (part.type === 'text' || part.type === 'reasoning') {
+        if (typeof part.text === 'string') parts.push(candidate as MessagePart)
+      } else if (part.type === 'image') {
+        if (typeof part.dataUrl === 'string' && typeof part.mediaType === 'string')
+          parts.push(candidate as MessagePart)
+      } else if (
+        part.type === 'tool' &&
+        typeof part.tool === 'string' &&
+        (part.state === 'running' || part.state === 'done' || part.state === 'error')
+      ) {
+        parts.push({
+          ...(candidate as Extract<MessagePart, { type: 'tool' }>),
+          ...(part.children !== undefined ? { children: normalizeMessageParts(part.children) } : {})
+        })
+      }
+    }
+  }
+  // Recover the saved plain-text body if no supported parts survived. Never rewrite the row.
+  return parts.length || content === undefined ? parts : [{ type: 'text', text: content }]
+}
+
 /**
  * How much of a SUBAGENT tool's output the parent's `task` card keeps.
  *
@@ -65,6 +93,7 @@ function foldInto(
 ): MessagePart[] {
   const full = cap > 0 && parts.length >= cap
   if (event.type === 'text' || event.type === 'reasoning') {
+    if (typeof event.delta !== 'string' || event.delta.length === 0) return parts
     const last = parts[parts.length - 1]
     // Grow the trailing text/reasoning part so prose reveals token by token
     // instead of fragmenting into one part per delta.
@@ -196,8 +225,9 @@ export class PartsFold {
       this.parts = this.parts.map((part, i) => (i === idx ? { ...parent, children } : part))
       return this.parts
     }
-    const children = foldInto(parent.children ?? [], sub, child, MAX_CHILD_PARTS)
-    if (children === parent.children) return this.parts
+    const previous = parent.children ?? []
+    const children = foldInto(previous, sub, child, MAX_CHILD_PARTS)
+    if (children === previous) return this.parts
     this.parts = this.parts.map((p, i) => (i === idx ? { ...parent, children } : p))
     return this.parts
   }
