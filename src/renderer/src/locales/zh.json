@@ -155,6 +155,8 @@
     "forward": "前进",
     "newTab": "新建标签页",
     "proxy": "浏览器代理",
+    "reload": "Reload",
+    "stop": "Stop",
     "urlPlaceholder": "搜索或输入网址"
   },
   "catalog": {
@@ -342,8 +344,9 @@
     "queuePlaceholderStop": "将后续消息加入队列…（按 Esc 停止）",
     "removeImage": "移除图片",
     "send": "发送",
+    "sendOnlyTo": "Send only to @{{username}}",
     "sendTo": "发送给 @{{username}}",
-    "sendToHint": "仅发送给此协作者。回车键仍会发送给 Roxy。",
+    "sendToRoxy": "Send to Roxy",
     "stop": "停止 (Esc)"
   },
   "configBackup": {

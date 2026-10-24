@@ -29,6 +29,7 @@ import { openLink } from './links'
 import { diffPatch } from '../components/diff/model'
 import { prefersReducedMotion, subscribeMotion } from '../lib/motion'
 import { PromptHistoryRail } from './PromptHistoryRail'
+import { updateTooltip } from '../components/AppTooltip'
 import { activePrompt, PROMPT_OFFSET, type PromptAnchor, type PromptEntry } from './prompt-history'
 
 const NO_PROMPTS: PromptEntry[] = []
@@ -221,10 +222,32 @@ export function CanvasSurface({
     const textHit =
       inside && !region && hitText(scene.current, pos.x, pos.y + el.scrollTop, metrics)
     el.style.cursor = region?.cursor ?? (textHit || press.current?.dragged ? 'text' : 'default')
-    el.title = region?.title ?? ''
+    if (press.current) return
+    const rect = el.getBoundingClientRect()
+    updateTooltip(
+      el,
+      region?.title
+        ? {
+            key: `${region.x}:${region.y}:${region.w}:${region.h}`,
+            content: region.title,
+            rect: new DOMRect(
+              rect.left + region.x,
+              rect.top + region.y - el.scrollTop,
+              region.w,
+              region.h
+            )
+          }
+        : null
+    )
   }, [metrics])
 
   useEffect(() => observeTheme(setTheme), [])
+  useEffect(() => {
+    const target = scroller.current
+    return () => {
+      if (target) updateTooltip(target, null)
+    }
+  }, [sceneKey])
   useLayoutEffect(() => {
     const el = scroller.current
     if (!el) return
@@ -770,7 +793,7 @@ export function CanvasSurface({
           }}
           onPointerMove={(event) => {
             const pos = point(event)
-            pointer.current = pos
+            pointer.current = event.pointerType === 'touch' ? null : pos
             const pending = press.current
             if (pending?.pointerId === event.pointerId) {
               if (Math.hypot(pos.x - pending.x, pos.y - pending.y) >= 4) pending.dragged = true

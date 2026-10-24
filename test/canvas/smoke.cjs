@@ -269,7 +269,18 @@ async function run() {
     await probe('return getComputedStyle(el).cursor === "pointer"')
   )
   const beforeHover = await probe('return probe.debug.layouts')
+  await wait(650)
+  check(
+    'canvas hit regions use the themed tooltip',
+    await evaluate(
+      `document.querySelector('[data-app-tooltip]')?.textContent === 'https://example.com/docs'`
+    )
+  )
   await mouse('mouseMove', 10, link.y)
+  check(
+    'leaving a canvas hit region dismisses its tooltip',
+    await evaluate(`!document.querySelector('[data-app-tooltip]')`)
+  )
   check(
     'blank space resets cursor',
     await probe('return getComputedStyle(el).cursor === "default"')

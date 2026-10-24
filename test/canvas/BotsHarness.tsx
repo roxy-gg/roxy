@@ -139,8 +139,19 @@ Object.assign(window.roxy, {
   messages: { list: async (id: string) => messages.filter((message) => message.chatId === id) },
   queue: {
     list: async (chatId: string) => queue.filter((item) => item.chatId === chatId),
-    add: async (chatId: string, content: string, images?: QueueItem['images']) => {
+    add: async (
+      chatId: string,
+      content: string,
+      images?: QueueItem['images'],
+      options?: {
+        asBotId?: string
+        recipientId?: string
+        sourceChatId?: string
+        fromUser?: boolean
+      }
+    ) => {
       const item: QueueItem = {
+        ...options,
         id: crypto.randomUUID(),
         chatId,
         content,

@@ -159,7 +159,7 @@ app
     assert.equal(await draft(), 'Typed edit wins')
     await click('#voice-hotkey')
     await click('#voice-partial')
-    await click('button[title="Send"]')
+    await click('button[aria-label="Send"]')
     await click('#voice-late')
     assert.equal(await draft(), '')
     await click('#voice-slow')

@@ -155,6 +155,8 @@
     "forward": "Avançar",
     "newTab": "Nova aba",
     "proxy": "Proxy do navegador",
+    "reload": "Reload",
+    "stop": "Stop",
     "urlPlaceholder": "Pesquisar ou inserir um URL"
   },
   "catalog": {
@@ -342,8 +344,9 @@
     "queuePlaceholderStop": "Adicione uma continuação à fila… (Esc para parar)",
     "removeImage": "Remover imagem",
     "send": "Enviar",
+    "sendOnlyTo": "Send only to @{{username}}",
     "sendTo": "Enviar para @{{username}}",
-    "sendToHint": "Enviar apenas para este colaborador. Enter ainda envia para Roxy.",
+    "sendToRoxy": "Send to Roxy",
     "stop": "Parar (Esc)"
   },
   "configBackup": {
