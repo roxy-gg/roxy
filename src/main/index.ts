@@ -51,6 +51,8 @@ protocol.registerSchemesAsPrivileged([
   }
 ])
 
+let primaryWindow: BrowserWindow | null = null
+
 function createWindow(): BrowserWindow {
   const isMac = process.platform === 'darwin'
   const mainWindow = new BrowserWindow({
@@ -73,6 +75,11 @@ function createWindow(): BrowserWindow {
       sandbox: false,
       contextIsolation: true
     }
+  })
+
+  primaryWindow = mainWindow
+  mainWindow.on('closed', () => {
+    if (primaryWindow === mainWindow) primaryWindow = null
   })
 
   mainWindow.on('ready-to-show', () => {
@@ -104,6 +111,16 @@ function createWindow(): BrowserWindow {
   setVoiceWindow(mainWindow)
 
   return mainWindow
+}
+
+function focusMainWindow(): void {
+  if (!primaryWindow || primaryWindow.isDestroyed()) {
+    createWindow()
+    return
+  }
+  if (primaryWindow.isMinimized()) primaryWindow.restore()
+  primaryWindow.show()
+  primaryWindow.focus()
 }
 
 /**
@@ -183,9 +200,10 @@ app.whenReady().then(() => {
   const mainWindow = createWindow()
   initAutoUpdater(mainWindow)
 
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow()
-  })
+  app.on('activate', focusMainWindow)
+  // Unlike activate (Dock/reopen), this also fires for macOS app switching.
+  // Always prefer Roxy itself over the agent's separate browser windows.
+  if (process.platform === 'darwin') app.on('did-become-active', focusMainWindow)
 })
 
 app.on('window-all-closed', () => {
