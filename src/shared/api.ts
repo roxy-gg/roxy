@@ -879,6 +879,7 @@ export interface RoxyApi {
     setContextLimit(limit: number | null): Promise<AppSettings>
     setAutoWorkstream(enabled: boolean): Promise<AppSettings>
     setFreshWorkstream(enabled: boolean): Promise<AppSettings>
+    setWorktreeSetupCommand(command: string): Promise<AppSettings>
     setBranchPrefix(prefix: string): Promise<AppSettings>
     /** Notify when a turn finishes: chime + OS toast, or nothing. */
     setNotifyOnComplete(enabled: boolean): Promise<AppSettings>

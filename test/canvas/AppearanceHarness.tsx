@@ -159,6 +159,10 @@ window.roxy.settings.setFreshWorkstream = async (enabled) => ({
   ...useRoxyStore.getState().settings!,
   freshWorkstream: enabled
 })
+window.roxy.settings.setWorktreeSetupCommand = async (command) => ({
+  ...useRoxyStore.getState().settings!,
+  worktreeSetupCommand: command.trim()
+})
 
 let activeId = DEFAULT_THEME_ID
 const custom: ThemeFile[] = []

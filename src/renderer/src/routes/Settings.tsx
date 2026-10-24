@@ -168,6 +168,8 @@ export default function Settings(): JSX.Element {
   const reorderProviders = useRoxyStore((s) => s.reorderProviders)
   const setAutoWorkstream = useRoxyStore((s) => s.setAutoWorkstream)
   const setFreshWorkstream = useRoxyStore((s) => s.setFreshWorkstream)
+  const setWorktreeSetupCommand = useRoxyStore((s) => s.setWorktreeSetupCommand)
+  const [setupCommand, setSetupCommand] = useState('')
   const telemetryEnabled = useRoxyStore((s) => s.telemetryEnabled)
   const setTelemetryEnabled = useRoxyStore((s) => s.setTelemetryEnabled)
   const setBranchPrefix = useRoxyStore((s) => s.setBranchPrefix)
@@ -227,6 +229,10 @@ export default function Settings(): JSX.Element {
   useEffect(() => {
     setPrefix(settings?.branchPrefix ?? DEFAULT_BRANCH_PREFIX)
   }, [settings?.branchPrefix])
+
+  useEffect(() => {
+    setSetupCommand(settings?.worktreeSetupCommand ?? '')
+  }, [settings?.worktreeSetupCommand])
 
   useEffect(() => {
     refreshProviders()
@@ -744,6 +750,40 @@ export default function Settings(): JSX.Element {
               checked={settings?.freshWorkstream ?? false}
               onChange={(v) => void setFreshWorkstream(v)}
             />
+          </div>
+
+          <div className="mt-3 sq sq-xl sq-ring rounded-xl border border-border bg-surface p-4">
+            <label
+              id="settings-worktree-setup"
+              htmlFor="worktree-setup-command"
+              className="text-sm font-medium text-text"
+            >
+              {t('settings.workstreams.setupTitle')}
+            </label>
+            <p id="worktree-setup-description" className="mt-0.5 text-xs text-text-muted">
+              {t('settings.workstreams.setupDescription')}
+            </p>
+            <div className="mt-3 flex flex-wrap items-start gap-2">
+              <textarea
+                id="worktree-setup-command"
+                value={setupCommand}
+                onChange={(e) => setSetupCommand(e.target.value)}
+                rows={3}
+                spellCheck={false}
+                placeholder={t('settings.workstreams.setupPlaceholder')}
+                aria-describedby="worktree-setup-description worktree-setup-footnote"
+                className="min-w-0 flex-1 basis-full resize-y sq sq-lg sq-ring rounded-lg border border-border bg-surface-2 px-3 py-2 font-mono text-sm text-text outline-none placeholder:text-text-subtle focus:border-border-strong focus:[--sq-ring:var(--color-border-strong)] sm:basis-0"
+              />
+              <Button
+                onClick={() => void setWorktreeSetupCommand(setupCommand)}
+                disabled={setupCommand.trim() === (settings?.worktreeSetupCommand ?? '')}
+              >
+                {t('common.save')}
+              </Button>
+            </div>
+            <p id="worktree-setup-footnote" className="mt-2 text-xs text-text-subtle">
+              {t('settings.workstreams.setupFootnote')}
+            </p>
           </div>
 
           <div className="mt-3 sq sq-xl sq-ring rounded-xl border border-border bg-surface p-4">

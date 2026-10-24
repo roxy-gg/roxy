@@ -112,6 +112,8 @@ const roxy: RoxyApi = {
     setAutoWorkstream: (enabled) => ipcRenderer.invoke(CHANNELS.settingsSetAutoWorkstream, enabled),
     setFreshWorkstream: (enabled) =>
       ipcRenderer.invoke(CHANNELS.settingsSetFreshWorkstream, enabled),
+    setWorktreeSetupCommand: (command) =>
+      ipcRenderer.invoke(CHANNELS.settingsSetWorktreeSetupCommand, command),
     setBranchPrefix: (prefix) => ipcRenderer.invoke(CHANNELS.settingsSetBranchPrefix, prefix),
     setNotifyOnComplete: (enabled) =>
       ipcRenderer.invoke(CHANNELS.settingsSetNotifyOnComplete, enabled),

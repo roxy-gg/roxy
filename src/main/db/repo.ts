@@ -127,6 +127,7 @@ export function getSettings(): AppSettings {
     // without a migration.
     autoWorkstream: map.get('auto_workstream') !== '0',
     freshWorkstream: map.get('fresh_workstream') === '1',
+    worktreeSetupCommand: map.get('worktree_setup_command') ?? '',
     // `?? DEFAULT` and not `|| DEFAULT`: an EMPTY string is a deliberate
     // "no prefix", and must survive a round trip through settings.
     branchPrefix: map.get('branch_prefix') ?? DEFAULT_BRANCH_PREFIX,
@@ -237,6 +238,12 @@ export function setContextLimit(limit: number | null): AppSettings {
 export function setBranchPrefix(prefix: string): AppSettings {
   // Store even the empty string, so "no prefix" is distinguishable from unset.
   setSetting('branch_prefix', normalizeBranchPrefix(prefix))
+  return getSettings()
+}
+
+export function setWorktreeSetupCommand(command: string): AppSettings {
+  if (typeof command !== 'string') throw new Error('Expected a worktree setup command string.')
+  setSetting('worktree_setup_command', command.trim() || null)
   return getSettings()
 }
 

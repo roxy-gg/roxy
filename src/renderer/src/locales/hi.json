@@ -1013,7 +1013,11 @@
       "prefixDescription": "नई कार्यधाराओं को सत्र के नाम पर एक शाखा मिलती है। यह वह है जो इसके सामने आता है — अपने आद्याक्षर, <code>wip</code> का उपयोग करें, या बिल्कुल भी उपसर्ग के लिए इसे साफ़ करें।",
       "prefixFootnote": "केवल नई कार्यधाराओं को प्रभावित करता है। मौजूदा शाखाएँ अपने नाम रखती हैं — कंपोजर के नीचे बार से एक का नाम बदलें।",
       "prefixPlaceholder": "कोई उपसर्ग नहीं",
-      "prefixTitle": "शाखा उपसर्ग"
+      "prefixTitle": "शाखा उपसर्ग",
+      "setupDescription": "Optional shell command to run in each newly created worktree, across all projects. Leave empty to run nothing. Runs in the background without waiting for it to finish.",
+      "setupFootnote": "Only runs for new worktrees, never when attaching to an existing one. Available environment variables: ROXY_PROJECT_ROOT, ROXY_WORKTREE_PATH and ROXY_PORT. Clearing and saving disables future runs; it does not stop commands already running.",
+      "setupPlaceholder": "Leave empty to run nothing",
+      "setupTitle": "New worktree command"
     }
   },
   "sidebar": {

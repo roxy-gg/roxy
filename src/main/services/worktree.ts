@@ -17,7 +17,6 @@ import {
 } from '../../shared/branch'
 import { slugToBranchSegment } from '../../shared/slugs'
 import { isMultiRepo, planRepoLinks, sharedBranch, type RepoLink } from '../../shared/repos'
-import { existsSync, readFileSync } from 'node:fs'
 import { promises as fsp } from 'node:fs'
 import path from 'node:path'
 import * as repo from '../db/repo'
@@ -29,49 +28,9 @@ import { emitSessionsUpdated } from './session-events'
 import type { WorktreeIntent } from '../../shared/types'
 
 /**
- * Optional per-project worktree config, read from `<project>/.roxy/worktree.json`
- * — the same convention as `.roxy/mcp.json` (see services/mcp.ts).
- *
- *   { "setup": "cp $ROXY_PROJECT_ROOT/.env . && pnpm install" }
- */
-export interface WorktreeConfig {
-  /** Shell command run in a NEW worktree, once, right after it's created. */
-  setup?: string
-}
-
-/**
- * Read `.roxy/worktree.json`. Missing or malformed yields `{}` — a broken
- * config must degrade to "no setup script", never break worktree creation.
- */
-export function loadWorktreeConfig(projectRoot: string): WorktreeConfig {
-  if (!projectRoot) return {}
-  const file = path.join(projectRoot, '.roxy', 'worktree.json')
-  if (!existsSync(file)) return {}
-  try {
-    const parsed = JSON.parse(readFileSync(file, 'utf8')) as WorktreeConfig
-    if (!parsed || typeof parsed !== 'object') return {}
-    return { setup: typeof parsed.setup === 'string' ? parsed.setup : undefined }
-  } catch {
-    return {}
-  }
-}
-
-/**
- * Run the project's setup script in a freshly created worktree.
- *
- * A new worktree has an EMPTY node_modules and no .env — git only tracks what's
- * committed. There is deliberately no auto-copy and no symlink here:
- *   - copying node_modules costs gigabytes per session, and native modules are
- *     built per platform/arch anyway;
- *   - symlinking it to the main checkout would let one branch's `npm install`
- *     mutate every other session's dependencies, which destroys the isolation
- *     this whole feature exists to provide.
- * So the user declares what their project needs, and we run it.
- *
- * It goes through `startBackground` — the same path the `bash` tool uses — so
- * the install shows up in bash_list, streams its output, is owned by the
- * session, and is killed when the session is deleted. Never awaited: a
- * `pnpm install` takes minutes and must not hold up the turn.
+ * Run only the command explicitly saved in Workstreams settings. Repository
+ * files never opt a user into executing shell commands during checkout.
+ * Uses the session's background-process path and never holds up the turn.
  */
 function runSetupScript(input: {
   chatId: string
@@ -79,9 +38,9 @@ function runSetupScript(input: {
   worktreePath: string
   devPort: number | null
 }): void {
-  const { setup } = loadWorktreeConfig(input.projectRoot)
-  if (!setup?.trim()) return
   try {
+    const setup = repo.getSettings().worktreeSetupCommand
+    if (!setup.trim()) return
     startBackground(setup, input.worktreePath, repo.rootSessionId(input.chatId), {
       ROXY_PROJECT_ROOT: input.projectRoot,
       ROXY_WORKTREE_PATH: input.worktreePath,
@@ -96,6 +55,8 @@ function runSetupScript(input: {
 export interface MaterializeResult {
   /** True when the session now has a worktree (created, attached, or already had one). */
   ok: boolean
+  /** True only when at least one checkout was created, not reused. */
+  created?: boolean
   worktreePath?: string
   branch?: string
   /**
@@ -196,7 +157,7 @@ export async function materializePendingWorktree(
   })
 
   // Fire-and-forget: installs take minutes, and the turn starts now.
-  if (signal?.aborted) return result
+  if (signal?.aborted || !result.created) return result
   runSetupScript({
     chatId,
     projectRoot: workspace,
@@ -269,7 +230,12 @@ async function createForWorkspace(
       )
       if (!r.ok || !r.worktree)
         return { ok: false, error: r.error ?? 'Could not create the worktree.' }
-      return { ok: true, worktreePath: r.worktree.path, branch: r.worktree.branch ?? branch }
+      return {
+        ok: true,
+        created: !r.attached,
+        worktreePath: r.worktree.path,
+        branch: r.worktree.branch ?? branch
+      }
     }
 
     // fromBranch / attach both target an existing branch; attachWorktree
@@ -280,7 +246,12 @@ async function createForWorkspace(
     const r = await git.attachWorktree({ repoRoot: root, branch }, signal)
     if (!r.ok || !r.worktree)
       return { ok: false, error: r.error ?? 'Could not check out the branch.' }
-    return { ok: true, worktreePath: r.worktree.path, branch: r.worktree.branch ?? branch }
+    return {
+      ok: true,
+      created: !r.attached,
+      worktreePath: r.worktree.path,
+      branch: r.worktree.branch ?? branch
+    }
   } catch (e) {
     // git.ts doesn't throw, but a caller bug here must still not break a turn.
     return { ok: false, error: e instanceof Error ? e.message : String(e) }
@@ -329,6 +300,7 @@ async function createComposite(
     const planned = planRepoLinks(compositeRoot, roots, branch, path)
 
     const links: RepoLink[] = []
+    let created = false
     const skipped: string[] = []
     // Serial, not parallel: N concurrent checkouts contend on the same disk and
     // each one already serializes behind its own repo lock, so the wall-clock
@@ -371,6 +343,7 @@ async function createComposite(
             )
 
       if (r.ok && r.worktree) {
+        created ||= !r.attached
         links.push({ ...link, branch: r.worktree.branch ?? branch })
       } else {
         // Recorded, not thrown: the other repos still get their checkout.
@@ -391,6 +364,7 @@ async function createComposite(
     return {
       ok: true,
       worktreePath: compositeRoot,
+      created,
       branch: sharedBranch(links) ?? branch,
       repos: links,
       error: skipped.length ? `Left out of this workstream: ${skipped.join(', ')}.` : undefined

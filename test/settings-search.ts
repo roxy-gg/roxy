@@ -30,6 +30,7 @@ async function main(): Promise<void> {
   assert.equal(search('does-not-exist-4937').length, 0)
   assert.equal(search('BRANCH prefix')[0].entry.title, 'settings.workstreams.prefixTitle')
   assert.equal(search('auto-reset remote main')[0].entry.target, 'settings-fresh-worktree')
+  assert.equal(search('new worktree command')[0].entry.target, 'settings-worktree-setup')
   assert.equal(search('browser password')[0].entry.title, 'proxy.title')
   assert(
     search('notification').some(({ entry }) => entry.title === 'settings.notifications.soundsTitle')

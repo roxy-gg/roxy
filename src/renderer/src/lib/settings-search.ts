@@ -196,6 +196,13 @@ export const SETTINGS_SEARCH = [
   },
   {
     section: 'worktrees',
+    title: 'settings.workstreams.setupTitle',
+    description: 'settings.workstreams.setupDescription',
+    target: 'settings-worktree-setup',
+    terms: ['settings.workstreams.setupFootnote']
+  },
+  {
+    section: 'worktrees',
     title: 'settings.workstreams.prefixTitle',
     description: 'settings.workstreams.prefixDescription',
     target: 'settings-branch-prefix'

@@ -1013,7 +1013,11 @@
       "prefixDescription": "Les nouveaux flux de travail obtiennent une branche nommée d'après la session. C'est ce qui la précède — utilisez vos initiales, <code>wip</code>, ou effacez-le pour n'avoir aucun préfixe.",
       "prefixFootnote": "N'affecte que les nouveaux flux de travail. Les branches existantes conservent leurs noms — renommez-en une depuis la barre sous le compositeur.",
       "prefixPlaceholder": "aucun préfixe",
-      "prefixTitle": "Préfixe de branche"
+      "prefixTitle": "Préfixe de branche",
+      "setupDescription": "Optional shell command to run in each newly created worktree, across all projects. Leave empty to run nothing. Runs in the background without waiting for it to finish.",
+      "setupFootnote": "Only runs for new worktrees, never when attaching to an existing one. Available environment variables: ROXY_PROJECT_ROOT, ROXY_WORKTREE_PATH and ROXY_PORT. Clearing and saving disables future runs; it does not stop commands already running.",
+      "setupPlaceholder": "Leave empty to run nothing",
+      "setupTitle": "New worktree command"
     }
   },
   "sidebar": {

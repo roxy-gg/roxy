@@ -463,6 +463,8 @@ export interface AppSettings {
   autoWorkstream: boolean
   /** Require freshly fetched origin for new, non-fork workstreams. Off by default. */
   freshWorkstream: boolean
+  /** Optional shell command for newly created worktrees. Empty by default. */
+  worktreeSetupCommand: string
   /**
    * Prefix for the branch a new workstream generates, e.g. `roxy` ->
    * `roxy/a1b2c3d4`. Empty means no prefix at all (`a1b2c3d4`), which some

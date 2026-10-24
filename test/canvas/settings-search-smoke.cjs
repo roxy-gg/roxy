@@ -24,8 +24,8 @@ async function until(code) {
 }
 async function input(selector, value) {
   await evaluate(`const el = document.querySelector(${JSON.stringify(selector)});
-    if (!(el instanceof HTMLInputElement)) throw new Error('Not an input: ' + el?.outerHTML);
-    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(el, ${JSON.stringify(value)});
+    if (!(el instanceof HTMLInputElement) && !(el instanceof HTMLTextAreaElement)) throw new Error('Not an input: ' + el?.outerHTML);
+    Object.getOwnPropertyDescriptor(Object.getPrototypeOf(el), 'value').set.call(el, ${JSON.stringify(value)});
     el.dispatchEvent(new Event('input', {bubbles: true}));`)
   await wait()
 }
@@ -111,6 +111,20 @@ app.whenReady().then(async () => {
     await until(`!!document.querySelector('#settings-branch-prefix.settings-search-target')`)
     assert.equal(await evaluate(`return document.activeElement.id`), 'settings-branch-prefix')
     await screenshot('desktop-dark')
+    const setupInput = '#worktree-setup-command'
+    const setupSave = '#worktree-setup-command + button'
+    assert.equal(await evaluate(`return document.querySelector('${setupInput}').value`), '')
+    assert(await evaluate(`return document.querySelector('${setupSave}').disabled`))
+    await input(setupInput, 'npm ci\necho ready')
+    assert(!(await evaluate(`return document.querySelector('${setupSave}').disabled`)))
+    await click(setupSave)
+    await until(`document.querySelector('${setupSave}').disabled`)
+    await evaluate(`const {useRoxyStore} = await import('/@fs/' + ${JSON.stringify(path.resolve('src/renderer/src/lib/store.ts').replaceAll('\\', '/'))});
+      if (useRoxyStore.getState().settings.worktreeSetupCommand !== 'npm ci\\necho ready') throw new Error('setup did not persist');`)
+    await input(setupInput, '')
+    await click(setupSave)
+    await until(`document.querySelector('${setupSave}').disabled`)
+    await input(setupInput, 'unsaved-setup')
     const freshSwitch =
       '#settings-worktrees-panel [role="switch"][aria-label="Auto-reset new workstreams to remote main"]'
     assert.equal(
@@ -139,6 +153,12 @@ app.whenReady().then(async () => {
           `const r = document.querySelector(${JSON.stringify(freshSwitch)}).getBoundingClientRect(); return r.width > 0 && r.left >= 0 && r.right <= innerWidth`
         ),
         `fresh toggle is accessible at ${width}px`
+      )
+      assert(
+        await evaluate(
+          `const r = document.querySelector('${setupInput}').getBoundingClientRect(); return r.width > 0 && r.left >= 0 && r.right <= innerWidth`
+        ),
+        `setup command is accessible at ${width}px`
       )
       await screenshot('fresh-workstreams-' + width)
     }
@@ -178,6 +198,14 @@ app.whenReady().then(async () => {
       ),
       'unsaved-prefix'
     )
+    assert.equal(
+      await evaluate(`return document.querySelector('${setupInput}').value`),
+      'unsaved-setup'
+    )
+    await input('#settings-search', 'new worktree command')
+    await until(`document.querySelectorAll('#settings-search-results button').length === 1`)
+    await click('#settings-search-results button')
+    await until(`!!document.querySelector('#settings-worktree-setup.settings-search-target')`)
     await input('#settings-search', 'cheat')
     await until(`document.querySelectorAll('#settings-search-results button').length >= 1`)
     await click('#settings-search-results button')
@@ -210,11 +238,7 @@ app.whenReady().then(async () => {
     await key('Escape')
     await until(`document.querySelector('#settings-search').value === ''`)
     assert(await evaluate(`return !!document.querySelector('#appearance-page')`))
-    assert(
-      await evaluate(
-        `return document.querySelector('#settings-browser').getBoundingClientRect().height > 0`
-      )
-    )
+    await until(`document.querySelector('#settings-browser').getBoundingClientRect().height > 0`)
     await input('#settings-search', 'opacity')
     await until(`document.querySelectorAll('#settings-search-results button').length === 1`)
     const dark = await evaluate(
