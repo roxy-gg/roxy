@@ -3,7 +3,7 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { execFileSync } from 'node:child_process'
-import { app, BrowserWindow } from 'electron'
+import { app, BrowserWindow, ipcMain } from 'electron'
 import { getDb, closeDb } from '../src/main/db/database'
 import * as repo from '../src/main/db/repo'
 import * as bots from '../src/main/db/bots'
@@ -11,6 +11,8 @@ import { registerIpc } from '../src/main/ipc'
 import { runTool } from '../src/main/harness/tools'
 import { claimTurn, sessionBusy, stopTurn } from '../src/main/services/turn-state'
 import { startSubagentRun } from '../src/main/services/subagent-stream'
+import { voiceState } from '../src/main/services/voice'
+import { CHANNELS } from '../src/shared/ipc'
 import {
   enqueuePrompt,
   startAutomation,
@@ -611,8 +613,11 @@ async function main(): Promise<void> {
   )
 
   if (process.env.DELIVERY_UI_URL) {
+    // This fixture is not the trusted voice window; expose only its read-only state.
+    ipcMain.removeHandler(CHANNELS.voiceState)
+    ipcMain.handle(CHANNELS.voiceState, () => voiceState())
     const win = new BrowserWindow({
-      show: false,
+      show: true,
       width: 1280,
       height: 900,
       webPreferences: {
@@ -621,6 +626,9 @@ async function main(): Promise<void> {
         contextIsolation: true,
         backgroundThrottling: false
       }
+    })
+    win.webContents.on('console-message', (_event, level, message) => {
+      if (level >= 3) console.error('Delivery renderer:', message)
     })
     await win.loadURL(process.env.DELIVERY_UI_URL)
     for (const id of [bot.chatId, project.id]) {
@@ -636,11 +644,19 @@ async function main(): Promise<void> {
         0,
         'idle send never renders waiting'
       )
+      await win.webContents.executeJavaScript(
+        'new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))'
+      )
+      assert.equal(
+        await win.webContents.executeJavaScript('window.delivery.promptBeforeThinking'),
+        true,
+        'the durable user prompt is visible before the first thinking frame'
+      )
       await win.loadURL(process.env.DELIVERY_UI_URL)
       await win.webContents.executeJavaScript(`window.delivery.select(${JSON.stringify(id)})`)
       assert.ok(
         await win.webContents.executeJavaScript(
-          `!!document.querySelector('button[title="Stop"]') || !!document.querySelector('[role="status"]')`
+          `!!document.querySelector('button[title="Stop (Esc)"]') || !!document.querySelector('[role="status"]')`
         ),
         'reload restores starting activity'
       )
@@ -653,6 +669,11 @@ async function main(): Promise<void> {
       await idle(id)
       assert.equal(repo.listMessages(id).filter((m) => m.content === 'UI idle fixture').length, 1)
       await win.webContents.executeJavaScript(`window.delivery.waitForEmptyQueue()`)
+      assert.equal(
+        await win.webContents.executeJavaScript('window.delivery.recoverMissedCompletion()'),
+        true,
+        'main idle snapshot clears stale thinking without losing the persisted answer'
+      )
       await win.loadURL(process.env.DELIVERY_UI_URL)
       await win.webContents.executeJavaScript(`window.delivery.select(${JSON.stringify(id)})`)
     }
@@ -787,6 +808,7 @@ async function main(): Promise<void> {
       await win.webContents.executeJavaScript('document.documentElement.scrollWidth <= innerWidth')
     )
     win.destroy()
+
     console.log('DELIVERY UI OK (real IPC, database, harness; deterministic provider)')
   }
   stopAutomation()

@@ -767,7 +767,7 @@ export type RemoteDelta =
       kind: 'turn'
       state: 'running' | 'idle'
       phase?: 'starting' | 'running'
-      /** Persisted before the terminal event, so swapping out live parts is lossless. */
+      /** Durable prompt on start or reply on completion, available before live parts change. */
       message?: Message
       botId?: string
       botUsername?: string

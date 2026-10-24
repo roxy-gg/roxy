@@ -22,7 +22,13 @@ import {
 import { layoutMarkdown, layoutPlainText } from '../../src/renderer/src/canvas/prose'
 import { BlockCache, layoutTranscript } from '../../src/renderer/src/canvas/transcript'
 import { linkUrl } from '../../src/renderer/src/canvas/links'
-import { visibleImages, type Scene, type ViewState } from '../../src/renderer/src/canvas/scene'
+import {
+  forEachNode,
+  visibleImages,
+  type Node,
+  type Scene,
+  type ViewState
+} from '../../src/renderer/src/canvas/scene'
 import type { CanvasTheme } from '../../src/renderer/src/canvas/theme'
 import source from '../../src/renderer/src/locales/default.json'
 import { FIXTURES, LARGE_DIFF } from './fixtures'
@@ -505,6 +511,97 @@ const longInput = (messages: Message[], state = view()) => ({
   canCancel: () => true,
   t,
   viewport: { top: 0, height: 600, tail: true, targetId: undefined as string | undefined }
+})
+
+check('human bubbles hug content on the right in retained and windowed layouts', () => {
+  for (const width of [320, 800]) {
+    for (const text of [
+      'push and merge',
+      'A longer request with **literal markup** and `code`. '.repeat(12),
+      'x'.repeat(500)
+    ]) {
+      const prompt: Message = {
+        ...longMessages[0],
+        id: 'bubble',
+        content: text,
+        parts: [{ type: 'text', text }]
+      }
+      const layouts = [false, true].map((windowed) => {
+        const scene = layoutTranscript(
+          { ...longInput(windowed ? [...longMessages, prompt] : [prompt]), width, streaming: [] },
+          new BlockCache()
+        )
+        const block = scene.blocks.at(-2)!
+        const nodes: Node[] = []
+        forEachNode(block.nodes, (node) => nodes.push(node))
+        const bubble = nodes.find((node) => node.kind === 'rect')
+        assert.ok(bubble?.kind === 'rect')
+        assert.ok(bubble.w < width * 0.85, 'bubble never fills the column')
+        assert.ok(bubble.x >= 16)
+        assert.ok(
+          !nodes.some(
+            (node) => node.kind === 'image' || (node.kind === 'text' && node.text === 'You')
+          )
+        )
+        assert.equal(block.selectable.map((line) => line.text).join(''), text)
+        for (const line of block.selectable) {
+          assert.ok(line.x >= bubble.x + 12)
+          assert.ok(
+            line.x + Math.max(...line.runs.map((run) => run.x + run.width)) <=
+              bubble.x + bubble.w + 1
+          )
+        }
+        assert.ok(scene.blocks.at(-1)!.y >= block.y + block.height, 'thinking follows the prompt')
+        return { x: bubble.x, width: bubble.w, height: block.height }
+      })
+      assert.deepEqual(layouts[0], layouts[1], 'history windowing preserves bubble geometry')
+    }
+  }
+})
+check('bubble attachments wrap inside the frame and keep their click targets', () => {
+  const prompt: Message = {
+    ...longMessages[0],
+    id: 'images',
+    parts: Array.from({ length: 5 }, (_, i) => ({
+      type: 'image',
+      dataUrl: `image-${i}`,
+      mediaType: 'image/png'
+    }))
+  }
+  for (const messages of [[prompt], [...longMessages, prompt]]) {
+    const scene = layoutTranscript({ ...longInput(messages), width: 320 }, new BlockCache())
+    const block = scene.blocks.at(-1)!
+    const nodes: Node[] = []
+    forEachNode(block.nodes, (node) => nodes.push(node))
+    const bubble = nodes.find((node) => node.kind === 'rect')
+    assert.ok(bubble?.kind === 'rect')
+    assert.equal(block.regions.filter((region) => region.action.type === 'image').length, 5)
+    for (const image of nodes.filter((node) => node.kind === 'image')) {
+      assert.ok(image.x >= bubble.x + 12 && image.x + image.w <= bubble.x + bubble.w - 12)
+    }
+  }
+})
+check('bubble surfaces follow the active palette in light and custom themes', () => {
+  const prompt: Message = { ...longMessages[0], parts: [{ type: 'text', text: 'Short prompt' }] }
+  const fills = [
+    theme,
+    {
+      ...theme,
+      epoch: 2,
+      appearance: 'light' as const,
+      palette: { ...theme.palette, surface2: '#efeff1', white: '#18181b', text: '#1a1a1c' }
+    },
+    { ...theme, epoch: 3, palette: { ...theme.palette, surface2: '#3d2942' } }
+  ].map((theme) => {
+    const scene = layoutTranscript({ ...longInput([prompt]), theme }, new BlockCache())
+    const nodes: Node[] = []
+    forEachNode(scene.blocks[0].nodes, (node) => nodes.push(node))
+    const bubble = nodes.find((node) => node.kind === 'rect')
+    assert.ok(bubble?.kind === 'rect')
+    assert.equal(scene.blocks[0].selectable[0].runs[0].color, theme.palette.text)
+    return bubble.fill
+  })
+  assert.equal(new Set(fills).size, 3)
 })
 
 check('invalid prose and unknown parts cannot blank retained or windowed transcripts', () => {
@@ -1287,7 +1384,8 @@ check('bot replies use a full-size Facehash and username in both transcript layo
         new BlockCache()
       ).blocks.at(-1)!.nodes
     )
-    assert.ok(nodes.includes('"name":"user"'), 'human mentions do not change authorship')
+    assert.ok(nodes.includes('"kind":"rect"'), 'human mentions keep the human bubble')
+    assert.ok(!nodes.includes('"name":"user"'), 'human bubbles do not need an avatar')
     assert.ok(!nodes.includes('data:image/svg+xml,'))
   }
 
