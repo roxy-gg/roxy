@@ -94,6 +94,11 @@ const delayed = (
   return work
 }
 window.roxy.background = {
+  preview: async () => ({ ok: true, value: null }),
+  previewCustom: async (id) => ({
+    ok: true,
+    value: assets[id]?.image.startsWith('data:image/png;') ? null : (assets[id]?.image ?? null)
+  }),
   listCustom: async () => {
     if (location.hash === '#library-fail') return { ok: false, error: 'unavailable' }
     if (location.hash === '#published') {

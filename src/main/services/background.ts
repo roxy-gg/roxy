@@ -373,6 +373,37 @@ async function readCustomAsset(id: string): Promise<{ image: string; poster?: st
   return media
 }
 
+export function previewCustomBackground(id: string): Promise<string | null> {
+  return storageTransaction(async () => {
+    if (!validCustomId(id)) throw Error('Invalid background')
+    if (!(await getStoredBackground()).library?.some((entry) => entry.id === id))
+      throw Error('Missing background')
+    const { image } = await readCustomAsset(id)
+    // Videos are already on this device; previewing never imports or changes selection.
+    if (image.startsWith('data:video/')) return image
+    if (!image.startsWith('data:image/gif;')) return null
+    const source = Buffer.from(image.split(',')[1], 'base64')
+    for (const width of [480, 240, 160]) {
+      const bytes = await sharp(source, {
+        animated: true,
+        limitInputPixels: MAX_PIXELS
+      })
+        .timeout({ seconds: 15 })
+        .resize({
+          width,
+          height: Math.round((width * 9) / 16),
+          fit: 'inside',
+          withoutEnlargement: true
+        })
+        .webp({ quality: 45, effort: 2, loop: 0 })
+        .toBuffer()
+      if (bytes.length && bytes.length <= 1024 * 1024)
+        return `data:image/webp;base64,${bytes.toString('base64')}`
+    }
+    return null
+  })
+}
+
 export function getCustomSubmission(
   id: string
 ): Promise<{ entry: CustomBackground; image: string }> {

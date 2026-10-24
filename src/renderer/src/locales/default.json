@@ -1111,7 +1111,7 @@
   },
   "wallpapers": {
     "title": "Wallpaper Workshop",
-    "description": "Browse lightweight thumbnails. Full images and silent videos download only when you use a background. An anonymous wallpaper-device ID reports your current catalog selection to rank active use.",
+    "description": "Select a card to preview it. Videos and GIFs play a lightweight loop; full media downloads only when you use a background. An anonymous wallpaper-device ID reports your current catalog selection to rank active use.",
     "addCustom": "Add Custom Background",
     "addOwn": "Add your own",
     "myBackgrounds": "My Backgrounds are saved on this device. Select a custom card to rename or delete it.",

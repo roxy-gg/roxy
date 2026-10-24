@@ -143,6 +143,8 @@ export const CHANNELS = {
   backgroundRenameCustom: 'background:rename-custom',
   backgroundSearch: 'background:search',
   backgroundThumbnail: 'background:thumbnail',
+  backgroundPreview: 'background:preview',
+  backgroundPreviewCustom: 'background:preview-custom',
   backgroundApplyCatalog: 'background:apply-catalog',
   backgroundSubmit: 'background:submit',
   backgroundChoose: 'background:choose',

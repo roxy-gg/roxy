@@ -11,6 +11,7 @@ import type {
 import { api } from '../lib/api'
 import { useBackground } from '../lib/background'
 import { Button } from './ui'
+import { WallpaperPreview } from './WallpaperPreview'
 
 const LICENSES = ['CC0-1.0', 'CC-BY-4.0', 'CC-BY-SA-4.0', 'CC-BY-NC-4.0', 'other'] as const
 
@@ -62,6 +63,7 @@ export function WallpaperWorkshop({
   const [thumbnails, setThumbnails] = useState<Record<string, string>>({})
   const [page, setPage] = useState<WallpaperPage>({ entries: [], nextCursor: null })
   const [selected, setSelected] = useState<Wallpaper | null>(null)
+  const [previewed, setPreviewed] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [working, setWorking] = useState(false)
   const [error, setError] = useState('')
@@ -446,6 +448,7 @@ export function WallpaperWorkshop({
                     onClick={() => {
                       setSelected(null)
                       setSelectedCustomId(entry.id)
+                      setPreviewed(`custom:${entry.id}`)
                       setConfirmDelete(false)
                     }}
                     className={`group overflow-hidden rounded-lg border text-left focus-visible:outline-2 focus-visible:outline-accent ${highlightedCustom === entry.id ? 'border-accent ring-1 ring-accent' : 'border-border hover:border-text-subtle'}`}
@@ -490,6 +493,7 @@ export function WallpaperWorkshop({
                     onClick={() => {
                       setSelectedCustomId(null)
                       setSelected(item)
+                      setPreviewed(`catalog:${item.id}`)
                       setConfirmDelete(false)
                     }}
                     className={`group overflow-hidden rounded-lg border text-left focus-visible:outline-2 focus-visible:outline-accent ${highlightedCatalog === item.id ? 'border-accent ring-1 ring-accent' : 'border-border hover:border-text-subtle'}`}
@@ -541,10 +545,13 @@ export function WallpaperWorkshop({
                   className="space-y-3 rounded-lg border border-border bg-bg p-3"
                   data-custom-details={selectedCustom.id}
                 >
-                  <img
-                    src={selectedCustom.thumbnail}
-                    alt={selectedCustom.title || t('wallpapers.untitledCustom')}
-                    className="aspect-video max-h-72 w-full rounded-md bg-surface object-contain"
+                  <WallpaperPreview
+                    key={`custom:${selectedCustom.id}`}
+                    id={selectedCustom.id}
+                    custom
+                    enabled={previewed === `custom:${selectedCustom.id}`}
+                    thumbnail={selectedCustom.thumbnail}
+                    title={selectedCustom.title || t('wallpapers.untitledCustom')}
                   />
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <h4 className="min-w-0 flex-1 break-words text-sm font-medium">
@@ -674,15 +681,16 @@ export function WallpaperWorkshop({
               )}
               {selected && (
                 <div className="overflow-hidden rounded-lg border border-border bg-bg">
-                  {thumbnails[`${selected.id}:${selected.sha256}`] && (
-                    <img
-                      src={thumbnails[`${selected.id}:${selected.sha256}`]}
-                      alt={selected.title}
-                      referrerPolicy="no-referrer"
-                      crossOrigin="anonymous"
-                      className="aspect-video max-h-72 w-full object-contain"
-                    />
-                  )}
+                  <WallpaperPreview
+                    key={`catalog:${selected.id}:${selected.sha256}`}
+                    id={selected.id}
+                    enabled={
+                      previewed === `catalog:${selected.id}` &&
+                      (selected.kind === 'video' || selected.mime === 'image/gif')
+                    }
+                    thumbnail={thumbnails[`${selected.id}:${selected.sha256}`]}
+                    title={selected.title}
+                  />
                   <div className="space-y-2 p-3">
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <h4 className="text-sm font-medium">{selected.title}</h4>

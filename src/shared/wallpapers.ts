@@ -1,3 +1,9 @@
+export interface WallpaperPreview {
+  mime: 'video/mp4' | 'image/webp'
+  bytes: number
+  sha256: string
+}
+
 export interface Wallpaper {
   id: string
   title: string
@@ -18,6 +24,8 @@ export interface Wallpaper {
   approvedAt: string | null
   posterUrl: string
   mediaUrl: string
+  /** Absent on older catalogs; never fall back to downloading full media for a preview. */
+  preview?: WallpaperPreview | null
 }
 export interface WallpaperQuery {
   q?: string
