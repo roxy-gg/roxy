@@ -124,6 +124,7 @@ export function WorkspaceSummary({
   const { t } = useTranslation()
   const summary = totals(snapshot)
   const isRepo = snapshot?.roots.some((root) => root.isRepo)
+  const showTotals = isRepo && (summary.additions > 0 || summary.deletions > 0)
   return (
     <button
       type="button"
@@ -134,7 +135,7 @@ export function WorkspaceSummary({
       title={
         failed || summary.unavailable
           ? t('inspector.unavailable')
-          : isRepo
+          : showTotals
             ? t('inspector.summary', { additions: summary.additions, deletions: summary.deletions })
             : t('inspector.open')
       }
@@ -146,7 +147,7 @@ export function WorkspaceSummary({
     >
       {failed || summary.unavailable ? (
         <GitCompareArrows className="h-3.5 w-3.5 text-text-subtle" />
-      ) : isRepo ? (
+      ) : showTotals ? (
         <span className="flex items-center gap-1.5 font-mono text-[11px] tabular-nums">
           <span className={summary.count ? 'text-success' : 'text-text-subtle'}>
             +{summary.additions.toLocaleString()}
