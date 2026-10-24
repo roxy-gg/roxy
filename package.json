@@ -17,7 +17,7 @@
     "predev": "node script/predev.mjs",
     "dev": "electron-vite dev",
     "start": "electron-vite preview",
-    "build": "npm run typecheck && electron-vite build",
+    "build": "npm run typecheck && node --max-old-space-size=4096 ./node_modules/electron-vite/bin/electron-vite.js build",
     "build:unpack": "npm run build && electron-builder --dir",
     "build:win": "npm run build && electron-builder --win",
     "build:mac": "npm run build && electron-builder --mac",

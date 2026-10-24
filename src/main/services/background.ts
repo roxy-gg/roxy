@@ -628,15 +628,18 @@ export async function importBackground(
             clearTimeout(timer); resolve(canvas.toDataURL('image/png'));
           } catch (error) { clearTimeout(timer); reject(error); }
         };
-        video.onloadeddata = () => {
+        video.requestVideoFrameCallback(() => {
           if (!Number.isFinite(video.duration) || video.duration <= 0) {
             clearTimeout(timer); reject(new Error('invalid duration')); return;
           }
-          video.onloadeddata = null;
-          video.onseeked = capture;
-          // Opening frames can be blank; capture a decoded frame inside the clip.
+          // Drain the opening frame, then observe the seek frame before drawing.
+          // seeked alone can fire before Chromium presents the new frame.
+          video.requestVideoFrameCallback(capture);
+          // Seeking within a single frame may not publish another frame.
+          video.onseeked = () => video.play().catch((error) => { clearTimeout(timer); reject(error); });
+          video.onended = capture;
           video.currentTime = Math.min(1, video.duration / 2);
-        };
+        });
         video.src = ${JSON.stringify(image)}; video.load();
       })`),
         interrupted

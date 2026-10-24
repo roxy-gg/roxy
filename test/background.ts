@@ -305,24 +305,43 @@ async function run(): Promise<void> {
       { ok: false, error: 'invalidVideo' },
       'unsupported MOV codec is rejected'
     )
-    const blackIntro = await service.importBackground(
-      path.join(process.cwd(), 'test/fixtures/background-black-intro.mp4')
-    )
-    assert.ok(blackIntro.ok)
-    for (const preview of [
-      blackIntro.state.poster!,
-      (await service.listCustomBackgrounds())[0].thumbnail
-    ]) {
-      const { data: pixel } = await sharp(Buffer.from(preview.split(',')[1], 'base64'))
-        .resize(1, 1)
-        .removeAlpha()
-        .raw()
-        .toBuffer({ resolveWithObject: true })
-      assert.ok(
-        pixel[0] > 200 && pixel[1] < 40 && pixel[2] < 40,
-        'video preview seeks past the black opening frame'
+    for (let attempt = 1; attempt <= 5; attempt++) {
+      const blackIntro = await service.importBackground(
+        path.join(process.cwd(), 'test/fixtures/background-black-intro.mp4')
       )
+      assert.ok(blackIntro.ok, `black-intro video decodes (attempt ${attempt})`)
+      const entry = (await service.listCustomBackgrounds()).find(
+        (entry) => entry.id === blackIntro.state.customId
+      )!
+      for (const [kind, preview] of [
+        ['poster', blackIntro.state.poster!],
+        ['thumbnail', entry.thumbnail]
+      ]) {
+        const pixel = await sharp(Buffer.from(preview.split(',')[1], 'base64'))
+          .resize(1, 1)
+          .removeAlpha()
+          .raw()
+          .toBuffer()
+        assert.ok(
+          pixel[0] > 200 && pixel[1] < 40 && pixel[2] < 40,
+          `${kind} seeks past the black opening frame (attempt ${attempt}, RGB ${[...pixel]})`
+        )
+      }
+      assert.equal(BrowserWindow.getAllWindows().length, 0, 'poster decoder is disposed')
     }
+    const singleFrame = await service.importBackground(
+      path.join(process.cwd(), 'test/fixtures/background-single-frame.mp4')
+    )
+    assert.ok(singleFrame.ok, 'a single-frame video still produces a poster')
+    const blackPixel = await sharp(Buffer.from(singleFrame.state.poster!.split(',')[1], 'base64'))
+      .resize(1, 1)
+      .removeAlpha()
+      .raw()
+      .toBuffer()
+    assert.ok(
+      blackPixel.every((channel) => channel < 10),
+      'a legitimately black frame is kept'
+    )
     await fs.writeFile(path.join(directory, 'restored.png'), data)
     await service.importBackground(input)
     const updated = await service.updateBackground({
