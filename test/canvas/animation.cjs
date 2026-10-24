@@ -305,12 +305,46 @@ async function run() {
     check('streaming remains pinned without a typewriter backlog', final.atBottom)
     await click('motion-thinking')
   }
+  await click('motion-text')
+  await wait(1450)
   await click('motion-done')
   await wait(150)
   a = await inspect()
   await wait(320)
   b = await inspect()
   check('settled transcript stops the animation clock', a.frames === b.frames)
+  check(
+    'completion replaces live thinking with its persisted transcript',
+    await evaluate(
+      `window.__canvasTranscript.scene().blocks.some(b=>b.id==='completed-turn') && !window.__canvasTranscript.scene().blocks.some(b=>b.id==='__streaming__')`
+    )
+  )
+  check('completion stays at the tail', b.atBottom)
+  win.hide()
+  await wait(150)
+  await evaluate(
+    `const el=document.querySelector('[data-canvas-surface]');el.scrollTop=0;el.dispatchEvent(new Event('scroll'))`
+  )
+  win.show()
+  win.focus()
+  await wait(180)
+  check(
+    'restoring a finished window repairs hidden native scroll clamping',
+    (await inspect(false)).atBottom
+  )
+  await evaluate(
+    `const el=document.querySelector('[data-canvas-surface]');el.scrollTop=0;el.dispatchEvent(new Event('scroll'))`
+  )
+  await wait(100)
+  win.hide()
+  await wait(100)
+  win.show()
+  win.focus()
+  await wait(150)
+  check(
+    'restoring a window preserves intentional history reading',
+    await evaluate(`document.querySelector('[data-canvas-surface]').scrollTop<2`)
+  )
   check('no renderer errors during animation', errors.length === 0)
   console.log(`CANVAS MOTION OK - ${checks} checks passed`)
 }

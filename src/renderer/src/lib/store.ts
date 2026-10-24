@@ -287,6 +287,8 @@ interface RoxyStore {
   /** Persist the project (workspace) order (optimistic). `paths` = full list, top → bottom. */
   reorderProjects: (paths: string[]) => Promise<void>
   submit: (content: string, images?: ComposerImage[]) => Promise<void>
+  /** Reconcile main-owned turns after window suspension or a missed terminal event. */
+  refreshLiveState: () => Promise<void>
   /**
    * Explicit composer action: queue the prompt so ONLY this collaborator answers
    * as a guest in the shared project session. Default Enter / submit still goes
@@ -430,6 +432,8 @@ const modelCatalogInflight = new Map<string, Promise<void>>()
 let hiddenModelsLoaded = false
 /** Events buffered until the automation snapshot supplies their missing prefix. */
 let automationSnapshotEvents: AutomationDelta[] | null = null
+let automationRefresh: Promise<void> | null = null
+const automationEnded = new Set<string>()
 let subagentRevision = 0
 const subagentRunRevisions = new Map<string, number>()
 const subagentHydrations = new Map<string, SubagentDelta[]>()
@@ -509,6 +513,13 @@ async function loadTranscript(chatId: string): Promise<void> {
 function applyAutomationDelta(payload: AutomationDelta): void {
   const id = payload.sessionId
   automationSnapshotEvents?.push(payload)
+  // A new run has an explicit boundary; stray output cannot reopen an ended one.
+  if (payload.kind !== 'turn' && automationEnded.has(id)) return
+  if (payload.kind === 'turn') {
+    if (payload.state === 'running') automationEnded.delete(id)
+    else automationEnded.add(id)
+  }
+
   if (payload.kind === 'phase') {
     useRoxyStore.setState((s) => ({
       startingAutomation: { ...s.startingAutomation, [id]: payload.phase === 'starting' }
@@ -1093,7 +1104,22 @@ async function hydrateSubagent(subChatId: string): Promise<void> {
   if (subagentHydrations.has(subChatId)) return
   const deltas: SubagentDelta[] = []
   subagentHydrations.set(subChatId, deltas)
-  const snapshot = await api.subagents.snapshot(subChatId).catch(() => null)
+  const snapshot = await api.subagents.snapshot(subChatId).catch(() => undefined)
+  if (snapshot === null && deltas.length === 0) {
+    // Load the durable reply before removing its stale live copy. Failed IPC is
+    // not an idle observation, and a racing new run must retain ownership.
+    await loadTranscript(subChatId)
+    if (deltas.length === 0) {
+      subagentTurns.delete(subChatId)
+      clearActivity(subChatId)
+      useRoxyStore.setState((s) => {
+        const runningSubagents = { ...s.runningSubagents }
+        delete runningSubagents[subChatId]
+        return { runningSubagents }
+      })
+      publishStream(subChatId, null)
+    }
+  }
   subagentHydrations.delete(subChatId)
   if (!snapshot) return
   const fold = restorePartsSnapshot(snapshot, deltas)
@@ -1328,50 +1354,7 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
       automationSubscribed = true
       api.automation.onDelta((payload) => applyAutomationDelta(payload))
       api.automation.onChanged((chatId) => void loadTranscript(chatId))
-      // Keep the live tail until the snapshot supplies its missing prefix.
-      const deltas: AutomationDelta[] = []
-      automationSnapshotEvents = deltas
-      void api.automation
-        .snapshot()
-        .then((running) => {
-          for (const run of running) {
-            const sessionDeltas = deltas.filter((delta) => delta.sessionId === run.sessionId)
-            const fold = restorePartsSnapshot(
-              run,
-              sessionDeltas.filter((delta) => delta.kind !== 'phase')
-            )
-            if (!fold) continue
-            const phase = sessionDeltas
-              .filter((delta) => delta.kind === 'phase' && delta.sequence > run.sequence)
-              .at(-1)
-            set((s) => ({
-              runningAutomation: { ...s.runningAutomation, [run.sessionId]: true },
-              startingAutomation: {
-                ...s.startingAutomation,
-                [run.sessionId]: (phase?.kind === 'phase' ? phase.phase : run.phase) === 'starting'
-              },
-              activityStartedAt: {
-                ...s.activityStartedAt,
-                [run.sessionId]: Math.max(
-                  s.activityStartedAt[run.sessionId] ?? 0,
-                  run.activityStartedAt
-                )
-              },
-              automationSpeakers: {
-                ...s.automationSpeakers,
-                [run.sessionId]: { botId: run.botId, botUsername: run.botUsername }
-              }
-            }))
-            remoteTurns.set(run.sessionId, fold)
-            if (get().activeChatId === run.sessionId && !get().sendingChats[run.sessionId]) {
-              publishStream(run.sessionId, fold.parts)
-            }
-          }
-        })
-        .catch(() => {})
-        .finally(() => {
-          automationSnapshotEvents = null
-        })
+      void get().refreshLiveState()
     }
 
     if (!llmDeltaSubscribed) {
@@ -1459,6 +1442,84 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
     if (!get().activeChatId && firstSession) {
       await get().selectChat(firstSession.id)
     }
+  },
+
+  refreshLiveState: () => {
+    if (automationRefresh) return automationRefresh
+    const deltas: AutomationDelta[] = []
+    automationSnapshotEvents = deltas
+    const known = Object.keys(get().runningAutomation)
+    automationRefresh = (async () => {
+      await api.automation
+        .snapshot()
+        .then(async (running) => {
+          for (const run of running) {
+            const sessionDeltas = deltas.filter((delta) => delta.sessionId === run.sessionId)
+            const fold = restorePartsSnapshot(
+              run,
+              sessionDeltas.filter((delta) => delta.kind !== 'phase')
+            )
+            if (!fold) continue
+            const phase = sessionDeltas
+              .filter((delta) => delta.kind === 'phase' && delta.sequence > run.sequence)
+              .at(-1)
+            automationEnded.delete(run.sessionId)
+            set((s) => ({
+              runningAutomation: { ...s.runningAutomation, [run.sessionId]: true },
+              startingAutomation: {
+                ...s.startingAutomation,
+                [run.sessionId]: (phase?.kind === 'phase' ? phase.phase : run.phase) === 'starting'
+              },
+              activityStartedAt: {
+                ...s.activityStartedAt,
+                [run.sessionId]: Math.max(
+                  s.activityStartedAt[run.sessionId] ?? 0,
+                  run.activityStartedAt
+                )
+              },
+              automationSpeakers: {
+                ...s.automationSpeakers,
+                [run.sessionId]: { botId: run.botId, botUsername: run.botUsername }
+              }
+            }))
+            remoteTurns.set(run.sessionId, fold)
+            if (get().activeChatId === run.sessionId && !get().sendingChats[run.sessionId])
+              publishStream(run.sessionId, fold.parts)
+          }
+          for (const id of known) {
+            if (
+              running.some((run) => run.sessionId === id) ||
+              deltas.some((delta) => delta.sessionId === id)
+            )
+              continue
+            await loadTranscript(id)
+            if (deltas.some((delta) => delta.sessionId === id)) continue
+            automationEnded.add(id)
+            remoteTurns.delete(id)
+            set((s) => {
+              const runningAutomation = { ...s.runningAutomation }
+              const startingAutomation = { ...s.startingAutomation }
+              const automationSpeakers = { ...s.automationSpeakers }
+              delete runningAutomation[id]
+              delete startingAutomation[id]
+              delete automationSpeakers[id]
+              return { runningAutomation, startingAutomation, automationSpeakers }
+            })
+            if (!get().sendingChats[id] && !get().runningSubagents[id]) {
+              clearActivity(id)
+              publishStream(id, null)
+            }
+          }
+        })
+        .catch(() => {})
+      const active = get().activeChatId
+      if (active && get().chats.find((chat) => chat.id === active)?.kind === 'sub')
+        await hydrateSubagent(active)
+    })().finally(() => {
+      automationSnapshotEvents = null
+      automationRefresh = null
+    })
+    return automationRefresh
   },
 
   refreshChats: async () => {
@@ -2040,6 +2101,7 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
     // back into an onClick where nothing handled it. Now the failure is state,
     // so the transcript can say so and offer a retry.
     await loadTranscript(id)
+    void get().refreshLiveState()
   },
 
   clearActive: () =>

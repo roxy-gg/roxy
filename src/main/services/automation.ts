@@ -480,8 +480,10 @@ async function deliver(item: QueueItem): Promise<void> {
         : undefined
     if (speaker) speakers.set(item.chatId, speaker)
     returnAuthor = speaker ?? {}
-    emit({ sessionId: item.chatId, kind: 'turn', state: 'running', phase: 'starting', ...speaker })
     let requestMessageId = previous.message_id
+    let requestMessage = requestMessageId
+      ? repo.listMessages(item.chatId).find((message) => message.id === requestMessageId)
+      : undefined
     if (!requestMessageId)
       getDb().transaction(() => {
         const message = repo.addMessage({
@@ -501,7 +503,18 @@ async function deliver(item: QueueItem): Promise<void> {
         })
         getDb().prepare('UPDATE queue SET message_id = ? WHERE id = ?').run(message.id, item.id)
         requestMessageId = message.id
+        requestMessage = message
       })()
+    // Deliver the durable prompt before opening the live thinking row. A separate
+    // transcript read can lag behind the start event by several frames.
+    emit({
+      sessionId: item.chatId,
+      kind: 'turn',
+      state: 'running',
+      phase: 'starting',
+      message: requestMessage,
+      ...speaker
+    })
     notifyAutomation(item.chatId)
     notifyTranscriptChanged(item.chatId)
     // Admission is synchronous; setup yields only after the prompt is durable.
@@ -556,7 +569,6 @@ async function deliver(item: QueueItem): Promise<void> {
     if (!guest && !hostVisiting && estimated > budget * 0.8)
       await compactChat(item.chatId, provider.id, model, controller.signal)
     if (controller.signal.aborted) throw new Error('Stopped.')
-    const requestMessage = repo.listMessages(item.chatId).find((m) => m.id === requestMessageId)
     const previousMessages = history(item.chatId, budget, info?.outputLimit ?? 4096, guest, asHost)
     const messages = withRequest(
       // Machine handoffs select their attachments explicitly. Shared history
@@ -581,6 +593,8 @@ async function deliver(item: QueueItem): Promise<void> {
         asHost
       },
       (event) => {
+        // Inherited tool pipes may outlive their turn or a newer owner of this chat.
+        if (live.get(item.chatId) !== fold) return
         if (!started) {
           started = true
           getDb().prepare("UPDATE queue SET state = 'running' WHERE id = ?").run(item.id)

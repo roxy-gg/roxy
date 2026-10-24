@@ -19,6 +19,7 @@ export function AnimationHarness(): JSX.Element {
   const [mode, setMode] = useState<'thinking' | 'tools' | 'text' | 'done'>('thinking')
   const [large, setLarge] = useState(false)
   const [streaming, setStreaming] = useState<MessagePart[] | null>([])
+  const [completed, setCompleted] = useState<Message[]>([])
   useEffect(() => {
     const original = CanvasRenderingContext2D.prototype.fillText
     CanvasRenderingContext2D.prototype.fillText = function (text: string, ...args: number[]) {
@@ -43,6 +44,16 @@ export function AnimationHarness(): JSX.Element {
       return publish.cancel
     }
     if (mode === 'done') {
+      setCompleted([
+        {
+          id: 'completed-turn',
+          chatId: 'motion-test',
+          role: 'assistant',
+          content: 'Finished reply',
+          parts: streaming ?? [{ type: 'text', text: 'Finished reply' }],
+          createdAt: 1
+        }
+      ])
       publish(null)
       return
     }
@@ -95,7 +106,13 @@ export function AnimationHarness(): JSX.Element {
       </div>
       <span data-motion-css className="animate-spin" aria-hidden />
       <CanvasTranscript
-        messages={large ? HISTORY_FIXTURES : EMPTY_HISTORY}
+        messages={
+          mode === 'done'
+            ? [...(large ? HISTORY_FIXTURES : EMPTY_HISTORY), ...completed]
+            : large
+              ? HISTORY_FIXTURES
+              : EMPTY_HISTORY
+        }
         streaming={streaming}
         chatId="motion-test"
         onCancelSubagent={() => {}}

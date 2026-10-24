@@ -11,6 +11,7 @@
  * Run: node test/store-guard.mjs
  */
 import { globSync, readFileSync } from 'node:fs'
+import { EventEmitter } from 'node:events'
 import { buildSync, transformSync } from 'esbuild'
 
 // Normalize CRLF up front: this repo checks out with Windows line endings and
@@ -31,6 +32,48 @@ const check = (name, ok, detail = '') => {
 }
 
 console.log('store: event-as-argument guards')
+const toolsSource = readFileSync(
+  new URL('../src/main/harness/tools.ts', import.meta.url),
+  'utf8'
+).replace(/\r\n/g, '\n')
+const bashSource = toolsSource.match(/function runBash\([\s\S]*?\n\}/)?.[0]
+const child = new EventEmitter()
+child.stdout = Object.assign(new EventEmitter(), { resume() {} })
+child.stderr = Object.assign(new EventEmitter(), { resume() {} })
+const chunks = []
+const runBash = new Function(
+  'spawn',
+  'shellInvocation',
+  'spawnEnv',
+  'FG_TIMEOUT_MAX',
+  'MAX_OUTPUT',
+  'EXIT_DRAIN_MS',
+  `${transformSync(bashSource, { loader: 'ts' }).code}; return runBash`
+)(
+  () => child,
+  () => ({ cmd: 'fixture', args: [] }),
+  () => ({}),
+  60_000,
+  100_000,
+  1
+)
+const bashResult = runBash('fixture', '.', (chunk) => chunks.push(chunk))
+child.stdout.emit('data', Buffer.from('initial output'))
+child.emit('exit', 1)
+await bashResult
+const settledChunks = chunks.join('')
+child.stdout.emit('data', Buffer.from('late inherited output'))
+child.stderr.emit('data', Buffer.from('late inherited error'))
+child.emit('close', 1)
+child.emit('error', new Error('late pipe error'))
+check(
+  'settled foreground bash cannot emit late output, errors, or duplicate exit suffixes',
+  chunks.join('') === settledChunks
+)
+check(
+  'settled foreground bash detaches inherited pipe listeners',
+  child.stdout.listenerCount('data') === 0 && child.stderr.listenerCount('data') === 0
+)
 
 // 1. The guard exists and rejects non-strings.
 check(
@@ -457,7 +500,12 @@ const flushFrames = () => {
   for (const callback of [...frames.values()]) callback()
 }
 console.log('store: reload snapshots preserve prefixes, live tails and speakers')
-const snapshotBody = src.match(/\.then\(\(running\) => \{\n([\s\S]*?)\n {8}\}\)\n {8}\.catch/)?.[1]
+const refreshLiveBody = src.match(
+  /  refreshLiveState: \(\) => \{\n([\s\S]*?)\n {2}\},\n\n {2}refreshChats:/
+)?.[1]
+const snapshotBody = src.match(
+  /\.then\(async \(running\) => \{\n([\s\S]*?)\n {10}for \(const id of known\)/
+)?.[1]
 check('snapshot handler found', snapshotBody !== undefined)
 const runSnapshot = (deltas, phase) => {
   const state = {
@@ -480,6 +528,7 @@ const runSnapshot = (deltas, phase) => {
     'restorePartsSnapshot',
     'remoteTurns',
     'publishStream',
+    'automationEnded',
     `${body}
 return apply(running)`
   )(
@@ -517,7 +566,8 @@ return apply(running)`
     () => state,
     restorePartsSnapshot,
     turns,
-    () => {}
+    () => {},
+    new Set()
   )
   return { state, turns }
 }
@@ -658,6 +708,7 @@ let subagentRefreshes = 0
 const subagentSet = (patch) =>
   Object.assign(subagentState, typeof patch === 'function' ? patch(subagentState) : patch)
 let snapshotRequest = deferred()
+let automationRequest = deferred()
 let readMessages = async () => []
 const subagentFns = new Function(
   'useRoxyStore',
@@ -683,11 +734,14 @@ const subagentFns = new Function(
     const automationTurnRevisions = new Map()
     const notifyIfSessionIdle = async () => {}
     const remoteTurns = new Map()
+    const automationEnded = new Set()
     let automationSnapshotEvents = null
+    let automationRefresh = null
     const get = useRoxyStore.getState, set = useRoxyStore.setState
     ${subagentCode}
+    function refreshLiveState() { ${refreshLiveBody} }
     return { apply: applySubagentDelta, hydrate: hydrateSubagent, turns: subagentTurns,
-      load: loadTranscript, remember: rememberMessage, automate: applyAutomationDelta }
+      load: loadTranscript, remember: rememberMessage, automate: applyAutomationDelta, refresh: refreshLiveState }
   `,
     { loader: 'ts' }
   ).code
@@ -695,6 +749,7 @@ const subagentFns = new Function(
   { getState: () => subagentState, setState: subagentSet },
   {
     subagents: { snapshot: () => snapshotRequest.promise },
+    automation: { snapshot: () => automationRequest.promise },
     messages: { list: (...args) => readMessages(...args) },
     queue: { list: async () => [] }
   },
@@ -755,6 +810,37 @@ check(
     !subagentState.runningSubagents['sub-2'] &&
     !subagentState.streamingChats['sub-2'] &&
     !subagentState.subagentPreviews['sub-2']
+)
+
+snapshotRequest = deferred()
+subagentFns.apply({ subChatId: 'stale-sub', sequence: 13, kind: 'run', state: 'running' })
+flushFrames()
+const idleHydration = subagentFns.hydrate('stale-sub')
+snapshotRequest.resolve(null)
+await idleHydration
+check(
+  'an authoritative idle child snapshot clears stale thinking and previews',
+  !subagentFns.turns.has('stale-sub') &&
+    !subagentState.runningSubagents['stale-sub'] &&
+    !subagentState.streamingChats['stale-sub']
+)
+snapshotRequest = deferred()
+subagentFns.apply({ subChatId: 'retry-sub', sequence: 14, kind: 'run', state: 'running' })
+const failedHydration = subagentFns.hydrate('retry-sub')
+snapshotRequest.resolve(Promise.reject(new Error('IPC unavailable')))
+await failedHydration
+check(
+  'a failed child snapshot is not mistaken for idle',
+  subagentState.runningSubagents['retry-sub']
+)
+snapshotRequest = deferred()
+const racedIdle = subagentFns.hydrate('retry-sub')
+subagentFns.apply({ subChatId: 'retry-sub', sequence: 15, kind: 'run', state: 'running' })
+snapshotRequest.resolve(null)
+await racedIdle
+check(
+  'an idle snapshot cannot clear a newer child run',
+  subagentState.runningSubagents['retry-sub']
 )
 
 subagentFns.apply({ subChatId: 'detached-review', sequence: 13, kind: 'run', state: 'running' })
@@ -873,9 +959,16 @@ subagentFns.automate({
   sequence: 20,
   kind: 'turn',
   state: 'running',
+  message: { ...userRow, id: 'next-prompt', createdAt: 4 },
   botId: 'guest',
   botUsername: 'helper'
 })
+flushFrames()
+check(
+  'automation start retains its prompt before thinking while transcript reads are delayed',
+  visibleMessages(subagentState.messages, subagentState.optimisticMessages.parent).at(-1)?.id ===
+    'next-prompt' && Array.isArray(subagentState.streamingChats.parent)
+)
 subagentFns.automate({
   sessionId: 'parent',
   sequence: 21,
@@ -912,6 +1005,59 @@ check(
   visibleMessages(subagentState.messages, subagentState.optimisticMessages.parent).at(-1) ===
     nextRow && !subagentState.messagesError
 )
+
+subagentFns.automate({
+  sessionId: 'parent',
+  sequence: 23,
+  kind: 'event',
+  event: { type: 'tool-delta', callId: 'old-shell', delta: 'late output' }
+})
+flushFrames()
+check(
+  'late output after terminal cannot resurrect automation thinking',
+  !subagentState.streamingChats.parent && !subagentState.runningAutomation.parent
+)
+
+readMessages = async () => [nextRow]
+subagentState.chats = []
+subagentState.runningAutomation.parent = true
+subagentState.startingAutomation.parent = true
+subagentState.streamingChats.parent = []
+const idleRefresh = subagentFns.refresh()
+check(
+  'concurrent window resume refreshes share one snapshot',
+  subagentFns.refresh() === idleRefresh
+)
+automationRequest.resolve([])
+await idleRefresh
+check(
+  'an authoritative idle refresh repairs a missed terminal event',
+  !subagentState.runningAutomation.parent &&
+    !subagentState.startingAutomation.parent &&
+    !subagentState.streamingChats.parent &&
+    subagentState.messages.at(-1).id === nextRow.id
+)
+
+automationRequest = deferred()
+subagentState.runningAutomation.parent = true
+const racedRefresh = subagentFns.refresh()
+subagentFns.automate({ sessionId: 'parent', sequence: 24, kind: 'turn', state: 'running' })
+automationRequest.resolve([])
+await racedRefresh
+flushFrames()
+check(
+  'a stale idle refresh cannot clear a newer automation turn',
+  subagentState.runningAutomation.parent && Array.isArray(subagentState.streamingChats.parent)
+)
+automationRequest = deferred()
+const failedRefresh = subagentFns.refresh()
+automationRequest.resolve(Promise.reject(new Error('IPC unavailable')))
+await failedRefresh
+check(
+  'a failed automation snapshot preserves genuine running state',
+  subagentState.runningAutomation.parent
+)
+subagentFns.automate({ sessionId: 'parent', sequence: 25, kind: 'turn', state: 'idle' })
 
 subagentState.activeChatId = 'retained-sub'
 subagentState.messagesChatId = 'retained-sub'

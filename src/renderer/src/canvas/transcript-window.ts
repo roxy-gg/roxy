@@ -280,7 +280,11 @@ export class TranscriptWindow {
           .map(([id, state]) => `${id}:${state.left}:${state.top}`)
           .join(',')
         const live = message.id === '__streaming__'
-        const key = `${format}:${item.kind === 'header' ? (messageBotUsername(input, message) ?? '') : ''}:${opened}:${diffs}:${scrolls}:${live && item.part === message.parts.length - 1}:${part?.type === 'tool' ? part.state : ''}`
+        const username = messageBotUsername(input, message)
+        const human = message.role === 'user' && !username
+        const messageX = human ? x + SPACE.messagePadX : bodyX
+        const messageWidth = human ? Math.max(1, width - SPACE.messagePadX * 2) : bodyWidth
+        const key = `${format}:${username ?? ''}:${opened}:${diffs}:${scrolls}:${live && item.part === message.parts.length - 1}:${part?.type === 'tool' ? part.state : ''}`
         const hit = this.entries.get(item.id)
         let block: Block
         if (!live && hit?.key === key && sameSource(hit.source, source)) {
@@ -296,7 +300,6 @@ export class TranscriptWindow {
             input.bots?.map((bot) => bot.username)
           )
           let height: number
-          const username = messageBotUsername(input, message)
           if (item.kind === 'header') {
             height = layoutMessageHeader(
               builder,
@@ -308,10 +311,10 @@ export class TranscriptWindow {
               username ? input.botAvatar?.(username) : undefined
             ).y
           } else if (item.kind === 'user')
-            height = layoutUserBody(builder, message.parts, bodyX, 0, bodyWidth)
+            height = layoutUserBody(builder, message.parts, messageX, 0, messageWidth, human)
           else if (item.kind === 'end')
             height =
-              layoutPromptFailure(builder, message, bodyX, 0, bodyWidth, input) +
+              layoutPromptFailure(builder, message, messageX, 0, messageWidth, input) +
               SPACE.messagePadY +
               (live && !message.parts.length
                 ? layoutParts(

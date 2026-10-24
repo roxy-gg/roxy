@@ -273,7 +273,7 @@ export function CanvasSurface({
     const resume = (): void => {
       cancelAnimationFrame(frame.current)
       frame.current = 0
-      if (!document.hidden) requestPaint()
+      if (!document.hidden) layoutRef.current()
     }
     const motionChanged = (): void => {
       reducedMotion.current = prefersReducedMotion()
@@ -281,12 +281,14 @@ export function CanvasSurface({
     }
     const stopMotion = subscribeMotion(motionChanged)
     document.addEventListener('visibilitychange', resume)
+    window.addEventListener('focus', resume)
     return () => {
       mounted.current = false
       copyAttempt.current++
       clearTimeout(copyTimer.current)
       stopMotion()
       document.removeEventListener('visibilitychange', resume)
+      window.removeEventListener('focus', resume)
       cancelAnimationFrame(frame.current)
       frame.current = 0
     }
@@ -298,12 +300,15 @@ export function CanvasSurface({
       const target = canvas.current
       const range = spacer.current
       if (!el || !target || !range || !size.width || !size.height) return
-      // Commit the scroll range and initial offset together, before painting any messages.
-      range.style.height = `${Math.max(0, scene.current.height - size.height)}px`
       if (el.clientWidth !== size.width || el.clientHeight !== size.height) {
         setSize({ width: el.clientWidth, height: el.clientHeight })
         return
       }
+      // Validate geometry before changing the scroll range. Hidden/restored
+      // windows can briefly report stale sizes and clamp the native offset.
+      const previousTop = el.scrollTop
+      range.style.height = `${Math.max(0, scene.current.height - size.height)}px`
+      if (el.scrollTop !== previousTop) ownScrollTop.current = el.scrollTop
       const measured = scene.current.window
       if (
         !position &&
@@ -687,6 +692,12 @@ export function CanvasSurface({
           style={{ overflowAnchor: 'none', scrollBehavior: 'auto', userSelect: 'none' }}
           onScroll={() => {
             const el = scroller.current!
+            // Occlusion and resize clamping are not intent to leave the tail.
+            if (document.hidden) return
+            if (el.clientWidth !== size.width || el.clientHeight !== size.height) {
+              setSize({ width: el.clientWidth, height: el.clientHeight })
+              return
+            }
             // A self-write is not user intent to detach from the live tail.
             if (ownScrollTop.current === null || Math.abs(el.scrollTop - ownScrollTop.current) > 1)
               stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80

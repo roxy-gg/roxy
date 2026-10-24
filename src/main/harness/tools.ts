@@ -504,13 +504,14 @@ function runBash(
     let acc = header
     let truncated = false
     let timedOut = false
+    let settled = false
     const child = spawn(cmd, args, {
       cwd,
       windowsHide: true,
       env: spawnEnv(opts.sessionId ?? '')
     })
     const onData = (buf: Buffer): void => {
-      if (truncated) return
+      if (settled || truncated) return
       let chunk = buf.toString()
       if (acc.length + chunk.length > MAX_OUTPUT) {
         chunk = chunk.slice(0, Math.max(0, MAX_OUTPUT - acc.length)) + '\n…(truncated)'
@@ -529,7 +530,6 @@ function runBash(
     // Fires once, whichever path below gets there first. Cancel MUST be able to
     // win a race against a `close` that may never come, and the promise must
     // still settle exactly once if that `close` does arrive afterwards.
-    let settled = false
     let killTimer: NodeJS.Timeout | undefined
     let drainTimer: NodeJS.Timeout | undefined
     const cleanup = (): void => {
@@ -537,6 +537,11 @@ function runBash(
       if (killTimer) clearTimeout(killTimer)
       if (drainTimer) clearTimeout(drainTimer)
       opts.signal?.removeEventListener('abort', onAbort)
+      child.stdout?.removeListener('data', onData)
+      child.stderr?.removeListener('data', onData)
+      // Keep inherited pipes draining without forwarding into a finished turn.
+      child.stdout?.resume()
+      child.stderr?.resume()
     }
     const settle = (result: ToolResult): void => {
       if (settled) return
@@ -566,6 +571,7 @@ function runBash(
     }
     opts.signal?.addEventListener('abort', onAbort, { once: true })
     child.on('error', (e) => {
+      if (settled) return
       if (stopped) {
         settle({ ok: false, output: `${acc}\n[${TOOL_ABORTED}]`.trimEnd() })
         return
@@ -576,6 +582,7 @@ function runBash(
     })
     /** The command finished (or was killed) — build its result. */
     const finish = (code: number | null): void => {
+      if (settled) return
       if (stopped) {
         finishStopped()
         return

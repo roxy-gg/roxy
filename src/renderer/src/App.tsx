@@ -68,12 +68,28 @@ export default function App(): JSX.Element {
   const ready = useRoxyStore((s) => s.ready)
   const settings = useRoxyStore((s) => s.settings)
   const bootstrap = useRoxyStore((s) => s.bootstrap)
+  const refreshLiveState = useRoxyStore((s) => s.refreshLiveState)
   const ensureModels = useRoxyStore((s) => s.ensureModels)
   const providers = useRoxyStore((s) => s.providers)
 
   useEffect(() => {
     bootstrap()
   }, [bootstrap])
+
+  useEffect(() => {
+    if (!ready) return
+    const refresh = (): void => {
+      if (!document.hidden) void refreshLiveState()
+    }
+    const timer = window.setInterval(refresh, 30_000)
+    window.addEventListener('focus', refresh)
+    document.addEventListener('visibilitychange', refresh)
+    return () => {
+      window.clearInterval(timer)
+      window.removeEventListener('focus', refresh)
+      document.removeEventListener('visibilitychange', refresh)
+    }
+  }, [ready, refreshLiveState])
 
   useEffect(() => {
     const copilots = providers.filter((p) => p.seedId === 'github-copilot')
