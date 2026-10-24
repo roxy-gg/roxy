@@ -519,6 +519,7 @@
     "thinkingTitle": "Denkaufwand"
   },
   "inspector": {
+    "actualSize": "View image at actual size",
     "added": "Hinzugefügt",
     "backToChat": "Zurück zum Chat",
     "binary": "Die Vorschau ist für Binär- oder Nicht-UTF-8-Dateien nicht verfügbar.",
@@ -541,7 +542,10 @@
     "emptyFolder": "Dieser Ordner ist leer.",
     "fileChanged": "Diese Datei wurde auf der Festplatte geändert. Ihre Änderungen bleiben erhalten. Kopieren Sie sie, bevor Sie neu laden, um den Konflikt zu beheben.",
     "files": "Dateien",
+    "fitImage": "Fit image to view",
     "loading": "Laden...",
+    "mediaFailed": "This media could not be displayed. The file may be damaged or use an unsupported format or codec.",
+    "mediaWorkingFile": "Showing the current working file. Media files do not have a text diff.",
     "mixedEol": "Die Bearbeitung ist für Dateien mit gemischten oder älteren Zeilenenden deaktiviert, um eine Änderung ihres Formats zu vermeiden.",
     "modified": "Geändert",
     "noGit": "Dieser Ordner ist kein Git-Repository",

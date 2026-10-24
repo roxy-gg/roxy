@@ -519,6 +519,7 @@
     "thinkingTitle": "Esforço de pensamento"
   },
   "inspector": {
+    "actualSize": "View image at actual size",
     "added": "Adicionado",
     "backToChat": "Voltar ao chat",
     "binary": "A pré-visualização não está disponível para ficheiros binários ou não-UTF-8.",
@@ -541,7 +542,10 @@
     "emptyFolder": "Esta pasta está vazia.",
     "fileChanged": "Este ficheiro foi alterado no disco. As suas edições foram mantidas. Copie-as antes de recarregar para resolver o conflito.",
     "files": "Ficheiros",
+    "fitImage": "Fit image to view",
     "loading": "A carregar...",
+    "mediaFailed": "This media could not be displayed. The file may be damaged or use an unsupported format or codec.",
+    "mediaWorkingFile": "Showing the current working file. Media files do not have a text diff.",
     "mixedEol": "A edição está desativada para ficheiros com quebras de linha mistas ou legadas para evitar alterar o seu formato.",
     "modified": "Modificado",
     "noGit": "Esta pasta não é um repositório Git",

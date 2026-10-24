@@ -519,6 +519,7 @@
     "thinkingTitle": "جهد التفكير"
   },
   "inspector": {
+    "actualSize": "View image at actual size",
     "added": "تمت الإضافة",
     "backToChat": "العودة إلى الدردشة",
     "binary": "المعاينة غير متاحة للملفات الثنائية أو غير المشفرة بـ UTF-8.",
@@ -541,7 +542,10 @@
     "emptyFolder": "هذا المجلد فارغ.",
     "fileChanged": "تغير هذا الملف على القرص. تم الاحتفاظ بتعديلاتك. انسخها قبل إعادة التحميل لحل التعارض.",
     "files": "الملفات",
+    "fitImage": "Fit image to view",
     "loading": "جارٍ التحميل...",
+    "mediaFailed": "This media could not be displayed. The file may be damaged or use an unsupported format or codec.",
+    "mediaWorkingFile": "Showing the current working file. Media files do not have a text diff.",
     "mixedEol": "تم تعطيل التحرير للملفات ذات نهايات الأسطر المختلطة أو القديمة لتجنب تغيير تنسيقها.",
     "modified": "تم التعديل",
     "noGit": "هذا المجلد ليس مستودع Git",

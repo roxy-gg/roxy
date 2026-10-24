@@ -14,6 +14,7 @@ import {
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import type { Chat } from '@shared/types'
+import { workspaceMedia } from '@shared/workspace-inspector'
 import type {
   InspectionResult,
   WorkspaceChange,
@@ -27,6 +28,7 @@ import { cn } from '../lib/cn'
 import { useRoxyStore } from '../lib/store'
 import { DiffViewer } from './diff/DiffViewer'
 import { FileIcon } from './FileIcon'
+import { WorkspaceMediaPreview } from './WorkspaceMediaPreview'
 const FileEditor = lazy(() => import('./FileEditor'))
 
 export function useWorkspaceInspection(
@@ -347,6 +349,7 @@ export function WorkspaceFileCanvas({
   const refreshComparison = useRef<(() => void) | null>(null)
   const host = useRef<HTMLDivElement>(null)
   const [height, setHeight] = useState(400)
+  const media = workspaceMedia(selection.path)
   useEffect(() => {
     const node = host.current
     if (!node) return
@@ -358,7 +361,7 @@ export function WorkspaceFileCanvas({
     return () => observer.disconnect()
   }, [])
   useEffect(() => {
-    if (!selection.comparison) return
+    if (!selection.comparison || media) return
     let cancelled = false
     let reading = false
     const refresh = (): void => {
@@ -384,7 +387,7 @@ export function WorkspaceFileCanvas({
       cancelled = true
       refreshComparison.current = null
     }
-  }, [sessionId, selection.rootId, selection.path, selection.comparison])
+  }, [sessionId, selection.rootId, selection.path, selection.comparison, media?.kind])
   useEffect(() => {
     refreshComparison.current?.()
   }, [snapshot])
@@ -393,6 +396,7 @@ export function WorkspaceFileCanvas({
     const timer = setTimeout(() => setCopied(false), 1200)
     return () => clearTimeout(timer)
   }, [copied])
+  if (media) return <WorkspaceMediaPreview {...{ sessionId, selection, onBack }} />
   if (!selection.comparison)
     return (
       <Suspense

@@ -519,6 +519,7 @@
     "thinkingTitle": "Esfuerzo de razonamiento"
   },
   "inspector": {
+    "actualSize": "View image at actual size",
     "added": "Añadido",
     "backToChat": "Volver al chat",
     "binary": "La previsualización no está disponible para archivos binarios o que no sean UTF-8.",
@@ -541,7 +542,10 @@
     "emptyFolder": "Esta carpeta está vacía.",
     "fileChanged": "Este archivo cambió en el disco. Tus ediciones se mantienen. Cópialas antes de recargar para resolver el conflicto.",
     "files": "Archivos",
+    "fitImage": "Fit image to view",
     "loading": "Cargando...",
+    "mediaFailed": "This media could not be displayed. The file may be damaged or use an unsupported format or codec.",
+    "mediaWorkingFile": "Showing the current working file. Media files do not have a text diff.",
     "mixedEol": "La edición está deshabilitada para archivos con finales de línea mixtos o heredados para evitar cambiar su formato.",
     "modified": "Modificado",
     "noGit": "Esta carpeta no es un repositorio Git",

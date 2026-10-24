@@ -1,6 +1,7 @@
 import {
   inspectWorkspace,
   listWorkspace,
+  previewWorkspace,
   readWorkspace,
   writeWorkspace
 } from '../services/workspace-inspector'
@@ -1479,6 +1480,13 @@ export function registerIpc(): void {
 
   ipcMain.handle(CHANNELS.workspaceInspect, (event, sessionId: string) =>
     trustedWallpaper(event) ? inspectWorkspace(sessionId) : { roots: [] }
+  )
+  ipcMain.handle(
+    CHANNELS.workspacePreview,
+    (event, sessionId: string, rootId: string, file: string) =>
+      trustedWallpaper(event)
+        ? previewWorkspace(sessionId, rootId, file)
+        : { ok: false, reason: 'unsafe' }
   )
   ipcMain.handle(
     CHANNELS.workspaceList,

@@ -519,6 +519,7 @@
     "thinkingTitle": "सोचने का प्रयास"
   },
   "inspector": {
+    "actualSize": "View image at actual size",
     "added": "जोड़ा गया",
     "backToChat": "चैट पर वापस",
     "binary": "बाइनरी या गैर-UTF-8 फ़ाइलों के लिए पूर्वावलोकन उपलब्ध नहीं है।",
@@ -541,7 +542,10 @@
     "emptyFolder": "यह फ़ोल्डर खाली है।",
     "fileChanged": "यह फ़ाइल डिस्क पर बदल गई। आपके संपादन रखे गए हैं। संघर्ष को हल करने के लिए पुनः लोड करने से पहले उन्हें कॉपी करें।",
     "files": "फ़ाइलें",
+    "fitImage": "Fit image to view",
     "loading": "लोड हो रहा है...",
+    "mediaFailed": "This media could not be displayed. The file may be damaged or use an unsupported format or codec.",
+    "mediaWorkingFile": "Showing the current working file. Media files do not have a text diff.",
     "mixedEol": "मिश्रित या पुरानी लाइन एंडिंग वाली फ़ाइलों के लिए संपादन अक्षम है ताकि उनके स्वरूप को बदलने से बचा जा सके।",
     "modified": "संशोधित",
     "noGit": "यह फ़ोल्डर एक Git रिपॉजिटरी नहीं है",

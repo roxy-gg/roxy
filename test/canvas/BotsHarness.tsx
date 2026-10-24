@@ -438,6 +438,12 @@ if (workspaceFixture) {
           'notes.markdown',
           'unknown.extension',
           'unknown',
+          'photo.png',
+          'photo.jpeg',
+          'clip.mp4',
+          'sound.wav',
+          'document.pdf',
+          'broken.png',
           'package.json',
           'tsconfig.json'
         ]
@@ -477,6 +483,49 @@ if (workspaceFixture) {
           after: document.content,
           revision: document.revision
         }
+      },
+      preview: async (_sessionId: string, _rootId: string, file: string) => {
+        const { workspaceMedia } = await import('../../src/shared/workspace-inspector')
+        const media = workspaceMedia(file)!
+        let blob: Blob
+        if (file === 'broken.png') blob = new Blob(['invalid'], { type: media.mime })
+        else if (media.kind === 'image') {
+          const canvas = document.createElement('canvas')
+          canvas.width = 2400
+          canvas.height = 1800
+          const context = canvas.getContext('2d')!
+          context.fillStyle = '#23536a'
+          context.fillRect(0, 0, canvas.width, canvas.height)
+          context.fillStyle = '#e8c890'
+          context.fillRect(300, 300, 1800, 1200)
+          blob = await new Promise<Blob>((resolve) =>
+            canvas.toBlob((value) => resolve(value!), media.mime)
+          )
+        } else if (media.kind === 'audio') {
+          const bytes = new ArrayBuffer(44 + 16000)
+          const view = new DataView(bytes)
+          const text = (at: number, value: string): void => {
+            for (let i = 0; i < value.length; i++) view.setUint8(at + i, value.charCodeAt(i))
+          }
+          text(0, 'RIFF')
+          view.setUint32(4, bytes.byteLength - 8, true)
+          text(8, 'WAVEfmt ')
+          view.setUint32(16, 16, true)
+          view.setUint16(20, 1, true)
+          view.setUint16(22, 1, true)
+          view.setUint32(24, 8000, true)
+          view.setUint32(28, 16000, true)
+          view.setUint16(32, 2, true)
+          view.setUint16(34, 16, true)
+          text(36, 'data')
+          view.setUint32(40, 16000, true)
+          blob = new Blob([bytes], { type: media.mime })
+        } else if (media.kind === 'video') {
+          blob = await fetch(new URL('../fixtures/background.mp4', import.meta.url)).then(
+            (response) => response.blob()
+          )
+        } else blob = new Blob(['%PDF-1.4\n%%EOF'], { type: media.mime })
+        return { ok: true, ...media, url: URL.createObjectURL(blob), size: blob.size }
       },
       write: async (
         _sessionId: string,

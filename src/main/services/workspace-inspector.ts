@@ -1,9 +1,10 @@
 import { execFile } from 'node:child_process'
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { promises as fs, realpath } from 'node:fs'
 import type { FileHandle } from 'node:fs/promises'
 import { promisify } from 'node:util'
 import path from 'node:path'
+import { Readable } from 'node:stream'
 import { diffLines } from 'diff'
 import * as repo from '../db/repo'
 import { discoverRepos, findGitRoot, sessionCwd } from './workspace'
@@ -14,6 +15,7 @@ import type {
   WorkspaceRoot,
   WorkspaceSnapshot
 } from '../../shared/workspace-inspector'
+import { workspaceMedia } from '../../shared/workspace-inspector'
 
 const nativeRealpath = promisify(realpath.native)
 
@@ -432,6 +434,96 @@ function failure(error: unknown): {
   reason: 'unavailable' | 'tooLarge' | 'binary' | 'unsafe'
 } {
   return { ok: false, reason: error instanceof InspectionError ? error.reason : 'unavailable' }
+}
+
+// Opaque capabilities are issued only through trusted IPC. Recheck the session's
+// current root and path on every request, including video seeks.
+const mediaPreviews = new Map<string, { sessionId: string; rootId: string; relative: string }>()
+
+export async function previewWorkspace(
+  sessionId: string,
+  rootId: string,
+  relative: string
+): ReturnType<WorkspaceInspectorApi['preview']> {
+  try {
+    const filename = await safePath(rootFor(sessionId, rootId), relative)
+    const stat = await fs.stat(filename)
+    if (!stat.isFile()) throw new InspectionError('unsafe')
+    const media = workspaceMedia(relative)
+    if (!media) throw new InspectionError('binary')
+    const token = randomUUID()
+    mediaPreviews.set(token, { sessionId, rootId, relative })
+    if (mediaPreviews.size > 128) mediaPreviews.delete(mediaPreviews.keys().next().value!)
+    return { ok: true, ...media, url: `roxy-media://preview/${token}`, size: stat.size }
+  } catch (error) {
+    return failure(error)
+  }
+}
+
+export async function serveWorkspaceMedia(request: Request): Promise<Response> {
+  let handle: FileHandle | undefined
+  try {
+    const url = new URL(request.url)
+    const preview = mediaPreviews.get(url.pathname.slice(1))
+    if (url.protocol !== 'roxy-media:' || url.host !== 'preview' || !preview)
+      return new Response(null, { status: 404 })
+    if (request.method !== 'GET' && request.method !== 'HEAD')
+      return new Response(null, { status: 405 })
+    const { sessionId, rootId, relative } = preview
+    const filename = await safePath(rootFor(sessionId, rootId), relative)
+    if (!(await fs.lstat(filename)).isFile()) throw new InspectionError('unsafe')
+    handle = await fs.open(filename, 'r')
+    const stat = await handle.stat()
+    if (!stat.isFile()) throw new InspectionError('unsafe')
+    const media = workspaceMedia(relative)
+    if (!media) throw new InspectionError('unsafe')
+    const headers = new Headers({
+      'Content-Type': media.mime,
+      'Accept-Ranges': 'bytes',
+      'Cache-Control': 'no-store',
+      'X-Content-Type-Options': 'nosniff',
+      'Content-Security-Policy':
+        "default-src 'none'; frame-ancestors 'self' file: http://localhost:* http://127.0.0.1:*"
+    })
+    let start = 0
+    let end = stat.size - 1
+    const range = request.headers.get('range')
+    if (range) {
+      const match = /^bytes=(\d*)-(\d*)$/.exec(range)
+      if (match && (match[1] || match[2])) {
+        start = match[1] ? Number(match[1]) : Math.max(0, stat.size - Number(match[2]))
+        end = match[1] && match[2] ? Math.min(end, Number(match[2])) : end
+      }
+      if (
+        !match ||
+        (!match[1] && !match[2]) ||
+        !Number.isSafeInteger(start) ||
+        !Number.isSafeInteger(end) ||
+        start > end ||
+        start >= stat.size
+      ) {
+        headers.set('Content-Range', `bytes */${stat.size}`)
+        return new Response(null, { status: 416, headers })
+      }
+      headers.set('Content-Range', `bytes ${start}-${end}/${stat.size}`)
+    }
+    headers.set('Content-Length', String(Math.max(0, end - start + 1)))
+    const status = range ? 206 : 200
+    if (request.method === 'HEAD' || stat.size === 0) return new Response(null, { status, headers })
+    const stream = handle.createReadStream({ start, end, autoClose: true })
+    handle = undefined // The response owns the open handle, including cancellation.
+    const abort = (): void => {
+      stream.destroy()
+    }
+    request.signal.addEventListener('abort', abort, { once: true })
+    stream.once('close', () => request.signal.removeEventListener('abort', abort))
+    if (request.signal.aborted) abort()
+    return new Response(Readable.toWeb(stream) as ReadableStream<Uint8Array>, { status, headers })
+  } catch {
+    return new Response(null, { status: 404 })
+  } finally {
+    await handle?.close()
+  }
 }
 
 export async function listWorkspace(

@@ -1,6 +1,7 @@
 import { shutdownCheatTools } from './services/cheat'
 import { shutdownEngineeringTools } from './services/engineering-tools'
-import { app, shell, BrowserWindow, session } from 'electron'
+import { app, shell, BrowserWindow, session, protocol } from 'electron'
+import { serveWorkspaceMedia } from './services/workspace-inspector'
 import { join } from 'path'
 import { optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
@@ -42,6 +43,13 @@ import {
 import { resolveThemeById } from './services/themes'
 import * as repo from './db/repo'
 import { setVoiceWindow, shutdownVoice } from './services/voice'
+
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: 'roxy-media',
+    privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true }
+  }
+])
 
 function createWindow(): BrowserWindow {
   const isMac = process.platform === 'darwin'
@@ -154,6 +162,7 @@ app.whenReady().then(() => {
 
   // Open the database (runs migrations) and wire up IPC before the first window.
   getDb()
+  protocol.handle('roxy-media', serveWorkspaceMedia)
   registerIpc()
   // Anonymous usage tracking (opt-out in Settings). Deliberately after the DB
   // and IPC are up so nothing here can delay the first window, and it owns its

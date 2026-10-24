@@ -519,6 +519,7 @@
     "thinkingTitle": "思考程度"
   },
   "inspector": {
+    "actualSize": "View image at actual size",
     "added": "已添加",
     "backToChat": "返回聊天",
     "binary": "二进制或非 UTF-8 文件无法预览。",
@@ -541,7 +542,10 @@
     "emptyFolder": "此文件夹为空。",
     "fileChanged": "此文件在磁盘上已更改。您的编辑已保留。在重新加载以解决冲突之前复制它们。",
     "files": "文件",
+    "fitImage": "Fit image to view",
     "loading": "正在加载...",
+    "mediaFailed": "This media could not be displayed. The file may be damaged or use an unsupported format or codec.",
+    "mediaWorkingFile": "Showing the current working file. Media files do not have a text diff.",
     "mixedEol": "为避免更改文件格式，已禁用对混合或旧版行尾文件的编辑。",
     "modified": "已修改",
     "noGit": "此文件夹不是 Git 仓库",

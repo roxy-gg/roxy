@@ -296,6 +296,8 @@ const roxy: RoxyApi = {
     import: () => ipcRenderer.invoke(CHANNELS.configImport)
   },
   workspace: {
+    preview: (sessionId, rootId, file) =>
+      ipcRenderer.invoke(CHANNELS.workspacePreview, sessionId, rootId, file),
     inspect: (sessionId) => ipcRenderer.invoke(CHANNELS.workspaceInspect, sessionId),
     list: (sessionId, rootId, directory) =>
       ipcRenderer.invoke(CHANNELS.workspaceList, sessionId, rootId, directory),

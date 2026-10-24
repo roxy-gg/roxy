@@ -519,6 +519,7 @@
     "thinkingTitle": "Уровень обдумывания"
   },
   "inspector": {
+    "actualSize": "View image at actual size",
     "added": "Добавлено",
     "backToChat": "Вернуться в чат",
     "binary": "Предварительный просмотр недоступен для бинарных или не-UTF-8 файлов.",
@@ -541,7 +542,10 @@
     "emptyFolder": "Эта папка пуста.",
     "fileChanged": "Этот файл изменился на диске. Ваши изменения сохранены. Скопируйте их перед перезагрузкой, чтобы разрешить конфликт.",
     "files": "Файлы",
+    "fitImage": "Fit image to view",
     "loading": "Загрузка...",
+    "mediaFailed": "This media could not be displayed. The file may be damaged or use an unsupported format or codec.",
+    "mediaWorkingFile": "Showing the current working file. Media files do not have a text diff.",
     "mixedEol": "Редактирование отключено для файлов со смешанными или устаревшими окончаниями строк, чтобы избежать изменения их формата.",
     "modified": "Изменено",
     "noGit": "Эта папка не является репозиторием Git",

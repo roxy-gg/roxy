@@ -1,18 +1,35 @@
 import assert from 'node:assert/strict'
-import { app } from 'electron'
+import { app, BrowserWindow, protocol } from 'electron'
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { workspaceMedia } from '../src/shared/workspace-inspector'
+
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: 'roxy-media',
+    privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true }
+  }
+])
+app.on('window-all-closed', () => {})
 
 async function main(): Promise<void> {
   await app.whenReady()
   const sandbox = await fs.mkdtemp(path.join(os.tmpdir(), 'roxy-inspector-'))
   app.setPath('userData', sandbox)
   const repo = require('../src/main/db/repo') as typeof import('../src/main/db/repo')
-  const { inspectWorkspace, listWorkspace, readWorkspace, writeWorkspace } =
+  const {
+    inspectWorkspace,
+    listWorkspace,
+    readWorkspace,
+    writeWorkspace,
+    previewWorkspace,
+    serveWorkspaceMedia
+  } =
     require('../src/main/services/workspace-inspector') as typeof import('../src/main/services/workspace-inspector')
+  protocol.handle('roxy-media', serveWorkspaceMedia)
   const root = path.join(sandbox, 'project')
   await fs.mkdir(root)
   const git = (...args: string[]): string =>
@@ -147,6 +164,161 @@ async function main(): Promise<void> {
   })
   const plain = repo.createChat({ title: 'Plain', workspacePath: outside })
   assert.equal((await inspectWorkspace(plain.id)).roots[0].isRepo, false)
+  // Media bypasses the text limit, streams exact ranges, and keeps path/root checks.
+  for (const [file, kind] of [
+    ['photo.PNG', 'image'],
+    ['photo.jpeg', 'image'],
+    ['movie.mp4', 'video'],
+    ['movie.webm', 'video'],
+    ['sound.mp3', 'audio'],
+    ['paper.pdf', 'pdf']
+  ]) {
+    assert.equal(workspaceMedia(file)?.kind, kind)
+  }
+  for (const file of [
+    'index.html',
+    'script.js',
+    'file.bin',
+    'constructor',
+    '__proto__',
+    'png',
+    'mp4',
+    'folder.png/file'
+  ]) {
+    assert.equal(workspaceMedia(file), null)
+  }
+  const mediaBytes = Buffer.alloc(1024 * 1024 + 7)
+  for (let i = 0; i < mediaBytes.length; i++) mediaBytes[i] = i % 251
+  await fs.writeFile(path.join(outside, 'large video #1.webm'), mediaBytes)
+  const mediaRoot = (await inspectWorkspace(plain.id)).roots[0].id
+  const preview = await previewWorkspace(plain.id, mediaRoot, 'large video #1.webm')
+  assert(preview.ok)
+  assert.equal(preview.kind, 'video')
+  assert.equal(preview.size, mediaBytes.length)
+  assert(!preview.url.includes(outside))
+  const full = await serveWorkspaceMedia(new Request(preview.url))
+  assert.equal(full.status, 200)
+  assert.equal(full.headers.get('content-type'), 'video/webm')
+  assert.deepEqual(Buffer.from(await full.arrayBuffer()), mediaBytes)
+  for (const [range, start, end] of [
+    ['bytes=2-5', 2, 5],
+    ['bytes=1048576-', 1048576, mediaBytes.length - 1],
+    ['bytes=-4', mediaBytes.length - 4, mediaBytes.length - 1],
+    ['bytes=0-9999999', 0, mediaBytes.length - 1]
+  ] as const) {
+    const response = await serveWorkspaceMedia(new Request(preview.url, { headers: { range } }))
+    assert.equal(response.status, 206)
+    assert.equal(
+      response.headers.get('content-range'),
+      `bytes ${start}-${end}/${mediaBytes.length}`
+    )
+    assert.deepEqual(Buffer.from(await response.arrayBuffer()), mediaBytes.subarray(start, end + 1))
+  }
+  for (const range of ['bytes=9999999-', 'bytes=5-2', 'bytes=-0', 'bytes=-', 'bytes=0-1,3-4']) {
+    assert.equal(
+      (await serveWorkspaceMedia(new Request(preview.url, { headers: { range } }))).status,
+      416
+    )
+  }
+  const head = await serveWorkspaceMedia(new Request(preview.url, { method: 'HEAD' }))
+  assert.equal(head.headers.get('content-length'), String(mediaBytes.length))
+  assert.equal((await head.arrayBuffer()).byteLength, 0)
+  assert.equal((await serveWorkspaceMedia(new Request('roxy-media://preview/forged'))).status, 404)
+  await fs.writeFile(path.join(outside, 'empty.png'), '')
+  const empty = await previewWorkspace(plain.id, mediaRoot, 'empty.png')
+  assert(empty.ok)
+  assert.equal(
+    (await (await serveWorkspaceMedia(new Request(empty.url))).arrayBuffer()).byteLength,
+    0
+  )
+  for (const file of ['../outside/photo.png', '.git/config', '/absolute.png']) {
+    assert.deepEqual(await previewWorkspace(plain.id, mediaRoot, file), {
+      ok: false,
+      reason: 'unsafe'
+    })
+  }
+  assert.deepEqual(await previewWorkspace(plain.id, 'forged', 'empty.png'), {
+    ok: false,
+    reason: 'unsafe'
+  })
+  assert.deepEqual(await previewWorkspace(plain.id, mediaRoot, 'secret.txt'), {
+    ok: false,
+    reason: 'binary'
+  })
+  await fs.symlink(
+    outside,
+    path.join(root, 'media-escape'),
+    process.platform === 'win32' ? 'junction' : 'dir'
+  )
+  assert.deepEqual(await previewWorkspace(chat.id, snapshot.id, 'media-escape/empty.png'), {
+    ok: false,
+    reason: 'unsafe'
+  })
+  await fs.rm(path.join(root, 'media-escape'))
+  // Decode and seek through the actual Electron protocol, not just the handler.
+  const mediaWindow = new BrowserWindow({
+    show: false,
+    webPreferences: { contextIsolation: true, nodeIntegration: false }
+  })
+  try {
+    await mediaWindow.loadURL('data:text/html,<body></body>')
+    const sharp = (await import('sharp')).default
+    for (const format of ['png', 'jpeg'] as const) {
+      const imageBytes = await sharp({
+        create: { width: 1600, height: 900, channels: 3, background: '#369' }
+      })
+        [format]()
+        .toBuffer()
+      await fs.writeFile(path.join(outside, `photo.${format}`), imageBytes)
+      const image = await previewWorkspace(plain.id, mediaRoot, `photo.${format}`)
+      assert(image.ok)
+      assert.deepEqual(
+        await mediaWindow.webContents.executeJavaScript(
+          `new Promise((resolve, reject) => { const img = new Image(); img.onload = () => resolve([img.naturalWidth, img.naturalHeight]); img.onerror = () => reject(Error('Image failed')); img.src = ${JSON.stringify(image.url)}; document.body.append(img); })`
+        ),
+        [1600, 900]
+      )
+    }
+    await fs.copyFile(path.resolve('test/fixtures/background.mp4'), path.join(outside, 'play.mp4'))
+    const video = await previewWorkspace(plain.id, mediaRoot, 'play.mp4')
+    assert(video.ok)
+    assert(
+      (await mediaWindow.webContents.executeJavaScript(`new Promise((resolve, reject) => {
+      const video = document.createElement('video'); video.muted = true; video.src = ${JSON.stringify(video.url)};
+      video.onerror = () => reject(Error('Video failed: ' + video.error?.message));
+      video.onloadeddata = async () => { await video.play(); video.pause(); video.onseeked = () => resolve(video.videoWidth); video.currentTime = .2; }; document.body.append(video);
+    })`)) > 0
+    )
+    await fs.copyFile(
+      path.resolve('src/renderer/src/assets/chime.wav'),
+      path.join(outside, 'play.wav')
+    )
+    const audio = await previewWorkspace(plain.id, mediaRoot, 'play.wav')
+    assert(audio.ok)
+    assert(
+      (await mediaWindow.webContents.executeJavaScript(`new Promise((resolve, reject) => {
+      const audio = document.createElement('audio'); audio.muted = true; audio.src = ${JSON.stringify(audio.url)};
+      audio.onerror = () => reject(Error('Audio failed')); audio.onloadeddata = async () => { await audio.play(); audio.pause(); resolve(audio.duration); }; document.body.append(audio);
+    })`)) > 0
+    )
+    const pdfBytes = await mediaWindow.webContents.printToPDF({})
+    await fs.writeFile(path.join(outside, 'document.pdf'), pdfBytes)
+    const pdf = await previewWorkspace(plain.id, mediaRoot, 'document.pdf')
+    assert(pdf.ok)
+    await mediaWindow.webContents.executeJavaScript(
+      `new Promise(resolve => { const frame = document.createElement('iframe'); frame.src = ${JSON.stringify(pdf.url)}; frame.onload = () => resolve(true); document.body.append(frame); })`
+    )
+    await new Promise((resolve) => setTimeout(resolve, 1000))
+    assert(
+      mediaWindow.webContents.mainFrame.framesInSubtree.some(
+        (frame) => frame.url.startsWith('chrome-extension://') && frame.url.endsWith('/index.html')
+      ),
+      'Electron PDF viewer loads the streamed document'
+    )
+  } finally {
+    mediaWindow.destroy()
+  }
+  await fs.rm(path.join(outside, 'large video #1.webm'))
   git('rm', '--cached', 'removed.txt')
   await fs.writeFile(path.join(root, 'removed.txt'), 'replacement\n')
   const replacement = (await inspectWorkspace(chat.id)).roots[0].changes.filter(
@@ -230,7 +402,16 @@ async function main(): Promise<void> {
   }
   const worktreePath = path.join(sandbox, 'checkout')
   git('worktree', 'add', '-q', '-b', 'inspector-worktree', worktreePath)
+  await fs.writeFile(path.join(root, 'stale.png'), Buffer.from([1]))
+  const stale = await previewWorkspace(chat.id, snapshot.id, 'stale.png')
+  assert(stale.ok)
   repo.setChatWorktree(chat.id, { worktreePath })
+  assert.equal((await serveWorkspaceMedia(new Request(stale.url))).status, 404)
+  // The old root's capability must not survive switching to an isolated checkout.
+  assert.deepEqual(await previewWorkspace(chat.id, snapshot.id, 'stale.png'), {
+    ok: false,
+    reason: 'unsafe'
+  })
   await fs.writeFile(path.join(worktreePath, 'file.txt'), 'isolated\n')
   const isolated = (await inspectWorkspace(chat.id)).roots[0]
   assert.notEqual(isolated.id, snapshot.id)
@@ -450,7 +631,7 @@ async function main(): Promise<void> {
   assert.equal((await inspectWorkspace(chat.id)).roots[0].unavailable, true)
   assert.equal((await readWorkspace(chat.id, isolated.id, 'file.txt', false)).ok, false)
   console.log(
-    'WORKSPACE INSPECTOR OK: net staged/unstaged counts, literal paths, additions, deletions, binary, clean/unborn/non-Git, bounded reads, traversal/junction rejection, no index/worktree mutations'
+    'WORKSPACE INSPECTOR OK: diffs/editor safety, media above 512 KB, byte ranges, PNG/JPEG decode, video playback/seeking, audio playback, native PDF viewer, traversal/junction rejection, stale media roots, no index/worktree mutations'
   )
 }
 

@@ -319,6 +319,7 @@ export const CHANNELS = {
   workspaceInspect: 'workspace:inspect',
   workspaceList: 'workspace:list',
   workspaceRead: 'workspace:read',
+  workspacePreview: 'workspace:preview',
   workspaceWrite: 'workspace:write',
   workspaceConfirmDiscard: 'workspace:confirmDiscard',
   gitAvailable: 'git:available',

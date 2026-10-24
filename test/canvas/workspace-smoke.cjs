@@ -314,6 +314,96 @@ app.whenReady().then(async () => {
     await evaluate('window.roxy.workspace.list = window.__originalList')
     await until(`!!document.querySelector('#workspace-inspector button[title="src/renderer"]')`)
     await screenshot('files')
+    // Media uses its own preview API, never the text editor or its 512 KB limit.
+    await evaluate(
+      `window.__mediaOriginalRead = window.roxy.workspace.read; window.__mediaReads = 0; window.roxy.workspace.read = (...args) => { window.__mediaReads++; return window.__mediaOriginalRead(...args) }`
+    )
+    for (const file of ['photo.png', 'photo.jpeg']) {
+      await click('#workspace-inspector button[title="' + file + '"]')
+      await until(`document.querySelector('[data-workspace-media] img')?.naturalWidth === 2400`)
+      assert(
+        await evaluate(
+          `const image = document.querySelector('[data-workspace-media] img').getBoundingClientRect(); const viewport = document.querySelector('[data-media-viewport]').getBoundingClientRect(); return image.width <= viewport.width && image.height <= viewport.height`
+        )
+      )
+      await click('[aria-label="View image at actual size"]')
+      assert.equal(
+        await evaluate(
+          `return document.querySelector('[data-workspace-media] img').getBoundingClientRect().width`
+        ),
+        2400
+      )
+      await click('[aria-label="Fit image to view"]')
+      for (const width of [760, 480, 1440]) {
+        win.setContentSize(width, 900)
+        await wait()
+        if (width === 480) {
+          await click('[title="Collapse sidebar"]')
+          await new Promise((resolve) => setTimeout(resolve, 400))
+        } else if (width === 1440) {
+          await click('[title="Expand sidebar"]')
+          await new Promise((resolve) => setTimeout(resolve, 400))
+        }
+        assert(
+          await evaluate(
+            `const image = document.querySelector('[data-workspace-media] img').getBoundingClientRect(); const viewport = document.querySelector('[data-media-viewport]').getBoundingClientRect(); return image.width <= viewport.width && image.height <= viewport.height && document.documentElement.scrollWidth <= innerWidth`
+          ),
+          'media fits at ' + width
+        )
+      }
+      await evaluate(
+        `window.__mediaImage = document.querySelector('[data-workspace-media] img'); window.dispatchEvent(new Event('focus'))`
+      )
+      await wait()
+      assert(
+        await evaluate(
+          `return window.__mediaImage === document.querySelector('[data-workspace-media] img')`
+        )
+      )
+      await screenshot('preview-' + file)
+      await click('[aria-label="Back to chat"]')
+    }
+    for (const [file, tag] of [
+      ['clip.mp4', 'video'],
+      ['sound.wav', 'audio']
+    ]) {
+      await click('#workspace-inspector button[title="' + file + '"]')
+      await until(`document.querySelector('[data-workspace-media] ${tag}')?.readyState >= 1`)
+      assert(
+        await evaluate(`return document.querySelector('[data-workspace-media] ${tag}').controls`)
+      )
+      await evaluate(
+        `const media = document.querySelector('[data-workspace-media] ${tag}'); media.muted = true; await media.play(); media.pause()`
+      )
+      await screenshot('preview-' + tag)
+      await click('[aria-label="Back to chat"]')
+    }
+    await click('#workspace-inspector button[title="document.pdf"]')
+    await until(`!!document.querySelector('[data-workspace-media] iframe[title="document.pdf"]')`)
+    await click('[aria-label="Back to chat"]')
+    await click('#workspace-inspector button[title="broken.png"]')
+    await until(
+      `document.querySelector('[data-workspace-media] [role=status]')?.textContent.includes('could not be displayed')`
+    )
+    await click('[aria-label="Back to chat"]')
+    assert.equal(await evaluate('return window.__mediaReads'), 0)
+    await evaluate('window.roxy.workspace.read = window.__mediaOriginalRead')
+    await evaluate(`window.__mediaOriginalInspect = window.roxy.workspace.inspect;
+      window.roxy.workspace.inspect = async (...args) => { const snapshot = structuredClone(await window.__mediaOriginalInspect(...args)); snapshot.roots[0].changes.push({path:'photo.png',status:'modified',additions:null,deletions:null}); return snapshot; }; window.dispatchEvent(new Event('focus'));`)
+    await click('#inspector-tab-changes')
+    await until(`!!document.querySelector('#workspace-inspector button[title="photo.png"]')`)
+    await click('#workspace-inspector button[title="photo.png"]')
+    await until(`document.querySelector('[data-workspace-media] img')?.naturalWidth === 2400`)
+    assert(
+      await evaluate(
+        `return document.querySelector('[data-workspace-media]').textContent.includes('Showing the current working file')`
+      )
+    )
+    await click('[aria-label="Back to chat"]')
+    await evaluate(
+      `window.roxy.workspace.inspect = window.__mediaOriginalInspect; window.dispatchEvent(new Event('focus'))`
+    )
+    await click('#inspector-tab-files')
     await click('#workspace-inspector button[title="package.json"]')
     await until(
       `document.querySelector('[data-workspace-editor] .view-lines')?.textContent.includes('roxy')`
@@ -683,7 +773,7 @@ app.whenReady().then(async () => {
     )
     await click('[aria-label="Back to chat"]')
     console.log(
-      'WORKSPACE UI OK: layout/diff/tree/file-type icons, zero counts, editor virtualization, Enter/Tab/Shift-Tab, undo/redo, save shortcuts, retained drafts, polling/save races, external conflicts, TS completions/diagnostics, BOM/CRLF/tabs, mixed-EOL protection'
+      'WORKSPACE UI OK: layout/diff/tree/icons, responsive PNG/JPEG previews/actual size, video/audio playback, PDF frame, media failures, editor virtualization/shortcuts/drafts/conflicts, TS completions/diagnostics, BOM/CRLF/tabs, mixed-EOL protection'
     )
   } catch (error) {
     console.error(error)

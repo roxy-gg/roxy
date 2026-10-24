@@ -519,6 +519,7 @@
     "thinkingTitle": "Effort de réflexion"
   },
   "inspector": {
+    "actualSize": "View image at actual size",
     "added": "Ajouté",
     "backToChat": "Retour au chat",
     "binary": "L'aperçu n'est pas disponible pour les fichiers binaires ou non-UTF-8.",
@@ -541,7 +542,10 @@
     "emptyFolder": "Ce dossier est vide.",
     "fileChanged": "Ce fichier a été modifié sur le disque. Vos modifications sont conservées. Copiez-les avant de recharger pour résoudre le conflit.",
     "files": "Fichiers",
+    "fitImage": "Fit image to view",
     "loading": "Chargement...",
+    "mediaFailed": "This media could not be displayed. The file may be damaged or use an unsupported format or codec.",
+    "mediaWorkingFile": "Showing the current working file. Media files do not have a text diff.",
     "mixedEol": "L'édition est désactivée pour les fichiers avec des fins de ligne mixtes ou héritées afin d'éviter de modifier leur format.",
     "modified": "Modifié",
     "noGit": "Ce dossier n'est pas un dépôt Git",
