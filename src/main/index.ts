@@ -188,11 +188,11 @@ app.on('window-all-closed', () => {
 // Kill any agent-started background processes (dev servers/watchers) on quit,
 // cancel any in-flight background subagent tasks (Phase 11), and shut down any
 // warm language servers (Phase 12).
-// Last chance to send the queued events: 'before-quit' fires before windows
-// start tearing down, which gives the final flush a real (if not guaranteed)
-// window to reach the network. Losing it costs one app_close, nothing more.
+// Flush tracking before final process teardown; it is deliberately best-effort.
 let engineeringQuit = false
-app.on('before-quit', (event) => {
+// Wait until windows accept closing, including unsaved-editor confirmation,
+// before shutting down services. A cancelled quit must leave Roxy operational.
+app.on('will-quit', (event) => {
   if (!engineeringQuit) {
     event.preventDefault()
     engineeringQuit = true
@@ -200,14 +200,12 @@ app.on('before-quit', (event) => {
     void shutdownEngineeringTools()
       .catch(console.error)
       .finally(() => app.quit())
+    return
   }
   shutdownVoice()
   stopAutomation()
   stopAllTurns()
   shutdownTracking()
-})
-
-app.on('will-quit', () => {
   killAllBackground()
   closeAllBrowsers()
   shutdownAllLsp()

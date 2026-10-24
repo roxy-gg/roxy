@@ -316,6 +316,8 @@ export const CHANNELS = {
   workspaceInspect: 'workspace:inspect',
   workspaceList: 'workspace:list',
   workspaceRead: 'workspace:read',
+  workspaceWrite: 'workspace:write',
+  workspaceConfirmDiscard: 'workspace:confirmDiscard',
   gitAvailable: 'git:available',
   gitStatus: 'git:status',
   gitStatusMulti: 'git:status-multi',

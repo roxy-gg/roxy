@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { promises as fs, realpath } from 'node:fs'
+import type { FileHandle } from 'node:fs/promises'
 import { promisify } from 'node:util'
 import path from 'node:path'
 import { diffLines } from 'diff'
@@ -9,6 +10,7 @@ import { discoverRepos, findGitRoot, sessionCwd } from './workspace'
 import type {
   InspectionResult,
   WorkspaceEntry,
+  WorkspaceInspectorApi,
   WorkspaceRoot,
   WorkspaceSnapshot
 } from '../../shared/workspace-inspector'
@@ -164,7 +166,7 @@ async function safePath(root: string, relative: string): Promise<string> {
 function text(bytes: Buffer): string {
   if (bytes.includes(0)) throw new InspectionError('binary')
   try {
-    return new TextDecoder('utf-8', { fatal: true }).decode(bytes)
+    return new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes)
   } catch {
     throw new InspectionError('binary')
   }
@@ -175,20 +177,87 @@ async function readText(root: string, relative: string): Promise<string> {
   if (!(await fs.lstat(filename)).isFile()) throw new InspectionError('unsafe')
   const handle = await fs.open(filename, 'r')
   try {
-    const stat = await handle.stat()
-    if (!stat.isFile()) throw new InspectionError('unsafe')
-    if (stat.size > FILE_LIMIT) throw new InspectionError('tooLarge')
-    const bytes = Buffer.alloc(FILE_LIMIT + 1)
-    let length = 0
-    while (length < bytes.length) {
-      const read = await handle.read(bytes, length, bytes.length - length, null)
-      if (!read.bytesRead) break
-      length += read.bytesRead
-    }
-    if (length > FILE_LIMIT) throw new InspectionError('tooLarge')
-    return text(bytes.subarray(0, length))
+    return await readHandle(handle)
   } finally {
     await handle.close()
+  }
+}
+
+async function readHandle(handle: FileHandle): Promise<string> {
+  const stat = await handle.stat()
+  if (!stat.isFile()) throw new InspectionError('unsafe')
+  if (stat.size > FILE_LIMIT) throw new InspectionError('tooLarge')
+  const bytes = Buffer.alloc(FILE_LIMIT + 1)
+  let length = 0
+  while (length < bytes.length) {
+    const read = await handle.read(bytes, length, bytes.length - length, length)
+    if (!read.bytesRead) break
+    length += read.bytesRead
+  }
+  if (length > FILE_LIMIT) throw new InspectionError('tooLarge')
+  return text(bytes.subarray(0, length))
+}
+
+function revision(content: string): string {
+  return createHash('sha256').update(content).digest('hex')
+}
+
+const saves = new Map<string, Promise<unknown>>()
+
+export async function writeWorkspace(
+  sessionId: string,
+  rootId: string,
+  relative: string,
+  content: string,
+  expectedRevision: string
+): ReturnType<WorkspaceInspectorApi['write']> {
+  try {
+    if (
+      typeof content !== 'string' ||
+      typeof expectedRevision !== 'string' ||
+      !/^[a-f0-9]{64}$/.test(expectedRevision)
+    )
+      throw new InspectionError('unsafe')
+    const bytes = Buffer.from(content, 'utf8')
+    if (bytes.length > FILE_LIMIT) throw new InspectionError('tooLarge')
+    if (text(bytes) !== content) throw new InspectionError('binary')
+    const root = rootFor(sessionId, rootId)
+    const filename = await safePath(root, relative)
+    const previous = saves.get(filename)
+    const save = (async () => {
+      await previous?.catch(() => {})
+      // Serialize our own writers and revalidate after waiting. External local writers
+      // can still race this check; this is optimistic conflict detection, not a sandbox.
+      if (rootFor(sessionId, rootId) !== root || (await safePath(root, relative)) !== filename)
+        throw new InspectionError('unsafe')
+      if (!(await fs.lstat(filename)).isFile()) throw new InspectionError('unsafe')
+      const handle = await fs.open(filename, 'r+')
+      try {
+        // Editing a hard link could modify a file outside this session's root.
+        if ((await handle.stat()).nlink !== 1) throw new InspectionError('unsafe')
+        if (revision(await readHandle(handle)) !== expectedRevision)
+          return { ok: false, reason: 'changed' } as const
+        let offset = 0
+        while (offset < bytes.length) {
+          const { bytesWritten } = await handle.write(bytes, offset, bytes.length - offset, offset)
+          if (!bytesWritten) throw new InspectionError('unavailable')
+          offset += bytesWritten
+        }
+        await handle.truncate(bytes.length)
+        await handle.sync()
+        return { ok: true, revision: revision(content) } as const
+      } finally {
+        await handle.close()
+      }
+    })()
+    saves.set(filename, save)
+    try {
+      return await save
+    } finally {
+      if (saves.get(filename) === save) saves.delete(filename)
+    }
+  } catch (error) {
+    return failure(error)
   }
 }
 
@@ -399,7 +468,7 @@ export async function readWorkspace(
   rootId: string,
   relative: string,
   comparison: boolean
-): Promise<InspectionResult<{ before: string; after: string }>> {
+): ReturnType<WorkspaceInspectorApi['read']> {
   try {
     const root = rootFor(sessionId, rootId)
     let before = ''
@@ -421,7 +490,7 @@ export async function readWorkspace(
       }
       if (change.status !== 'deleted') after = await readText(root, relative)
     } else after = await readText(root, relative)
-    return { ok: true, before, after }
+    return { ok: true, before, after, ...(!comparison ? { revision: revision(after) } : {}) }
   } catch (error) {
     return failure(error)
   }

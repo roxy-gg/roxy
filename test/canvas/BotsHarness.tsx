@@ -367,6 +367,7 @@ Object.assign(window.roxy, {
 }
 
 if (workspaceFixture) {
+  const files = new Map<string, { content: string; revision: string }>()
   const changes = [
     {
       path: 'src/renderer/src/components/ChatView.tsx',
@@ -443,11 +444,35 @@ if (workspaceFixture) {
           )
         }
       },
-      read: async (_sessionId: string, _rootId: string, file: string, comparison: boolean) => ({
-        ok: true,
-        before: comparison ? before : '',
-        after: file.endsWith('.json') ? '{\n  "name": "roxy",\n  "version": "1.0.21"\n}\n' : after
-      })
+      read: async (_sessionId: string, _rootId: string, file: string, comparison: boolean) => {
+        if (!files.has(file))
+          files.set(file, {
+            content: file.endsWith('.json')
+              ? '{\n  "name": "roxy",\n  "version": "1.0.21"\n}\n'
+              : after,
+            revision: 'initial'
+          })
+        const document = files.get(file)!
+        return {
+          ok: true,
+          before: comparison ? before : '',
+          after: document.content,
+          revision: document.revision
+        }
+      },
+      write: async (
+        _sessionId: string,
+        _rootId: string,
+        file: string,
+        content: string,
+        expected: string
+      ) => {
+        if (files.get(file)?.revision !== expected) return { ok: false, reason: 'changed' }
+        const revision = crypto.randomUUID()
+        files.set(file, { content, revision })
+        return { ok: true, revision }
+      },
+      confirmDiscard: async () => true
     },
     git: {
       available: async () => true,

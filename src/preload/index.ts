@@ -296,7 +296,18 @@ const roxy: RoxyApi = {
     list: (sessionId, rootId, directory) =>
       ipcRenderer.invoke(CHANNELS.workspaceList, sessionId, rootId, directory),
     read: (sessionId, rootId, file, comparison) =>
-      ipcRenderer.invoke(CHANNELS.workspaceRead, sessionId, rootId, file, comparison)
+      ipcRenderer.invoke(CHANNELS.workspaceRead, sessionId, rootId, file, comparison),
+    write: (sessionId, rootId, file, content, expectedRevision) =>
+      ipcRenderer.invoke(
+        CHANNELS.workspaceWrite,
+        sessionId,
+        rootId,
+        file,
+        content,
+        expectedRevision
+      ),
+    confirmDiscard: (message, discard, cancel) =>
+      ipcRenderer.invoke(CHANNELS.workspaceConfirmDiscard, message, discard, cancel)
   },
   tools: {
     run: (sessionId, name, input) => ipcRenderer.invoke(CHANNELS.toolsRun, sessionId, name, input),

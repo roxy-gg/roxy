@@ -1,4 +1,4 @@
-/** Read-only project inspection; paths are relative to a session-scoped root. */
+/** Project inspection and editing; paths are relative to a session-scoped root. */
 export interface WorkspaceChange {
   path: string
   status: 'added' | 'modified' | 'deleted' | 'conflict'
@@ -42,5 +42,13 @@ export interface WorkspaceInspectorApi {
     rootId: string,
     file: string,
     comparison: boolean
-  ): Promise<InspectionResult<{ before: string; after: string }>>
+  ): Promise<InspectionResult<{ before: string; after: string; revision?: string }>>
+  write(
+    sessionId: string,
+    rootId: string,
+    file: string,
+    content: string,
+    expectedRevision: string
+  ): Promise<InspectionResult<{ revision: string }> | { ok: false; reason: 'changed' }>
+  confirmDiscard(message: string, discard: string, cancel: string): Promise<boolean>
 }

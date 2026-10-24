@@ -87,7 +87,8 @@
     "perf:canvas": "electron test/canvas/performance.cjs",
     "smoke:diff": "esbuild test/canvas/diff.ts --bundle --platform=node --format=cjs --packages=external --outfile=test/.out/diff.cjs && node test/.out/diff.cjs",
     "smoke:workspace": "esbuild test/workspace-inspector.ts --bundle --platform=node --format=cjs --packages=external --outfile=test/.out/workspace-inspector.cjs && electron test/.out/workspace-inspector.cjs",
-    "smoke:workspace-ui": "electron test/canvas/workspace-smoke.cjs"
+    "smoke:workspace-ui": "electron test/canvas/workspace-smoke.cjs",
+    "smoke:editor-built": "vite build --config test/canvas/vite.config.mjs --outDir ../.out/editor-build --base ./ && electron test/canvas/editor-built-smoke.cjs"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^2.0.85",
@@ -109,6 +110,7 @@
     "facehash": "^0.1.0",
     "i18next": "^25.10.10",
     "lucide-react": "^1.21.0",
+    "monaco-editor": "0.57.0",
     "morphicons": "^1.7.0",
     "proper-lockfile": "^4.1.2",
     "qrcode.react": "^4.2.0",

@@ -19,17 +19,24 @@ async function until(code) {
       'const el=document.querySelector("[data-workspace-canvas] [data-canvas-surface]");return {top:el?.scrollTop,height:el?.scrollHeight,text:el?.textContent?.slice(0,400),window:window.__canvasTranscript?.scene().window}'
     )
   )
+  console.error(
+    await evaluate(
+      'return {value:window.__editor?.getValue(),position:window.__editor?.getPosition(),text:document.querySelector("[data-workspace-editor]")?.textContent?.slice(0,400)}'
+    )
+  )
   throw Error(`Timed out: ${code}`)
 }
 async function click(selector) {
   await evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`)
   await wait()
 }
-async function key(keyCode) {
+async function key(keyCode, modifiers = []) {
   win.focus()
   win.webContents.focus()
-  win.webContents.sendInputEvent({ type: 'keyDown', keyCode })
-  win.webContents.sendInputEvent({ type: 'keyUp', keyCode })
+  win.webContents.sendInputEvent({ type: 'keyDown', keyCode, modifiers })
+  if (keyCode === 'Enter')
+    win.webContents.sendInputEvent({ type: 'char', keyCode: '\r', modifiers })
+  win.webContents.sendInputEvent({ type: 'keyUp', keyCode, modifiers })
   await wait()
 }
 async function screenshot(name) {
@@ -126,6 +133,7 @@ app.whenReady().then(async () => {
     )
     win.focus()
     win.webContents.focus()
+    await wait()
     win.webContents.debugger.attach('1.3')
     await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', {
       type: 'mouseMoved',
@@ -138,6 +146,7 @@ app.whenReady().then(async () => {
       buttons: 1,
       clickCount: 1
     })
+    await wait()
     await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', {
       type: 'mouseMoved',
       x: edge.x - 80,
@@ -230,7 +239,7 @@ app.whenReady().then(async () => {
     await screenshot('files')
     await click('#workspace-inspector button[title="package.json"]')
     await until(
-      `document.querySelector('[data-workspace-canvas] [data-canvas-surface]')?.textContent.includes('roxy')`
+      `document.querySelector('[data-workspace-editor] .view-lines')?.textContent.includes('roxy')`
     )
     assert(
       await evaluate(
@@ -338,63 +347,228 @@ app.whenReady().then(async () => {
     await screenshot('files-light')
     await evaluate(`window.__originalRead = window.roxy.workspace.read;
       window.__longFile = Array.from({length: 300}, (_, i) => 'const row' + i + ' = "' + 'wide '.repeat(120) + '";').join('\\r\\n') + '\\r\\n';
-      window.roxy.workspace.read = async () => ({ok:true,before:'',after:window.__longFile});`)
+      window.roxy.workspace.read = async () => ({ok:true,before:'',after:window.__longFile,revision:'long'});`)
     await click('#workspace-inspector button[title="package.json"]')
     await until(
-      `document.querySelector('[data-workspace-canvas] [data-canvas-surface]')?.textContent.includes('row0')`
-    )
-    await until(
-      `document.querySelector('[data-workspace-canvas] [data-canvas-surface]')?.scrollHeight > 5000`
+      `document.querySelector('[data-workspace-editor] .view-lines')?.textContent.includes('row0')`
     )
     await evaluate(
-      `document.querySelector('[data-workspace-canvas] [data-canvas-surface]').scrollTop = 4000`
+      `const { monaco } = await import(${JSON.stringify(base + '/lib/workspace-editor.ts')}); window.__monaco = monaco; window.__editor = monaco.editor.getEditors()[0]; window.__editor.setScrollTop(4000);`
     )
     await until(
-      `document.querySelector('[data-workspace-canvas] [data-canvas-surface]')?.textContent.includes('row200')`
+      `document.querySelector('[data-workspace-editor] .view-lines')?.textContent.includes('row200')`
     )
-    await evaluate(
-      `document.querySelector('[data-workspace-canvas] [data-canvas-surface]').focus()`
-    )
-    win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'A', modifiers: ['control'] })
-    win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'A', modifiers: ['control'] })
-    win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'C', modifiers: ['control'] })
-    win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'C', modifiers: ['control'] })
+    await click('[aria-label="Copy file contents"]')
     await until(`window.__canvasTest.copied.includes(window.__longFile)`)
-    const fileBox = await evaluate(
-      `const r = document.querySelector('[data-workspace-canvas] [data-canvas-surface]').getBoundingClientRect(); return {x:Math.round(r.left+100),y:Math.round(r.top+100)}`
-    )
-    assert(
-      await evaluate(
-        `const el = document.querySelector('[data-workspace-canvas] [data-canvas-surface]'); const wheel = new WheelEvent('wheel', {clientX:${fileBox.x},clientY:${fileBox.y},deltaX:500,cancelable:true,bubbles:true}); el.dispatchEvent(wheel); return wheel.defaultPrevented`
-      )
-    )
+    await evaluate('window.__editor.focus()')
     await key('Escape')
     await evaluate(
-      `window.roxy.workspace.read = async () => ({ok:true,before:'',after:'const a = 1\\n'.repeat(40000)})`
+      `window.roxy.workspace.read = async () => ({ok:true,before:'',after:'const a = 1\\n'.repeat(40000),revision:'huge'})`
     )
     await click('#workspace-inspector button[title="package.json"]')
-    await until(
-      `document.querySelector('[data-workspace-canvas] [data-canvas-surface]')?.scrollHeight > 700000`
-    )
+    await until('window.__monaco.editor.getEditors()[0]?.getModel()?.getLineCount() === 40001')
     assert(
       await evaluate(
-        'return window.__canvasTranscript.scene().blocks.reduce((sum,b)=>sum+b.selectable.length,0) < 300'
+        'return document.querySelectorAll("[data-workspace-editor] .view-line").length < 300'
       )
     )
     await evaluate(
-      `document.querySelector('[data-workspace-canvas] [data-canvas-surface]').scrollTop = 600000`
+      'window.__editor = window.__monaco.editor.getEditors()[0]; window.__editor.setScrollTop(600000)'
     )
-    await until('window.__canvasTranscript.scene().window.scrollTop > 590000')
+    await until('window.__editor.getScrollTop() > 590000')
     assert(
       await evaluate(
-        'return window.__canvasTranscript.scene().blocks.reduce((sum,b)=>sum+b.selectable.length,0) < 300'
+        'return document.querySelectorAll("[data-workspace-editor] .view-line").length < 300'
       )
     )
+    await screenshot('editor-light-large')
+    await evaluate('window.__editor.focus()')
     await key('Escape')
     await evaluate(`window.roxy.workspace.read = window.__originalRead`)
+    // Exercise the real editor's keyboard commands, language workers and draft lifecycle.
+    await click('#workspace-inspector button[title="tsconfig.json"]')
+    await until('window.__monaco.editor.getEditors().length === 1')
+    await evaluate(
+      `window.__editor = window.__monaco.editor.getEditors()[0]; window.__editor.focus()`
+    )
+    await key('A', ['control'])
+    await win.webContents.insertText('{}')
+    await until(`window.__editor.getValue().includes('{')`)
+    await evaluate(
+      'window.__editor.getModel().setValue("{}"); window.__editor.getModel().setEOL(0); window.__editor.setPosition({lineNumber:1,column:2}); window.__editor.focus()'
+    )
+    await key('Enter')
+    await until(`window.__editor.getValue() === '{\\n  \\n}'`)
+    await key('Tab')
+    await until(`window.__editor.getValue() === '{\\n    \\n}'`)
+    await key('Tab', ['shift'])
+    await until(`window.__editor.getValue() === '{\\n  \\n}'`)
+    await win.webContents.insertText('"editable": true')
+    const edited = await evaluate('return window.__editor.getValue()')
+    await evaluate('window.dispatchEvent(new Event("focus"))')
+    await new Promise((resolve) => setTimeout(resolve, 300))
+    assert.equal(await evaluate('return window.__editor.getValue()'), edited)
+    await click('[aria-label="Back to chat"]')
+    await click('#workspace-inspector button[title="package.json"]')
+    await until('window.__monaco.editor.getEditors().length === 1')
+    await click('[aria-label="Back to chat"]')
+    await click('#workspace-inspector button[title="tsconfig.json"]')
+    await until('window.__monaco.editor.getEditors().length === 1')
+    await evaluate(
+      'window.__editor = window.__monaco.editor.getEditors()[0]; window.__editor.focus()'
+    )
+    assert.equal(await evaluate('return window.__editor.getValue()'), edited)
+    await key('Z', ['control'])
+    assert.notEqual(await evaluate('return window.__editor.getValue()'), edited)
+    await key('Z', ['control', 'shift'])
+    assert.equal(await evaluate('return window.__editor.getValue()'), edited)
+    await key('S', ['control'])
+    await until(`document.querySelector('[aria-label="Save file"]')?.disabled`)
+    assert.equal(
+      await evaluate(
+        `return (await window.__originalRead('project-chat','roxy','tsconfig.json',false)).after`
+      ),
+      edited
+    )
+    // A later keystroke must not be marked saved by an earlier in-flight save.
+    await evaluate(
+      `window.__originalWrite = window.roxy.workspace.write; window.roxy.workspace.write = (...args) => new Promise(resolve => { window.__finishSave = () => window.__originalWrite(...args).then(resolve) }); window.__editor.focus()`
+    )
+    await key('End', ['control'])
+    await win.webContents.insertText(' ')
+    await key('S', ['control'])
+    await until('!!window.__finishSave')
+    await win.webContents.insertText(' ')
+    await evaluate('window.__finishSave()')
+    await until(
+      `!!document.querySelector('[aria-label="Unsaved changes"]') && !document.querySelector('[aria-label="Save file"]')?.disabled`
+    )
+    await evaluate('window.roxy.workspace.write = window.__originalWrite')
+    await key('S', ['control'])
+    await until(`document.querySelector('[aria-label="Save file"]')?.disabled`)
+    // An external writer wins on disk; a stale save keeps the user's draft intact.
+    await evaluate(
+      `const disk = await window.__originalRead('project-chat','roxy','tsconfig.json',false); await window.__originalWrite('project-chat','roxy','tsconfig.json','{"external":true}',disk.revision); window.__editor.focus()`
+    )
+    await win.webContents.insertText(' ')
+    const conflictDraft = await evaluate('return window.__editor.getValue()')
+    await key('S', ['control'])
+    await until('document.body.textContent.includes("This file changed on disk")')
+    assert.equal(await evaluate('return window.__editor.getValue()'), conflictDraft)
+    await screenshot('editor-conflict')
+    await click('[aria-label="Reload file from disk"]')
+    await until(`window.__editor.getValue() === '{"external":true}'`)
+    await click('[aria-label="Back to chat"]')
+    await evaluate(
+      `window.roxy.workspace.read = async () => ({ok:true,before:'',after:'function example() {}',revision:'typescript'});`
+    )
+    await click('#workspace-inspector button[title="test"]')
+    await until(`!!document.querySelector('button[title="test/workspace-inspector.ts"]')`)
+    await click('button[title="test/workspace-inspector.ts"]')
+    await until(
+      'window.__monaco.editor.getEditors()[0]?.getModel()?.getLanguageId() === "typescript"'
+    )
+    await evaluate(
+      'window.__editor = window.__monaco.editor.getEditors()[0]; window.__editor.getModel().setEOL(0); window.__editor.setPosition({lineNumber:1,column:21}); window.__editor.focus()'
+    )
+    await key('Enter')
+    await until(`window.__editor.getValue() === 'function example() {\\n  \\n}'`)
+    await evaluate(
+      `window.__editor.getModel().setValue('const greeting = "hello";\\ngreeting.'); window.__editor.setPosition({lineNumber:2,column:10}); window.__editor.focus(); window.__editor.trigger('test','editor.action.triggerSuggest',{});`
+    )
+    await until('document.querySelector(".suggest-widget.visible")?.textContent.includes("charAt")')
+    await key('Escape')
+    assert(
+      await evaluate('return !!document.querySelector("[data-workspace-editor]")'),
+      'Escape dismisses suggestions before closing the editor'
+    )
+    await evaluate(`window.__editor.getModel().setValue('const broken: =');`)
+    await until(
+      'window.__monaco.editor.getModelMarkers({resource:window.__editor.getModel().uri}).length > 0'
+    )
+    await click('[aria-label="Reload file from disk"]')
+    await until(`!document.querySelector('[aria-label="Unsaved changes"]')`)
+    await click('[aria-label="Back to chat"]')
+    // Existing tab indentation and BOM/CRLF survive editor round trips.
+    await evaluate(
+      `window.roxy.workspace.read = async () => ({ok:true,before:'',after:'\\ufefffunction tabs() {\\r\\n\\treturn 1\\r\\n}\\r\\n',revision:'tabs'});`
+    )
+    await click('button[title="test/workspace-inspector.ts"]')
+    await until('window.__monaco.editor.getEditors().length === 1')
+    assert(
+      await evaluate(
+        `window.__editor = window.__monaco.editor.getEditors()[0]; return window.__editor.getModel().getValue(undefined,true).startsWith('\\ufeff') && window.__editor.getModel().getEOL() === '\\r\\n' && !window.__editor.getModel().getOptions().insertSpaces`
+      )
+    )
+    await click('[aria-label="Back to chat"]')
+    await evaluate(
+      `window.roxy.workspace.read = async () => ({ok:true,before:'',after:'first\\r\\nsecond\\n',revision:'mixed'});`
+    )
+    await click('button[title="test/workspace-inspector.ts"]')
+    await until('document.body.textContent.includes("mixed or legacy line endings")')
+    assert(
+      await evaluate(
+        'return window.__monaco.editor.getEditors()[0].getOption(window.__monaco.editor.EditorOption.readOnly)'
+      )
+    )
+    await click('[aria-label="Back to chat"]')
+    await evaluate('window.roxy.workspace.read = window.__originalRead')
+    // Reload remains locked across navigation, then redetects the new indentation.
+    await click('button[title="test/workspace-inspector.ts"]')
+    await until('window.__monaco.editor.getEditors().length === 1')
+    await evaluate(
+      `window.__editor = window.__monaco.editor.getEditors()[0]; window.__editor.trigger('test','type',{text:' '}); window.__reloadReads = []; window.roxy.workspace.read = () => new Promise(resolve => window.__reloadReads.push(resolve));`
+    )
+    await click('[aria-label="Reload file from disk"]')
+    await until('window.__reloadReads.length > 0')
+    await click('[aria-label="Back to chat"]')
+    await click('button[title="test/workspace-inspector.ts"]')
+    await until('window.__monaco.editor.getEditors().length === 1')
+    assert(
+      await evaluate(
+        'return window.__monaco.editor.getEditors()[0].getOption(window.__monaco.editor.EditorOption.readOnly)'
+      )
+    )
+    await evaluate(
+      `window.__reloadReads.forEach(resolve => resolve({ok:true,before:'',after:'function tabs() {\\n\\treturn 1\\n}',revision:'reload-tabs'})); window.roxy.workspace.read = window.__originalRead;`
+    )
+    await until(
+      '!window.__monaco.editor.getEditors()[0].getOption(window.__monaco.editor.EditorOption.readOnly)'
+    )
+    assert.equal(
+      await evaluate(
+        'return window.__monaco.editor.getEditors()[0].getModel().getOptions().insertSpaces'
+      ),
+      false
+    )
+    await click('[aria-label="Back to chat"]')
+    // A save completed while closed must release its clean model and reopen safely in StrictMode.
+    await click('button[title="tsconfig.json"]')
+    await until('window.__monaco.editor.getEditors().length === 1')
+    await evaluate(
+      `window.__editor = window.__monaco.editor.getEditors()[0]; window.__editor.trigger('test','type',{text:' '}); window.__finishSave = null; window.roxy.workspace.write = (...args) => new Promise(resolve => { window.__finishSave = () => window.__originalWrite(...args).then(resolve) });`
+    )
+    await click('[aria-label="Save file"]')
+    await until('!!window.__finishSave')
+    await click('[aria-label="Back to chat"]')
+    await evaluate(
+      'await window.__finishSave(); window.roxy.workspace.write = window.__originalWrite'
+    )
+    await click('button[title="tsconfig.json"]')
+    await until('window.__monaco.editor.getEditors().length === 1')
+    assert(await evaluate('return !window.__monaco.editor.getEditors()[0].getModel().isDisposed()'))
+    await click('[aria-label="Back to chat"]')
     assert.equal(errors.length, 0, errors.join('\n'))
+    await click('#inspector-tab-changes')
+    await click('#workspace-inspector section button')
+    await until(`!!document.querySelector('[aria-label="Edit working file"]')`)
+    await click('[aria-label="Edit working file"]')
+    await until(
+      'window.__monaco.editor.getEditors()[0]?.getModel()?.getLanguageId() === "typescript"'
+    )
+    await click('[aria-label="Back to chat"]')
     console.log(
-      'WORKSPACE UI OK: closed default, header totals, dock/overlay, preserved transcript/draft, diff, file tree/refresh, file preview/copy, tab arrows/Escape/focus, narrow layouts'
+      'WORKSPACE UI OK: layout/diff/tree, editor virtualization, Enter/Tab/Shift-Tab, undo/redo, save shortcuts, retained drafts, polling/save races, external conflicts, TS completions/diagnostics, BOM/CRLF/tabs, mixed-EOL protection'
     )
   } catch (error) {
     console.error(error)

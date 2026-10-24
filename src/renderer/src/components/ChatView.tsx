@@ -553,6 +553,12 @@ export function ChatView(): JSX.Element {
             sessionId={activeChat.id}
             selection={fileSelection}
             snapshot={inspection.snapshot}
+            onEdit={() =>
+              setSelectedFile({
+                sessionId: activeChat.id,
+                selection: { ...fileSelection, comparison: false }
+              })
+            }
             onBack={() => {
               setSelectedFile(null)
             }}

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { app } from 'electron'
 import { execFileSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -10,7 +11,7 @@ async function main(): Promise<void> {
   const sandbox = await fs.mkdtemp(path.join(os.tmpdir(), 'roxy-inspector-'))
   app.setPath('userData', sandbox)
   const repo = require('../src/main/db/repo') as typeof import('../src/main/db/repo')
-  const { inspectWorkspace, listWorkspace, readWorkspace } =
+  const { inspectWorkspace, listWorkspace, readWorkspace, writeWorkspace } =
     require('../src/main/services/workspace-inspector') as typeof import('../src/main/services/workspace-inspector')
   const root = path.join(sandbox, 'project')
   await fs.mkdir(root)
@@ -41,6 +42,7 @@ async function main(): Promise<void> {
   await fs.writeFile(path.join(root, '..notes', 'hello.txt'), 'allowed')
   const beforeStatus = git('status', '--porcelain=v1')
   const beforeIndex = git('write-tree')
+  const revision = (content: string): string => createHash('sha256').update(content).digest('hex')
   const snapshot = (await inspectWorkspace(chat.id)).roots[0]
   const change = (file: string) => snapshot.changes.find((entry) => entry.path === file)!
   assert.deepEqual(change('file.txt'), {
@@ -221,7 +223,8 @@ async function main(): Promise<void> {
   assert.deepEqual(await readWorkspace(chat.id, isolated.id, 'file.txt', false), {
     ok: true,
     before: '',
-    after: 'isolated\n'
+    after: 'isolated\n',
+    revision: revision('isolated\n')
   })
   const child = repo.createChat({ title: 'Child', parentId: chat.id, kind: 'sub' })
   const grandchild = repo.createChat({ title: 'Grandchild', parentId: child.id, kind: 'sub' })
@@ -240,7 +243,163 @@ async function main(): Promise<void> {
   assert.equal(compositeSnapshot.roots.length, 2)
   assert.deepEqual(
     await readWorkspace(composite.id, compositeSnapshot.roots[0].id, 'file.txt', false),
-    { ok: true, before: '', after: 'isolated\n' }
+    { ok: true, before: '', after: 'isolated\n', revision: revision('isolated\n') }
+  )
+  // Writes target only existing, bounded UTF-8 files in the current session root.
+  const worktreeIndex = execFileSync('git', ['write-tree'], {
+    cwd: worktreePath,
+    encoding: 'utf8'
+  }).trim()
+  for (const invalid of [
+    '../outside.txt',
+    '/absolute',
+    'C:/Windows',
+    'file.txt:stream',
+    '.git/config',
+    '.GIT/config',
+    'a/../../outside',
+    'a\\b'
+  ]) {
+    assert.deepEqual(
+      await writeWorkspace(chat.id, isolated.id, invalid, 'no', revision('isolated\n')),
+      { ok: false, reason: 'unsafe' }
+    )
+  }
+  assert.deepEqual(
+    await writeWorkspace(chat.id, snapshot.id, 'file.txt', 'no', revision('isolated\n')),
+    { ok: false, reason: 'unsafe' }
+  )
+  assert.deepEqual(
+    await writeWorkspace(chat.id, isolated.id, 'file.txt', 'saved\n', revision('isolated\n')),
+    { ok: true, revision: revision('saved\n') }
+  )
+  assert.equal(await fs.readFile(path.join(worktreePath, 'file.txt'), 'utf8'), 'saved\n')
+  assert.equal(await fs.readFile(path.join(root, 'file.txt'), 'utf8'), 'one\ntwo\n')
+  assert.deepEqual(
+    await writeWorkspace(chat.id, isolated.id, 'file.txt', 'stale\n', revision('isolated\n')),
+    { ok: false, reason: 'changed' }
+  )
+  const racing = await Promise.all(
+    ['first\n', 'second\n'].map((content) =>
+      writeWorkspace(chat.id, isolated.id, 'file.txt', content, revision('saved\n'))
+    )
+  )
+  assert.equal(racing.filter((result) => result.ok).length, 1)
+  assert.equal(racing.filter((result) => !result.ok && result.reason === 'changed').length, 1)
+  assert.equal(
+    execFileSync('git', ['write-tree'], { cwd: worktreePath, encoding: 'utf8' }).trim(),
+    worktreeIndex
+  )
+  const file = path.join(outside, 'editable.txt')
+  const plainRoot = (await inspectWorkspace(plain.id)).roots[0].id
+  for (const content of [
+    '\ufeffone\r\ntwo\r\n',
+    'one\ntwo',
+    '',
+    '\tunicode \u00e9\n',
+    'mixed\r\nend\n',
+    'x'.repeat(512 * 1024)
+  ]) {
+    await fs.writeFile(file, content)
+    const read = await readWorkspace(plain.id, plainRoot, 'editable.txt', false)
+    assert(read.ok)
+    assert.equal(read.after, content)
+    assert.equal(read.revision, revision(content))
+    const saved = await writeWorkspace(plain.id, plainRoot, 'editable.txt', content, read.revision!)
+    assert(saved.ok)
+    assert.deepEqual(await fs.readFile(file), Buffer.from(content))
+  }
+  await fs.writeFile(file, 'safe')
+  const identity = await fs.stat(file)
+  for (const content of ['longer contents\n', 'x', '', 'restored']) {
+    const current = await fs.readFile(file, 'utf8')
+    assert.equal(
+      (await writeWorkspace(plain.id, plainRoot, 'editable.txt', content, revision(current))).ok,
+      true
+    )
+    assert.deepEqual(await fs.readFile(file), Buffer.from(content))
+    const stat = await fs.stat(file)
+    assert.equal(stat.dev, identity.dev)
+    assert.equal(stat.ino, identity.ino)
+    assert.equal(stat.mode, identity.mode)
+  }
+  if (process.platform !== 'win32') {
+    await fs.chmod(file, 0o750)
+    assert.equal(
+      (
+        await writeWorkspace(
+          plain.id,
+          plainRoot,
+          'editable.txt',
+          'executable',
+          revision('restored')
+        )
+      ).ok,
+      true
+    )
+    assert.equal((await fs.stat(file)).mode & 0o777, 0o750)
+  }
+  await fs.writeFile(file, 'safe')
+  for (const content of ['a\0b', '\ud800']) {
+    assert.deepEqual(
+      await writeWorkspace(plain.id, plainRoot, 'editable.txt', content, revision('safe')),
+      { ok: false, reason: 'binary' }
+    )
+  }
+  assert.deepEqual(
+    await writeWorkspace(
+      plain.id,
+      plainRoot,
+      'editable.txt',
+      '\u00e9'.repeat(512 * 1024),
+      revision('safe')
+    ),
+    { ok: false, reason: 'tooLarge' }
+  )
+  assert.equal(await fs.readFile(file, 'utf8'), 'safe')
+  await fs.rm(file)
+  assert.equal(
+    (await writeWorkspace(plain.id, plainRoot, 'editable.txt', 'no recreation', revision('safe')))
+      .ok,
+    false
+  )
+  await assert.rejects(fs.access(file))
+  await fs.symlink(
+    outside,
+    path.join(worktreePath, 'escape'),
+    process.platform === 'win32' ? 'junction' : 'dir'
+  )
+  assert.deepEqual(
+    await writeWorkspace(chat.id, isolated.id, 'escape/secret.txt', 'no', revision('outside')),
+    { ok: false, reason: 'unsafe' }
+  )
+  assert.equal(await fs.readFile(path.join(outside, 'secret.txt'), 'utf8'), 'outside')
+  await fs.rm(path.join(worktreePath, 'escape'))
+  await fs.link(path.join(outside, 'secret.txt'), path.join(worktreePath, 'hardlink.txt'))
+  assert.deepEqual(
+    await writeWorkspace(chat.id, isolated.id, 'hardlink.txt', 'no', revision('outside')),
+    { ok: false, reason: 'unsafe' }
+  )
+  assert.equal(await fs.readFile(path.join(outside, 'secret.txt'), 'utf8'), 'outside')
+  await fs.rm(path.join(worktreePath, 'hardlink.txt'))
+  assert.deepEqual(await writeWorkspace(chat.id, isolated.id, 'binary.bin', 'no', revision('')), {
+    ok: false,
+    reason: 'binary'
+  })
+  await fs.writeFile(path.join(worktreePath, 'invalid-utf8.txt'), Buffer.from([0xff, 0xfe, 0x41]))
+  assert.deepEqual(
+    await writeWorkspace(chat.id, isolated.id, 'invalid-utf8.txt', 'no', revision('')),
+    { ok: false, reason: 'binary' }
+  )
+  assert.deepEqual(
+    await fs.readFile(path.join(worktreePath, 'invalid-utf8.txt')),
+    Buffer.from([0xff, 0xfe, 0x41])
+  )
+  assert.equal((await writeWorkspace(chat.id, isolated.id, '', 'no', revision(''))).ok, false)
+  assert.equal(
+    (await writeWorkspace(chat.id, isolated.id, 'file.txt', 42 as unknown as string, revision('')))
+      .ok,
+    false
   )
   git('worktree', 'remove', '--force', worktreePath)
   assert.equal((await inspectWorkspace(chat.id)).roots[0].unavailable, true)

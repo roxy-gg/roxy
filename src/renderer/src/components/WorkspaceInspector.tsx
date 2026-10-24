@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import {
   ArrowLeft,
   Check,
@@ -11,7 +11,8 @@ import {
   GitBranch,
   GitCompareArrows,
   Loader2,
-  PanelRight
+  PanelRight,
+  Pencil
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import type { Chat } from '@shared/types'
@@ -27,7 +28,7 @@ import { api } from '../lib/api'
 import { cn } from '../lib/cn'
 import { useRoxyStore } from '../lib/store'
 import { DiffViewer } from './diff/DiffViewer'
-import { FileCanvas } from './FileCanvas'
+const FileEditor = lazy(() => import('./FileEditor'))
 
 export function useWorkspaceInspection(
   chat: Chat | undefined,
@@ -329,12 +330,14 @@ export function WorkspaceFileCanvas({
   sessionId,
   selection,
   snapshot,
-  onBack
+  onBack,
+  onEdit
 }: {
   sessionId: string
   selection: WorkspaceSelection
   snapshot: WorkspaceSnapshot | null
   onBack: () => void
+  onEdit: () => void
 }): JSX.Element {
   const { t } = useTranslation()
   const [result, setResult] = useState<InspectionResult<{ before: string; after: string }> | null>(
@@ -354,6 +357,7 @@ export function WorkspaceFileCanvas({
     return () => observer.disconnect()
   }, [])
   useEffect(() => {
+    if (!selection.comparison) return
     let cancelled = false
     void api.workspace
       .read(sessionId, selection.rootId, selection.path, selection.comparison)
@@ -372,6 +376,21 @@ export function WorkspaceFileCanvas({
     const timer = setTimeout(() => setCopied(false), 1200)
     return () => clearTimeout(timer)
   }, [copied])
+  if (!selection.comparison)
+    return (
+      <Suspense
+        fallback={
+          <div
+            data-workspace-canvas
+            className="absolute inset-0 z-20 bg-bg p-4 text-xs text-text-subtle"
+          >
+            {t('inspector.loading')}
+          </div>
+        }
+      >
+        <FileEditor {...{ sessionId, selection, snapshot, onBack }} />
+      </Suspense>
+    )
   return (
     <div
       data-workspace-canvas
@@ -396,6 +415,17 @@ export function WorkspaceFileCanvas({
         <span title={selection.path} className="min-w-0 flex-1 truncate font-mono text-[11px]">
           {selection.path}
         </span>
+        {result?.ok && (
+          <button
+            type="button"
+            title={t('inspector.edit')}
+            aria-label={t('inspector.edit')}
+            onClick={onEdit}
+            className="press-scale shrink-0 rounded p-1 text-text-muted hover:bg-white/5"
+          >
+            <Pencil className="h-3.5 w-3.5" />
+          </button>
+        )}
         {result?.ok && (
           <button
             type="button"
@@ -424,15 +454,13 @@ export function WorkspaceFileCanvas({
           <p role="status" className="p-4 text-xs text-text-muted">
             {t(`inspector.${result.reason}`)}
           </p>
-        ) : selection.comparison ? (
+        ) : (
           <DiffViewer
             path={selection.path}
             before={result.before}
             after={result.after}
             height={height}
           />
-        ) : (
-          <FileCanvas path={selection.path} content={result.after} />
         )}
       </div>
     </div>

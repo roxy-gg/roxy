@@ -1,4 +1,9 @@
-import { inspectWorkspace, listWorkspace, readWorkspace } from '../services/workspace-inspector'
+import {
+  inspectWorkspace,
+  listWorkspace,
+  readWorkspace,
+  writeWorkspace
+} from '../services/workspace-inspector'
 import { registerCheatIpc, resetCheatTools, closeCheatSession } from '../services/cheat'
 import { registerEngineeringIpc, resetEngineeringTools } from '../services/engineering-tools'
 import { closeEngineeringSession } from '../services/engineering-runtime'
@@ -1475,6 +1480,36 @@ export function registerIpc(): void {
       trustedWallpaper(event)
         ? readWorkspace(sessionId, rootId, file, comparison === true)
         : { ok: false, reason: 'unsafe' }
+  )
+
+  ipcMain.handle(
+    CHANNELS.workspaceWrite,
+    (event, sessionId: string, rootId: string, file: string, content: string, revision: string) =>
+      trustedWallpaper(event)
+        ? writeWorkspace(sessionId, rootId, file, content, revision)
+        : { ok: false, reason: 'unsafe' }
+  )
+  ipcMain.handle(
+    CHANNELS.workspaceConfirmDiscard,
+    async (event, message: string, discard: string, cancel: string) => {
+      if (
+        !trustedWallpaper(event) ||
+        ![message, discard, cancel].every(
+          (value) => typeof value === 'string' && value.length > 0 && value.length < 2000
+        )
+      )
+        return false
+      const window = BrowserWindow.fromWebContents(event.sender)!
+      const result = await dialog.showMessageBox(window, {
+        type: 'warning',
+        message,
+        buttons: [cancel, discard],
+        defaultId: 0,
+        cancelId: 0,
+        noLink: true
+      })
+      return result.response === 1
+    }
   )
 
   // ---- git (worktree-backed sessions) ----
