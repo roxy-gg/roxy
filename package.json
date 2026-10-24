@@ -55,6 +55,7 @@
     "smoke:multirepo": "esbuild test/multirepo.ts --bundle --platform=node --format=cjs --packages=external --outfile=test/.out/multirepo.cjs && node test/.out/multirepo.cjs",
     "smoke:live": "esbuild test/live-multirepo.ts --bundle --platform=node --format=cjs --packages=external --outfile=test/.out/live.cjs && electron test/.out/live.cjs",
     "smoke:cliproxy": "esbuild test/cliproxy.ts --bundle --platform=node --format=cjs --packages=external --outfile=test/.out/cliproxy.cjs && electron test/.out/cliproxy.cjs",
+    "smoke:bundle-cliproxy": "node --test test/bundle-cliproxy.mjs",
     "worktree:setup": "npm ci --prefer-offline --no-audit --no-fund",
     "smoke:store": "node test/store-guard.mjs && esbuild test/optimistic-messages.ts --bundle --platform=node --format=cjs --packages=external --outfile=test/.out/optimistic-messages.cjs && node test/.out/optimistic-messages.cjs && esbuild test/repo-status.ts --bundle --platform=node --format=cjs --tsconfig=tsconfig.web.json --outfile=test/.out/repo-status.cjs && node test/.out/repo-status.cjs",
     "smoke:onboarding-ui": "electron test/canvas/onboarding-smoke.cjs",
