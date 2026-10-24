@@ -12,9 +12,8 @@
  *   task        → a nested transcript   (the subagent's own steps) + its report
  *   otherwise   → plain monospace output
  *
- * with an inline image (a browser screenshot) drawn under whichever body ran, in
- * both the collapsed and the expanded state — a screenshot IS the result, so
- * hiding it behind a disclosure was never right.
+ * An inline image (a browser screenshot) is part of the expanded body and
+ * follows the same disclosure state as the tool's text output.
  */
 
 import type { TFunction } from 'i18next'
@@ -186,7 +185,7 @@ export function layoutToolCard(
     }
   }
 
-  if (part.image) {
+  if (open && part.image) {
     cursor += layoutImageBody(builder, part.image, x + 1, cursor, contentWidth)
   }
 
