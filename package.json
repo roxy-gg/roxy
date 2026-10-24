@@ -98,6 +98,7 @@
     "@fontsource-variable/geist-mono": "^5.2.8",
     "@handy-computer/recorder": "0.2.1",
     "@modelcontextprotocol/sdk": "^1.29.0",
+    "@react-symbols/icons": "^1.4.1",
     "ai": "^5.0.210",
     "better-sqlite3": "^12.11.1",
     "clsx": "^2.1.1",

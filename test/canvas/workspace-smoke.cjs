@@ -178,6 +178,9 @@ app.whenReady().then(async () => {
       'document.querySelector("#workspace-inspector [role=separator]").dispatchEvent(new MouseEvent("dblclick",{bubbles:true}))'
     )
     await screenshot('changes')
+    const changeIcon = await evaluate(
+      `return document.querySelector('#workspace-inspector section button[title="src/renderer/src/components/ChatView.tsx"] svg').innerHTML`
+    )
     await click('#workspace-inspector section button')
     await until(`document.querySelectorAll('[data-canvas-surface]').length === 2`)
     for (const platform of ['win32', 'darwin']) {
@@ -211,6 +214,38 @@ app.whenReady().then(async () => {
     )
     await click('#inspector-tab-files')
     await until(`!!document.querySelector('#workspace-inspector button[title="src"]')`)
+    const icons = await evaluate(`return Object.fromEntries(
+      [...document.querySelectorAll('#workspace-inspector section button[title]')]
+        .filter(button => !button.hasAttribute('aria-expanded'))
+        .map(button => {
+          const icon = button.querySelector('svg');
+          const box = icon.getBoundingClientRect();
+          if (icon.getAttribute('aria-hidden') !== 'true' || box.width !== 16 || box.height !== 16)
+            throw Error('File icon must be decorative and fixed-size: ' + button.title);
+          return [button.title, icon.innerHTML];
+        })
+    )`)
+    assert.equal(
+      new Set(
+        ['app.js', 'app.ts', 'app.tsx', 'app.jsx', 'main.rs', '.env', 'README.md'].map(
+          (name) => icons[name]
+        )
+      ).size,
+      7,
+      'JavaScript, TypeScript, React, Rust, env and Markdown have distinct icons'
+    )
+    assert.equal(icons['app.tsx'], changeIcon, 'Changes and Files use the same icon')
+    assert.equal(icons['app.ts'], icons['UPPER.TS'], 'extensions are case-insensitive')
+    assert.equal(icons['app.ts'], icons['module.mts'])
+    assert.equal(icons['app.ts'], icons['module.cts'])
+    assert.notEqual(icons['app.ts'], icons['types.d.ts'], 'declarations have a distinct icon')
+    assert.equal(icons['.env'], icons['.env.local'])
+    assert.equal(icons['.env'], icons['.env.staging.local'])
+    assert.equal(icons['README.md'], icons['notes.markdown'])
+    assert.equal(icons['unknown'], icons['unknown.extension'], 'unknown files have a fallback')
+    for (const name of ['.gitignore', '.prettierrc', 'package.json', 'config.jsonc']) {
+      assert.notEqual(icons[name], icons['unknown'], name + ' has a recognized icon')
+    }
     await click('#workspace-inspector button[title="src"]')
     await until(`!!document.querySelector('#workspace-inspector button[title="src/renderer"]')`)
     assert.equal(
@@ -238,6 +273,13 @@ app.whenReady().then(async () => {
       )
     )
     await screenshot('file-canvas')
+    assert.equal(
+      await evaluate(
+        `return document.querySelector('.workspace-file-toolbar svg[aria-hidden="true"][focusable="false"]').innerHTML`
+      ),
+      icons['package.json'],
+      'file preview uses the same file-type icon'
+    )
     await click('[aria-label="Copy file contents"]')
     assert(await evaluate(`return window.__canvasTest.copied.some(text => text.includes('roxy'))`))
     await click('[aria-label="Back to chat"]')
@@ -394,7 +436,7 @@ app.whenReady().then(async () => {
     await evaluate(`window.roxy.workspace.read = window.__originalRead`)
     assert.equal(errors.length, 0, errors.join('\n'))
     console.log(
-      'WORKSPACE UI OK: closed default, header totals, dock/overlay, preserved transcript/draft, diff, file tree/refresh, file preview/copy, tab arrows/Escape/focus, narrow layouts'
+      'WORKSPACE UI OK: closed default, header totals, dock/overlay, preserved transcript/draft, diff, file-type icons, file tree/refresh, file preview/copy, tab arrows/Escape/focus, narrow layouts'
     )
   } catch (error) {
     console.error(error)

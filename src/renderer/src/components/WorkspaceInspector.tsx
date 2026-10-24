@@ -4,8 +4,6 @@ import {
   Check,
   ChevronRight,
   Copy,
-  File,
-  FileCode2,
   Folder,
   FolderOpen,
   GitBranch,
@@ -28,6 +26,7 @@ import { cn } from '../lib/cn'
 import { useRoxyStore } from '../lib/store'
 import { DiffViewer } from './diff/DiffViewer'
 import { FileCanvas } from './FileCanvas'
+import { FileIcon } from './FileIcon'
 
 export function useWorkspaceInspection(
   chat: Chat | undefined,
@@ -187,7 +186,7 @@ function ChangeRow({
       title={change.path}
       className="flex h-9 w-full items-center gap-2 rounded-md px-2 text-left text-xs hover:bg-white/5 focus-visible:outline-accent"
     >
-      <FileCode2 className="h-3.5 w-3.5 shrink-0 text-text-subtle" />
+      <FileIcon path={change.path} />
       <span className="min-w-0 flex-1 truncate">
         <span className="text-text">{change.path.slice(slash + 1)}</span>
         {slash >= 0 && (
@@ -265,7 +264,7 @@ function Directory({
             className="flex h-7 w-full items-center gap-2 rounded-md pr-2 text-left text-xs hover:bg-white/5 disabled:opacity-40"
             style={{ paddingLeft: 24 + depth * 14 }}
           >
-            <File className="h-3.5 w-3.5 shrink-0 text-text-subtle" />
+            <FileIcon path={entry.name} />
             <span className="min-w-0 flex-1 truncate">{entry.name}</span>
             {root.changes.some((change) => change.path === entry.path) && (
               <span className="h-1 w-1 shrink-0 rounded-full bg-success" />
@@ -393,6 +392,7 @@ export function WorkspaceFileCanvas({
         >
           <ArrowLeft className="h-3.5 w-3.5" />
         </button>
+        <FileIcon path={selection.path} />
         <span title={selection.path} className="min-w-0 flex-1 truncate font-mono text-[11px]">
           {selection.path}
         </span>
