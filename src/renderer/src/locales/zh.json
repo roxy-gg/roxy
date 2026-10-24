@@ -929,6 +929,24 @@
       "worktrees": "工作树配置"
     },
     "notifications": {
+      "builtinSounds": {
+        "bell": "Bell",
+        "bloom": "Bloom",
+        "bubble": "Bubble",
+        "celesta": "Celesta",
+        "chirp": "Chirp",
+        "crystal": "Crystal",
+        "droplet": "Droplet",
+        "glimmer": "Glimmer",
+        "marimba": "Marimba",
+        "orbit": "Orbit",
+        "pluck": "Pluck",
+        "ripple": "Ripple",
+        "signal": "Signal",
+        "soft-ping": "Soft Ping",
+        "sparkle": "Sparkle",
+        "woodblock": "Woodblock"
+      },
       "completeHint": "当响应准备就绪且 Roxy 未聚焦时通知。",
       "completeTitle": "回复完成",
       "defaultSound": "默认",

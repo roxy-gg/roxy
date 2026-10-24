@@ -929,6 +929,24 @@
       "worktrees": "Configuração do worktree"
     },
     "notifications": {
+      "builtinSounds": {
+        "bell": "Bell",
+        "bloom": "Bloom",
+        "bubble": "Bubble",
+        "celesta": "Celesta",
+        "chirp": "Chirp",
+        "crystal": "Crystal",
+        "droplet": "Droplet",
+        "glimmer": "Glimmer",
+        "marimba": "Marimba",
+        "orbit": "Orbit",
+        "pluck": "Pluck",
+        "ripple": "Ripple",
+        "signal": "Signal",
+        "soft-ping": "Soft Ping",
+        "sparkle": "Sparkle",
+        "woodblock": "Woodblock"
+      },
       "completeHint": "Notificar quando uma resposta estiver pronta e Roxy não estiver em foco.",
       "completeTitle": "Respostas concluídas",
       "defaultSound": "Padrão",

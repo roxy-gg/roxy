@@ -929,6 +929,24 @@
       "worktrees": "Настройка рабочих деревьев"
     },
     "notifications": {
+      "builtinSounds": {
+        "bell": "Bell",
+        "bloom": "Bloom",
+        "bubble": "Bubble",
+        "celesta": "Celesta",
+        "chirp": "Chirp",
+        "crystal": "Crystal",
+        "droplet": "Droplet",
+        "glimmer": "Glimmer",
+        "marimba": "Marimba",
+        "orbit": "Orbit",
+        "pluck": "Pluck",
+        "ripple": "Ripple",
+        "signal": "Signal",
+        "soft-ping": "Soft Ping",
+        "sparkle": "Sparkle",
+        "woodblock": "Woodblock"
+      },
       "completeHint": "Уведомлять, когда ответ готов, а Roxy не в фокусе.",
       "completeTitle": "Завершение ответов",
       "defaultSound": "По умолчанию",

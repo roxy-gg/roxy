@@ -929,6 +929,24 @@
       "worktrees": "Configuration de l'arborescence de travail"
     },
     "notifications": {
+      "builtinSounds": {
+        "bell": "Bell",
+        "bloom": "Bloom",
+        "bubble": "Bubble",
+        "celesta": "Celesta",
+        "chirp": "Chirp",
+        "crystal": "Crystal",
+        "droplet": "Droplet",
+        "glimmer": "Glimmer",
+        "marimba": "Marimba",
+        "orbit": "Orbit",
+        "pluck": "Pluck",
+        "ripple": "Ripple",
+        "signal": "Signal",
+        "soft-ping": "Soft Ping",
+        "sparkle": "Sparkle",
+        "woodblock": "Woodblock"
+      },
       "completeHint": "Notifier lorsqu'une réponse est prête et que Roxy n'est pas au premier plan.",
       "completeTitle": "Réponses terminées",
       "defaultSound": "Par défaut",

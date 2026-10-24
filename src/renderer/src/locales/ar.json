@@ -929,6 +929,24 @@
       "worktrees": "تكوين Worktree"
     },
     "notifications": {
+      "builtinSounds": {
+        "bell": "Bell",
+        "bloom": "Bloom",
+        "bubble": "Bubble",
+        "celesta": "Celesta",
+        "chirp": "Chirp",
+        "crystal": "Crystal",
+        "droplet": "Droplet",
+        "glimmer": "Glimmer",
+        "marimba": "Marimba",
+        "orbit": "Orbit",
+        "pluck": "Pluck",
+        "ripple": "Ripple",
+        "signal": "Signal",
+        "soft-ping": "Soft Ping",
+        "sparkle": "Sparkle",
+        "woodblock": "Woodblock"
+      },
       "completeHint": "إشعار عند جاهزية الاستجابة وعدم تركيز Roxy.",
       "completeTitle": "اكتمال الردود",
       "defaultSound": "افتراضي",

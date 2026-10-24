@@ -929,6 +929,24 @@
       "worktrees": "वर्कट्री कॉन्फ़िगरेशन"
     },
     "notifications": {
+      "builtinSounds": {
+        "bell": "Bell",
+        "bloom": "Bloom",
+        "bubble": "Bubble",
+        "celesta": "Celesta",
+        "chirp": "Chirp",
+        "crystal": "Crystal",
+        "droplet": "Droplet",
+        "glimmer": "Glimmer",
+        "marimba": "Marimba",
+        "orbit": "Orbit",
+        "pluck": "Pluck",
+        "ripple": "Ripple",
+        "signal": "Signal",
+        "soft-ping": "Soft Ping",
+        "sparkle": "Sparkle",
+        "woodblock": "Woodblock"
+      },
       "completeHint": "जब कोई प्रतिक्रिया तैयार हो और Roxy फ़ोकस में न हो, तो सूचित करें।",
       "completeTitle": "प्रतिक्रिया पूर्ण होना",
       "defaultSound": "डिफ़ॉल्ट",

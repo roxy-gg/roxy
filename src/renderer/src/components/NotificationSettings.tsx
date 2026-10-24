@@ -9,6 +9,7 @@ import { api } from '../lib/api'
 import { useMenuAnchor } from '../lib/useMenuAnchor'
 import {
   SOUND_MAX_COUNT,
+  BUILTIN_NOTIFICATION_SOUNDS,
   type NotificationSoundError,
   type NotificationSoundLibrary,
   type NotificationSoundResult
@@ -84,7 +85,16 @@ export function NotificationSettings(): JSX.Element {
     }
   }
 
-  const selected = library?.sounds.find((sound) => sound.id === library.selectedId)
+  const choices = [
+    { id: null, name: t('settings.notifications.defaultSound'), custom: false },
+    ...BUILTIN_NOTIFICATION_SOUNDS.map((sound) => ({
+      id: `builtin:${sound}`,
+      name: t(`settings.notifications.builtinSounds.${sound}`),
+      custom: false
+    })),
+    ...(library?.sounds ?? []).map((sound) => ({ ...sound, custom: true }))
+  ]
+  const selected = choices.find((sound) => sound.id === library?.selectedId)
 
   return (
     <section
@@ -244,47 +254,45 @@ export function NotificationSettings(): JSX.Element {
               }
             }}
           >
-            {[{ id: null, name: t('settings.notifications.defaultSound') }, ...library.sounds].map(
-              (sound) => (
-                <div
-                  key={sound.id ?? 'default'}
-                  role="none"
-                  className="flex items-center gap-1 rounded-md focus-within:bg-white/5 hover:bg-white/5"
+            {choices.map((sound) => (
+              <div
+                key={sound.id ?? 'default'}
+                role="none"
+                className="flex items-center gap-1 rounded-md focus-within:bg-white/5 hover:bg-white/5"
+              >
+                <button
+                  type="button"
+                  role="menuitemradio"
+                  aria-checked={library.selectedId === sound.id}
+                  tabIndex={-1}
+                  disabled={busy}
+                  title={sound.name}
+                  className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-2 text-left text-sm text-text outline-none focus-visible:ring-1 focus-visible:ring-accent"
+                  onClick={() => void change(() => api.notifications.selectSound(sound.id))}
                 >
+                  <span className="h-3.5 w-3.5 shrink-0">
+                    {library.selectedId === sound.id && (
+                      <Check className="h-3.5 w-3.5 text-accent" />
+                    )}
+                  </span>
+                  <span className="truncate">{sound.name}</span>
+                </button>
+                {sound.custom && sound.id && (
                   <button
                     type="button"
-                    role="menuitemradio"
-                    aria-checked={library.selectedId === sound.id}
+                    role="menuitem"
                     tabIndex={-1}
                     disabled={busy}
-                    title={sound.name}
-                    className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-2 text-left text-sm text-text outline-none focus-visible:ring-1 focus-visible:ring-accent"
-                    onClick={() => void change(() => api.notifications.selectSound(sound.id))}
+                    aria-label={t('settings.notifications.deleteSound', { name: sound.name })}
+                    title={t('settings.notifications.deleteSound', { name: sound.name })}
+                    className="shrink-0 rounded-md p-2 text-text-subtle outline-none hover:text-danger focus-visible:text-danger focus-visible:ring-1 focus-visible:ring-accent"
+                    onClick={() => void change(() => api.notifications.deleteSound(sound.id!))}
                   >
-                    <span className="h-3.5 w-3.5 shrink-0">
-                      {library.selectedId === sound.id && (
-                        <Check className="h-3.5 w-3.5 text-accent" />
-                      )}
-                    </span>
-                    <span className="truncate">{sound.name}</span>
+                    <X className="h-3 w-3" strokeWidth={1.5} />
                   </button>
-                  {sound.id && (
-                    <button
-                      type="button"
-                      role="menuitem"
-                      tabIndex={-1}
-                      disabled={busy}
-                      aria-label={t('settings.notifications.deleteSound', { name: sound.name })}
-                      title={t('settings.notifications.deleteSound', { name: sound.name })}
-                      className="shrink-0 rounded-md p-2 text-text-subtle outline-none hover:text-danger focus-visible:text-danger focus-visible:ring-1 focus-visible:ring-accent"
-                      onClick={() => void change(() => api.notifications.deleteSound(sound.id!))}
-                    >
-                      <X className="h-3 w-3" strokeWidth={1.5} />
-                    </button>
-                  )}
-                </div>
-              )
-            )}
+                )}
+              </div>
+            ))}
           </div>,
           document.body
         )}
