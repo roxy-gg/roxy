@@ -1432,6 +1432,14 @@ export function registerIpc(): void {
   ipcMain.handle(CHANNELS.browserForward, (e) => browser.forward(keyOf(e)))
   ipcMain.handle(CHANNELS.browserReload, (e) => browser.reload(keyOf(e)))
   ipcMain.handle(CHANNELS.browserStop, (e) => browser.stop(keyOf(e)))
+  ipcMain.handle(CHANNELS.browserToggleDevTools, (e) => {
+    const key = browser.keyForContents(e.sender)
+    return key === null ? undefined : browser.toggleDevTools(key)
+  })
+  ipcMain.handle(CHANNELS.browserInspectElement, (e) => {
+    const key = browser.keyForContents(e.sender)
+    return key === null ? undefined : browser.inspectElement(key)
+  })
   ipcMain.handle(CHANNELS.browserNewTab, (e, url?: string) => browser.newTab(url, keyOf(e)))
   ipcMain.handle(CHANNELS.browserCloseTab, (e, id: string) => browser.closeTab(id, keyOf(e)))
   ipcMain.handle(CHANNELS.browserActivateTab, (e, id: string) => browser.activateTab(id, keyOf(e)))

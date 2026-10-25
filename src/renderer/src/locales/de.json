@@ -149,10 +149,13 @@
   "browserChrome": {
     "back": "Zurück",
     "closeCookies": "Cookies schließen",
+    "closeDeveloperTools": "Close developer tools",
     "closeProxy": "Browser-Proxy schließen",
     "closeTab": "Tab schließen",
     "cookies": "Cookies",
+    "developerTools": "Developer tools",
     "forward": "Vorwärts",
+    "inspectElement": "Inspect element",
     "newTab": "Neuer Tab",
     "proxy": "Browser-Proxy",
     "urlPlaceholder": "Suchen oder URL eingeben"

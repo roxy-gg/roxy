@@ -392,7 +392,10 @@
     "cookies": "Cookies",
     "closeCookies": "Close cookies",
     "proxy": "Browser proxy",
-    "closeProxy": "Close browser proxy"
+    "closeProxy": "Close browser proxy",
+    "developerTools": "Developer tools",
+    "closeDeveloperTools": "Close developer tools",
+    "inspectElement": "Inspect element"
   },
   "chat": {
     "copilotReconnectBody": "GitHub Copilot auth sucks sometimes. Your authorization expired or was revoked, and automatic refresh could not recover it. Refresh your login here to keep chatting.",

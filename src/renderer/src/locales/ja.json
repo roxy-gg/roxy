@@ -149,10 +149,13 @@
   "browserChrome": {
     "back": "戻る",
     "closeCookies": "Cookieを閉じる",
+    "closeDeveloperTools": "Close developer tools",
     "closeProxy": "ブラウザプロキシを閉じる",
     "closeTab": "タブを閉じる",
     "cookies": "Cookie",
+    "developerTools": "Developer tools",
     "forward": "進む",
+    "inspectElement": "Inspect element",
     "newTab": "新しいタブ",
     "proxy": "ブラウザプロキシ",
     "urlPlaceholder": "検索またはURLを入力"

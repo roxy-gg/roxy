@@ -149,10 +149,13 @@
   "browserChrome": {
     "back": "رجوع",
     "closeCookies": "إغلاق ملفات تعريف الارتباط",
+    "closeDeveloperTools": "Close developer tools",
     "closeProxy": "إغلاق وكيل المتصفح",
     "closeTab": "إغلاق علامة التبويب",
     "cookies": "ملفات تعريف الارتباط",
+    "developerTools": "Developer tools",
     "forward": "إلى الأمام",
+    "inspectElement": "Inspect element",
     "newTab": "علامة تبويب جديدة",
     "proxy": "وكيل المتصفح",
     "urlPlaceholder": "بحث أو إدخال عنوان URL"

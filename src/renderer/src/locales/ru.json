@@ -149,10 +149,13 @@
   "browserChrome": {
     "back": "Назад",
     "closeCookies": "Закрыть куки",
+    "closeDeveloperTools": "Close developer tools",
     "closeProxy": "Закрыть прокси браузера",
     "closeTab": "Закрыть вкладку",
     "cookies": "Куки",
+    "developerTools": "Developer tools",
     "forward": "Вперед",
+    "inspectElement": "Inspect element",
     "newTab": "Новая вкладка",
     "proxy": "Прокси браузера",
     "urlPlaceholder": "Поиск или ввод URL"

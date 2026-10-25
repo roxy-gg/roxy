@@ -279,6 +279,8 @@ export const CHANNELS = {
   browserForward: 'browser:forward',
   browserReload: 'browser:reload',
   browserStop: 'browser:stop',
+  browserToggleDevTools: 'browser:toggle-devtools',
+  browserInspectElement: 'browser:inspect-element',
   browserNewTab: 'browser:new-tab',
   browserCloseTab: 'browser:close-tab',
   browserActivateTab: 'browser:activate-tab',

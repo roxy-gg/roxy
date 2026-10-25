@@ -2,11 +2,13 @@ import { useEffect, useMemo, useState } from 'react'
 import {
   ArrowLeft,
   ArrowRight,
+  Bug,
   Cookie,
   Globe,
   Plus,
   RotateCw,
   Search,
+  SquareMousePointer,
   ShieldCheck,
   X
 } from 'lucide-react'
@@ -22,7 +24,8 @@ const BLANK: BrowserState = {
   title: '',
   canGoBack: false,
   canGoForward: false,
-  loading: false
+  loading: false,
+  devToolsOpen: false
 }
 
 /**
@@ -42,6 +45,10 @@ export function BrowserChrome(): JSX.Element {
   const [proxyEnabled, setProxyEnabled] = useState(false)
   const cookiesOpen = panel === 'cookies'
   const proxyOpen = panel === 'proxy'
+
+  useEffect(() => {
+    if (nav.devToolsOpen) setPanel(null)
+  }, [nav.devToolsOpen])
 
   // The host the cookie panel scopes to -- the active tab's, like the
   // Cookie-Editor popup. Undefined on a blank tab, which shows the whole jar.
@@ -97,6 +104,11 @@ export function BrowserChrome(): JSX.Element {
   }
 
   const secure = nav.url.startsWith('https://')
+  const debug = (inspect = false): void => {
+    setPanel(null)
+    if (inspect) void api.browser.inspectElement()
+    else void api.browser.toggleDevTools()
+  }
 
   return (
     <div className="flex h-screen w-screen select-none flex-col overflow-hidden bg-surface text-text">
@@ -205,6 +217,18 @@ export function BrowserChrome(): JSX.Element {
             className="h-8 w-full rounded-full border border-border bg-surface-2 pl-9 pr-3.5 text-xs text-text outline-none transition-colors placeholder:text-text-subtle focus:border-accent focus:bg-surface focus:ring-1 focus:ring-accent/35"
           />
         </div>
+        <NavButton onClick={() => debug(true)} title={t('browserChrome.inspectElement')}>
+          <SquareMousePointer className="h-4 w-4" />
+        </NavButton>
+        <NavButton
+          onClick={() => debug()}
+          title={t(
+            nav.devToolsOpen ? 'browserChrome.closeDeveloperTools' : 'browserChrome.developerTools'
+          )}
+          active={nav.devToolsOpen}
+        >
+          <Bug className="h-4 w-4" />
+        </NavButton>
         <NavButton
           onClick={() => setPanel((value) => (value === 'cookies' ? null : 'cookies'))}
           title={t('browserChrome.cookies')}
@@ -269,6 +293,8 @@ function NavButton({
       onClick={onClick}
       disabled={disabled}
       title={title}
+      aria-label={title}
+      aria-pressed={active}
       className={cn(
         'press-scale flex h-7 w-7 shrink-0 items-center justify-center sq sq-lg rounded-lg text-text-muted hover:bg-surface-2 hover:text-text disabled:opacity-35 disabled:hover:bg-transparent disabled:hover:text-text-muted',
         active && 'bg-surface-2 text-text'

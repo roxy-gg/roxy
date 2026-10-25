@@ -149,10 +149,13 @@
   "browserChrome": {
     "back": "पीछे",
     "closeCookies": "कुकीज़ बंद करें",
+    "closeDeveloperTools": "Close developer tools",
     "closeProxy": "ब्राउज़र प्रॉक्सी बंद करें",
     "closeTab": "टैब बंद करें",
     "cookies": "कुकीज़",
+    "developerTools": "Developer tools",
     "forward": "आगे",
+    "inspectElement": "Inspect element",
     "newTab": "नया टैब",
     "proxy": "ब्राउज़र प्रॉक्सी",
     "urlPlaceholder": "खोजें या यूआरएल दर्ज करें"

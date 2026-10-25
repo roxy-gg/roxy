@@ -33,6 +33,7 @@ import { attachNativeContextMenu } from './context-menu'
 import { BROWSER_PARTITION, ensureApplied as ensureProxyApplied } from './browser-proxy'
 import type { ResolvedTheme } from '../../shared/theme'
 import { BrowserDevtools } from './browser-devtools'
+import sourceStrings from '../../renderer/src/locales/default.json'
 
 /** Persisted session â†’ cookies, localStorage and logins survive app restarts. */
 export const PARTITION = BROWSER_PARTITION
@@ -67,6 +68,7 @@ interface Tab {
   id: string
   view: BrowserView
   inspector: BrowserDevtools
+  devToolsOpening?: Promise<void>
   /** The real URL represented by our internal load-error document. */
   errorUrl?: string
   errorPageUrl?: string
@@ -161,6 +163,7 @@ function ensureWindow(s: Session, rawUrl?: string, load = true): BrowserWindow {
     }
   })
   s.win = win
+  wireDebugShortcuts(s, win.webContents)
 
   // A window opened AFTER a theme change would otherwise wear the constructor's
   // fallback colors, since the theme broadcast only reaches windows that already
@@ -416,7 +419,24 @@ function wireTab(s: Session, tab: Tab): void {
   const wc = tab.view.webContents
   // Real websites in a BrowserView have no React tree of ours to portal a
   // themed menu into, so these pages get the NATIVE right-click editing menu.
-  attachNativeContextMenu(wc)
+  attachNativeContextMenu(wc, (params) => [
+    {
+      label: sourceStrings.browserChrome.inspectElement,
+      click: () =>
+        void openPageDevTools(tab)
+          .then(() => {
+            if (!wc.isDestroyed()) wc.inspectElement(params.x, params.y)
+          })
+          .catch(() => undefined)
+    },
+    {
+      label: sourceStrings.browserChrome.developerTools,
+      click: () => void openPageDevTools(tab).catch(() => undefined)
+    }
+  ])
+  wireDebugShortcuts(s, wc)
+  wc.on('devtools-opened', () => pushState(s))
+  wc.on('devtools-closed', () => pushState(s))
   wc.on('console-message', (_e, level, message, line, sourceId) => {
     s.consoleLog.push({
       tabId: tab.id,
@@ -481,7 +501,8 @@ function pushState(s: Session): void {
     title: tab.errorUrl ? errorTabTitle(tab.errorUrl) : wc.getTitle(),
     canGoBack: wc.navigationHistory.canGoBack(),
     canGoForward: wc.navigationHistory.canGoForward(),
-    loading: wc.isLoadingMainFrame()
+    loading: wc.isLoadingMainFrame(),
+    devToolsOpen: wc.isDevToolsOpened()
   }
   s.win.webContents.send(CHANNELS.browserState, state)
 }
@@ -811,6 +832,78 @@ export function reload(key: string = DEFAULT_KEY): void {
 export function stop(key: string = DEFAULT_KEY): void {
   const s = peek(key)
   if (s) activeView(s)?.webContents.stop()
+}
+
+/** Native DevTools live in their own window so they never cover a BrowserView. */
+async function openPageDevTools(tab: Tab): Promise<void> {
+  const wc = tab.view.webContents
+  await tab.inspector.ready
+  if (wc.isDestroyed()) return
+  if (tab.devToolsOpening) await tab.devToolsOpening
+  else if (!wc.isDevToolsOpened()) {
+    tab.inspector.suspendForDevTools()
+    tab.devToolsOpening = new Promise<void>((resolve) => {
+      const finished = (): void => {
+        wc.removeListener('devtools-opened', finished)
+        wc.removeListener('destroyed', finished)
+        resolve()
+      }
+      wc.once('devtools-opened', finished)
+      wc.once('destroyed', finished)
+      wc.openDevTools({ mode: 'detach' })
+    }).finally(() => {
+      tab.devToolsOpening = undefined
+    })
+    await tab.devToolsOpening
+  }
+  if (!wc.isDestroyed()) wc.devToolsWebContents?.focus()
+}
+
+export async function toggleDevTools(key: string = DEFAULT_KEY): Promise<void> {
+  const s = peek(key)
+  const tab = s?.tabs.find((entry) => entry.id === s.activeTabId)
+  if (!tab || tab.view.webContents.isDestroyed()) return
+  if (tab.view.webContents.isDevToolsOpened()) tab.view.webContents.closeDevTools()
+  else await openPageDevTools(tab)
+}
+
+export async function inspectElement(key: string = DEFAULT_KEY): Promise<void> {
+  const s = peek(key)
+  const tab = s?.tabs.find((entry) => entry.id === s.activeTabId)
+  if (!tab) return
+  await openPageDevTools(tab)
+  if (tab.view.webContents.isDestroyed()) return
+  // Use the bundled Chromium frontend's own picker so it owns highlight/selection.
+  await tab.view.webContents.devToolsWebContents?.executeJavaScript(
+    'DevToolsAPI.enterInspectElementMode()'
+  )
+}
+
+function wireDebugShortcuts(s: Session, wc: Electron.WebContents): void {
+  wc.on('before-input-event', (event, input) => {
+    if (input.type !== 'keyDown' || input.isAutoRepeat) return
+    const key = input.key.toLowerCase()
+    const chord =
+      process.platform === 'darwin'
+        ? input.meta && input.alt && !input.control && !input.shift
+        : input.control && input.shift && !input.meta && !input.alt
+    const toggle = key === 'f12' && !input.control && !input.shift && !input.meta && !input.alt
+    if (!toggle && !(chord && ['i', 'j', 'c'].includes(key))) return
+    event.preventDefault()
+    setChromeHeight(0, s.key)
+    if (key === 'c') void inspectElement(s.key).catch(() => undefined)
+    else if (key === 'j') {
+      const tab = s.tabs.find((entry) => entry.id === s.activeTabId)
+      if (tab)
+        void openPageDevTools(tab)
+          .then(() =>
+            tab.view.webContents.devToolsWebContents?.executeJavaScript(
+              'DevToolsAPI.showPanel("console")'
+            )
+          )
+          .catch(() => undefined)
+    } else void toggleDevTools(s.key).catch(() => undefined)
+  })
 }
 
 /** Click the first element matching a CSS selector. */

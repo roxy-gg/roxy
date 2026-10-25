@@ -110,10 +110,13 @@ const ROLES: Partial<Record<ClipboardAction, MenuItemConstructorOptions['role']>
  * Give a webContents a native right-click editing menu.
  *
  * Used for the agent browser's pages. The menu is suppressed entirely when no
- * row would be usable — right-clicking blank page background should do nothing,
- * not pop a box of five greyed-out words.
+ * row would be usable, unless the caller provides additional page actions
+ * such as Inspect Element.
  */
-export function attachNativeContextMenu(wc: WebContents): void {
+export function attachNativeContextMenu(
+  wc: WebContents,
+  extraItems?: (params: Electron.ContextMenuParams) => MenuItemConstructorOptions[]
+): void {
   wc.on('context-menu', (_event, params) => {
     const ctx: ClickContext = {
       editable: params.isEditable,
@@ -129,7 +132,8 @@ export function attachNativeContextMenu(wc: WebContents): void {
       linkUrl: params.linkURL || undefined
     }
     const items = contextMenuItems(ctx, process.platform)
-    if (!hasUsableItems(items)) return
+    const extra = extraItems?.(params) ?? []
+    if (!hasUsableItems(items) && !extra.length) return
 
     const template: MenuItemConstructorOptions[] = []
     let group = items[0]?.group ?? 0
@@ -149,6 +153,8 @@ export function attachNativeContextMenu(wc: WebContents): void {
             }
       )
     }
+    if (template.length && extra.length) template.push({ type: 'separator' })
+    template.push(...extra)
     Menu.buildFromTemplate(template).popup({ x: params.x, y: params.y })
   })
 }

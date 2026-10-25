@@ -149,10 +149,13 @@
   "browserChrome": {
     "back": "后退",
     "closeCookies": "关闭 Cookie",
+    "closeDeveloperTools": "Close developer tools",
     "closeProxy": "关闭浏览器代理",
     "closeTab": "关闭标签页",
     "cookies": "Cookie",
+    "developerTools": "Developer tools",
     "forward": "前进",
+    "inspectElement": "Inspect element",
     "newTab": "新建标签页",
     "proxy": "浏览器代理",
     "urlPlaceholder": "搜索或输入网址"
