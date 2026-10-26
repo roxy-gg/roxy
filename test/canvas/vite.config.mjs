@@ -15,5 +15,13 @@ export default defineConfig({
   },
   optimizeDeps: { include: ['zustand'] },
   plugins: [react(), tailwindcss()],
+  build: {
+    rollupOptions: {
+      input: {
+        index: resolve(import.meta.dirname, 'index.html'),
+        editor: resolve(import.meta.dirname, 'editor.html')
+      }
+    }
+  },
   server: { port: 3114, strictPort: true }
 })

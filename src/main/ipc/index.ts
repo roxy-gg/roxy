@@ -1,3 +1,10 @@
+import {
+  inspectWorkspace,
+  listWorkspace,
+  previewWorkspace,
+  readWorkspace,
+  writeWorkspace
+} from '../services/workspace-inspector'
 import { registerCheatIpc, resetCheatTools, closeCheatSession } from '../services/cheat'
 import { registerEngineeringIpc, resetEngineeringTools } from '../services/engineering-tools'
 import { closeEngineeringSession } from '../services/engineering-runtime'
@@ -278,6 +285,12 @@ export function registerIpc(): void {
   )
   ipcMain.handle(CHANNELS.settingsSetAutoWorkstream, (_e, enabled: boolean) =>
     repo.setAutoWorkstream(enabled)
+  )
+  ipcMain.handle(CHANNELS.settingsSetFreshWorkstream, (_e, enabled: boolean) =>
+    repo.setFreshWorkstream(enabled)
+  )
+  ipcMain.handle(CHANNELS.settingsSetWorktreeSetupCommand, (_e, command: string) =>
+    repo.setWorktreeSetupCommand(command)
   )
   ipcMain.handle(CHANNELS.settingsSetLanguage, (_e, language: Language) =>
     repo.setLanguage(language)
@@ -710,6 +723,16 @@ export function registerIpc(): void {
   ipcMain.handle(CHANNELS.backgroundThumbnail, (event, id: string, sha256: string) =>
     trustedWallpaper(event)
       ? wallpaperClient.result(() => wallpaperClient.thumbnail(id, sha256))
+      : { ok: false, error: 'invalid' }
+  )
+  ipcMain.handle(CHANNELS.backgroundPreview, (event, id: string) =>
+    trustedWallpaper(event)
+      ? wallpaperClient.result(() => wallpaperClient.preview(id))
+      : { ok: false, error: 'invalid' }
+  )
+  ipcMain.handle(CHANNELS.backgroundPreviewCustom, (event, id: string) =>
+    trustedWallpaper(event)
+      ? wallpaperClient.result(() => background.previewCustomBackground(id))
       : { ok: false, error: 'invalid' }
   )
   const backgroundSubmissions = new Set<string>()
@@ -1409,6 +1432,14 @@ export function registerIpc(): void {
   ipcMain.handle(CHANNELS.browserForward, (e) => browser.forward(keyOf(e)))
   ipcMain.handle(CHANNELS.browserReload, (e) => browser.reload(keyOf(e)))
   ipcMain.handle(CHANNELS.browserStop, (e) => browser.stop(keyOf(e)))
+  ipcMain.handle(CHANNELS.browserToggleDevTools, (e) => {
+    const key = browser.keyForContents(e.sender)
+    return key === null ? undefined : browser.toggleDevTools(key)
+  })
+  ipcMain.handle(CHANNELS.browserInspectElement, (e) => {
+    const key = browser.keyForContents(e.sender)
+    return key === null ? undefined : browser.inspectElement(key)
+  })
   ipcMain.handle(CHANNELS.browserNewTab, (e, url?: string) => browser.newTab(url, keyOf(e)))
   ipcMain.handle(CHANNELS.browserCloseTab, (e, id: string) => browser.closeTab(id, keyOf(e)))
   ipcMain.handle(CHANNELS.browserActivateTab, (e, id: string) => browser.activateTab(id, keyOf(e)))
@@ -1457,6 +1488,61 @@ export function registerIpc(): void {
     if (title) browser.setLabel(key, title)
     await browser.navigate(`http://localhost:${port}`, key)
   })
+
+  ipcMain.handle(CHANNELS.workspaceInspect, (event, sessionId: string) =>
+    trustedWallpaper(event) ? inspectWorkspace(sessionId) : { roots: [] }
+  )
+  ipcMain.handle(
+    CHANNELS.workspacePreview,
+    (event, sessionId: string, rootId: string, file: string) =>
+      trustedWallpaper(event)
+        ? previewWorkspace(sessionId, rootId, file)
+        : { ok: false, reason: 'unsafe' }
+  )
+  ipcMain.handle(
+    CHANNELS.workspaceList,
+    (event, sessionId: string, rootId: string, directory: string) =>
+      trustedWallpaper(event)
+        ? listWorkspace(sessionId, rootId, directory)
+        : { ok: false, reason: 'unsafe' }
+  )
+  ipcMain.handle(
+    CHANNELS.workspaceRead,
+    (event, sessionId: string, rootId: string, file: string, comparison: boolean) =>
+      trustedWallpaper(event)
+        ? readWorkspace(sessionId, rootId, file, comparison === true)
+        : { ok: false, reason: 'unsafe' }
+  )
+
+  ipcMain.handle(
+    CHANNELS.workspaceWrite,
+    (event, sessionId: string, rootId: string, file: string, content: string, revision: string) =>
+      trustedWallpaper(event)
+        ? writeWorkspace(sessionId, rootId, file, content, revision)
+        : { ok: false, reason: 'unsafe' }
+  )
+  ipcMain.handle(
+    CHANNELS.workspaceConfirmDiscard,
+    async (event, message: string, discard: string, cancel: string) => {
+      if (
+        !trustedWallpaper(event) ||
+        ![message, discard, cancel].every(
+          (value) => typeof value === 'string' && value.length > 0 && value.length < 2000
+        )
+      )
+        return false
+      const window = BrowserWindow.fromWebContents(event.sender)!
+      const result = await dialog.showMessageBox(window, {
+        type: 'warning',
+        message,
+        buttons: [cancel, discard],
+        defaultId: 0,
+        cancelId: 0,
+        noLink: true
+      })
+      return result.response === 1
+    }
+  )
 
   // ---- git (worktree-backed sessions) ----
   // Every handler degrades instead of throwing: a folder that isn't a repo, or a

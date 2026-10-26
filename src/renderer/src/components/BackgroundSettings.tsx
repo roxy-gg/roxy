@@ -95,9 +95,10 @@ export function BackgroundSettings({
             })
           }
         />
-        {error && (
+        {(error || background.failed) && (
           <p role="alert" className="mt-2 text-xs text-danger">
-            {error}
+            {error ||
+              t(background.image ? 'background.effectFailed' : 'background.errors.readFailed')}
           </p>
         )}
       </section>

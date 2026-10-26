@@ -252,6 +252,8 @@ interface RoxyStore {
   setReasoningEffort: (level: ReasoningEffort) => Promise<void>
   setContextLimit: (limit: number | null) => Promise<void>
   setAutoWorkstream: (enabled: boolean) => Promise<void>
+  setFreshWorkstream: (enabled: boolean) => Promise<void>
+  setWorktreeSetupCommand: (command: string) => Promise<void>
   setTelemetryEnabled: (enabled: boolean) => Promise<void>
   setBranchPrefix: (prefix: string) => Promise<void>
   setNotifyOnComplete: (enabled: boolean) => Promise<void>
@@ -1961,6 +1963,16 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
 
   setAutoWorkstream: async (enabled) => {
     const settings = await api.settings.setAutoWorkstream(enabled)
+    set({ settings })
+  },
+
+  setFreshWorkstream: async (enabled) => {
+    const settings = await api.settings.setFreshWorkstream(enabled)
+    set({ settings })
+  },
+
+  setWorktreeSetupCommand: async (command) => {
+    const settings = await api.settings.setWorktreeSetupCommand(command)
     set({ settings })
   },
 

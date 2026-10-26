@@ -1,6 +1,7 @@
 import { shutdownCheatTools } from './services/cheat'
 import { shutdownEngineeringTools } from './services/engineering-tools'
-import { app, shell, BrowserWindow, session } from 'electron'
+import { app, shell, BrowserWindow, session, protocol } from 'electron'
+import { serveWorkspaceMedia } from './services/workspace-inspector'
 import { join } from 'path'
 import { optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
@@ -12,7 +13,11 @@ import { stopAllTurns } from './services/turn-state'
 import { listModels } from './services/models'
 import { backfillUsageFromHistory } from './services/usage'
 import { listConnectedProviders } from './db/repo'
-import { setAppIcon, closeAll as closeAllBrowsers } from './services/browser'
+import {
+  setAppIcon,
+  closeAll as closeAllBrowsers,
+  keyForContents as browserKeyForContents
+} from './services/browser'
 import {
   BROWSER_PARTITION,
   credentialsFor as browserProxyCredentials
@@ -43,6 +48,15 @@ import { resolveThemeById } from './services/themes'
 import * as repo from './db/repo'
 import { setVoiceWindow, shutdownVoice } from './services/voice'
 
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: 'roxy-media',
+    privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true }
+  }
+])
+
+let primaryWindow: BrowserWindow | null = null
+
 function createWindow(): BrowserWindow {
   const isMac = process.platform === 'darwin'
   const mainWindow = new BrowserWindow({
@@ -65,6 +79,11 @@ function createWindow(): BrowserWindow {
       sandbox: false,
       contextIsolation: true
     }
+  })
+
+  primaryWindow = mainWindow
+  mainWindow.on('closed', () => {
+    if (primaryWindow === mainWindow) primaryWindow = null
   })
 
   mainWindow.on('ready-to-show', () => {
@@ -96,6 +115,16 @@ function createWindow(): BrowserWindow {
   setVoiceWindow(mainWindow)
 
   return mainWindow
+}
+
+function focusMainWindow(): void {
+  if (!primaryWindow || primaryWindow.isDestroyed()) {
+    createWindow()
+    return
+  }
+  if (primaryWindow.isMinimized()) primaryWindow.restore()
+  primaryWindow.show()
+  primaryWindow.focus()
 }
 
 /**
@@ -139,7 +168,11 @@ app.whenReady().then(() => {
   }
 
   app.on('browser-window-created', (_, window) => {
-    optimizer.watchWindowShortcuts(window)
+    // Browser sessions register their own page-targeted F12 handler after construction.
+    queueMicrotask(() => {
+      if (!window.isDestroyed() && browserKeyForContents(window.webContents) === null)
+        optimizer.watchWindowShortcuts(window)
+    })
   })
 
   app.on('login', (event, webContents, _details, authInfo, callback) => {
@@ -154,6 +187,7 @@ app.whenReady().then(() => {
 
   // Open the database (runs migrations) and wire up IPC before the first window.
   getDb()
+  protocol.handle('roxy-media', serveWorkspaceMedia)
   registerIpc()
   // Anonymous usage tracking (opt-out in Settings). Deliberately after the DB
   // and IPC are up so nothing here can delay the first window, and it owns its
@@ -174,9 +208,10 @@ app.whenReady().then(() => {
   const mainWindow = createWindow()
   initAutoUpdater(mainWindow)
 
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow()
-  })
+  app.on('activate', focusMainWindow)
+  // Unlike activate (Dock/reopen), this also fires for macOS app switching.
+  // Always prefer Roxy itself over the agent's separate browser windows.
+  if (process.platform === 'darwin') app.on('did-become-active', focusMainWindow)
 })
 
 app.on('window-all-closed', () => {
@@ -188,11 +223,11 @@ app.on('window-all-closed', () => {
 // Kill any agent-started background processes (dev servers/watchers) on quit,
 // cancel any in-flight background subagent tasks (Phase 11), and shut down any
 // warm language servers (Phase 12).
-// Last chance to send the queued events: 'before-quit' fires before windows
-// start tearing down, which gives the final flush a real (if not guaranteed)
-// window to reach the network. Losing it costs one app_close, nothing more.
+// Flush tracking before final process teardown; it is deliberately best-effort.
 let engineeringQuit = false
-app.on('before-quit', (event) => {
+// Wait until windows accept closing, including unsaved-editor confirmation,
+// before shutting down services. A cancelled quit must leave Roxy operational.
+app.on('will-quit', (event) => {
   if (!engineeringQuit) {
     event.preventDefault()
     engineeringQuit = true
@@ -200,14 +235,12 @@ app.on('before-quit', (event) => {
     void shutdownEngineeringTools()
       .catch(console.error)
       .finally(() => app.quit())
+    return
   }
   shutdownVoice()
   stopAutomation()
   stopAllTurns()
   shutdownTracking()
-})
-
-app.on('will-quit', () => {
   killAllBackground()
   closeAllBrowsers()
   shutdownAllLsp()

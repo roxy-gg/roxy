@@ -54,6 +54,9 @@ jobs:
       - name: Store guard (regression test over renderer source)
         run: npm run smoke:store
 
+      - name: CLIProxyAPI packaging download retries
+        run: npm run smoke:bundle-cliproxy
+
       - name: Renderer usage preferences and Escape regression suite
         run: npm run smoke:ui-preferences
 

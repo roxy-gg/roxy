@@ -1000,10 +1000,35 @@ export function reserveWorktreePath(desired: string): Promise<string> {
 // Worktree lifecycle
 // ---------------------------------------------------------------------------
 
+/** Fetch and pin origin's actual default branch, without touching any checkout. */
+export async function freshWorktreeBase(
+  cwd: string,
+  signal?: AbortSignal
+): Promise<{ ok: true; baseRef: string; baseBranch: string } | { ok: false; error: string }> {
+  const head = await git(['ls-remote', '--symref', 'origin', 'HEAD'], cwd, FETCH_TIMEOUT_MS, signal)
+  if (!head.ok) return { ok: false, error: cleanGitError(head, 'Could not reach origin') }
+  const baseBranch = /^ref: refs\/heads\/(.+)\s+HEAD$/m.exec(head.stdout)?.[1]
+  if (!baseBranch) return { ok: false, error: 'Origin has no default branch to start from.' }
+  // Fetch this exact ref even when the clone has a narrow fetch refspec. A forced
+  // remote update is safe: it moves only the tracking ref, never a local branch.
+  const fetched = await git(
+    ['fetch', '--quiet', 'origin', `+refs/heads/${baseBranch}:refs/remotes/origin/${baseBranch}`],
+    cwd,
+    FETCH_TIMEOUT_MS,
+    signal
+  )
+  if (!fetched.ok) return { ok: false, error: cleanGitError(fetched, 'Could not refresh origin') }
+  const baseRef = await resolveCommit(cwd, `refs/remotes/origin/${baseBranch}`, signal)
+  if (!baseRef) return { ok: false, error: `Could not resolve origin/${baseBranch}.` }
+  return { ok: true, baseRef, baseBranch }
+}
+
 export interface CreateWorktreeInput {
   repoRoot: string
   /** The NEW branch to create. */
   branch: string
+  /** Refuse reuse of an existing checkout when a fresh remote base is required. */
+  requireNew?: boolean
   /** Commit-ish to branch from. Omitted -> freshly-fetched origin/<default>. */
   baseRef?: string
   /** Explicit directory. Omitted -> the standard userData location. */
@@ -1050,7 +1075,14 @@ export async function createWorktree(
   // branch already lives in a worktree, hand that one back.
   const existing = (await listWorktrees(root, signal)).find((w) => w.branch === branch)
   if (signal?.aborted) return { ok: false, error: 'Stopped.' }
-  if (existing) return { ok: true, worktree: existing, attached: true }
+  if (existing) {
+    if (input.requireNew)
+      return {
+        ok: false,
+        error: `Branch "${branch}" already has a worktree. Choose a new branch name.`
+      }
+    return { ok: true, worktree: existing, attached: true }
+  }
 
   let baseRef = input.baseRef
   const base = input.baseBranch ?? (await defaultBranch(root, signal))

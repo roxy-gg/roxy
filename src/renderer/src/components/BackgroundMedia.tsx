@@ -22,6 +22,7 @@ export function BackgroundMedia({ effect }: { effect: BackgroundEffect }): JSX.E
       ) {
         void element.play().catch((error: DOMException) => {
           if (error.name === 'AbortError' || ref.current !== element) return
+          setFailed(source!)
           backgroundMediaFailed(source!)
         })
       } else element.pause()

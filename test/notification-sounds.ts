@@ -6,7 +6,12 @@ import path from 'node:path'
 import { spawn } from 'node:child_process'
 import { closeDb, getDb } from '../src/main/db/database'
 import * as sounds from '../src/main/services/notification-sounds'
-import { SOUND_MAX_BYTES } from '../src/shared/notification-sounds'
+import {
+  BUILTIN_NOTIFICATION_SOUNDS,
+  SOUND_MAX_BYTES,
+  SOUND_MIN_SECONDS,
+  SOUND_MAX_SECONDS
+} from '../src/shared/notification-sounds'
 
 const root = process.env.ROXY_SOUND_RELOAD ?? mkdtempSync(path.join(os.tmpdir(), 'roxy-sounds-'))
 app.setPath('userData', root)
@@ -41,12 +46,54 @@ function wav(seconds: number, frequency = 440): Buffer {
 async function run(): Promise<void> {
   if (process.env.ROXY_SOUND_RELOAD) {
     const state = sounds.getSoundLibrary()
-    assert.equal(state.sounds.length, 1)
-    assert.equal(state.selectedId, state.sounds[0].id)
+    assert.equal(state.sounds.length, process.env.ROXY_SOUND_BUILTIN ? 0 : 1)
+    assert.equal(state.selectedId, process.env.ROXY_SOUND_BUILTIN ?? state.sounds[0].id)
     assert.ok((await sounds.soundAudio())?.startsWith('data:audio/wav;base64,'))
     console.log('Fresh process restored library, selection and copied audio without original')
     return
   }
+  assert.deepEqual(sounds.getSoundLibrary(), { selectedId: null, sounds: [] })
+  const bundled = new Set<string>()
+  for (const name of BUILTIN_NOTIFICATION_SOUNDS) {
+    const id = `builtin:${name}`
+    assert.ok((await sounds.selectSound(id)).ok)
+    assert.deepEqual(sounds.getSoundLibrary(), { selectedId: id, sounds: [] })
+    const audio = await sounds.soundAudio()
+    assert.ok(audio?.startsWith('data:audio/wav;base64,'), `${name} loads from bundled resources`)
+    assert.equal(await sounds.soundAudio(id), audio)
+    bundled.add(audio)
+    const bytes = Buffer.from(audio.split(',')[1], 'base64')
+    assert.deepEqual(bytes, await fs.readFile(`resources/notification-sounds/${name}.wav`))
+    assert.equal(bytes.toString('ascii', 0, 4), 'RIFF')
+    assert.equal(bytes.toString('ascii', 8, 12), 'WAVE')
+    assert.equal(bytes.readUInt32LE(4), bytes.length - 8)
+    assert.equal(bytes.readUInt32LE(40), bytes.length - 44)
+    assert.equal(bytes.readUInt16LE(20), 1, 'PCM audio')
+    assert.equal(bytes.readUInt16LE(22), 1, 'mono audio')
+    assert.equal(bytes.readUInt16LE(34), 16, '16-bit audio')
+    const duration = bytes.readUInt32LE(40) / bytes.readUInt32LE(28)
+    assert.ok(duration >= SOUND_MIN_SECONDS && duration <= SOUND_MAX_SECONDS)
+    let peak = 0
+    for (let offset = 44; offset < bytes.length; offset += 2)
+      peak = Math.max(peak, Math.abs(bytes.readInt16LE(offset)))
+    assert.ok(peak > 1000 && peak < 24000, 'audible, unclipped audio with headroom')
+    assert.deepEqual(await sounds.deleteSound(id), { ok: false, error: 'readFailed' })
+  }
+  assert.equal(bundled.size, 16, 'each built-in sound is distinct')
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn(process.execPath, [process.argv[1]], {
+      env: { ...process.env, ROXY_SOUND_RELOAD: root, ROXY_SOUND_BUILTIN: 'builtin:woodblock' },
+      stdio: 'inherit'
+    })
+    child.once('error', reject)
+    child.once('exit', (code) => (code === 0 ? resolve() : reject(Error(`Reload failed: ${code}`))))
+  })
+  for (const id of ['builtin:missing', 'builtin:../bell', 'builtin:bell.wav']) {
+    assert.deepEqual(await sounds.selectSound(id), { ok: false, error: 'readFailed' })
+    assert.equal(await sounds.soundAudio(id), null)
+  }
+  await sounds.resetNotificationSounds()
+  assert.ok(await sounds.soundAudio('builtin:bell'), 'reset does not remove bundled sounds')
   assert.deepEqual(sounds.getSoundLibrary(), { selectedId: null, sounds: [] })
   const unrecognized = path.join(root, 'fake.mp3')
   await fs.writeFile(unrecognized, Buffer.from('ID3this is not an audio stream'))
@@ -133,6 +180,11 @@ async function run(): Promise<void> {
   const concurrent = await Promise.all([sounds.importSound(original), sounds.importSound(invalid)])
   assert.equal(concurrent.filter((result) => result.ok).length, 1)
   assert.ok(concurrent.some((result) => !result.ok && result.error === 'libraryFull'))
+  assert.equal(sounds.getSoundLibrary().sounds.length, 20)
+  assert.ok(
+    (await sounds.selectSound('builtin:bell')).ok,
+    'built-ins work with a full custom library'
+  )
   assert.equal(sounds.getSoundLibrary().sounds.length, 20)
   await sounds.resetNotificationSounds()
   await assert.rejects(fs.access(path.join(root, 'notification-sounds')), { code: 'ENOENT' })
