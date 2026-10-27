@@ -5,8 +5,11 @@ const os = require('node:os')
 const path = require('node:path')
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'roxy-settings-search-'))
 app.setPath('userData', temp)
-let win, server
+let win,
+  server,
+  failed = false
 const errors = []
+const fsUrl = (file) => path.posix.join('/@fs/', path.resolve(file).replaceAll('\\', '/'))
 const wait = () => new Promise((resolve) => setTimeout(resolve, 60))
 const evaluate = async (code) => {
   try {
@@ -119,7 +122,7 @@ app.whenReady().then(async () => {
     assert(!(await evaluate(`return document.querySelector('${setupSave}').disabled`)))
     await click(setupSave)
     await until(`document.querySelector('${setupSave}').disabled`)
-    await evaluate(`const {useRoxyStore} = await import('/@fs/' + ${JSON.stringify(path.resolve('src/renderer/src/lib/store.ts').replaceAll('\\', '/'))});
+    await evaluate(`const {useRoxyStore} = await import(${JSON.stringify(fsUrl('src/renderer/src/lib/store.ts'))});
       if (useRoxyStore.getState().settings.worktreeSetupCommand !== 'npm ci\\necho ready') throw new Error('setup did not persist');`)
     await input(setupInput, '')
     await click(setupSave)
@@ -249,8 +252,8 @@ app.whenReady().then(async () => {
       `return getComputedStyle(document.querySelector('mark')).textDecorationColor`
     )
     assert.notEqual(dark, custom, 'underline follows the theme accent')
-    const base = '/@fs/' + path.resolve('src/renderer/src').replaceAll('\\', '/')
-    const shared = '/@fs/' + path.resolve('src/shared/theme.ts').replaceAll('\\', '/')
+    const base = fsUrl('src/renderer/src')
+    const shared = fsUrl('src/shared/theme.ts')
     await evaluate(`const { applyTheme } = await import(${JSON.stringify(base + '/lib/theme.ts')});
       const { BUILT_IN_THEMES, resolveTheme } = await import(${JSON.stringify(shared)});
       applyTheme(resolveTheme(BUILT_IN_THEMES.find(theme => theme.id === 'roxy-light')));`)
@@ -295,7 +298,7 @@ app.whenReady().then(async () => {
         `return document.querySelectorAll('#settings-search-results button').length`
       )) <= 20
     )
-    const registry = '/@fs/' + path.resolve('src/shared/i18n.ts').replaceAll('\\', '/')
+    const registry = fsUrl('src/shared/i18n.ts')
     const languages = await evaluate(`return (await import(${JSON.stringify(registry)})).LANGUAGES`)
     await evaluate(`await (await import(${JSON.stringify(base + '/i18n.ts')})).applyLanguage('en')`)
     for (const { code } of languages) {
@@ -353,11 +356,11 @@ app.whenReady().then(async () => {
     console.error(error)
     console.error(errors.join('\n'))
     if (win && !win.isDestroyed()) console.error(await evaluate(`return document.body.innerText`))
-    process.exitCode = 1
+    failed = true
   } finally {
     win?.destroy()
     await server?.close()
-    app.quit()
     fs.rmSync(temp, { recursive: true, force: true })
+    app.exit(failed ? 1 : 0)
   }
 })
