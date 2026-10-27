@@ -72,6 +72,18 @@ jobs:
           node-version: 20
           cache: npm
 
+      # Packaging also rebuilds uiohook-napi with node-gyp 9 (needs distutils).
+      - uses: actions/setup-python@v5
+        id: python
+        with:
+          python-version: '3.11'
+
+      - name: Install native input-hook build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libx11-dev libxtst-dev libxrandr-dev libxt-dev
+
       - name: Install dependencies
         # --ignore-scripts skips native postinstall builds (better-sqlite3 tries
         # to compile for Node here and fails: npm's bundled node-gyp can't detect
@@ -123,6 +135,7 @@ jobs:
       - name: Package & upload to the draft release
         run: npx --no-install electron-builder --publish always
         env:
+          npm_config_python: ${{ steps.python.outputs.python-path }}
           # Provided automatically by Actions; lets electron-builder upload assets.
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Resolve latest once in the guard so every OS embeds the same release.

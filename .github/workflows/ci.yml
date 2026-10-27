@@ -98,6 +98,18 @@ jobs:
           git config --global user.email "ci@roxy.gg"
           git config --global user.name "Roxy CI"
 
+      # electron-builder 25 uses node-gyp 9, which still imports distutils.
+      - uses: actions/setup-python@v5
+        id: python
+        with:
+          python-version: '3.11'
+
+      - name: Install native input-hook build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libx11-dev libxtst-dev libxrandr-dev libxt-dev
+
       - name: Install dependencies (with native rebuild for Electron's ABI)
         # Unlike the other two jobs, this one actually spawns `electron`, so it
         # CANNOT use --ignore-scripts: that also skips Electron's own
@@ -109,6 +121,8 @@ jobs:
         # — so `install-app-deps` rebuilds it against Electron's, same as
         # `npm run worktree:setup` and the same step electron-builder runs when
         # packaging (npmRebuild: true).
+        env:
+          npm_config_python: ${{ steps.python.outputs.python-path }}
         run: |
           npm ci
           npx electron-builder install-app-deps

@@ -71,6 +71,17 @@ roxy/
 
 ## Getting started
 
+Native dependency builds require Python 3.11 (electron-builder's node-gyp 9
+still uses `distutils`) and a platform C/C++ toolchain: Visual Studio C++ Build
+Tools on Windows, Xcode Command Line Tools on macOS, or `build-essential` on
+Debian/Ubuntu. If multiple Python versions are installed, set
+`npm_config_python` to the Python 3.11 executable before installing.
+On Debian/Ubuntu, also install the input-hook development libraries:
+
+```bash
+sudo apt-get install libx11-dev libxtst-dev libxrandr-dev libxt-dev
+```
+
 ```bash
 # Install dependencies
 npm install
