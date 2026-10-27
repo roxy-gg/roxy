@@ -17,31 +17,10 @@ import { ImagePreview } from './ImagePreview'
 import { restoreComposerDraft, updateComposerDraft } from '../lib/composerDrafts'
 import { useRoxyStore } from '../lib/store'
 import { BotAvatar } from './BotAvatar'
-import { Tooltip } from './AppTooltip'
 import { cn } from '../lib/cn'
 import roxy from '../assets/roxy.png'
 import { HOST_USERNAME } from '@shared/bots'
 import { MENTION, isKnownMention, mentionedBots } from '@shared/mentions'
-
-const MOD_KEY = /mac/i.test(navigator.platform) ? '\u2318' : 'Ctrl'
-
-function TipRow({ label, keys }: { label: string; keys: string[] }): JSX.Element {
-  return (
-    <span className="flex items-center justify-between gap-4">
-      <span className="min-w-0 text-text-muted">{label}</span>
-      <span className="flex shrink-0 items-center gap-1">
-        {keys.map((key) => (
-          <kbd
-            key={key}
-            className="rounded bg-surface-2 px-1.5 py-px font-sans text-[10px] font-medium text-text"
-          >
-            {key}
-          </kbd>
-        ))}
-      </span>
-    </span>
-  )
-}
 
 export function Composer({
   chatId,
@@ -587,53 +566,25 @@ export function Composer({
                 )}
                 <div className="flex items-center gap-1.5">
                   {sendTarget && (
-                    <Tooltip
-                      content={
-                        <TipRow
-                          label={t('composer.sendOnlyTo', { username: sendTarget.username })}
-                          keys={[MOD_KEY, '\u21b5']}
-                        />
-                      }
-                    >
-                      <button
-                        type="button"
-                        onClick={() => void submit(sendTarget.id)}
-                        disabled={!canSend || submitting}
-                        className="press-scale h-8 shrink-0 sq sq-lg rounded-lg bg-accent/15 px-2.5 text-xs font-medium text-accent hover:bg-accent/25 disabled:opacity-30"
-                      >
-                        {t('composer.sendTo', { username: sendTarget.username })}
-                      </button>
-                    </Tooltip>
-                  )}
-                  <Tooltip
-                    content={
-                      sendTarget ? (
-                        <span className="flex flex-col gap-1.5">
-                          <TipRow
-                            label={sending ? t('composer.addToQueue') : t('composer.sendToRoxy')}
-                            keys={['\u21b5']}
-                          />
-                          <TipRow
-                            label={t('composer.sendOnlyTo', { username: sendTarget.username })}
-                            keys={[MOD_KEY, '\u21b5']}
-                          />
-                        </span>
-                      ) : sending ? (
-                        t('composer.addToQueue')
-                      ) : (
-                        t('composer.send')
-                      )
-                    }
-                  >
                     <button
-                      onClick={() => void submit()}
+                      type="button"
+                      onClick={() => void submit(sendTarget.id)}
                       disabled={!canSend || submitting}
-                      aria-label={sending ? t('composer.addToQueue') : t('composer.send')}
-                      className="press-scale flex h-8 w-8 shrink-0 items-center justify-center sq sq-lg rounded-lg bg-white text-black hover:bg-white/90 disabled:opacity-30"
+                      title={t('composer.sendOnlyTo', { username: sendTarget.username })}
+                      className="press-scale h-8 shrink-0 sq sq-lg rounded-lg bg-accent/15 px-2.5 text-xs font-medium text-accent hover:bg-accent/25 disabled:opacity-30"
                     >
-                      <ArrowUp className="h-4 w-4" />
+                      {t('composer.sendTo', { username: sendTarget.username })}
                     </button>
-                  </Tooltip>
+                  )}
+                  <button
+                    onClick={() => void submit()}
+                    disabled={!canSend || submitting}
+                    aria-label={sending ? t('composer.addToQueue') : t('composer.send')}
+                    title={sending ? t('composer.addToQueue') : t('composer.send')}
+                    className="press-scale flex h-8 w-8 shrink-0 items-center justify-center sq sq-lg rounded-lg bg-white text-black hover:bg-white/90 disabled:opacity-30"
+                  >
+                    <ArrowUp className="h-4 w-4" />
+                  </button>
                 </div>
               </div>
             )}

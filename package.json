@@ -49,7 +49,6 @@
     "smoke:shared": "esbuild test/shared.ts --bundle --platform=node --format=cjs --packages=external --outfile=test/.out/shared.cjs && node test/.out/shared.cjs",
     "smoke:voice": "esbuild test/voice.ts --bundle --platform=node --format=cjs --outfile=test/.out/voice.cjs && node test/.out/voice.cjs && node test/voice-service.mjs",
     "smoke:voice-ui": "electron test/canvas/voice-smoke.cjs",
-    "smoke:tooltips": "electron test/canvas/tooltips-smoke.cjs",
     "smoke:voice-native": "esbuild test/voice-native.ts --bundle --platform=node --format=cjs --packages=external --outfile=test/.out/voice-native.cjs && electron test/.out/voice-native.cjs",
     "smoke:app": "esbuild test/smoke.ts --bundle --platform=node --format=cjs --packages=external --outfile=test/.out/smoke.cjs && electron test/.out/smoke.cjs",
     "smoke": "npm run smoke:shared && npm run smoke:i18n && npm run smoke:store && npm run smoke:images && npm run smoke:subagents && npm run smoke:multirepo && npm run smoke:live && npm run smoke:cookies && npm run smoke:browser-proxy && npm run smoke:browser-devtools && npm run smoke:app",

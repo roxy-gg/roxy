@@ -7,8 +7,6 @@ import '../../src/renderer/src/assets/main.css'
 import '../../src/renderer/src/i18n'
 import { CanvasTranscript } from '../../src/renderer/src/canvas/CanvasTranscript'
 import { AppContextMenu } from '../../src/renderer/src/components/AppContextMenu'
-import { AppTooltip } from '../../src/renderer/src/components/AppTooltip'
-const TooltipHarness = lazy(() => import('./TooltipHarness'))
 import { DiffViewer } from '../../src/renderer/src/components/diff/DiffViewer'
 import { FIXTURES, STREAMING, LARGE_DIFF, HISTORY_FIXTURES, TERMINAL_FIXTURES } from './fixtures'
 import { PerformanceHarness } from './PerformanceHarness'
@@ -224,12 +222,7 @@ function CopilotHarness(): JSX.Element {
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <AppTooltip />
-    {new URLSearchParams(location.search).has('tooltips') ? (
-      <Suspense>
-        <TooltipHarness />
-      </Suspense>
-    ) : new URLSearchParams(location.search).has('voice') ? (
+    {new URLSearchParams(location.search).has('voice') ? (
       <Suspense>
         <VoiceHarness />
       </Suspense>

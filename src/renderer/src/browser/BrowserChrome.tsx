@@ -113,7 +113,7 @@ export function BrowserChrome(): JSX.Element {
   return (
     <div className="flex h-screen w-screen select-none flex-col overflow-hidden bg-surface text-text">
       {/* Tab strip â€” doubles as the draggable title bar; native controls overlay it. */}
-      <div data-tooltip-bounds className="shrink-0">
+      <div className="shrink-0">
         <div className="titlebar reserve-controls-left reserve-controls-right flex items-end gap-0.5 overflow-x-auto px-2 pt-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {tabs.map((tab) => (
             <div
