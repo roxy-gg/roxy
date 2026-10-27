@@ -187,6 +187,51 @@ async function run() {
       'return Math.abs(document.querySelector("canvas").width / devicePixelRatio - el.clientWidth) <= 1'
     )
   )
+  await evaluate(`
+    window.__geometryPaints=[];
+    window.__geometryResizes=[];
+    window.__originalFillRect=CanvasRenderingContext2D.prototype.fillRect;
+    CanvasRenderingContext2D.prototype.fillRect=function(x,y,w,h) {
+      const el=this.canvas.closest('[data-canvas-surface]');
+      if(el && x===0 && y===0) window.__geometryPaints.push({width:w,actual:el.clientWidth});
+      return Reflect.apply(window.__originalFillRect,this,[x,y,w,h]);
+    };
+    void 0;
+  `)
+  await clickDom('#session')
+  check(
+    'every session paint uses the settled scrollbar width',
+    await evaluate(
+      `window.__geometryPaints.length>0 && window.__geometryPaints.every(p=>p.width===p.actual)`
+    )
+  )
+  await evaluate(`
+    window.__geometryObserver=new ResizeObserver(([entry])=>{
+      const el=entry.target;
+      const scene=window.__canvasTranscript.scene();
+      window.__geometryResizes.push({width:scene.width,actual:el.clientWidth});
+    });
+    window.__geometryObserver.observe(document.querySelector('[data-canvas-surface]'));
+    window.__geometryResizes=[];
+    document.querySelector('[data-canvas-viewport]').style.marginRight='137px';
+  `)
+  await settle()
+  check(
+    'resize is laid out before ResizeObserver delivery finishes',
+    await evaluate(
+      `window.__geometryResizes.length>0 && window.__geometryResizes.every(p=>p.width===p.actual)`
+    )
+  )
+  await evaluate(`
+    document.querySelector('[data-canvas-viewport]').style.marginRight='';
+    window.__geometryObserver.disconnect();
+    CanvasRenderingContext2D.prototype.fillRect=window.__originalFillRect;
+    delete window.__originalFillRect;
+    delete window.__geometryObserver;
+    delete window.__geometryPaints;
+    delete window.__geometryResizes;
+  `)
+  await settle()
   check(
     'table immediately after prose renders as separate canvas columns',
     await probe(`

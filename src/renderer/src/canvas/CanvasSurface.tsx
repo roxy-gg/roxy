@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { flushSync } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import type { TFunction } from 'i18next'
 import {
@@ -257,7 +258,8 @@ export function CanvasSurface({
           ? old
           : { width: el.clientWidth, height: el.clientHeight }
       )
-    const observer = new ResizeObserver(measure)
+    // ResizeObserver runs before paint; do not show the old bitmap in the new viewport.
+    const observer = new ResizeObserver(() => flushSync(measure))
     observer.observe(el)
     measure()
     return () => observer.disconnect()
@@ -712,7 +714,12 @@ export function CanvasSurface({
           role="region"
           aria-label={t('transcript.history')}
           className="relative min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto outline-none"
-          style={{ overflowAnchor: 'none', scrollBehavior: 'auto', userSelect: 'none' }}
+          style={{
+            overflowAnchor: 'none',
+            scrollBehavior: 'auto',
+            scrollbarGutter: 'stable',
+            userSelect: 'none'
+          }}
           onScroll={() => {
             const el = scroller.current!
             // Occlusion and resize clamping are not intent to leave the tail.
