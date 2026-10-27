@@ -27,6 +27,17 @@ async function until(code) {
   throw Error(`Timed out: ${code}`)
 }
 async function click(selector) {
+  if (
+    selector === '[aria-label="Close files and changes"]' ||
+    selector.includes('[aria-label="Close"]')
+  ) {
+    assert(
+      await evaluate(
+        `return !!document.querySelector(${JSON.stringify(selector)})?.querySelector('svg.lucide-x')`
+      ),
+      'workspace exit controls use an X icon'
+    )
+  }
   await evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`)
   await wait()
 }
@@ -334,7 +345,7 @@ app.whenReady().then(async () => {
     )
     await screenshot('diff')
     // A slow read survives repeated snapshot refreshes instead of restarting forever.
-    await click('[aria-label="Back to chat"]')
+    await click('[data-workspace-canvas] [aria-label="Close"]')
     await evaluate(`window.__slowOriginalRead = window.roxy.workspace.read;
       window.__slowReads = [];
       window.roxy.workspace.read = (...args) => new Promise(resolve => {
@@ -485,7 +496,7 @@ app.whenReady().then(async () => {
         )
       )
       await screenshot('preview-' + file)
-      await click('[aria-label="Back to chat"]')
+      await click('[data-workspace-canvas] [aria-label="Close"]')
     }
     for (const [file, tag] of [
       ['clip.mp4', 'video'],
@@ -500,16 +511,16 @@ app.whenReady().then(async () => {
         `const media = document.querySelector('[data-workspace-media] ${tag}'); media.muted = true; await media.play(); media.pause()`
       )
       await screenshot('preview-' + tag)
-      await click('[aria-label="Back to chat"]')
+      await click('[data-workspace-canvas] [aria-label="Close"]')
     }
     await click('#workspace-inspector button[title="document.pdf"]')
     await until(`!!document.querySelector('[data-workspace-media] iframe[title="document.pdf"]')`)
-    await click('[aria-label="Back to chat"]')
+    await click('[data-workspace-canvas] [aria-label="Close"]')
     await click('#workspace-inspector button[title="broken.png"]')
     await until(
       `document.querySelector('[data-workspace-media] [role=status]')?.textContent.includes('could not be displayed')`
     )
-    await click('[aria-label="Back to chat"]')
+    await click('[data-workspace-canvas] [aria-label="Close"]')
     assert.equal(await evaluate('return window.__mediaReads'), 0)
     await evaluate('window.roxy.workspace.read = window.__mediaOriginalRead')
     await evaluate(`window.__mediaOriginalInspect = window.roxy.workspace.inspect;
@@ -523,7 +534,7 @@ app.whenReady().then(async () => {
         `return document.querySelector('[data-workspace-media]').textContent.includes('Showing the current working file')`
       )
     )
-    await click('[aria-label="Back to chat"]')
+    await click('[data-workspace-canvas] [aria-label="Close"]')
     await evaluate(
       `window.roxy.workspace.inspect = window.__mediaOriginalInspect; window.dispatchEvent(new Event('focus'))`
     )
@@ -566,7 +577,7 @@ app.whenReady().then(async () => {
     )
     await click('[aria-label="Copy file contents"]')
     assert(await evaluate(`return window.__canvasTest.copied.some(text => text.includes('roxy'))`))
-    await click('[aria-label="Back to chat"]')
+    await click('[data-workspace-canvas] [aria-label="Close"]')
     assert.equal(
       await evaluate('return document.activeElement.hasAttribute("data-workspace-toggle")'),
       true
@@ -635,7 +646,7 @@ app.whenReady().then(async () => {
         ),
         'none'
       )
-      await click('[aria-label="Back to chat"]')
+      await click('[data-workspace-canvas] [aria-label="Close"]')
     }
     await evaluate(`document.querySelector('#workspace-inspector').focus()`)
     await key('Escape')
@@ -723,10 +734,10 @@ app.whenReady().then(async () => {
     await evaluate('window.dispatchEvent(new Event("focus"))')
     await new Promise((resolve) => setTimeout(resolve, 300))
     assert.equal(await evaluate('return window.__editor.getValue()'), edited)
-    await click('[aria-label="Back to chat"]')
+    await click('[data-workspace-canvas] [aria-label="Close"]')
     await click('#workspace-inspector button[title="package.json"]')
     await until('window.__monaco.editor.getEditors().length === 1')
-    await click('[aria-label="Back to chat"]')
+    await click('[data-workspace-canvas] [aria-label="Close"]')
     await click('#workspace-inspector button[title="tsconfig.json"]')
     await until('window.__monaco.editor.getEditors().length === 1')
     await evaluate(
@@ -773,7 +784,7 @@ app.whenReady().then(async () => {
     await screenshot('editor-conflict')
     await click('[aria-label="Reload file from disk"]')
     await until(`window.__editor.getValue() === '{"external":true}'`)
-    await click('[aria-label="Back to chat"]')
+    await click('[data-workspace-canvas] [aria-label="Close"]')
     await evaluate(
       `window.roxy.workspace.read = async () => ({ok:true,before:'',after:'function example() {}',revision:'typescript'});`
     )
@@ -803,7 +814,7 @@ app.whenReady().then(async () => {
     )
     await click('[aria-label="Reload file from disk"]')
     await until(`!document.querySelector('[aria-label="Unsaved changes"]')`)
-    await click('[aria-label="Back to chat"]')
+    await click('[data-workspace-canvas] [aria-label="Close"]')
     // Existing tab indentation and BOM/CRLF survive editor round trips.
     await evaluate(
       `window.roxy.workspace.read = async () => ({ok:true,before:'',after:'\\ufefffunction tabs() {\\r\\n\\treturn 1\\r\\n}\\r\\n',revision:'tabs'});`
@@ -815,7 +826,7 @@ app.whenReady().then(async () => {
         `window.__editor = window.__monaco.editor.getEditors()[0]; return window.__editor.getModel().getValue(undefined,true).startsWith('\\ufeff') && window.__editor.getModel().getEOL() === '\\r\\n' && !window.__editor.getModel().getOptions().insertSpaces`
       )
     )
-    await click('[aria-label="Back to chat"]')
+    await click('[data-workspace-canvas] [aria-label="Close"]')
     await evaluate(
       `window.roxy.workspace.read = async () => ({ok:true,before:'',after:'first\\r\\nsecond\\n',revision:'mixed'});`
     )
@@ -826,7 +837,7 @@ app.whenReady().then(async () => {
         'return window.__monaco.editor.getEditors()[0].getOption(window.__monaco.editor.EditorOption.readOnly)'
       )
     )
-    await click('[aria-label="Back to chat"]')
+    await click('[data-workspace-canvas] [aria-label="Close"]')
     await evaluate('window.roxy.workspace.read = window.__originalRead')
     // Reload remains locked across navigation, then redetects the new indentation.
     await click('button[title="test/workspace-inspector.ts"]')
@@ -836,7 +847,7 @@ app.whenReady().then(async () => {
     )
     await click('[aria-label="Reload file from disk"]')
     await until('window.__reloadReads.length > 0')
-    await click('[aria-label="Back to chat"]')
+    await click('[data-workspace-canvas] [aria-label="Close"]')
     await click('button[title="test/workspace-inspector.ts"]')
     await until('window.__monaco.editor.getEditors().length === 1')
     assert(
@@ -856,7 +867,7 @@ app.whenReady().then(async () => {
       ),
       false
     )
-    await click('[aria-label="Back to chat"]')
+    await click('[data-workspace-canvas] [aria-label="Close"]')
     // A save completed while closed must release its clean model and reopen safely in StrictMode.
     await click('button[title="tsconfig.json"]')
     await until('window.__monaco.editor.getEditors().length === 1')
@@ -865,14 +876,14 @@ app.whenReady().then(async () => {
     )
     await click('[aria-label="Save file"]')
     await until('!!window.__finishSave')
-    await click('[aria-label="Back to chat"]')
+    await click('[data-workspace-canvas] [aria-label="Close"]')
     await evaluate(
       'await window.__finishSave(); window.roxy.workspace.write = window.__originalWrite'
     )
     await click('button[title="tsconfig.json"]')
     await until('window.__monaco.editor.getEditors().length === 1')
     assert(await evaluate('return !window.__monaco.editor.getEditors()[0].getModel().isDisposed()'))
-    await click('[aria-label="Back to chat"]')
+    await click('[data-workspace-canvas] [aria-label="Close"]')
     for (const [additions, deletions] of [
       [0, 0],
       [5, 0],
@@ -920,7 +931,7 @@ app.whenReady().then(async () => {
     await until(
       'window.__monaco.editor.getEditors()[0]?.getModel()?.getLanguageId() === "typescript"'
     )
-    await click('[aria-label="Back to chat"]')
+    await click('[data-workspace-canvas] [aria-label="Close"]')
     console.log(
       'WORKSPACE UI OK: layout/diff/tree/icons, responsive PNG/JPEG previews/actual size, video/audio playback, PDF frame, media failures, editor virtualization/shortcuts/drafts/conflicts, TS completions/diagnostics, BOM/CRLF/tabs, mixed-EOL protection'
     )

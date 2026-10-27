@@ -1,6 +1,6 @@
 {
   "name": "roxy",
-  "version": "1.1.4",
+  "version": "1.1.5",
   "description": "Roxy — an open-source AI coding agent for engineers.",
   "main": "./out/main/index.js",
   "author": "Roxy (https://github.com/roxy-gg/roxy)",
@@ -52,7 +52,6 @@
     "smoke:narrete": "esbuild test/narrete.ts --bundle --platform=node --format=cjs --outfile=test/.out/narrete.cjs && node test/.out/narrete.cjs && node test/narrete-service.mjs && esbuild test/narrete-image.ts --bundle --platform=node --format=cjs --packages=external --outfile=test/.out/narrete-image.cjs && node test/.out/narrete-image.cjs",
     "smoke:narrete-ui": "electron test/canvas/narrete-smoke.cjs",
     "smoke:narrete-live": "electron test/narrete-live.cjs",
-    "smoke:tooltips": "electron test/canvas/tooltips-smoke.cjs",
     "smoke:voice-native": "esbuild test/voice-native.ts --bundle --platform=node --format=cjs --packages=external --outfile=test/.out/voice-native.cjs && electron test/.out/voice-native.cjs",
     "smoke:app": "esbuild test/smoke.ts --bundle --platform=node --format=cjs --packages=external --outfile=test/.out/smoke.cjs && electron test/.out/smoke.cjs",
     "smoke": "npm run smoke:shared && npm run smoke:i18n && npm run smoke:store && npm run smoke:images && npm run smoke:subagents && npm run smoke:multirepo && npm run smoke:live && npm run smoke:cookies && npm run smoke:browser-proxy && npm run smoke:browser-devtools && npm run smoke:app",

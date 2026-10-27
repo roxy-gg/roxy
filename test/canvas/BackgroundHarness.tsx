@@ -272,6 +272,20 @@ export function BackgroundHarness(): JSX.Element {
           Empty
         </button>
         <button
+          id="background-switch"
+          onClick={() => {
+            const state = useRoxyStore.getState()
+            const first = state.chats[0]
+            const id = state.activeChatId === first.id ? 'background-second' : first.id
+            if (!state.chats.some((chat) => chat.id === id)) {
+              useRoxyStore.setState({ chats: [...state.chats, { ...first, id }] })
+            }
+            void state.selectChat(id)
+          }}
+        >
+          Switch session
+        </button>
+        <button
           id="background-loading"
           onClick={() =>
             useRoxyStore.setState({ messages: [], messagesError: null, messagesChatId: null })

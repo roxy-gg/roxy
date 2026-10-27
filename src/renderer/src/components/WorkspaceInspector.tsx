@@ -1,6 +1,5 @@
 import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import {
-  ArrowLeft,
   Check,
   ChevronRight,
   Copy,
@@ -9,7 +8,8 @@ import {
   GitBranch,
   GitCompareArrows,
   PanelRight,
-  Pencil
+  Pencil,
+  X
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import type { Chat } from '@shared/types'
@@ -427,11 +427,11 @@ export function WorkspaceFileCanvas({
         <button
           type="button"
           onClick={onBack}
-          title={t('inspector.backToChat')}
-          aria-label={t('inspector.backToChat')}
+          title={t('common.close')}
+          aria-label={t('common.close')}
           className="press-scale rounded p-1 text-text-muted hover:bg-white/5 hover:text-text"
         >
-          <ArrowLeft className="h-3.5 w-3.5" />
+          <X className="h-3.5 w-3.5" />
         </button>
         <FileIcon path={selection.path} />
         <span title={selection.path} className="min-w-0 flex-1 truncate font-mono text-[11px]">
@@ -634,7 +634,7 @@ export function WorkspaceInspector({
           onClick={onClose}
           className="press-scale shrink-0 rounded p-1.5 text-text-subtle hover:bg-white/5 hover:text-text"
         >
-          <ArrowLeft className="h-3.5 w-3.5" />
+          <X className="h-3.5 w-3.5" />
         </button>
         <div
           className="flex min-w-0 flex-1 gap-1"

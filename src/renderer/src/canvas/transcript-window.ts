@@ -279,9 +279,6 @@ export class TranscriptWindow {
           .join(',')
         const live = message.id === '__streaming__'
         const username = messageBotUsername(input, message)
-        const human = message.role === 'user' && !username
-        const messageX = human ? x + SPACE.messagePadX : bodyX
-        const messageWidth = human ? Math.max(1, width - SPACE.messagePadX * 2) : bodyWidth
         const key = `${format}:${username ?? ''}:${opened}:${diffs}:${scrolls}:${live && item.part === message.parts.length - 1}:${part?.type === 'tool' ? part.state : ''}`
         const hit = this.entries.get(item.id)
         let block: Block
@@ -309,10 +306,10 @@ export class TranscriptWindow {
               username ? input.botAvatar?.(username) : undefined
             ).y
           } else if (item.kind === 'user')
-            height = layoutUserBody(builder, message.parts, messageX, 0, messageWidth, human)
+            height = layoutUserBody(builder, message.parts, bodyX, 0, bodyWidth)
           else if (item.kind === 'end')
             height =
-              layoutPromptFailure(builder, message, messageX, 0, messageWidth, input) +
+              layoutPromptFailure(builder, message, bodyX, 0, bodyWidth, input) +
               SPACE.messagePadY +
               (live && !message.parts.length
                 ? layoutParts(

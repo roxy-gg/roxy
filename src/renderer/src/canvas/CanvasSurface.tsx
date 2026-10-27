@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { flushSync } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import type { TFunction } from 'i18next'
 import {
@@ -29,7 +30,6 @@ import { openLink } from './links'
 import { diffPatch } from '../components/diff/model'
 import { prefersReducedMotion, subscribeMotion } from '../lib/motion'
 import { PromptHistoryRail } from './PromptHistoryRail'
-import { updateTooltip } from '../components/AppTooltip'
 import { activePrompt, PROMPT_OFFSET, type PromptAnchor, type PromptEntry } from './prompt-history'
 
 const NO_PROMPTS: PromptEntry[] = []
@@ -222,32 +222,10 @@ export function CanvasSurface({
     const textHit =
       inside && !region && hitText(scene.current, pos.x, pos.y + el.scrollTop, metrics)
     el.style.cursor = region?.cursor ?? (textHit || press.current?.dragged ? 'text' : 'default')
-    if (press.current) return
-    const rect = el.getBoundingClientRect()
-    updateTooltip(
-      el,
-      region?.title
-        ? {
-            key: `${region.x}:${region.y}:${region.w}:${region.h}`,
-            content: region.title,
-            rect: new DOMRect(
-              rect.left + region.x,
-              rect.top + region.y - el.scrollTop,
-              region.w,
-              region.h
-            )
-          }
-        : null
-    )
+    el.title = press.current ? '' : (region?.title ?? '')
   }, [metrics])
 
   useEffect(() => observeTheme(setTheme), [])
-  useEffect(() => {
-    const target = scroller.current
-    return () => {
-      if (target) updateTooltip(target, null)
-    }
-  }, [sceneKey])
   useLayoutEffect(() => {
     const el = scroller.current
     if (!el) return
@@ -257,7 +235,8 @@ export function CanvasSurface({
           ? old
           : { width: el.clientWidth, height: el.clientHeight }
       )
-    const observer = new ResizeObserver(measure)
+    // ResizeObserver runs before paint; do not show the old bitmap in the new viewport.
+    const observer = new ResizeObserver(() => flushSync(measure))
     observer.observe(el)
     measure()
     return () => observer.disconnect()
@@ -712,7 +691,12 @@ export function CanvasSurface({
           role="region"
           aria-label={t('transcript.history')}
           className="relative min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto outline-none"
-          style={{ overflowAnchor: 'none', scrollBehavior: 'auto', userSelect: 'none' }}
+          style={{
+            overflowAnchor: 'none',
+            scrollBehavior: 'auto',
+            scrollbarGutter: 'stable',
+            userSelect: 'none'
+          }}
           onScroll={() => {
             const el = scroller.current!
             // Occlusion and resize clamping are not intent to leave the tail.

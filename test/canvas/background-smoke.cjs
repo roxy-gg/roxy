@@ -70,6 +70,50 @@ const sampleWallpaper = async (selector) => {
     'base64'
   )
 }
+const assertSessionSwitch = async (label) => {
+  await evaluate(`const host=document.querySelector('#main-sidebar-harness .chat-background-host');
+    window.__switchMedia=document.querySelector('#main-sidebar-harness .chat-wallpaper :is(img,video), #main-sidebar-harness .chat-wallpaper-shared :is(img,video)');
+    window.__switchOpacity=host.style.getPropertyValue('--chat-wallpaper-opacity');
+    const list=window.roxy.messages.list;
+    window.roxy.messages.list=id=>new Promise(resolve=>{
+      window.__finishBackgroundSwitch=()=>{
+        window.roxy.messages.list=list;
+        resolve(list(id));
+      };
+    });
+    document.querySelector('#background-switch').click();`)
+  await wait()
+  assert.deepEqual(
+    await evaluate(`const host=document.querySelector('#main-sidebar-harness .chat-background-host');
+      const media=document.querySelector('#main-sidebar-harness .chat-wallpaper :is(img,video), #main-sidebar-harness .chat-wallpaper-shared :is(img,video)');
+      return {
+        wallpaper:host.hasAttribute('data-wallpaper'),
+        sameMedia:media===window.__switchMedia,
+        sameOpacity:host.style.getPropertyValue('--chat-wallpaper-opacity')===window.__switchOpacity,
+        glass:host.hasAttribute('data-glass'),
+        ready:media?.tagName==='VIDEO' ? media.readyState>=2 && !media.paused : !!media?.complete,
+        transcript:!!host.querySelector('[data-canvas-surface]')
+      };`),
+    {
+      wallpaper: true,
+      sameMedia: true,
+      sameOpacity: true,
+      glass: true,
+      ready: true,
+      transcript: false
+    },
+    `${label}: history loading preserves the visible wallpaper and media element`
+  )
+  await evaluate(`window.__finishBackgroundSwitch()`)
+  await wait()
+  assert.equal(
+    await evaluate(
+      `return window.__switchMedia===document.querySelector('#main-sidebar-harness .chat-wallpaper :is(img,video), #main-sidebar-harness .chat-wallpaper-shared :is(img,video)')`
+    ),
+    true,
+    `${label}: history arrival does not reload the wallpaper`
+  )
+}
 async function run() {
   let url = process.env.CANVAS_TEST_URL
   if (!url) {
@@ -120,7 +164,11 @@ async function run() {
     'a chosen wallpaper remains visible on Windows'
   )
   const sidebar = '#main-sidebar-harness [data-sidebar-frame]'
+  await assertSessionSwitch('image, default sidebar, empty session')
+  await click('#background-messages')
+  await assertSessionSwitch('image, default sidebar, populated session')
   await click('[aria-label="Sidebar background"] button:nth-child(2)')
+  await assertSessionSwitch('image, glass sidebar')
   await until(`document.querySelector('#main-sidebar-harness [data-sidebar-style="glass"]')`)
   assert.equal(
     await evaluate(
@@ -263,6 +311,7 @@ async function run() {
       return video.muted && video.loop && video.playsInline && !video.controls && video.videoWidth === 96 && video.videoHeight === 64`),
       `${format} is decoded, muted, and looping`
     )
+    await assertSessionSwitch(`${format}, default sidebar`)
     await evaluate(`window.__loopCount = 0; window.__lastTime = 0;
       document.querySelector('#main-sidebar-harness video').addEventListener('timeupdate', e => {
         if (e.target.currentTime < window.__lastTime) window.__loopCount++;
@@ -278,6 +327,7 @@ async function run() {
       1,
       'one video spans chat and sidebar'
     )
+    await assertSessionSwitch(`${format}, glass sidebar`)
     await evaluate(`document.querySelector('#main-sidebar-harness').setAttribute('inert','')`)
     await until(`document.querySelector('#main-sidebar-harness video').paused`)
     await evaluate(`document.querySelector('#main-sidebar-harness').removeAttribute('inert')`)
@@ -559,8 +609,9 @@ async function run() {
   )
   await click('#background-empty')
   assert.equal(await evaluate(`return document.querySelectorAll('[data-wallpaper]').length`), 1)
+  await assertSessionSwitch('empty-only scope')
   await click('#background-loading')
-  assert.equal(await evaluate(`return document.querySelectorAll('[data-wallpaper]').length`), 0)
+  assert.equal(await evaluate(`return document.querySelectorAll('[data-wallpaper]').length`), 1)
   await click('#background-error')
   assert.equal(await evaluate(`return document.querySelectorAll('[data-wallpaper]').length`), 0)
   await click('#background-empty')
