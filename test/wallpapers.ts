@@ -54,6 +54,27 @@ assert.equal(calls[0].url.searchParams.get('sort'), 'mostUsed')
 assert.equal(result.entries[0].posterUrl, `https://roxy.gg/api/wallpapers/${id}/poster`)
 assert.equal(result.entries[0].mediaUrl, `https://roxy.gg/api/wallpapers/${id}/media`)
 assert.deepEqual(await client.download(id), { bytes, extension: '.png' })
+for (const [kind, mime, extension] of [
+  ['image', 'image/gif', '.gif'],
+  ['video', 'video/mp4', '.mp4']
+] as const) {
+  const animated = new WallpaperClient('https://roxy.gg', async (url) =>
+    String(url).endsWith('/media')
+      ? new Response(bytes, { headers: { 'Content-Type': mime } })
+      : Response.json({ ...entry, kind, mime, duration: 1 })
+  )
+  assert.deepEqual(await animated.download(id), { bytes, extension })
+  const wrongType = new WallpaperClient('https://roxy.gg', async (url) =>
+    String(url).endsWith('/media')
+      ? new Response(bytes, { headers: { 'Content-Type': 'image/png' } })
+      : Response.json({ ...entry, kind, mime, duration: 1 })
+  )
+  await assert.rejects(() => wrongType.download(id), 'animated media MIME must match metadata')
+}
+const invalidMime = new WallpaperClient('https://roxy.gg', async () =>
+  Response.json({ ...entry, mime: 'text/html' })
+)
+await assert.rejects(() => invalidMime.download(id))
 assert.equal(
   await client.isPublished(id),
   true,
@@ -123,6 +144,66 @@ const huge = new WallpaperClient(
     })
 )
 await assert.rejects(() => huge.search({}))
+const previewBytes = await fs.readFile(path.join(process.cwd(), 'test/fixtures/background.mp4'))
+const previewMetadata = {
+  mime: 'video/mp4',
+  bytes: previewBytes.length,
+  sha256: createHash('sha256').update(previewBytes).digest('hex')
+}
+const previewCalls: string[] = []
+const previewClient = new WallpaperClient('https://roxy.gg', async (url) => {
+  const route = new URL(String(url)).pathname
+  previewCalls.push(route)
+  return route.endsWith('/preview')
+    ? new Response(previewBytes, { headers: { 'Content-Type': 'video/mp4' } })
+    : Response.json({ ...entry, kind: 'video', mime: 'video/mp4', preview: previewMetadata })
+})
+const previewResults = await Promise.all([previewClient.preview(id), previewClient.preview(id)])
+assert.equal(previewResults[0], `data:video/mp4;base64,${previewBytes.toString('base64')}`)
+assert.equal(previewResults[0], previewResults[1])
+assert.deepEqual(
+  previewCalls,
+  [`/api/wallpapers/${id}`, `/api/wallpapers/${id}/preview`],
+  'deduped fixed-route previews never request originals'
+)
+const beforeLegacy = calls.length
+assert.equal(await client.preview(id), null, 'legacy entries keep still thumbnail')
+assert.equal(calls.length, beforeLegacy + 1, 'missing preview does not fetch full media')
+for (const [data, type] of [
+  [Buffer.from('bad'), 'video/mp4'],
+  [previewBytes, 'text/html']
+] as const) {
+  const invalidPreview = new WallpaperClient('https://roxy.gg', async (url) =>
+    String(url).endsWith('/preview')
+      ? new Response(data, { headers: { 'Content-Type': type } })
+      : Response.json({ ...entry, preview: previewMetadata })
+  )
+  await assert.rejects(() => invalidPreview.preview(id), 'preview validates MIME/size/hash')
+}
+await assert.rejects(() => previewClient.preview('../escape'))
+const animatedPreview = await sharp(
+  await fs.readFile(path.join(process.cwd(), 'test/fixtures/background.gif')),
+  { animated: true }
+)
+  .webp({ loop: 0 })
+  .toBuffer()
+const webpPreviewClient = new WallpaperClient('https://roxy.gg', async (url) =>
+  String(url).endsWith('/preview')
+    ? new Response(animatedPreview, { headers: { 'Content-Type': 'image/webp' } })
+    : Response.json({
+        ...entry,
+        mime: 'image/gif',
+        preview: {
+          mime: 'image/webp',
+          bytes: animatedPreview.length,
+          sha256: createHash('sha256').update(animatedPreview).digest('hex')
+        }
+      })
+)
+assert.ok((await webpPreviewClient.preview(id))?.startsWith('data:image/webp;'))
+console.log(
+  'PASS animated previews: bounded first-party route, dedupe, integrity, GIF/WebP and legacy fallback'
+)
 console.log(
   'PASS wallpaper client: URL boundaries, bounded responses, integrity, anonymous consented submission and errors'
 )

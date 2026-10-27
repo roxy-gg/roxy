@@ -214,7 +214,19 @@ export const FIXTURES: Message[] = [
         ],
         output: 'The entry point is `layoutTranscript` in transcript.ts:57.'
       },
-      { type: 'text', text: MARKDOWN }
+      { type: 'text', text: MARKDOWN },
+      {
+        type: 'tool',
+        tool: 'browser_screenshot',
+        state: 'done',
+        callId: 'screenshot',
+        output: 'Captured a 640x360 screenshot of https://example.com.',
+        image:
+          'data:image/svg+xml,' +
+          encodeURIComponent(
+            '<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360"><rect width="640" height="360" fill="#5588ff"/></svg>'
+          )
+      }
     ],
     2
   ),

@@ -23,6 +23,7 @@ export class WallpaperFailure extends Error {
 export class WallpaperClient {
   private readonly base: URL
   private readonly thumbnails = new Map<string, Promise<string>>()
+  private readonly previews = new Map<string, Promise<string | null>>()
   private cacheWork: Promise<unknown> = Promise.resolve()
   private reconciledCache = false
   constructor(
@@ -140,6 +141,21 @@ export class WallpaperClient {
         throw Error('Invalid wallpaper')
     if (!Number.isFinite(raw.duration) || raw.duration < 0 || raw.duration > 60)
       throw Error('Invalid wallpaper')
+    const mime =
+      raw.mime === undefined ? (raw.kind === 'video' ? 'video/mp4' : 'image/png') : raw.mime
+    if (!(raw.kind === 'video' ? ['video/mp4'] : ['image/png', 'image/gif']).includes(mime))
+      throw Error('Invalid wallpaper media type')
+    const preview = raw.preview ?? null
+    if (
+      preview &&
+      (!['video/mp4', 'image/webp'].includes(preview.mime) ||
+        !Number.isSafeInteger(preview.bytes) ||
+        preview.bytes <= 0 ||
+        preview.bytes > 1024 * 1024 ||
+        typeof preview.sha256 !== 'string' ||
+        !/^[a-f0-9]{64}$/.test(preview.sha256))
+    )
+      throw Error('Invalid wallpaper preview')
     return {
       id: raw.id,
       title: raw.title,
@@ -148,6 +164,7 @@ export class WallpaperClient {
       credit: raw.credit,
       license: raw.license,
       kind: raw.kind,
+      mime,
       width: raw.width,
       height: raw.height,
       bytes: raw.bytes,
@@ -157,7 +174,8 @@ export class WallpaperClient {
       activeUses: Number.isSafeInteger(raw.activeUses) && raw.activeUses >= 0 ? raw.activeUses : 0,
       approvedAt: typeof raw.approvedAt === 'string' ? raw.approvedAt : null,
       posterUrl: new URL(`/api/wallpapers/${raw.id}/poster`, this.base).href,
-      mediaUrl: new URL(`/api/wallpapers/${raw.id}/media`, this.base).href
+      mediaUrl: new URL(`/api/wallpapers/${raw.id}/media`, this.base).href,
+      preview
     }
   }
 
@@ -309,18 +327,63 @@ export class WallpaperClient {
     if (result.ok !== true) throw Error('Invalid usage response')
   }
 
+  preview(id: string): Promise<string | null> {
+    if (!validWallpaperId(id)) return Promise.reject(new WallpaperFailure('invalid'))
+    const existing = this.previews.get(id)
+    if (existing) return existing
+    // Bound abandoned selections as well as each response; only a few clicks may fetch at once.
+    if (this.previews.size >= 4) return Promise.reject(new WallpaperFailure('unavailable'))
+    const work = (async () => {
+      const wallpaper = this.wallpaper(await this.json(`/api/wallpapers/${id}`))
+      if (wallpaper.id !== id) throw Error('Mismatched wallpaper')
+      if (!wallpaper.preview) return null
+      const media = await this.request(`/api/wallpapers/${id}/preview`, 1024 * 1024)
+      if (
+        media.type !== wallpaper.preview.mime ||
+        media.bytes.length !== wallpaper.preview.bytes ||
+        createHash('sha256').update(media.bytes).digest('hex') !== wallpaper.preview.sha256
+      )
+        throw Error('Invalid preview media')
+      if (media.type === 'image/webp') {
+        const decoder = sharp(media.bytes, {
+          animated: true,
+          limitInputPixels: 480 * 270 * 80
+        }).timeout({ seconds: 5 })
+        const info = await decoder.metadata()
+        if (
+          info.format !== 'webp' ||
+          !info.width ||
+          !info.height ||
+          info.width > 480 ||
+          (info.pageHeight ?? info.height) > 270 ||
+          (info.pages ?? 1) > 80
+        )
+          throw Error('Invalid animated preview')
+        await decoder.raw().toBuffer()
+      }
+      return `data:${media.type};base64,${media.bytes.toString('base64')}`
+    })()
+    this.previews.set(id, work)
+    void work.finally(() => this.previews.delete(id)).catch(() => {})
+    return work
+  }
+
   async download(id: string) {
     if (!validWallpaperId(id)) throw new WallpaperFailure('invalid')
     const wallpaper = this.wallpaper(await this.json(`/api/wallpapers/${id}`))
     if (wallpaper.id !== id) throw Error('Mismatched wallpaper')
     const media = await this.request(`/api/wallpapers/${id}/media`, MAX_BYTES)
     if (
-      media.type !== (wallpaper.kind === 'video' ? 'video/mp4' : 'image/png') ||
+      media.type !== wallpaper.mime ||
       media.bytes.length !== wallpaper.bytes ||
       createHash('sha256').update(media.bytes).digest('hex') !== wallpaper.sha256
     )
       throw Error('Invalid wallpaper media')
-    return { bytes: media.bytes, extension: wallpaper.kind === 'video' ? '.mp4' : '.png' }
+    return {
+      bytes: media.bytes,
+      extension:
+        wallpaper.mime === 'video/mp4' ? '.mp4' : wallpaper.mime === 'image/gif' ? '.gif' : '.png'
+    }
   }
 
   async isPublished(id: string): Promise<boolean> {

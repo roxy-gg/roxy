@@ -33,7 +33,7 @@ const highlights = () =>
   evaluate(
     `return [...document.querySelectorAll('[aria-hidden] span.text-accent')].map(el => el.textContent)`
   )
-const send = () => click('button[title="Send"], button[title="Add to queue"]')
+const send = () => click('button[aria-label="Send"], button[aria-label="Add to queue"]')
 async function run() {
   let url = process.env.BOTS_TEST_URL
   if (!url) {
@@ -249,6 +249,54 @@ async function run() {
       { username: '@reviewer', canonicalAppIcon: false, facehash: true }
     ],
     'Roxy uses the canonical app icon while collaborators keep BotAvatar'
+  )
+  await type('Solo para @reviewer ahora')
+
+  await evaluate(
+    `document.querySelector('textarea').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, shiftKey: true, bubbles: true }))`
+  )
+  await wait()
+  assert.equal(
+    await evaluate(`return document.querySelector('textarea').value`),
+    'Solo para @reviewer ahora',
+    'Ctrl+Shift+Enter never sends'
+  )
+  await evaluate(
+    `document.querySelector('textarea').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, bubbles: true }))`
+  )
+  await wait()
+  assert.equal(
+    await evaluate(`return document.querySelector('textarea').value`),
+    '',
+    'Ctrl+Enter sends selected collaborator'
+  )
+
+  assert.equal(
+    (await evaluate(`return (await window.roxy.queue.list('project-chat')).at(-1)`)).asBotId,
+    bot.id
+  )
+  await type('Solo por comando @reviewer ahora')
+  await evaluate(
+    `document.querySelector('textarea').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', metaKey: true, bubbles: true }))`
+  )
+  await wait()
+  assert.equal(
+    (await evaluate(`return (await window.roxy.queue.list('project-chat')).at(-1)`)).asBotId,
+    bot.id,
+    'Cmd+Enter sends selected collaborator'
+  )
+  await type('Enter normal @reviewer ahora')
+  await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent', {
+    type: 'keyDown',
+    key: 'Enter',
+    code: 'Enter',
+    windowsVirtualKeyCode: 13
+  })
+  await wait()
+  assert.equal(
+    (await evaluate(`return (await window.roxy.queue.list('project-chat')).at(-1)`)).asBotId,
+    undefined,
+    'Enter still sends to Roxy'
   )
   for (const draft of [
     'Hola @reviewer',

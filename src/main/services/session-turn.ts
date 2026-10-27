@@ -156,13 +156,12 @@ async function runTurn(
   // If this session asked for a worktree, build it now — on the first turn,
   // not at create time, so an abandoned composer leaves nothing on disk.
   //
-  // Wrapped because this MUST NOT be able to stop a turn. Everything inside is
-  // best-effort infrastructure (git, the filesystem, a schema that might be
-  // mid-upgrade); if any of it throws, the right outcome is a session that runs
-  // in its project folder, not a chat that refuses to answer.
+  // Normally best-effort: git trouble falls back to the project folder. Explicit
+  // fresh mode must instead stop before the agent can run against stale code.
   try {
     if (signal.aborted) return { ok: false, error: 'Stopped.' }
     const materialized = await materializePendingWorktree(input.sessionId, signal)
+    if (materialized.blocked) return { ok: false, error: materialized.error }
     // A session that materialized its own git worktree is running as a
     // workstream - isolated branch, isolated tree. Counted only on success, so
     // the number means "sessions that got one", not "sessions that asked".
@@ -170,7 +169,19 @@ async function runTurn(
     if (materialized.error && !signal.aborted)
       emit({ type: 'text', delta: `_${materialized.error}_\n\n` })
   } catch (e) {
-    console.warn('[worktree] materialize failed; running in the project folder:', e)
+    console.warn('[worktree] materialize failed:', e)
+    const chat = repo.getChat(input.sessionId)
+    if (
+      chat?.worktreePending?.mode === 'new' &&
+      !chat.worktreePending.baseRef?.trim() &&
+      repo.getSettings().freshWorkstream
+    ) {
+      return {
+        ok: false,
+        error:
+          'Could not start a fresh remote workstream. Retry, or turn off auto-reset in Workstreams settings.'
+      }
+    }
   }
   if (signal.aborted) return { ok: false, error: 'Stopped.' }
   // Where this session's tools run — its worktree when it has one, else the

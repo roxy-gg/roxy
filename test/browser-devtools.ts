@@ -1,4 +1,4 @@
-import { app, webContents } from 'electron'
+import { app, BrowserWindow, Menu, webContents } from 'electron'
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
 import { mkdtemp, rm } from 'node:fs/promises'
@@ -7,6 +7,7 @@ import path from 'node:path'
 import * as browser from '../src/main/services/browser'
 import { closeDb } from '../src/main/db/database'
 import { runTool } from '../src/main/harness/tools'
+import { optimizer } from '@electron-toolkit/utils'
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
 async function eventually(check: () => boolean | Promise<boolean>): Promise<void> {
@@ -23,6 +24,12 @@ async function main(): Promise<void> {
   const root = await mkdtemp(path.join(os.tmpdir(), 'roxy-devtools-'))
   app.setPath('userData', root)
   app.on('window-all-closed', () => undefined)
+  app.on('browser-window-created', (_event, window) => {
+    queueMicrotask(() => {
+      if (!window.isDestroyed() && browser.keyForContents(window.webContents) === null)
+        optimizer.watchWindowShortcuts(window)
+    })
+  })
   await app.whenReady()
   console.log('Browser DevTools: Electron ready')
   const server = createServer((req, res) => {
@@ -189,10 +196,133 @@ async function main(): Promise<void> {
     assert(failures.requests.some((r: any) => r.status === 404))
     assert(failures.requests.some((r: any) => r.url.endsWith('/broken') && r.error))
 
+    console.log('Browser DevTools: native frontend, picker and capture recovery')
+    const page = webContents.getAllWebContents().find((wc) => wc.getURL() === base + '/')!
+    await browser.toggleDevTools(key)
+    assert(page.isDevToolsOpened(), 'Native DevTools opens for the page')
+    const frontend = page.devToolsWebContents!
+    assert(
+      await frontend.executeJavaScript(`(async () => {
+      const UI = await import('./ui/legacy/legacy.js');
+      return ['console', 'elements', 'network', 'sources', 'timeline'].every(
+        name => UI.InspectorView.InspectorView.instance().hasPanel(name)
+      );
+    })()`)
+    )
+    assert(
+      !(await data('browser_network')).attached,
+      'Agent capture reports native frontend ownership'
+    )
+    assert((await data('browser_network')).unavailable.includes('developer tools'))
+    await browser.inspectElement(key)
+    await eventually(async () =>
+      frontend.executeJavaScript(`(async () => {
+      const UI = await import('./ui/legacy/legacy.js');
+      return UI.ActionRegistry.ActionRegistry.instance().getAction('elements.toggle-element-search').toggled();
+    })()`)
+    )
+    await frontend.executeJavaScript(`DevToolsAPI.showPanel('network')`)
+    await page.executeJavaScript(`fetch('/api?native-network').then(r => r.json())`)
+    await eventually(async () =>
+      frontend.executeJavaScript(`(async () => {
+      const Logs = await import('./models/logs/logs.js');
+      return Logs.NetworkLog.NetworkLog.instance().requests().some(r => r.url().includes('native-network'));
+    })()`)
+    )
+    await browser.toggleDevTools(key)
+    await eventually(async () => {
+      await browser.inspector(firstTab, key).inspector.ready
+      return (await data('browser_network')).attached
+    })
+    assert((await data('browser_network')).captureGap)
+    assert.equal(browser.currentUrl(key), base + '/', 'Reattachment never navigates the page')
+    assert.equal((await evaluate('window.fixtureReady')).answer, 42)
+    await evaluate(`fetch('/api?after-devtools').then(r => r.json())`)
+    await eventually(async () =>
+      (await data('browser_network', { url: 'after-devtools' })).requests.some(
+        (r: any) => r.finished
+      )
+    )
+    const buildMenu = Menu.buildFromTemplate
+    let pageMenu: Electron.Menu | undefined
+    try {
+      Menu.buildFromTemplate = (template) => {
+        pageMenu = buildMenu(template)
+        pageMenu.popup = () => undefined
+        return pageMenu
+      }
+      page.emit(
+        'context-menu',
+        {},
+        {
+          x: 20,
+          y: 20,
+          isEditable: false,
+          selectionText: '',
+          linkURL: '',
+          editFlags: {},
+          formControlType: ''
+        }
+      )
+    } finally {
+      Menu.buildFromTemplate = buildMenu
+    }
+    assert(pageMenu, 'Blank-page right-click offers debugging actions')
+    const inspectItem = pageMenu.items.find((item) => item.label === 'Inspect element')!
+    assert(inspectItem)
+    inspectItem.click(undefined, undefined, {})
+    await eventually(() => page.isDevToolsOpened())
+    await browser.toggleDevTools(key)
+    await eventually(() => !page.isDevToolsOpened())
+    await browser.inspector(firstTab, key).inspector.ready
+    const shortcut = async (wc: Electron.WebContents, key: string): Promise<void> => {
+      wc.focus()
+      const modifiers =
+        key === 'F12' ? [] : process.platform === 'darwin' ? ['meta', 'alt'] : ['control', 'shift']
+      wc.sendInputEvent({ type: 'keyDown', keyCode: key, modifiers })
+      wc.sendInputEvent({ type: 'keyUp', keyCode: key, modifiers })
+    }
+    await shortcut(page, 'j')
+    await eventually(() => page.isDevToolsOpened())
+    await eventually(async () =>
+      page.devToolsWebContents!.executeJavaScript(`(async () => {
+      const UI = await import('./ui/legacy/legacy.js');
+      return UI.InspectorView.InspectorView.instance().tabbedPane.selectedTabId === 'console';
+    })()`)
+    )
+    await shortcut(page, 'F12')
+    await eventually(() => !page.isDevToolsOpened())
+    await browser.inspector(firstTab, key).inspector.ready
+
     browser.newTab(base + '/second', key)
     const secondTab = browser.listTabs(key).find((t) => t.active)!.id
     await eventually(() => browser.currentUrl(key) === base + '/second')
     await evaluate('window.fixtureReady')
+    const secondPage = webContents
+      .getAllWebContents()
+      .find((wc) => wc.getURL() === base + '/second')!
+    const chrome = BrowserWindow.fromBrowserView(
+      BrowserWindow.getAllWindows()
+        .flatMap((w) => w.getBrowserViews())
+        .find((v) => v.webContents === secondPage)!
+    )!.webContents
+    await shortcut(chrome, 'i')
+    await eventually(() => secondPage.isDevToolsOpened())
+    assert(!page.isDevToolsOpened(), 'Chrome shortcut debugs only the active tab')
+    assert(!chrome.isDevToolsOpened(), 'Global dev shortcuts never inspect browser chrome')
+    browser.activateTab(firstTab, key)
+    assert(!page.isDevToolsOpened(), 'Switching tabs never retargets an existing frontend')
+    assert(secondPage.isDevToolsOpened())
+    browser.activateTab(secondTab, key)
+    await browser.toggleDevTools(key)
+    await eventually(() => !secondPage.isDevToolsOpened())
+    await browser.inspector(secondTab, key).inspector.ready
+    await shortcut(chrome, 'F12')
+    await eventually(() => secondPage.isDevToolsOpened())
+    assert(!chrome.isDevToolsOpened(), 'F12 targets the page even from the URL bar')
+    await shortcut(chrome, 'F12')
+    await eventually(() => !secondPage.isDevToolsOpened())
+    await browser.inspector(secondTab, key).inspector.ready
     assert(!(await data('browser_network')).requests.some((r: any) => r.url === base + '/'))
     assert(
       (await data('browser_network', { tabId: firstTab })).requests.some(
@@ -263,7 +393,10 @@ async function main(): Promise<void> {
     await evaluate('for (let i = 0; i < 310; i++) console.log("event-overflow", i)')
     assert((await data('browser_debug_events')).retention.droppedEvents > 0)
     const held = browser.inspector(secondTab, key).inspector
+    await browser.toggleDevTools(key)
+    const closingFrontend = secondPage.devToolsWebContents!
     browser.closeTab(secondTab, key)
+    await eventually(() => closingFrontend.isDestroyed())
     await assert.rejects(held.command('Performance.getMetrics'), /closed/)
     browser.close(key)
     await eventually(() => browser.listTabs(key).length === 0)

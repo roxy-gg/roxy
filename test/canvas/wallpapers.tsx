@@ -9,6 +9,9 @@ import { applyMotion } from '../../src/renderer/src/lib/motion'
 import { applyBackground } from '../../src/renderer/src/lib/background'
 import { DEFAULT_BACKGROUND } from '../../src/shared/background'
 import type { Wallpaper } from '../../src/shared/wallpapers'
+import mp4Url from '../fixtures/background.mp4?url'
+import gifUrl from '../fixtures/background.gif?url'
+applyMotion('on')
 
 const canvas = document.createElement('canvas')
 canvas.width = 640
@@ -46,6 +49,9 @@ const state = {
   applied: [] as string[],
   submissions: [] as unknown[],
   customAdds: 0,
+  previews: [] as string[],
+  previewFail: false,
+  previewDelay: 0,
   fail: false
 }
 ;(window as any).__wallpapers = state
@@ -78,6 +84,7 @@ window.roxy.background.search = async (input) => {
         id: `00000000-0000-4000-8000-${String(index + Number(input.cursor || 0) + 1).padStart(12, '0')}`,
         title: index === 0 ? input.q || item.title : `Silent Drift ${index}`,
         kind: index % 2 === 0 ? 'image' : 'video',
+        mime: index === 2 ? 'image/gif' : index % 2 ? 'video/mp4' : 'image/png',
         mediaUrl: 'https://do-not-load.test/full.mp4'
       })),
       nextCursor: input.cursor ? null : '10'
@@ -87,6 +94,20 @@ window.roxy.background.search = async (input) => {
 window.roxy.background.thumbnail = async (id) => {
   state.thumbnails.push(id)
   return { ok: true, value: image }
+}
+window.roxy.background.preview = async (id) => {
+  state.previews.push(id)
+  const fail = state.previewFail
+  await new Promise((resolve) => setTimeout(resolve, state.previewDelay))
+  if (fail) return { ok: false, error: 'unavailable' }
+  const gif = id.endsWith('3')
+  const blob = await (await fetch(gif ? gifUrl : mp4Url)).blob()
+  const value = await new Promise<string>((resolve) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(reader.result as string)
+    reader.readAsDataURL(new Blob([blob], { type: gif ? 'image/gif' : 'video/mp4' }))
+  })
+  return { ok: true, value }
 }
 window.roxy.background.applyCatalog = async (id) => {
   state.applied.push(id)
@@ -127,6 +148,9 @@ function Harness() {
           Reduce motion
         </button>
       </div>
+      <button id="full" onClick={() => applyMotion('on')}>
+        Full motion
+      </button>
       <WallpaperWorkshop
         image={background}
         disabled={false}

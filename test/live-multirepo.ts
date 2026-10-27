@@ -14,7 +14,7 @@
  */
 import { app } from 'electron'
 import { spawnSync } from 'node:child_process'
-import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 
 let pass = 0
@@ -29,8 +29,10 @@ function check(name: string, cond: boolean, detail = ''): void {
   }
 }
 
-function git(args: string[], cwd: string): void {
-  spawnSync('git', args, { cwd, encoding: 'utf8', shell: false })
+function git(args: string[], cwd: string): string {
+  const result = spawnSync('git', args, { cwd, encoding: 'utf8', shell: false })
+  if (result.status !== 0) throw new Error(`git ${args.join(' ')}: ${result.stderr}`)
+  return result.stdout.trim()
 }
 
 async function main(): Promise<void> {
@@ -186,8 +188,189 @@ async function main(): Promise<void> {
   check('teardown: force removes everything', forced.ok, forced.error ?? '')
   check('teardown: the composite root is gone too', !existsSync(composite))
 
-  // Leave the sandbox on disk: the DB handle is still open and Windows will
-  // not unlink it. The OS temp dir is the right owner of that cleanup.
+  // ---- fresh remote workstreams --------------------------------------------
+  check('fresh: defaults off', repo.getSettings().freshWorkstream === false)
+  repo.setFreshWorkstream(true)
+  check('fresh: opt-in persists', repo.getSettings().freshWorkstream === true)
+  const upstream = path.join(sandbox, 'upstream')
+  const local = path.join(sandbox, 'local')
+  const remote = path.join(sandbox, 'origin.git')
+  mkdirSync(upstream)
+  git(['init', '-q', '-b', 'main'], upstream)
+  writeFileSync(path.join(upstream, 'README.md'), 'initial\n')
+  git(['add', '.'], upstream)
+  git(['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-qm', 'initial'], upstream)
+  git(['clone', '--bare', upstream, remote], sandbox)
+  git(['clone', remote, local], sandbox)
+  git(['remote', 'add', 'origin', remote], upstream)
+  const initial = git(['rev-parse', 'HEAD'], local)
+  writeFileSync(path.join(local, 'local-only.txt'), 'local commit\n')
+  git(['add', '.'], local)
+  git(['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-qm', 'local-only'], local)
+  const localHead = git(['rev-parse', 'HEAD'], local)
+  writeFileSync(path.join(local, 'README.md'), 'unsaved local edit\n')
+  writeFileSync(path.join(local, 'untracked.txt'), 'keep me\n')
+
+  const fresh = repo.createChat({
+    title: 'Fresh Remote',
+    workspacePath: local,
+    worktree: { mode: 'new' }
+  })
+  // Advance AFTER session creation: refresh must happen at the first message.
+  writeFileSync(path.join(upstream, 'README.md'), 'latest remote\n')
+  git(['add', '.'], upstream)
+  git(['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-qm', 'remote update'], upstream)
+  git(['push', 'origin', 'main'], upstream)
+  const latest = git(['rev-parse', 'HEAD'], upstream)
+  const freshResult = await worktree.materializePendingWorktree(fresh.id)
+  check(
+    'fresh: materializes from latest remote, not local commits',
+    freshResult.ok && git(['rev-parse', 'HEAD'], freshResult.worktreePath!) === latest,
+    freshResult.error
+  )
+  check(
+    'fresh: checkout is clean and excludes local-only files',
+    git(['status', '--porcelain'], freshResult.worktreePath!) === '' &&
+      !existsSync(path.join(freshResult.worktreePath!, 'local-only.txt'))
+  )
+  check(
+    'fresh: project branch and dirty files are untouched',
+    git(['rev-parse', 'HEAD'], local) === localHead &&
+      readFileSync(path.join(local, 'README.md'), 'utf8') === 'unsaved local edit\n' &&
+      existsSync(path.join(local, 'untracked.txt'))
+  )
+
+  // Offline with a cached tracking ref must block, not silently use that ref.
+  git(['remote', 'set-url', 'origin', path.join(sandbox, 'missing.git')], local)
+  const offline = repo.createChat({
+    title: 'Offline Fresh',
+    workspacePath: local,
+    worktree: { mode: 'new' }
+  })
+  const offlineResult = await worktree.materializePendingWorktree(offline.id)
+  check(
+    'fresh: unreachable origin blocks without a checkout',
+    offlineResult.blocked === true && !repo.getChat(offline.id)!.worktreePath
+  )
+  check('fresh: failed attempt keeps intent for retry', !!repo.getChat(offline.id)!.worktreePending)
+  writeFileSync(path.join(freshResult.worktreePath!, 'session-wip.txt'), 'keep session edits\n')
+  await worktree.materializePendingWorktree(fresh.id)
+  check(
+    'fresh: existing workstream is never reset',
+    existsSync(path.join(freshResult.worktreePath!, 'session-wip.txt'))
+  )
+
+  const fork = repo.createChat({
+    title: 'Explicit Fork',
+    workspacePath: local,
+    worktree: { mode: 'new', baseRef: initial }
+  })
+  const forkResult = await worktree.materializePendingWorktree(fork.id)
+  check(
+    'fresh: fork keeps its explicit commit even offline',
+    forkResult.ok && git(['rev-parse', 'HEAD'], forkResult.worktreePath!) === initial,
+    forkResult.error
+  )
+  const attached = repo.createChat({
+    title: 'Explicit Branch',
+    workspacePath: local,
+    worktree: { mode: 'attach', branch: freshResult.branch }
+  })
+  const attachedResult = await worktree.materializePendingWorktree(attached.id)
+  check(
+    'fresh: selected existing branch is reused without reset',
+    attachedResult.ok && existsSync(path.join(attachedResult.worktreePath!, 'session-wip.txt')),
+    attachedResult.error
+  )
+  const collision = repo.createChat({
+    title: 'No Reuse',
+    workspacePath: local,
+    worktree: { mode: 'new', branch: freshResult.branch }
+  })
+  git(['remote', 'set-url', 'origin', remote], local)
+  const collisionResult = await worktree.materializePendingWorktree(collision.id)
+  check(
+    'fresh: new mode cannot reuse an existing dirty checkout',
+    collisionResult.blocked === true &&
+      existsSync(path.join(freshResult.worktreePath!, 'session-wip.txt'))
+  )
+  const retryResult = await worktree.materializePendingWorktree(offline.id)
+  check(
+    'fresh: retry succeeds when origin returns',
+    retryResult.ok && !repo.getChat(offline.id)!.worktreePending,
+    retryResult.error
+  )
+
+  // The server's default can differ from a stale origin/HEAD or local main.
+  git(['checkout', '-b', 'trunk'], upstream)
+  writeFileSync(path.join(upstream, 'trunk.txt'), 'new remote default\n')
+  git(['add', '.'], upstream)
+  git(['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-qm', 'trunk'], upstream)
+  git(['push', 'origin', 'trunk'], upstream)
+  git(['symbolic-ref', 'HEAD', 'refs/heads/trunk'], remote)
+  git(['config', 'remote.origin.fetch', '+refs/heads/main:refs/remotes/origin/main'], local)
+  const trunk = repo.createChat({
+    title: 'Remote Default',
+    workspacePath: local,
+    worktree: { mode: 'new' }
+  })
+  const trunkResult = await worktree.materializePendingWorktree(trunk.id)
+  check(
+    'fresh: follows remote default despite stale HEAD and narrow fetch config',
+    trunkResult.ok && existsSync(path.join(trunkResult.worktreePath!, 'trunk.txt')),
+    trunkResult.error
+  )
+  check(
+    'fresh: records actual PR base',
+    git(['config', `branch.${trunkResult.branch}.roxy-base`], local) === 'trunk'
+  )
+
+  for (const name of ['backend', 'frontend', 'shared']) {
+    const dir = path.join(project, name)
+    git(['remote', 'add', 'origin', remote], dir)
+  }
+  git(
+    ['remote', 'set-url', 'origin', path.join(sandbox, 'missing.git')],
+    path.join(project, 'shared')
+  )
+  const multiFresh = repo.createChat({
+    title: 'Fresh Composite',
+    workspacePath: project,
+    worktree: { mode: 'new' }
+  })
+  const multiFail = await worktree.materializePendingWorktree(multiFresh.id)
+  check(
+    'fresh: composite fetch failure blocks before any checkout',
+    multiFail.blocked === true &&
+      !repo.getChat(multiFresh.id)!.worktreePath &&
+      (await worktree.pruneWorktrees(project)).candidates.length === 0
+  )
+  git(['remote', 'set-url', 'origin', remote], path.join(project, 'shared'))
+  const multiResult = await worktree.materializePendingWorktree(multiFresh.id)
+  check(
+    'fresh: composite retries with every repo at remote default',
+    multiResult.ok &&
+      multiResult.repos?.length === 3 &&
+      multiResult.repos.every(
+        (link) =>
+          git(['rev-parse', 'HEAD'], link.worktreePath) === git(['rev-parse', 'HEAD'], upstream)
+      ),
+    multiResult.error
+  )
+  await worktree.removeWorktreeForChat(multiFresh.id, { force: true })
+
+  repo.setFreshWorkstream(false)
+  check('fresh: disabling persists', repo.getSettings().freshWorkstream === false)
+  git(['remote', 'set-url', 'origin', path.join(sandbox, 'missing.git')], local)
+  const fallback = repo.createChat({
+    title: 'Offline Default',
+    workspacePath: local,
+    worktree: { mode: 'new' }
+  })
+  check(
+    'fresh: off retains existing offline behavior',
+    (await worktree.materializePendingWorktree(fallback.id)).ok
+  )
 
   if (fails.length) {
     console.error(`\nLIVE FAILED - ${fails.length} failing: ${fails.join(', ')}`)

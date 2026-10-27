@@ -3,6 +3,33 @@ export const SOUND_MAX_COUNT = 20
 export const SOUND_MIN_SECONDS = 0.1
 export const SOUND_MAX_SECONDS = 5
 
+export const BUILTIN_NOTIFICATION_SOUNDS = [
+  'bell',
+  'bloom',
+  'bubble',
+  'celesta',
+  'chirp',
+  'crystal',
+  'droplet',
+  'glimmer',
+  'marimba',
+  'orbit',
+  'pluck',
+  'ripple',
+  'signal',
+  'soft-ping',
+  'sparkle',
+  'woodblock'
+] as const
+
+export function isBuiltinNotificationSound(
+  id: unknown
+): id is `builtin:${(typeof BUILTIN_NOTIFICATION_SOUNDS)[number]}` {
+  return (
+    typeof id === 'string' && BUILTIN_NOTIFICATION_SOUNDS.some((sound) => id === `builtin:${sound}`)
+  )
+}
+
 export interface NotificationSound {
   id: string
   name: string

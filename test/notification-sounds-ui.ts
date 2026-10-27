@@ -11,6 +11,7 @@ import {
 import { getSettings, setNotifyOnComplete } from '../src/main/db/repo'
 import { closeDb } from '../src/main/db/database'
 import { CHANNELS } from '../src/shared/ipc'
+import { BUILTIN_NOTIFICATION_SOUNDS } from '../src/shared/notification-sounds'
 
 const temp = mkdtempSync(path.join(os.tmpdir(), 'roxy-sound-ui-'))
 app.setPath('userData', temp)
@@ -38,12 +39,12 @@ async function button(label: string): Promise<void> {
 }
 
 async function run(): Promise<void> {
-  const base = 'http://127.0.0.1:3100'
+  const base = 'http://127.0.0.1:3101'
   const url = `${base}/notification-sounds.html`
   process.env.ELECTRON_RENDERER_URL = url
   server = await createServer({
     configFile: path.resolve('test/canvas/vite.config.mjs'),
-    server: { host: '127.0.0.1', port: 3100, strictPort: true }
+    server: { host: '127.0.0.1', port: 3101, strictPort: true }
   })
   await server.listen()
   registerNotificationSoundIpc()
@@ -78,16 +79,64 @@ async function run(): Promise<void> {
     await evaluate(`return document.querySelector('[role=switch]').getAttribute('aria-checked')`),
     'false'
   )
+  await evaluate(`document.querySelector('#notification-sound').click()`)
+  await until(`document.querySelectorAll('[role=menuitemradio]').length === 17`)
+  assert.equal(
+    await evaluate(`return document.querySelectorAll('[role=menu] [role=menuitem]').length`),
+    0,
+    'built-in sounds cannot be deleted'
+  )
+  await button('Bell')
+  await until(`document.querySelector('#notification-sound-value').textContent.trim() === 'Bell'`)
+  assert.equal(getSoundLibrary().selectedId, 'builtin:bell')
+  assert.equal(getSoundLibrary().sounds.length, 0, 'built-ins do not consume import slots')
+  await window.reload()
+  await until(`document.querySelector('#notification-sound-value')?.textContent.trim() === 'Bell'`)
+  assert.deepEqual(
+    await evaluate(`
+      const context = new AudioContext();
+      try {
+        const durations = [];
+        for (const name of ${JSON.stringify(BUILTIN_NOTIFICATION_SOUNDS)}) {
+          const source = await window.roxy.notifications.soundAudio('builtin:' + name);
+          const bytes = Uint8Array.from(atob(source.split(',')[1]), c => c.charCodeAt(0));
+          const buffer = await context.decodeAudioData(bytes.buffer);
+          if (buffer.duration < 0.1 || buffer.duration > 5 || buffer.numberOfChannels !== 1)
+            throw new Error('Invalid built-in: ' + name);
+          durations.push(buffer.duration);
+        }
+        return durations.length;
+      } finally { await context.close(); }
+    `),
+    16,
+    'all bundled assets decode in Chromium'
+  )
+  await evaluate(`window.__builtinPreview = null;
+    HTMLMediaElement.prototype.play = function() { window.__builtinPreview = this.src; return Promise.resolve(); };`)
+  await button('Test notification')
+  await until(`window.__builtinPreview?.startsWith('data:audio/wav;base64,')`)
+  assert.equal(toastCount, 1)
+  toastCount = 0
+  await window.reload()
+  await until(`document.querySelector('#notification-sound-value')?.textContent.trim() === 'Bell'`)
+  await evaluate(`document.querySelector('#notification-sound').click()`)
+  await until(`document.querySelector('[role=menu]')`)
+  await button('Default')
+  await until(
+    `document.querySelector('#notification-sound-value').textContent.trim() === 'Default'`
+  )
   await button('Import sound')
   await until(
     `document.querySelector('#notification-sound').getAttribute('aria-disabled') === 'false'`
   )
   await evaluate(`document.querySelector('#notification-sound').click()`)
-  await until(`document.querySelectorAll('[role=menuitemradio]').length === 2`)
+  await until(`document.querySelectorAll('[role=menuitemradio]').length === 18`)
   assert.equal(getSoundLibrary().selectedId, null)
   assert.equal(getSettings().notifyOnComplete, false)
   await until(`document.activeElement === document.querySelector('[role=menuitemradio]')`)
-  window.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Down' })
+  window.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'End' })
+  await until(`document.activeElement.getAttribute('aria-label') === 'Delete Demo sound'`)
+  window.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Up' })
   await until(`document.activeElement.textContent.trim() === 'Demo sound'`)
   window.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Enter' })
   window.webContents.sendInputEvent({ type: 'char', keyCode: '\r' })
@@ -162,6 +211,14 @@ async function run(): Promise<void> {
     return rect.left >= 0 && rect.right <= innerWidth && rect.bottom <= innerHeight;`),
     true,
     'menu fits the narrow viewport'
+  )
+  assert.equal(
+    await evaluate(`const menu = document.querySelector('[role=menu]');
+      const rect = menu.getBoundingClientRect();
+      const selected = document.activeElement.getBoundingClientRect();
+      return menu.scrollHeight > menu.clientHeight && selected.top >= rect.top && selected.bottom <= rect.bottom;`),
+    true,
+    'the long menu scrolls the selected sound into view on mobile'
   )
   await evaluate(
     `document.querySelector('[role=switch]').dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))`

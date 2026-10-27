@@ -6,8 +6,8 @@
  * LAZILY, on a session's first turn. Creating it when the session is created
  * would litter the disk with directories for every composer someone opened and
  * abandoned. And because it happens on the turn path, failure must be soft — a
- * missing git binary, a locked index or an offline fetch degrades to "run in the
- * project folder", never to a turn that won't start.
+ * missing git binary, a locked index or an offline fetch normally degrades to
+ * the project folder. Opt-in fresh mode instead preserves the intent for retry.
  */
 import {
   DEFAULT_BRANCH_PREFIX,
@@ -17,7 +17,6 @@ import {
 } from '../../shared/branch'
 import { slugToBranchSegment } from '../../shared/slugs'
 import { isMultiRepo, planRepoLinks, sharedBranch, type RepoLink } from '../../shared/repos'
-import { existsSync, readFileSync } from 'node:fs'
 import { promises as fsp } from 'node:fs'
 import path from 'node:path'
 import * as repo from '../db/repo'
@@ -29,49 +28,9 @@ import { emitSessionsUpdated } from './session-events'
 import type { WorktreeIntent } from '../../shared/types'
 
 /**
- * Optional per-project worktree config, read from `<project>/.roxy/worktree.json`
- * — the same convention as `.roxy/mcp.json` (see services/mcp.ts).
- *
- *   { "setup": "cp $ROXY_PROJECT_ROOT/.env . && pnpm install" }
- */
-export interface WorktreeConfig {
-  /** Shell command run in a NEW worktree, once, right after it's created. */
-  setup?: string
-}
-
-/**
- * Read `.roxy/worktree.json`. Missing or malformed yields `{}` — a broken
- * config must degrade to "no setup script", never break worktree creation.
- */
-export function loadWorktreeConfig(projectRoot: string): WorktreeConfig {
-  if (!projectRoot) return {}
-  const file = path.join(projectRoot, '.roxy', 'worktree.json')
-  if (!existsSync(file)) return {}
-  try {
-    const parsed = JSON.parse(readFileSync(file, 'utf8')) as WorktreeConfig
-    if (!parsed || typeof parsed !== 'object') return {}
-    return { setup: typeof parsed.setup === 'string' ? parsed.setup : undefined }
-  } catch {
-    return {}
-  }
-}
-
-/**
- * Run the project's setup script in a freshly created worktree.
- *
- * A new worktree has an EMPTY node_modules and no .env — git only tracks what's
- * committed. There is deliberately no auto-copy and no symlink here:
- *   - copying node_modules costs gigabytes per session, and native modules are
- *     built per platform/arch anyway;
- *   - symlinking it to the main checkout would let one branch's `npm install`
- *     mutate every other session's dependencies, which destroys the isolation
- *     this whole feature exists to provide.
- * So the user declares what their project needs, and we run it.
- *
- * It goes through `startBackground` — the same path the `bash` tool uses — so
- * the install shows up in bash_list, streams its output, is owned by the
- * session, and is killed when the session is deleted. Never awaited: a
- * `pnpm install` takes minutes and must not hold up the turn.
+ * Run only the command explicitly saved in Workstreams settings. Repository
+ * files never opt a user into executing shell commands during checkout.
+ * Uses the session's background-process path and never holds up the turn.
  */
 function runSetupScript(input: {
   chatId: string
@@ -79,9 +38,9 @@ function runSetupScript(input: {
   worktreePath: string
   devPort: number | null
 }): void {
-  const { setup } = loadWorktreeConfig(input.projectRoot)
-  if (!setup?.trim()) return
   try {
+    const setup = repo.getSettings().worktreeSetupCommand
+    if (!setup.trim()) return
     startBackground(setup, input.worktreePath, repo.rootSessionId(input.chatId), {
       ROXY_PROJECT_ROOT: input.projectRoot,
       ROXY_WORKTREE_PATH: input.worktreePath,
@@ -96,6 +55,8 @@ function runSetupScript(input: {
 export interface MaterializeResult {
   /** True when the session now has a worktree (created, attached, or already had one). */
   ok: boolean
+  /** True only when at least one checkout was created, not reused. */
+  created?: boolean
   worktreePath?: string
   branch?: string
   /**
@@ -103,8 +64,10 @@ export interface MaterializeResult {
    * session. Undefined and `[]` both mean "not composite"; see shared/repos.ts.
    */
   repos?: RepoLink[]
-  /** Set when we fell back to the project folder; safe to show the user. */
+  /** A creation failure or warning, safe to show the user. */
   error?: string
+  /** Fresh mode must never run in the project folder after a failed checkout. */
+  blocked?: boolean
 }
 
 /**
@@ -112,7 +75,8 @@ export interface MaterializeResult {
  *
  * Called on the turn path, so it returns quickly when there's nothing to do
  * (the overwhelmingly common case: no pending intent). The intent is cleared
- * on success or failure. A stopped turn preserves the intent if checkout has
+ * on success or a soft failure. Fresh mode keeps it on failure for retry.
+ * A stopped turn preserves the intent if checkout has
  * not begun, so the next turn can try again instead of running in place.
  */
 export async function materializePendingWorktree(
@@ -141,18 +105,31 @@ export async function materializePendingWorktree(
     return { ok: false }
   }
 
-  const result = await createForWorkspace(workspace, intent, chat.title, signal)
+  const requireFresh =
+    intent.mode === 'new' && !intent.baseRef?.trim() && repo.getSettings().freshWorkstream
+  const result = await createForWorkspace(workspace, intent, chat.title, signal, requireFresh)
   // Cancellation before checkout preserves the intent for the next turn.
   if (signal?.aborted && !result.worktreePath) return { ok: false }
-  // Clear the intent either way: fulfilled, or failed and falling back.
-  repo.setChatWorktreePending(chatId, null)
-  if (!result.ok || !result.worktreePath) return result
+  if (requireFresh && !result.ok) {
+    return {
+      ...result,
+      blocked: true,
+      error: `Could not start a fresh remote workstream. ${result.error ?? ''} Retry, or turn off auto-reset in Workstreams settings.`
+    }
+  }
+  if (!result.ok || !result.worktreePath) {
+    repo.setChatWorktreePending(chatId, null)
+    return result
+  }
 
   repo.setChatWorktree(chatId, {
     worktreePath: result.worktreePath,
     branch: result.branch ?? null,
     repos: result.repos ?? null
   })
+  // Persist the checkout before clearing intent, so a failed DB write cannot
+  // let fresh mode fall back to the shared project folder.
+  repo.setChatWorktreePending(chatId, null)
 
   // Give the session its own dev port before the setup script runs, so an
   // install that builds against a port sees the right one. Allocation failure
@@ -180,7 +157,7 @@ export async function materializePendingWorktree(
   })
 
   // Fire-and-forget: installs take minutes, and the turn starts now.
-  if (signal?.aborted) return result
+  if (signal?.aborted || !result.created) return result
   runSetupScript({
     chatId,
     projectRoot: workspace,
@@ -196,7 +173,8 @@ async function createForWorkspace(
   workspace: string,
   intent: WorktreeIntent,
   title: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  requireFresh = false
 ): Promise<MaterializeResult> {
   if (signal?.aborted) return { ok: false }
   if (!(await git.isGitAvailable(signal))) {
@@ -211,8 +189,21 @@ async function createForWorkspace(
   if (layout === 'none') {
     return { ok: false, error: 'This folder isn’t a git repository, so the session runs in place.' }
   }
+  // Preflight every remote before creating trees, so failed fetches are retryable.
+  const freshBases = new Map<string, { baseRef: string; baseBranch: string; requireNew: true }>()
+  if (requireFresh) {
+    for (const root of roots) {
+      const fresh = await git.freshWorktreeBase(root, signal)
+      if (!fresh.ok) return { ok: false, error: `${path.basename(root)}: ${fresh.error}` }
+      freshBases.set(normalizePath(root), {
+        baseRef: fresh.baseRef,
+        baseBranch: fresh.baseBranch,
+        requireNew: true
+      })
+    }
+  }
   if (layout === 'multi') {
-    return createComposite(workspace, roots, intent, title, signal)
+    return createComposite(workspace, roots, intent, title, signal, freshBases)
   }
 
   const root = (await git.repoRoot(workspace, signal)) ?? roots[0]
@@ -233,10 +224,18 @@ async function createForWorkspace(
       const baseRef = intent.baseRef?.trim()
         ? ((await git.resolveCommit(root, intent.baseRef.trim(), signal)) ?? undefined)
         : undefined
-      const r = await git.createWorktree({ repoRoot: root, branch, baseRef }, signal)
+      const r = await git.createWorktree(
+        { repoRoot: root, branch, baseRef, ...freshBases.get(normalizePath(root)) },
+        signal
+      )
       if (!r.ok || !r.worktree)
         return { ok: false, error: r.error ?? 'Could not create the worktree.' }
-      return { ok: true, worktreePath: r.worktree.path, branch: r.worktree.branch ?? branch }
+      return {
+        ok: true,
+        created: !r.attached,
+        worktreePath: r.worktree.path,
+        branch: r.worktree.branch ?? branch
+      }
     }
 
     // fromBranch / attach both target an existing branch; attachWorktree
@@ -247,7 +246,12 @@ async function createForWorkspace(
     const r = await git.attachWorktree({ repoRoot: root, branch }, signal)
     if (!r.ok || !r.worktree)
       return { ok: false, error: r.error ?? 'Could not check out the branch.' }
-    return { ok: true, worktreePath: r.worktree.path, branch: r.worktree.branch ?? branch }
+    return {
+      ok: true,
+      created: !r.attached,
+      worktreePath: r.worktree.path,
+      branch: r.worktree.branch ?? branch
+    }
   } catch (e) {
     // git.ts doesn't throw, but a caller bug here must still not break a turn.
     return { ok: false, error: e instanceof Error ? e.message : String(e) }
@@ -278,7 +282,8 @@ async function createComposite(
   roots: string[],
   intent: WorktreeIntent,
   title: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  freshBases = new Map<string, { baseRef: string; baseBranch: string; requireNew: true }>()
 ): Promise<MaterializeResult> {
   try {
     // `attach`/`fromBranch` name one branch; `new` derives one free everywhere.
@@ -295,6 +300,7 @@ async function createComposite(
     const planned = planRepoLinks(compositeRoot, roots, branch, path)
 
     const links: RepoLink[] = []
+    let created = false
     const skipped: string[] = []
     // Serial, not parallel: N concurrent checkouts contend on the same disk and
     // each one already serializes behind its own repo lock, so the wall-clock
@@ -321,6 +327,7 @@ async function createComposite(
                     undefined)
                   : undefined,
                 path: link.worktreePath,
+                ...freshBases.get(normalizePath(link.root)),
                 exactPath: true
               },
               signal
@@ -336,6 +343,7 @@ async function createComposite(
             )
 
       if (r.ok && r.worktree) {
+        created ||= !r.attached
         links.push({ ...link, branch: r.worktree.branch ?? branch })
       } else {
         // Recorded, not thrown: the other repos still get their checkout.
@@ -356,6 +364,7 @@ async function createComposite(
     return {
       ok: true,
       worktreePath: compositeRoot,
+      created,
       branch: sharedBranch(links) ?? branch,
       repos: links,
       error: skipped.length ? `Left out of this workstream: ${skipped.join(', ')}.` : undefined

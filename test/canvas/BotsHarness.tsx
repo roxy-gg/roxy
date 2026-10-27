@@ -5,16 +5,17 @@ import type { Chat, Message, MessagePart, QueueItem } from '../../src/shared/typ
 import { useRoxyStore } from '../../src/renderer/src/lib/store'
 import Chat from '../../src/renderer/src/routes/Chat'
 
+const workspaceFixture = new URLSearchParams(location.search).has('workspace')
 const baseChat: Chat = {
   id: 'project-chat',
-  title: 'Project session',
+  title: workspaceFixture ? 'Git Changes and File Explorer' : 'Project session',
   kind: 'main',
   providerId: null,
   model: null,
   agentId: null,
   reasoningEffort: null,
   contextLimit: null,
-  workspacePath: null,
+  workspacePath: workspaceFixture ? '/projects/roxy' : null,
   worktreePath: null,
   repos: null,
   worktreePending: null,
@@ -134,13 +135,24 @@ Object.assign(window.roxy, {
       return () => changed.delete(callback)
     }
   },
-  automation: { wake: async () => {} },
+  automation: { wake: async () => {}, snapshot: async () => [] },
   projects: { listOrder: async () => [] },
   messages: { list: async (id: string) => messages.filter((message) => message.chatId === id) },
   queue: {
     list: async (chatId: string) => queue.filter((item) => item.chatId === chatId),
-    add: async (chatId: string, content: string, images?: QueueItem['images']) => {
+    add: async (
+      chatId: string,
+      content: string,
+      images?: QueueItem['images'],
+      options?: {
+        asBotId?: string
+        recipientId?: string
+        sourceChatId?: string
+        fromUser?: boolean
+      }
+    ) => {
       const item: QueueItem = {
+        ...options,
         id: crypto.randomUUID(),
         chatId,
         content,
@@ -365,6 +377,231 @@ Object.assign(window.roxy, {
   })
 }
 
+if (workspaceFixture) {
+  const files = new Map<string, { content: string; revision: string }>()
+  const changes = [
+    {
+      path: 'src/renderer/src/components/ChatView.tsx',
+      status: 'modified',
+      additions: 36,
+      deletions: 12
+    },
+    {
+      path: 'src/renderer/src/components/WorkspaceInspector.tsx',
+      status: 'added',
+      additions: 72,
+      deletions: 0
+    },
+    {
+      path: 'src/main/services/workspace-inspector.ts',
+      status: 'added',
+      additions: 18,
+      deletions: 0
+    },
+    { path: 'src/renderer/src/assets/main.css', status: 'modified', additions: 0, deletions: 21 }
+  ] as const
+  const before =
+    'export function ChatView() {\n  return (\n    <main className="conversation">\n      <Transcript />\n      <Composer />\n    </main>\n  )\n}\n'
+  const after =
+    'export function ChatView() {\n  const [inspectorOpen, setInspectorOpen] = useState(false)\n\n  return (\n    <main className="conversation">\n      <WorkspaceSummary onClick={() => setInspectorOpen(!inspectorOpen)} />\n      <Transcript />\n      <Composer />\n      {inspectorOpen && <WorkspaceInspector />}\n    </main>\n  )\n}\n'
+  Object.assign(window.roxy, {
+    workspace: {
+      inspect: async () => ({
+        roots: [
+          {
+            id: 'roxy',
+            name: 'roxy',
+            branch: 'roxy/git-changes-and-file-explorer',
+            isRepo: true,
+            unavailable: false,
+            partial: false,
+            changes
+          }
+        ]
+      }),
+      list: async (_sessionId: string, _rootId: string, directory: string) => {
+        const paths = [
+          'src/renderer/src/components/ChatView.tsx',
+          'src/renderer/src/components/WorkspaceInspector.tsx',
+          'src/renderer/src/assets/main.css',
+          'src/main/services/workspace-inspector.ts',
+          '.github/workflows/build.yml',
+          'docs/README.md',
+          'script/dev.mjs',
+          'test/workspace-inspector.ts',
+          'AGENTS.md',
+          'README.md',
+          '.env',
+          '.env.local',
+          '.env.staging.local',
+          '.gitignore',
+          '.prettierrc',
+          'app.js',
+          'app.ts',
+          'app.tsx',
+          'app.jsx',
+          'main.rs',
+          'UPPER.TS',
+          'module.mts',
+          'module.cts',
+          'types.d.ts',
+          'config.jsonc',
+          'notes.markdown',
+          'unknown.extension',
+          'unknown',
+          'photo.png',
+          'photo.jpeg',
+          'clip.mp4',
+          'sound.wav',
+          'document.pdf',
+          'broken.png',
+          'package.json',
+          'tsconfig.json'
+        ]
+        const children = new Map<string, { name: string; path: string; kind: string }>()
+        for (const path of paths) {
+          if (directory && !path.startsWith(directory + '/')) continue
+          const tail = directory ? path.slice(directory.length + 1) : path
+          const name = tail.split('/')[0]
+          children.set(name, {
+            name,
+            path: directory ? directory + '/' + name : name,
+            kind: tail.includes('/') ? 'directory' : 'file'
+          })
+        }
+        return {
+          ok: true,
+          partial: false,
+          entries: [...children.values()].sort(
+            (a, b) =>
+              Number(b.kind === 'directory') - Number(a.kind === 'directory') ||
+              a.name.localeCompare(b.name)
+          )
+        }
+      },
+      read: async (_sessionId: string, _rootId: string, file: string, comparison: boolean) => {
+        if (!files.has(file))
+          files.set(file, {
+            content: file.endsWith('.json')
+              ? '{\n  "name": "roxy",\n  "version": "1.0.21"\n}\n'
+              : after,
+            revision: 'initial'
+          })
+        const document = files.get(file)!
+        return {
+          ok: true,
+          before: comparison ? before : '',
+          after: document.content,
+          revision: document.revision
+        }
+      },
+      preview: async (_sessionId: string, _rootId: string, file: string) => {
+        const { workspaceMedia } = await import('../../src/shared/workspace-inspector')
+        const media = workspaceMedia(file)!
+        let blob: Blob
+        if (file === 'broken.png') blob = new Blob(['invalid'], { type: media.mime })
+        else if (media.kind === 'image') {
+          const canvas = document.createElement('canvas')
+          canvas.width = 2400
+          canvas.height = 1800
+          const context = canvas.getContext('2d')!
+          context.fillStyle = '#23536a'
+          context.fillRect(0, 0, canvas.width, canvas.height)
+          context.fillStyle = '#e8c890'
+          context.fillRect(300, 300, 1800, 1200)
+          blob = await new Promise<Blob>((resolve) =>
+            canvas.toBlob((value) => resolve(value!), media.mime)
+          )
+        } else if (media.kind === 'audio') {
+          const bytes = new ArrayBuffer(44 + 16000)
+          const view = new DataView(bytes)
+          const text = (at: number, value: string): void => {
+            for (let i = 0; i < value.length; i++) view.setUint8(at + i, value.charCodeAt(i))
+          }
+          text(0, 'RIFF')
+          view.setUint32(4, bytes.byteLength - 8, true)
+          text(8, 'WAVEfmt ')
+          view.setUint32(16, 16, true)
+          view.setUint16(20, 1, true)
+          view.setUint16(22, 1, true)
+          view.setUint32(24, 8000, true)
+          view.setUint32(28, 16000, true)
+          view.setUint16(32, 2, true)
+          view.setUint16(34, 16, true)
+          text(36, 'data')
+          view.setUint32(40, 16000, true)
+          blob = new Blob([bytes], { type: media.mime })
+        } else if (media.kind === 'video') {
+          blob = await fetch(new URL('../fixtures/background.mp4', import.meta.url)).then(
+            (response) => response.blob()
+          )
+        } else blob = new Blob(['%PDF-1.4\n%%EOF'], { type: media.mime })
+        return { ok: true, ...media, url: URL.createObjectURL(blob), size: blob.size }
+      },
+      write: async (
+        _sessionId: string,
+        _rootId: string,
+        file: string,
+        content: string,
+        expected: string
+      ) => {
+        if (files.get(file)?.revision !== expected) return { ok: false, reason: 'changed' }
+        const revision = crypto.randomUUID()
+        files.set(file, { content, revision })
+        return { ok: true, revision }
+      },
+      confirmDiscard: async () => true
+    },
+    git: {
+      available: async () => true,
+      status: async () => ({
+        isRepo: true,
+        root: '/projects/roxy',
+        branch: 'roxy/git-changes-and-file-explorer',
+        dirty: true,
+        changed: 4,
+        ahead: 0,
+        behind: 0,
+        hasUpstream: false,
+        defaultBranch: 'main'
+      }),
+      projectRepos: async () => ({ layout: 'single', roots: ['/projects/roxy'] })
+    },
+    forge: { status: async () => null },
+    services: { list: async () => [] },
+    context: { instructions: async () => [] }
+  })
+  messages = [
+    {
+      id: 'workspace-user',
+      chatId: baseChat.id,
+      role: 'user',
+      createdAt: 1,
+      content:
+        'Add a compact Git summary and a file explorer, but keep the conversation front and center.',
+      parts: [
+        {
+          type: 'text',
+          text: 'Add a compact Git summary and a file explorer, but keep the conversation front and center.'
+        }
+      ]
+    },
+    {
+      id: 'workspace-assistant',
+      chatId: baseChat.id,
+      role: 'assistant',
+      createdAt: 2,
+      content: 'The workspace inspector stays out of your way until you need it.',
+      parts: [
+        {
+          type: 'text',
+          text: 'The workspace inspector stays out of your way until you need it.\n\nClick the **+126 -33** in the titlebar to review changes, or switch to **Files** to explore the project. Each changed file opens a read-only diff.\n\nThe conversation remains the main workspace. Nothing is staged, edited, or committed from the inspector.'
+        }
+      ]
+    }
+  ]
+}
+
 export function BotsHarness(): JSX.Element {
   const [ready, setReady] = useState(false)
   useEffect(() => {
@@ -392,14 +629,25 @@ export function BotsHarness(): JSX.Element {
       } as ReturnType<typeof useRoxyStore.getState>['settings'],
       activeChatId: baseChat.id,
       messagesChatId: baseChat.id,
-      gitAvailable: false
+      gitAvailable: workspaceFixture,
+      messages: workspaceFixture ? messages : [],
+      usageStats: workspaceFixture
+        ? ({ providers: [], updatedAt: Date.now() } as unknown as ReturnType<
+            typeof useRoxyStore.getState
+          >['usageStats'])
+        : null
     })
+    if (workspaceFixture) {
+      useRoxyStore.setState((state) => ({
+        providers: state.providers.map((provider) => ({ ...provider, auth: 'api-key' }))
+      }))
+    }
     setReady(true)
   }, [])
   if (!ready) return <></>
   return (
     <HashRouter>
-      <div className="bar">
+      <div className="bar" style={workspaceFixture ? { display: 'none' } : undefined}>
         <button
           id="busy"
           onClick={() => useRoxyStore.setState({ sendingChats: { 'project-chat': true } })}

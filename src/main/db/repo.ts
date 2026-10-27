@@ -126,6 +126,8 @@ export function getSettings(): AppSettings {
     // someone turns it OFF ('0'), which keeps existing installs opted in
     // without a migration.
     autoWorkstream: map.get('auto_workstream') !== '0',
+    freshWorkstream: map.get('fresh_workstream') === '1',
+    worktreeSetupCommand: map.get('worktree_setup_command') ?? '',
     // `?? DEFAULT` and not `|| DEFAULT`: an EMPTY string is a deliberate
     // "no prefix", and must survive a round trip through settings.
     branchPrefix: map.get('branch_prefix') ?? DEFAULT_BRANCH_PREFIX,
@@ -239,6 +241,12 @@ export function setBranchPrefix(prefix: string): AppSettings {
   return getSettings()
 }
 
+export function setWorktreeSetupCommand(command: string): AppSettings {
+  if (typeof command !== 'string') throw new Error('Expected a worktree setup command string.')
+  setSetting('worktree_setup_command', command.trim() || null)
+  return getSettings()
+}
+
 export function setLanguage(language: Language): AppSettings {
   const lang = normalizeLanguage(language)
   // English is the default, so it clears the row instead of writing one - the
@@ -261,6 +269,11 @@ export function setMotion(value: MotionPreference): AppSettings {
 export function setAutoWorkstream(enabled: boolean): AppSettings {
   // Store only the OFF state; see getSettings for why.
   setSetting('auto_workstream', enabled ? null : '0')
+  return getSettings()
+}
+
+export function setFreshWorkstream(enabled: boolean): AppSettings {
+  setSetting('fresh_workstream', enabled ? '1' : null)
   return getSettings()
 }
 

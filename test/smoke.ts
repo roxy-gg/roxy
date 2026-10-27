@@ -52,8 +52,7 @@ import {
   pruneWorktrees,
   removeWorktreeForChat,
   renameWorkstreamBranch,
-  syncBranchToTitle,
-  loadWorktreeConfig
+  syncBranchToTitle
 } from '../src/main/services/worktree'
 import { allocateDevPort, ensureDevPort } from '../src/main/services/ports'
 import { emitSessionsUpdated } from '../src/main/services/session-events'
@@ -2111,9 +2110,30 @@ async function main(): Promise<void> {
           process.platform === 'win32'
             ? `Set-Content -Path ${marker} -Value "$env:ROXY_PROJECT_ROOT|$env:ROXY_WORKTREE_PATH|$env:ROXY_PORT"`
             : `printf '%s' "$ROXY_PROJECT_ROOT|$ROXY_WORKTREE_PATH|$ROXY_PORT" > ${marker}`
+        check('worktree setup defaults to empty', repo.getSettings().worktreeSetupCommand === '')
+        // A checked-in command must not opt the user into execution.
         await fs.writeFile(
           path.join(gitRepo, '.roxy', 'worktree.json'),
           JSON.stringify({ setup: setupCmd })
+        )
+        const withoutSetup = repo.createChat({
+          title: 'no setup script',
+          kind: 'main',
+          workspacePath: gitRepo,
+          worktree: { mode: 'new' }
+        })
+        const noSetup = await materializePendingWorktree(withoutSetup.id)
+        check('an empty setup command still creates a worktree', noSetup.ok, noSetup.error ?? '')
+        check(
+          'repository config cannot launch a setup command',
+          !listServices(withoutSetup.id).length
+        )
+        await removeWorktreeForChat(withoutSetup.id)
+        repo.removeChat(withoutSetup.id)
+        repo.setWorktreeSetupCommand(`  ${setupCmd}  `)
+        check(
+          'worktree setup command persists',
+          repo.getSettings().worktreeSetupCommand === setupCmd
         )
         const withSetup = repo.createChat({
           title: 'setup script',
@@ -2125,7 +2145,7 @@ async function main(): Promise<void> {
         check('worktree with a setup script materializes', sm.ok, sm.error ?? '')
         // Fire-and-forget by design (installs take minutes) — poll for the marker.
         let setupOut = ''
-        for (let i = 0; i < 60 && !setupOut; i++) {
+        for (let i = 0; i < 200 && !setupOut; i++) {
           await new Promise((r) => setTimeout(r, 100))
           try {
             setupOut = await fs.readFile(path.join(sm.worktreePath!, marker), 'utf8')
@@ -2133,7 +2153,13 @@ async function main(): Promise<void> {
             /* not yet */
           }
         }
-        check('the setup script ran INSIDE the new worktree', setupOut !== '', setupOut)
+        check(
+          'the setup script ran INSIDE the new worktree',
+          setupOut !== '',
+          listServices(withSetup.id)
+            .map((service) => serviceOutput(service.id, withSetup.id))
+            .join('\n')
+        )
         const [gotRoot, gotWt, gotPort] = setupOut.trim().split('|')
         check('ROXY_PROJECT_ROOT points at the project', gotRoot === gitRepo, gotRoot)
         check('ROXY_WORKTREE_PATH points at the worktree', gotWt === sm.worktreePath, gotWt)
@@ -2146,6 +2172,21 @@ async function main(): Promise<void> {
           'the setup script did NOT run in the main checkout',
           !existsSync(path.join(gitRepo, marker))
         )
+        const setupProcesses = listServices(withSetup.id).length
+        await materializePendingWorktree(withSetup.id)
+        check('setup runs only once', listServices(withSetup.id).length === setupProcesses)
+        const attached = repo.createChat({
+          title: 'attach without setup',
+          kind: 'main',
+          workspacePath: gitRepo,
+          worktree: { mode: 'attach', branch: sm.branch }
+        })
+        const reused = await materializePendingWorktree(attached.id)
+        check('attaching reuses the worktree', reused.ok && reused.worktreePath === sm.worktreePath)
+        check('attaching never runs setup', !listServices(attached.id).length)
+        repo.removeChat(attached.id)
+        repo.setWorktreeSetupCommand(' \n ')
+        check('clearing disables setup', repo.getSettings().worktreeSetupCommand === '')
         await fs.rm(path.join(gitRepo, '.roxy'), { recursive: true, force: true })
         await removeWorktreeForChat(withSetup.id, { force: true })
         repo.removeChat(withSetup.id)
@@ -2683,26 +2724,6 @@ async function main(): Promise<void> {
     repo.removeChat(pA.id)
     repo.removeChat(pB.id)
     repo.removeChat(noPort.id)
-  }
-
-  // ---- worktree setup config ----
-  {
-    check('no .roxy/worktree.json -> empty config', loadWorktreeConfig(ws).setup === undefined)
-
-    const cfgDir = path.join(tmp, 'cfgproj')
-    await fs.mkdir(path.join(cfgDir, '.roxy'), { recursive: true })
-    await fs.writeFile(
-      path.join(cfgDir, '.roxy', 'worktree.json'),
-      JSON.stringify({ setup: 'echo hello' })
-    )
-    check('reads the setup command', loadWorktreeConfig(cfgDir).setup === 'echo hello')
-
-    await fs.writeFile(path.join(cfgDir, '.roxy', 'worktree.json'), '{ not json')
-    check('malformed config degrades to empty', loadWorktreeConfig(cfgDir).setup === undefined)
-
-    await fs.writeFile(path.join(cfgDir, '.roxy', 'worktree.json'), JSON.stringify({ setup: 42 }))
-    check('a non-string setup is ignored', loadWorktreeConfig(cfgDir).setup === undefined)
-    check('an empty project root is safe', loadWorktreeConfig('').setup === undefined)
   }
 
   // ---- change_session_metadata (the agent organizing its own session) ----

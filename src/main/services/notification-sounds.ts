@@ -10,6 +10,7 @@ import {
   SOUND_MAX_COUNT,
   SOUND_MIN_SECONDS,
   SOUND_MAX_SECONDS,
+  isBuiltinNotificationSound,
   type NotificationSound,
   type NotificationSoundLibrary,
   type NotificationSoundResult
@@ -117,7 +118,11 @@ export async function importSound(
 export function selectSound(id: unknown): Promise<NotificationSoundResult> {
   return serialize(async () => {
     const state = getSoundLibrary()
-    if (id !== null && (!validId(id) || !state.sounds.some((sound) => sound.id === id)))
+    if (
+      id !== null &&
+      !isBuiltinNotificationSound(id) &&
+      (!validId(id) || !state.sounds.some((sound) => sound.id === id))
+    )
       return { ok: false, error: 'readFailed' }
     try {
       return save({ ...state, selectedId: id })
@@ -150,6 +155,16 @@ export async function soundAudio(id?: unknown): Promise<string | null> {
   const revision = generation
   const state = getSoundLibrary()
   const requested = id === undefined ? state.selectedId : id
+  if (isBuiltinNotificationSound(requested)) {
+    try {
+      const bytes = await readBounded(
+        path.join(__dirname, '../../resources/notification-sounds', `${requested.slice(8)}.wav`)
+      )
+      return revision === generation ? `data:audio/wav;base64,${bytes.toString('base64')}` : null
+    } catch {
+      return null
+    }
+  }
   if (!validId(requested)) return null
   const sound = state.sounds.find((sound) => sound.id === requested)
   if (!sound) return null
@@ -238,7 +253,11 @@ export function getSoundLibrary(): NotificationSoundLibrary {
       : []
     return {
       sounds,
-      selectedId: sounds.some((sound) => sound.id === data.selectedId) ? data.selectedId : null
+      selectedId:
+        isBuiltinNotificationSound(data.selectedId) ||
+        sounds.some((sound) => sound.id === data.selectedId)
+          ? data.selectedId
+          : null
     }
   } catch {
     return { sounds: [], selectedId: null }

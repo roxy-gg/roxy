@@ -2,6 +2,26 @@
 @import 'tailwindcss';
 @source '../';
 
+/* Only borrow conversation space when there is room to keep chat comfortable. */
+.workspace-resize-handle {
+  -webkit-app-region: no-drag;
+}
+@container chat (min-width: 960px) {
+  .workspace-inspector {
+    position: relative;
+    box-shadow: none;
+  }
+  [data-platform='win32'] [data-inspector-open] .chat-background-host .reserve-controls-right,
+  [data-platform='linux'] [data-inspector-open] .chat-background-host .reserve-controls-right {
+    padding-right: 16px;
+  }
+}
+@container chat (max-width: 959px) {
+  [data-file-open] .workspace-inspector {
+    display: none;
+  }
+}
+
 @theme {
   /* Typography — Cursor-style geometric sans + mono */
   --font-sans: 'Geist Variable', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;

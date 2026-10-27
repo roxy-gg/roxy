@@ -71,11 +71,11 @@ const delivery = {
         }
       }
     }))
-    const selector = 'button[title="Send"], button[title="Add to queue"]'
+    const selector = 'button[aria-label="Send"], button[aria-label="Add to queue"]'
     await frame()
     await waitFor(() => document.querySelector<HTMLButtonElement>(selector)?.disabled === false)
     const button = document.querySelector<HTMLButtonElement>(selector)!
-    if (button.title === 'Send') {
+    if (button.getAttribute('aria-label') === 'Send') {
       expectedPrompt = text
       const inspect = (): void => {
         if (expectedPrompt !== text) return

@@ -188,9 +188,7 @@ export class TranscriptWindow {
                     ? 30
                     : part.type === 'image'
                       ? 292
-                      : part.image
-                        ? 442
-                        : 40
+                      : 40
               )
           })
         }

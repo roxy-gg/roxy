@@ -1,3 +1,4 @@
+import type { WorkspaceInspectorApi } from './workspace-inspector'
 import type { CheatPreferences, CheatResult, CheatSource, CheatState } from './cheat'
 import type {
   EngineeringPreferences,
@@ -609,6 +610,7 @@ export interface BrowserState {
   canGoBack: boolean
   canGoForward: boolean
   loading: boolean
+  devToolsOpen: boolean
 }
 
 /** One open tab in the Roxy browser, for the toolbar's tab strip. */
@@ -877,6 +879,8 @@ export interface RoxyApi {
     setReasoningEffort(level: ReasoningEffort): Promise<AppSettings>
     setContextLimit(limit: number | null): Promise<AppSettings>
     setAutoWorkstream(enabled: boolean): Promise<AppSettings>
+    setFreshWorkstream(enabled: boolean): Promise<AppSettings>
+    setWorktreeSetupCommand(command: string): Promise<AppSettings>
     setBranchPrefix(prefix: string): Promise<AppSettings>
     /** Notify when a turn finishes: chime + OS toast, or nothing. */
     setNotifyOnComplete(enabled: boolean): Promise<AppSettings>
@@ -1004,6 +1008,8 @@ export interface RoxyApi {
     deleteCustom(id: string): Promise<BackgroundResult>
     renameCustom(id: string, title: string): Promise<BackgroundResult>
     thumbnail(id: string, sha256: string): Promise<WallpaperResult<string>>
+    preview(id: string): Promise<WallpaperResult<string | null>>
+    previewCustom(id: string): Promise<WallpaperResult<string | null>>
     search(input: WallpaperQuery): Promise<WallpaperResult<WallpaperPage>>
     applyCatalog(id: string): Promise<WallpaperResult<BackgroundResult | null>>
     submit(input: WallpaperSubmitRequest): Promise<WallpaperResult<{ id: string }>>
@@ -1133,6 +1139,7 @@ export interface RoxyApi {
     /** Import a config bundle chosen via an open dialog (overwrites by name/id). */
     import(): Promise<ConfigImportResult>
   }
+  workspace: WorkspaceInspectorApi
   tools: {
     run(sessionId: string, name: string, input: Record<string, unknown>): Promise<ToolResult>
     /**
@@ -1226,6 +1233,10 @@ export interface RoxyApi {
     forward(): Promise<void>
     reload(): Promise<void>
     stop(): Promise<void>
+    /** Toggle Chromium DevTools for the active page, not the browser toolbar. */
+    toggleDevTools(): Promise<void>
+    /** Open the active page's DevTools in element-picker mode. */
+    inspectElement(): Promise<void>
     /** Open a new tab (optionally at a URL) and make it active. */
     newTab(url?: string): Promise<void>
     closeTab(id: string): Promise<void>
