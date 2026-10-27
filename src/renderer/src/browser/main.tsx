@@ -12,6 +12,7 @@ import { BrowserChrome } from './BrowserChrome'
 import { AppContextMenu } from '../components/AppContextMenu'
 import { primeTheme, startTheme } from '../lib/theme'
 import { startMotion } from '../lib/motion'
+import { startAutoHideScrollbars } from '../lib/scrollbars'
 
 // Reserve space for the native window-control overlay (same as the main window).
 document.documentElement.dataset.platform = window.electron?.process?.platform ?? 'win32'
@@ -22,6 +23,8 @@ document.documentElement.dataset.platform = window.electron?.process?.platform ?
 primeTheme()
 startTheme()
 startMotion()
+const stopScrollbars = startAutoHideScrollbars()
+import.meta.hot?.dispose(stopScrollbars)
 
 // Best-effort: paint in English if the settings read fails rather than blocking
 // the toolbar on it.

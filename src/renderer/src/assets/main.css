@@ -657,22 +657,37 @@ body {
  * appends two `.os-scrollbar` divs INSIDE the scroller -- which lands them in
  * the flex flow of the sidebar and the queue, where they pick up the parent's
  * `gap` and add phantom spacing. The layout bugs that caused are not worth an
- * auto-hiding handle.
+ * auto-hiding handle. `lib/scrollbars.ts` fades only the native paint instead.
  *
  * The handle is drawn with `background-clip: content-box` behind a transparent
  * border, which is what makes a 10px-wide track render a 6px capsule with
  * breathing room on either side -- the same trick Cursor and VS Code use. */
+@property --scrollbar-visibility {
+  syntax: '<number>';
+  inherits: true;
+  initial-value: 1;
+}
+:root[data-auto-scrollbars] * {
+  /* Reset on each element so revealing a panel never reveals nested scrollers. */
+  --scrollbar-visibility: 0;
+}
 ::-webkit-scrollbar {
   width: 10px;
   height: 10px;
 }
 ::-webkit-scrollbar-thumb {
-  background: var(--theme-scrollbar-thumb, var(--color-border-strong));
+  background: color-mix(
+    in srgb,
+    var(--theme-scrollbar-thumb, var(--color-border-strong))
+      calc(var(--scrollbar-visibility) * 100%),
+    transparent
+  );
   border-radius: 9999px;
   border: 2px solid transparent;
   background-clip: content-box;
 }
-::-webkit-scrollbar-thumb:hover {
+::-webkit-scrollbar-thumb:hover,
+::-webkit-scrollbar-thumb:active {
   /* Was a hardcoded #3d3d43, which stayed dark-grey under a light theme.
      `color-mix` keeps it relative to the palette, so it tracks any theme. */
   background: var(
@@ -686,6 +701,17 @@ body {
 }
 ::-webkit-scrollbar-corner {
   background: transparent;
+}
+@media (forced-colors: active) {
+  :root[data-auto-scrollbars] * {
+    --scrollbar-visibility: 1 !important;
+  }
+  ::-webkit-scrollbar-thumb,
+  ::-webkit-scrollbar-thumb:hover,
+  ::-webkit-scrollbar-thumb:active {
+    background: CanvasText;
+    background-clip: content-box;
+  }
 }
 /* Electron custom title bar: make a region draggable, keep controls clickable. */
 .titlebar {

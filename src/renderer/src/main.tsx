@@ -13,6 +13,7 @@ import { installSquircle } from './lib/squircle'
 import { primeTheme, startTheme } from './lib/theme'
 import { startMotion } from './lib/motion'
 import { startBackground } from './lib/background'
+import { startAutoHideScrollbars } from './lib/scrollbars'
 
 // Tag the platform so CSS can reserve room for the native window controls
 // (traffic lights on macOS, control overlay on Windows/Linux).
@@ -25,6 +26,8 @@ primeTheme()
 startTheme()
 startMotion()
 startBackground()
+const stopScrollbars = startAutoHideScrollbars()
+import.meta.hot?.dispose(stopScrollbars)
 
 // Upgrade every `.sq*` corner from a quarter-circle to a superellipse. Async and
 // purely additive -- the first frame paints with the plain `rounded-*` fallback.
