@@ -10,6 +10,7 @@ import { registerEngineeringIpc, resetEngineeringTools } from '../services/engin
 import { closeEngineeringSession } from '../services/engineering-runtime'
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import { registerVoiceIpc, resetVoice } from '../services/voice'
+import { registerNarreteIpc } from '../services/narrete'
 import { CHANNELS } from '../../shared/ipc'
 import { CatalogClient } from '../services/catalog'
 import { WallpaperClient, WallpaperFailure, validWallpaperId } from '../services/wallpapers'
@@ -265,6 +266,7 @@ export function registerIpc(): void {
   })
   app.once('before-quit', stopWallpaperUsage)
   registerVoiceIpc()
+  registerNarreteIpc()
   registerNotificationSoundIpc()
   registerEngineeringIpc()
   registerCheatIpc()

@@ -15,6 +15,7 @@ asarUnpack:
   - node_modules/@img/**
   - node_modules/@handy-computer/**
   - node_modules/sherpa-onnx-*/**
+  - node_modules/uiohook-napi/**
 # Fetch the latest CLIProxyAPI release for this OS/architecture, verify its
 # published checksum, and place the native executable in app resources before
 # code signing. Packaged apps never download the sidecar at runtime.

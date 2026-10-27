@@ -76,6 +76,20 @@ assert.equal(
   'draft \u4f60\u597d'
 )
 assert.equal(mergeVoiceDraft('short', { start: 99, text: '' }, 'voice'), null)
+const existingNote = 'x'.repeat(795)
+for (const start of [0, existingNote.length]) {
+  const first = mergeVoiceDraft(existingNote, { start, text: '' }, 'Make this button', 800)!
+  assert.equal(first.value.length, 800)
+  assert.equal(first.value.replace(/[^x]/g, '').length, 795, 'Length limit preserves existing note')
+  const final = mergeVoiceDraft(
+    first.value,
+    { start, text: first.text },
+    'Make this button red.',
+    800
+  )!
+  assert.equal(final.value.length, 800)
+  assert.equal(final.value.replace(/[^x]/g, '').length, 795)
+}
 console.log(
   'VOICE OK: default-off normalization, streaming catalog, revision snapshots, range conflicts and Unicode'
 )

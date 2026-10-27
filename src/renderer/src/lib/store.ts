@@ -257,6 +257,7 @@ interface RoxyStore {
   setTelemetryEnabled: (enabled: boolean) => Promise<void>
   setBranchPrefix: (prefix: string) => Promise<void>
   setNotifyOnComplete: (enabled: boolean) => Promise<void>
+  setNarreteEnabled: (enabled: boolean) => Promise<void>
   setLanguage: (language: Language) => Promise<void>
   setMotion: (preference: MotionPreference) => Promise<void>
   selectChat: (id: string) => Promise<void>
@@ -2072,6 +2073,9 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
     }
   },
 
+  setNarreteEnabled: async (enabled) => {
+    set({ settings: await api.settings.setNarreteEnabled(enabled) })
+  },
   setNotifyOnComplete: async (enabled) => {
     set({ settings: await api.settings.setNotifyOnComplete(enabled) })
   },

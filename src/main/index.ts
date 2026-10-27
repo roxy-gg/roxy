@@ -47,6 +47,7 @@ import {
 import { resolveThemeById } from './services/themes'
 import * as repo from './db/repo'
 import { setVoiceWindow, shutdownVoice } from './services/voice'
+import { isNarreteCapturing, setNarreteWindow } from './services/narrete'
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -113,11 +114,13 @@ function createWindow(): BrowserWindow {
   // happens to be first in getAllWindows() (the agent browser opens its own).
   setToastWindow(mainWindow)
   setVoiceWindow(mainWindow)
+  setNarreteWindow(mainWindow)
 
   return mainWindow
 }
 
 function focusMainWindow(): void {
+  if (isNarreteCapturing()) return
   if (!primaryWindow || primaryWindow.isDestroyed()) {
     createWindow()
     return

@@ -138,7 +138,8 @@ export function getSettings(): AppSettings {
     motion: normalizeMotion(map.get('motion')),
     activeThemeId: map.get('active_theme_id') ?? null,
     // Notifications are opt-in; an absent setting stays silent.
-    notifyOnComplete: map.get('notify_on_complete') === '1'
+    notifyOnComplete: map.get('notify_on_complete') === '1',
+    narreteEnabled: map.get('narrete_enabled') === '1'
   }
 }
 
@@ -279,6 +280,11 @@ export function setFreshWorkstream(enabled: boolean): AppSettings {
 
 export function setNotifyOnComplete(enabled: boolean): AppSettings {
   setSetting('notify_on_complete', enabled ? '1' : null)
+  return getSettings()
+}
+
+export function setNarreteEnabled(enabled: boolean): AppSettings {
+  setSetting('narrete_enabled', enabled === true ? '1' : null)
   return getSettings()
 }
 

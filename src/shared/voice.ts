@@ -159,12 +159,16 @@ export type VoiceResult<T = void> = { ok: true; value: T } | { ok: false; error:
 export function mergeVoiceDraft(
   current: string,
   range: { start: number; text: string },
-  transcript: string
+  transcript: string,
+  maxLength = Infinity
 ): { value: string; text: string } | null {
   if (!Number.isInteger(range.start) || range.start < 0 || range.start > current.length) return null
   if (current.slice(range.start, range.start + range.text.length) !== range.text) return null
   const prefix = current.slice(0, range.start)
   const suffix = current.slice(range.start + range.text.length)
+  const available = Math.max(0, maxLength - prefix.length - suffix.length)
+  const spacing = (prefix && !/\s$/.test(prefix) ? 1 : 0) + (suffix && !/^\s/.test(suffix) ? 1 : 0)
+  transcript = transcript.slice(0, Math.max(0, available - spacing))
   const text =
     (transcript && prefix && !/\s$/.test(prefix) ? ' ' : '') +
     transcript +

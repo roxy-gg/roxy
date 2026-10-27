@@ -8,7 +8,7 @@ import {
   systemPreferences,
   utilityProcess
 } from 'electron'
-import type { UtilityProcess, IpcMainInvokeEvent } from 'electron'
+import type { UtilityProcess, IpcMainInvokeEvent, WebContents } from 'electron'
 import type { Recorder } from '@handy-computer/recorder'
 import { createHash } from 'node:crypto'
 import { mkdir, open, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
@@ -26,6 +26,12 @@ import {
   type VoiceState
 } from '../../shared/voice'
 import { getChat, getVoiceSettings, setVoiceSettings } from '../db/repo'
+import {
+  isNarreteCapturing,
+  isNarreteSurfaceSender,
+  isNarreteVoiceSender,
+  narreteVoiceWindow
+} from './narrete'
 
 let window: BrowserWindow | null = null
 let shortcuts: string[] = []
@@ -37,6 +43,8 @@ let publishRevision = 0
 type Recording = {
   id: string
   chatId: string
+  owner: WebContents
+  cleanup?: () => void
   recorder?: Recorder
   worker?: UtilityProcess
   sequence: number
@@ -66,7 +74,14 @@ const supported = (): boolean =>
   (process.platform === 'linux' && ['arm64', 'x64'].includes(process.arch))
 
 function emit(event: VoiceEvent): void {
+  if ('recordingId' in event) {
+    const target = active?.owner
+    if (target && !target.isDestroyed()) target.send(CHANNELS.voiceEvent, event)
+    return
+  }
   if (window && !window.isDestroyed()) window.webContents.send(CHANNELS.voiceEvent, event)
+  const overlay = narreteVoiceWindow()
+  if (overlay && !overlay.isDestroyed()) overlay.webContents.send(CHANNELS.voiceEvent, event)
 }
 function permission(): string {
   return process.platform === 'darwin' || process.platform === 'win32'
@@ -215,6 +230,14 @@ function bindHotkeys(settings: VoiceSettings): VoiceError | null {
           const repeated = now - lastShortcutPress < 250
           lastShortcutPress = now
           if (repeated) return
+          if (isNarreteCapturing()) {
+            const overlay = narreteVoiceWindow()
+            if (overlay && !overlay.isDestroyed()) {
+              overlay.focus()
+              overlay.webContents.send(CHANNELS.voiceEvent, { type: 'toggle' })
+            }
+            return
+          }
           if (!window || window.isDestroyed()) return
           if (window.isMinimized()) window.restore()
           window.show()
@@ -239,7 +262,7 @@ function bindHotkeys(settings: VoiceSettings): VoiceError | null {
 export function setVoiceWindow(target: BrowserWindow): void {
   window = target
   const abandon = (): void => {
-    void stopVoice(false)
+    if (active?.owner === target.webContents) void stopVoice(false)
   }
   target.webContents.on('destroyed', abandon)
   target.webContents.on('render-process-gone', abandon)
@@ -295,14 +318,15 @@ export async function stopVoice(finalize: boolean, error?: VoiceError): Promise<
       } catch {
         unloadEngine()
       }
-      if (active === recording) active = null
       emit({ type: 'recording', recordingId: recording.id, phase: 'stopped', error })
+      recording.cleanup?.()
+      if (active === recording) active = null
     }
   })()
   return recording.closing
 }
 
-async function startVoice(id: string, chatId: string): Promise<VoiceResult> {
+async function startVoice(id: string, chatId: string, owner: WebContents): Promise<VoiceResult> {
   if (active || changing) return fail('busy')
   if (!supported()) return fail('unsupported')
   const settings = getVoiceSettings()
@@ -321,12 +345,27 @@ async function startVoice(id: string, chatId: string): Promise<VoiceResult> {
   const recording: Recording = {
     id,
     chatId,
+    owner,
     sequence: 0,
     pending: 0,
     stopping: false,
     cancelled: false
   }
   active = recording
+  const abandon = (): void => {
+    if (active === recording) void stopVoice(false)
+  }
+  owner.once('destroyed', abandon)
+  owner.once('render-process-gone', abandon)
+  const navigate = (_event: unknown, _url: string, inPlace: boolean, mainFrame: boolean): void => {
+    if (mainFrame && !inPlace) abandon()
+  }
+  owner.on('did-start-navigation', navigate)
+  recording.cleanup = () => {
+    owner.removeListener('destroyed', abandon)
+    owner.removeListener('render-process-gone', abandon)
+    owner.removeListener('did-start-navigation', navigate)
+  }
   try {
     const worker = await loadEngine(settings.modelId)
     if (active !== recording || recording.cancelled) return fail('busy')
@@ -551,8 +590,17 @@ export function registerVoiceIpc(): void {
     action: (e: IpcMainInvokeEvent, ...args: any[]) => unknown
   ): void => {
     ipcMain.handle(channel, async (e, ...args) => {
-      if (!trusted(e)) return fail('disabled')
+      const allowed = (): boolean =>
+        trusted(e) ||
+        (channel === CHANNELS.voiceState && isNarreteSurfaceSender(e)) ||
+        (channel === CHANNELS.voiceStop &&
+          active?.owner === e.sender &&
+          isNarreteSurfaceSender(e)) ||
+        ((channel === CHANNELS.voiceStart || channel === CHANNELS.voiceStop) &&
+          isNarreteVoiceSender(e, channel === CHANNELS.voiceStart ? args[1] : undefined))
+      if (!allowed()) return fail('disabled')
       await ready
+      if (!allowed()) return fail('disabled')
       return action(e, ...args)
     })
   }
@@ -642,8 +690,8 @@ export function registerVoiceIpc(): void {
       changing = false
     }
   })
-  handle(CHANNELS.voiceStart, (_e, id: string, chatId: string) => startVoice(id, chatId))
-  handle(CHANNELS.voiceStop, async (_e, id: string, finalize: boolean) => {
-    if (active?.id === id) await stopVoice(finalize === true)
+  handle(CHANNELS.voiceStart, (e, id: string, chatId: string) => startVoice(id, chatId, e.sender))
+  handle(CHANNELS.voiceStop, async (e, id: string, finalize: boolean) => {
+    if (active?.id === id && active.owner === e.sender) await stopVoice(finalize === true)
   })
 }

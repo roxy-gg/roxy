@@ -40,6 +40,7 @@ import { useRoxyStore } from '../lib/store'
 import { MotionSettings } from '../components/MotionSettings'
 import { BackgroundSettings } from '../components/BackgroundSettings'
 import { VoiceSettings } from '../components/VoiceSettings'
+import { NarreteSettings } from '../components/NarreteSettings'
 import { RemoteWorkspaceDialog } from '../components/RemoteWorkspaceDialog'
 import { SidebarNavItem } from '../components/SidebarFrame'
 import { SettingsSearchResults } from '../components/SettingsSearchResults'
@@ -551,6 +552,15 @@ export default function Settings(): JSX.Element {
           hidden={panel !== 'voice'}
         >
           {(visited.has('voice') || panel === 'voice') && <VoiceSettings />}
+        </section>
+
+        <section
+          id="settings-narrete-panel"
+          role="region"
+          aria-labelledby="settings-narrete"
+          hidden={panel !== 'narrete'}
+        >
+          {(visited.has('narrete') || panel === 'narrete') && <NarreteSettings />}
         </section>
 
         <section

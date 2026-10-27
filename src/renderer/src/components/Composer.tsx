@@ -8,7 +8,8 @@ import {
   type KeyboardEvent
 } from 'react'
 import { useTranslation } from 'react-i18next'
-import { ArrowUp, LoaderCircle, Mic, Plus, Square, X } from 'lucide-react'
+import { ArrowUp, LoaderCircle, Mic, MousePointer2, Plus, Square, X } from 'lucide-react'
+import { api } from '../lib/api'
 import { useVoiceComposer } from '../lib/voice'
 import { ModelPicker } from './ModelPicker'
 import { ContextMeter, ContextPicker, ThinkingPicker, AgentPicker } from './InferenceControls'
@@ -97,6 +98,17 @@ export function Composer({
       images: typeof next === 'function' ? next(current.images) : next
     }))
   }
+  const narreteEnabled = useRoxyStore((s) => s.settings?.narreteEnabled ?? false)
+  const [narreteOpen, setNarreteOpen] = useState(false)
+  const captureId = useRef<string | null>(null)
+  useLayoutEffect(() => {
+    setNarreteOpen(false)
+    return () => {
+      const id = captureId.current
+      captureId.current = null
+      if (id) void api.narrete.cancel(id).catch(() => undefined)
+    }
+  }, [chatId])
   const [dragging, setDragging] = useState(false)
   const ref = useRef<HTMLTextAreaElement>(null)
   const voice = useVoiceComposer(chatId, ref)
@@ -531,6 +543,64 @@ export function Composer({
             <ContextMeter />
           </div>
           <div className="flex shrink-0 items-center gap-1.5">
+            {narreteEnabled && (
+              <button
+                type="button"
+                aria-label={t('narrete.start')}
+                title={t('narrete.start')}
+                aria-haspopup="dialog"
+                aria-pressed={narreteOpen}
+                disabled={narreteOpen}
+                onClick={async () => {
+                  if (captureId.current) return
+                  voice.interrupt()
+                  const id = crypto.randomUUID()
+                  captureId.current = id
+                  setNarreteOpen(true)
+                  setError('')
+                  try {
+                    const result = await api.narrete.start(id, chatId)
+                    if (captureId.current !== id || useRoxyStore.getState().activeChatId !== chatId)
+                      return
+                    if (result.ok) {
+                      const image: ComposerImage = {
+                        ...result.image,
+                        id: crypto.randomUUID(),
+                        name: result.image.name ?? 'Narrete.png'
+                      }
+                      updateDraft((current) => ({
+                        value: [current.value, result.text].filter(Boolean).join('\n\n'),
+                        images: [...current.images, image]
+                      }))
+                      requestAnimationFrame(() => ref.current?.focus())
+                    }
+                    if (!result.ok && result.error !== 'cancelled')
+                      setError(
+                        t(
+                          result.error === 'sendFailed'
+                            ? 'narrete.errors.draftFailed'
+                            : `narrete.errors.${result.error}`
+                        )
+                      )
+                  } catch {
+                    if (captureId.current === id) setError(t('narrete.errors.captureFailed'))
+                  } finally {
+                    if (captureId.current === id) {
+                      captureId.current = null
+                      setNarreteOpen(false)
+                    }
+                  }
+                }}
+                className={cn(
+                  'press-scale flex h-8 w-8 shrink-0 items-center justify-center rounded-lg',
+                  narreteOpen
+                    ? 'bg-accent/15 text-accent'
+                    : 'text-text-muted hover:bg-white/5 hover:text-text'
+                )}
+              >
+                <MousePointer2 aria-hidden className="h-4 w-4" />
+              </button>
+            )}
             {voice.enabled && (
               <button
                 type="button"

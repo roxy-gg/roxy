@@ -1,4 +1,5 @@
 import type { WorkspaceInspectorApi } from './workspace-inspector'
+import type { NarreteCaptureResult } from './narrete'
 import type { CheatPreferences, CheatResult, CheatSource, CheatState } from './cheat'
 import type {
   EngineeringPreferences,
@@ -827,6 +828,10 @@ export interface RoxyApi {
     cancel(): Promise<void>
     onChanged(callback: (state: EngineeringState) => void): () => void
   }
+  narrete: {
+    start(id: string, chatId: string): Promise<NarreteCaptureResult>
+    cancel(id: string): Promise<void>
+  }
   voice: {
     state(): Promise<VoiceState>
     update(patch: Partial<VoiceSettings>): Promise<VoiceResult<VoiceSettings>>
@@ -884,6 +889,7 @@ export interface RoxyApi {
     setBranchPrefix(prefix: string): Promise<AppSettings>
     /** Notify when a turn finishes: chime + OS toast, or nothing. */
     setNotifyOnComplete(enabled: boolean): Promise<AppSettings>
+    setNarreteEnabled(enabled: boolean): Promise<AppSettings>
     /** Set the UI language. An unknown code falls back to English. */
     setLanguage(language: Language): Promise<AppSettings>
     setMotion(motion: MotionPreference): Promise<AppSettings>

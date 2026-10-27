@@ -637,6 +637,35 @@
     "selectModel": "选择模型",
     "tools": "工具"
   },
+  "narrete": {
+    "addNext": "Add & next",
+    "addToPrompt": "Add to prompt",
+    "ctrlHint": "Ctrl + left-drag to capture. Ordinary drags work normally. Esc exits.",
+    "ctrlHowItWorks": "Click the cursor and keep using your computer. Hold Ctrl before left-dragging a rectangle at least 24 by 24 pixels, and keep holding it until you release the mouse. Releasing Ctrl early cancels the capture. Ordinary dragging, text selection, typing and scrolling stay unchanged. Add & next saves your feedback and returns to the live desktop. Add to prompt combines your screenshots and appends the image and notes to your existing draft. Nothing is sent until you send the chat message.",
+    "ctrlReselectHint": "Your note is ready. Ctrl + left-drag its region to keep collecting.",
+    "directDescription": "Point to anything on your screen and tell Roxy what to change.",
+    "enable": "Show Narrete in the composer",
+    "errors": {
+      "busy": "Another screen capture is already in progress.",
+      "captureFailed": "Couldn't capture this screen. Check screen-recording permissions or try another screen.",
+      "draftFailed": "Couldn't add to your draft. Your screenshots and feedback are still here. Try again.",
+      "inputPermissionDenied": "Allow Accessibility access for Roxy in your system privacy settings to detect capture gestures.",
+      "permissionDenied": "Allow screen recording for Roxy in your system privacy settings, then restart Roxy and try again.",
+      "saveFailed": "Couldn't save this preference. Try again.",
+      "unsupported": "Live capture gestures aren't supported on this desktop. Wayland and Linux ARM are not supported."
+    },
+    "heading": "Narrete",
+    "livePrivacy": "Screen capture and the temporary input listener run only while this mode is on. Screenshots are taken only after a deliberate drag. Keyboard input is not recorded. Full-screen snapshots stay on your device; only the regions you collect are added to your draft.",
+    "note": "What should change?",
+    "notePlaceholder": "Make this text white, remove this animation...",
+    "preview": "Captured region {{number}}",
+    "regionNote": "{{number}}. What should change?",
+    "reselect": "Select again",
+    "savedCount_one": "{{count}} saved",
+    "savedCount_other": "{{count}} saved",
+    "savedRegion": "{{number}}. {{note}}",
+    "start": "Start Narrete capture"
+  },
   "notifications": {
     "responseReady": "响应就绪。",
     "responseReadyForSession": "响应就绪：{{session}}"

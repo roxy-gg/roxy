@@ -2,3 +2,5 @@ out
 dist
 node_modules
 package-lock.json
+# Keep bundled third-party license text verbatim.
+resources/third-party/uiohook/COPYING*.md

@@ -49,6 +49,9 @@
     "smoke:shared": "esbuild test/shared.ts --bundle --platform=node --format=cjs --packages=external --outfile=test/.out/shared.cjs && node test/.out/shared.cjs",
     "smoke:voice": "esbuild test/voice.ts --bundle --platform=node --format=cjs --outfile=test/.out/voice.cjs && node test/.out/voice.cjs && node test/voice-service.mjs",
     "smoke:voice-ui": "electron test/canvas/voice-smoke.cjs",
+    "smoke:narrete": "esbuild test/narrete.ts --bundle --platform=node --format=cjs --outfile=test/.out/narrete.cjs && node test/.out/narrete.cjs && node test/narrete-service.mjs && esbuild test/narrete-image.ts --bundle --platform=node --format=cjs --packages=external --outfile=test/.out/narrete-image.cjs && node test/.out/narrete-image.cjs",
+    "smoke:narrete-ui": "electron test/canvas/narrete-smoke.cjs",
+    "smoke:narrete-live": "electron test/narrete-live.cjs",
     "smoke:tooltips": "electron test/canvas/tooltips-smoke.cjs",
     "smoke:voice-native": "esbuild test/voice-native.ts --bundle --platform=node --format=cjs --packages=external --outfile=test/.out/voice-native.cjs && electron test/.out/voice-native.cjs",
     "smoke:app": "esbuild test/smoke.ts --bundle --platform=node --format=cjs --packages=external --outfile=test/.out/smoke.cjs && electron test/.out/smoke.cjs",
@@ -124,6 +127,7 @@
     "shiki": "^4.4.3",
     "tailwind-merge": "^3.6.0",
     "tinyglobby": "^0.2.17",
+    "uiohook-napi": "1.5.5",
     "ws": "^8.21.0",
     "zustand": "^5.0.14"
   },

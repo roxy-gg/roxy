@@ -182,6 +182,13 @@ export const SETTINGS_SEARCH = [
     terms: ['voice.hotkeyHint']
   },
   {
+    section: 'narrete',
+    title: 'narrete.enable',
+    description: 'narrete.directDescription',
+    target: 'settings-narrete-enabled',
+    terms: ['narrete.ctrlHowItWorks', 'narrete.start']
+  },
+  {
     section: 'worktrees',
     title: 'settings.workstreams.autoTitle',
     description: 'settings.workstreams.autoDescription',

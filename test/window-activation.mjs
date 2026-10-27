@@ -14,6 +14,7 @@ for (const platform of ['darwin', 'win32', 'linux']) {
   let ready
   let toastWindow
   let voiceWindow
+  let capturing = false
   const app = new EventEmitter()
   app.whenReady = () => ({ then: (callback) => (ready = callback) })
   app.setAppUserModelId = () => {}
@@ -65,7 +66,8 @@ for (const platform of ['darwin', 'win32', 'linux']) {
       setWindowFactory: noop,
       setToastWindow: (window) => (toastWindow = window)
     },
-    './services/voice': { setVoiceWindow: (window) => (voiceWindow = window) }
+    './services/voice': { setVoiceWindow: (window) => (voiceWindow = window) },
+    './services/narrete': { setNarreteWindow: noop, isNarreteCapturing: () => capturing }
   }
   new Function('require', 'process', '__dirname', code)(
     (name) => dependencies[name] ?? unused,
@@ -90,6 +92,11 @@ for (const platform of ['darwin', 'win32', 'linux']) {
     assert.equal(app.listenerCount('did-become-active'), 0, 'macOS-only focus policy')
   }
 
+  capturing = true
+  app.emit('activate')
+  if (platform === 'darwin') app.emit('did-become-active')
+  assert.deepEqual(main.calls.splice(0), [], 'Capture overlay is not covered by app activation')
+  capturing = false
   app.emit('activate')
   assert.deepEqual(main.calls.splice(0), ['show', 'focus'], 'Dock activation raises Roxy')
   assert.equal(windows.length, 2, 'reuse the existing main window')

@@ -81,6 +81,10 @@ const recorder = {
   }
 }
 let holding = false
+let screenCapturing = false
+let captureWindow = null
+let captureSelected = false
+const captureEvents = []
 globalThis.__voiceMocks = {
   shared,
   electron: {
@@ -136,6 +140,18 @@ globalThis.__voiceMocks = {
     }
   },
   native: {
+    isNarreteCapturing: () => screenCapturing,
+    isNarreteSurfaceSender: (event) =>
+      !!captureWindow &&
+      event.sender === captureWindow.webContents &&
+      event.senderFrame === event.sender.mainFrame,
+    isNarreteVoiceSender: (event, chatId) =>
+      captureSelected &&
+      !!captureWindow &&
+      event.sender === captureWindow.webContents &&
+      event.senderFrame === event.sender.mainFrame &&
+      (chatId === undefined || chatId === 'chat'),
+    narreteVoiceWindow: () => (captureSelected ? captureWindow : null),
     listInputDevices: async () => [{ id: 'usb', name: 'Mic', occurrence: 0, isDefault: true }],
     Recorder: {
       open: async (options) => {
@@ -160,7 +176,7 @@ await build({
       name: 'voice-boundaries',
       setup(plugin) {
         plugin.onResolve(
-          { filter: /^(electron|@handy-computer\/recorder)$|^\.\.\/db\/repo$/ },
+          { filter: /^(electron|@handy-computer\/recorder)$|^\.\.\/db\/repo$|^\.\/narrete$/ },
           (args) => ({ path: args.path, namespace: 'voice-mock' })
         )
         plugin.onResolve({ filter: /^node:fs\/promises$/ }, () => ({
@@ -175,7 +191,7 @@ await build({
           const key =
             args.path === 'electron'
               ? 'electron'
-              : args.path.includes('recorder')
+              : args.path.includes('recorder') || args.path === './narrete'
                 ? 'native'
                 : args.path === 'shared'
                   ? 'shared'
@@ -191,6 +207,7 @@ await build({
 try {
   const service = require(resolve('test/.out/voice-service.cjs'))
   const contents = new EventEmitter()
+  contents.isDestroyed = () => false
   contents.getURL = () => 'file:///untrusted'
   contents.mainFrame = {}
   contents.send = (_channel, event) => events.push(event)
@@ -238,6 +255,15 @@ try {
     ).ok
   )
   assert.equal(registrations.size, 2)
+  const beforeCaptureHotkey = events.length
+  screenCapturing = true
+  registrations.get('Ctrl+Space')()
+  assert.equal(
+    events.length,
+    beforeCaptureHotkey,
+    'Voice hotkey cannot raise Roxy over a region capture'
+  )
+  screenCapturing = false
   while (!loads) await new Promise((resolve) => setTimeout(resolve, 1))
   assert.equal(loads, 1, 'Selecting an enabled model preloads weights')
   assert.equal(captureOptions, undefined, 'Preload does not open the microphone')
@@ -389,6 +415,48 @@ try {
     2,
     'Startup restores enabled voice with a verified selected model'
   )
+  const captureContents = new EventEmitter()
+  captureContents.mainFrame = {}
+  captureContents.isDestroyed = () => false
+  captureContents.send = (_channel, event) => captureEvents.push(event)
+  captureWindow = { webContents: captureContents, isDestroyed: () => false, focus() {} }
+  const captureEvent = { sender: captureContents, senderFrame: captureContents.mainFrame }
+  const captureInvoke = (name, ...args) => handlers.get('voice:' + name)(captureEvent, ...args)
+  assert.equal((await captureInvoke('state')).supported, true)
+  assert.equal(
+    (await captureInvoke('start', 'overlay', 'chat')).error,
+    'disabled',
+    'No microphone before selecting'
+  )
+  captureSelected = true
+  assert.equal(
+    (await captureInvoke('update', { enabled: false })).error,
+    'disabled',
+    'Overlay cannot manage settings'
+  )
+  assert.equal(
+    (await captureInvoke('start', 'overlay', 'other')).error,
+    'disabled',
+    'Capture is bound to original chat'
+  )
+  const mainTranscriptCount = events.filter((event) => event.type === 'transcript').length
+  assert((await captureInvoke('start', 'overlay', 'chat')).ok)
+  assert(captureEvents.some((event) => event.type === 'transcript'))
+  assert.equal(
+    events.filter((event) => event.type === 'transcript').length,
+    mainTranscriptCount,
+    'Capture transcripts do not enter main composer'
+  )
+  await invoke('stop', 'overlay', false)
+  assert(recorder.isRecording, 'Main cannot stop another renderer recording')
+  await captureInvoke('stop', 'overlay', true)
+  assert.equal(recorder.isRecording, false)
+  assert((await captureInvoke('start', 'overlay-crash', 'chat')).ok)
+  captureContents.emit('destroyed')
+  await new Promise((resolve) => setTimeout(resolve, 5))
+  assert.equal(recorder.isRecording, false, 'Closing capture releases microphone')
+  captureWindow = null
+  captureSelected = false
   service.shutdownVoice()
   console.log(
     'VOICE SERVICE OK: opt-in, isolation, hotkeys, streaming, warm reuse without mic, unload/switch/removal, crash recovery, cancellation, verified downloads'
