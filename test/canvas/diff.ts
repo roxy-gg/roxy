@@ -10,6 +10,7 @@ import {
 } from '../../src/renderer/src/components/diff/model'
 import { layoutDiffViewer } from '../../src/renderer/src/components/diff/layout'
 import { Builder } from '../../src/renderer/src/canvas/builder'
+import { SPACE } from '../../src/renderer/src/canvas/metrics'
 import { font, wrapSpans, type TextMetrics } from '../../src/renderer/src/canvas/text'
 import {
   formatElapsed,
@@ -513,7 +514,7 @@ const longInput = (messages: Message[], state = view()) => ({
   viewport: { top: 0, height: 600, tail: true, targetId: undefined as string | undefined }
 })
 
-check('human bubbles hug content on the right in retained and windowed layouts', () => {
+check('human prompts stay linear and unboxed in retained and windowed layouts', () => {
   for (const width of [320, 800]) {
     for (const text of [
       'push and merge',
@@ -522,7 +523,7 @@ check('human bubbles hug content on the right in retained and windowed layouts',
     ]) {
       const prompt: Message = {
         ...longMessages[0],
-        id: 'bubble',
+        id: 'plain-prompt',
         content: text,
         parts: [{ type: 'text', text }]
       }
@@ -534,56 +535,70 @@ check('human bubbles hug content on the right in retained and windowed layouts',
         const block = scene.blocks.at(-2)!
         const nodes: Node[] = []
         forEachNode(block.nodes, (node) => nodes.push(node))
-        const bubble = nodes.find((node) => node.kind === 'rect')
-        assert.ok(bubble?.kind === 'rect')
-        assert.ok(bubble.w < width * 0.85, 'bubble never fills the column')
-        assert.ok(bubble.x >= 16)
-        assert.ok(
-          !nodes.some(
-            (node) => node.kind === 'image' || (node.kind === 'text' && node.text === 'You')
-          )
+        const frames = nodes.filter((node) => node.kind === 'rect')
+        assert.equal(frames.length, 1, 'only the avatar has a background')
+        assert.equal(frames[0].w, SPACE.avatar)
+        assert.equal(frames[0].h, SPACE.avatar)
+        assert.ok(nodes.some((node) => node.kind === 'icon' && node.name === 'user'))
+        const header = nodes.find(
+          (node) => node.kind === 'text' && node.text === t('transcript.you')
         )
-        assert.equal(block.selectable.map((line) => line.text).join(''), text)
-        for (const line of block.selectable) {
-          assert.ok(line.x >= bubble.x + 12)
-          assert.ok(
-            line.x + Math.max(...line.runs.map((run) => run.x + run.width)) <=
-              bubble.x + bubble.w + 1
-          )
-        }
+        assert.ok(header?.kind === 'text')
+        const body = block.selectable
+        assert.equal(body.map((line) => line.text).join(''), text)
+        for (const line of body) assert.equal(line.x, header.x)
+        const assistantNodes: Node[] = []
+        forEachNode(scene.blocks.at(-1)!.nodes, (node) => assistantNodes.push(node))
+        const assistantHeader = assistantNodes.find(
+          (node) => node.kind === 'text' && node.text === '@roxy'
+        )
+        assert.ok(assistantHeader?.kind === 'text')
+        assert.equal(body[0].x, assistantHeader.x)
         assert.ok(scene.blocks.at(-1)!.y >= block.y + block.height, 'thinking follows the prompt')
-        return { x: bubble.x, width: bubble.w, height: block.height }
+        return {
+          height: block.height,
+          lines: block.selectable.map((line) => [line.x, line.y - block.y, line.text])
+        }
       })
-      assert.deepEqual(layouts[0], layouts[1], 'history windowing preserves bubble geometry')
+      assert.deepEqual(layouts[0], layouts[1], 'history windowing preserves the linear layout')
     }
   }
 })
-check('bubble attachments wrap inside the frame and keep their click targets', () => {
+check('plain prompt attachments wrap in the text column and keep their click targets', () => {
   const prompt: Message = {
     ...longMessages[0],
     id: 'images',
-    parts: Array.from({ length: 5 }, (_, i) => ({
-      type: 'image',
-      dataUrl: `image-${i}`,
-      mediaType: 'image/png'
-    }))
+    parts: [
+      ...Array.from({ length: 5 }, (_, i) => ({
+        type: 'image' as const,
+        dataUrl: `image-${i}`,
+        mediaType: 'image/png'
+      })),
+      { type: 'text', text: 'Describe these images.' }
+    ]
   }
   for (const messages of [[prompt], [...longMessages, prompt]]) {
     const scene = layoutTranscript({ ...longInput(messages), width: 320 }, new BlockCache())
     const block = scene.blocks.at(-1)!
     const nodes: Node[] = []
     forEachNode(block.nodes, (node) => nodes.push(node))
-    const bubble = nodes.find((node) => node.kind === 'rect')
-    assert.ok(bubble?.kind === 'rect')
+    const header = nodes.find((node) => node.kind === 'text' && node.text === t('transcript.you'))
+    assert.ok(header?.kind === 'text')
+    const body = block.selectable[0]
+    assert.equal(nodes.filter((node) => node.kind === 'rect').length, 1)
     assert.equal(block.regions.filter((region) => region.action.type === 'image').length, 5)
     for (const image of nodes.filter((node) => node.kind === 'image')) {
-      assert.ok(image.x >= bubble.x + 12 && image.x + image.w <= bubble.x + bubble.w - 12)
+      assert.ok(image.x >= header.x && image.x + image.w <= 320 - SPACE.columnPadX)
     }
+    assert.equal(body.x, header.x)
+    const images = block.regions.filter((region) => region.action.type === 'image')
+    assert.ok(images.every((image) => image.y + image.h < body.y))
+    assert.ok(new Set(images.map((image) => image.y)).size > 1, 'attachments wrap onto rows')
   }
 })
-check('bubble surfaces follow the active palette in light and custom themes', () => {
+check('plain prompts keep theme-aware text without a message surface', () => {
   const prompt: Message = { ...longMessages[0], parts: [{ type: 'text', text: 'Short prompt' }] }
-  const fills = [
+  for (const paletteTheme of [
     theme,
     {
       ...theme,
@@ -592,16 +607,22 @@ check('bubble surfaces follow the active palette in light and custom themes', ()
       palette: { ...theme.palette, surface2: '#efeff1', white: '#18181b', text: '#1a1a1c' }
     },
     { ...theme, epoch: 3, palette: { ...theme.palette, surface2: '#3d2942' } }
-  ].map((theme) => {
-    const scene = layoutTranscript({ ...longInput([prompt]), theme }, new BlockCache())
-    const nodes: Node[] = []
-    forEachNode(scene.blocks[0].nodes, (node) => nodes.push(node))
-    const bubble = nodes.find((node) => node.kind === 'rect')
-    assert.ok(bubble?.kind === 'rect')
-    assert.equal(scene.blocks[0].selectable[0].runs[0].color, theme.palette.text)
-    return bubble.fill
-  })
-  assert.equal(new Set(fills).size, 3)
+  ]) {
+    for (const messages of [[prompt], [...longMessages, prompt]]) {
+      const scene = layoutTranscript(
+        { ...longInput(messages), theme: paletteTheme },
+        new BlockCache()
+      )
+      const block = scene.blocks.at(-1)!
+      const nodes: Node[] = []
+      forEachNode(block.nodes, (node) => nodes.push(node))
+      const frames = nodes.filter((node) => node.kind === 'rect')
+      assert.equal(frames.length, 1)
+      assert.equal(frames[0].w, SPACE.avatar)
+      assert.equal(frames[0].fill, paletteTheme.palette.surface2)
+      assert.equal(block.selectable[0].runs[0].color, paletteTheme.palette.text)
+    }
+  }
 })
 
 check('tool images follow disclosure state in retained and windowed transcripts', () => {
@@ -1457,8 +1478,7 @@ check('bot replies use a full-size Facehash and username in both transcript layo
         new BlockCache()
       ).blocks.at(-1)!.nodes
     )
-    assert.ok(nodes.includes('"kind":"rect"'), 'human mentions keep the human bubble')
-    assert.ok(!nodes.includes('"name":"user"'), 'human bubbles do not need an avatar')
+    assert.ok(nodes.includes('"name":"user"'), 'human mentions do not change authorship')
     assert.ok(!nodes.includes('data:image/svg+xml,'))
   }
 

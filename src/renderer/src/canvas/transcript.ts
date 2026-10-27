@@ -16,9 +16,9 @@ import type { TFunction } from 'i18next'
 import type { Message, MessagePart, QueueItem } from '@shared/types'
 import { Builder } from './builder'
 import type { Block, Scene, ViewState } from './scene'
-import { TextMetrics, font, wrapSpans, type InlineSpan } from './text'
+import { TextMetrics, font, type InlineSpan } from './text'
 import type { CanvasTheme } from './theme'
-import { alpha, mix } from './theme'
+import { alpha } from './theme'
 import { FONT_SIZE, SIZE, SPACE } from './metrics'
 import { layoutMarkdown, layoutPlainText } from './prose'
 import { layoutToolCard, type ToolCardInput } from './tool-card'
@@ -201,7 +201,7 @@ function layoutMessage(
   )
   let cursor = body.y
   if (message.role === 'user') {
-    cursor += layoutUserBody(builder, message.parts, body.x, cursor, body.width, !username)
+    cursor += layoutUserBody(builder, message.parts, body.x, cursor, body.width)
   } else {
     cursor += layoutParts(
       builder,
@@ -315,27 +315,34 @@ export function layoutMessageHeader(
 ): { x: number; y: number; width: number } {
   const palette = builder.palette
   const top = y + SPACE.messagePadY
-  if (isUser && !botUsername)
-    return {
-      x: x + SPACE.messagePadX,
-      y: top,
-      width: Math.max(1, width - SPACE.messagePadX * 2)
-    }
   const bodyX = x + SPACE.messagePadX + SPACE.avatar + SPACE.avatarGap
   const bodyWidth = Math.max(1, width - SPACE.messagePadX * 2 - SPACE.avatar - SPACE.avatarGap)
 
   // Avatar.
   const avatarY = top + 2
-  builder.push({
-    kind: 'image',
-    x: x + SPACE.messagePadX,
-    y: avatarY,
-    w: SPACE.avatar,
-    h: SPACE.avatar,
-    src: botUsername === HOST_USERNAME ? '__roxy__' : (botAvatarSrc ?? '__roxy__'),
-    radius: !botUsername || botUsername === HOST_USERNAME ? SPACE.radiusLg : SPACE.avatar / 4,
-    border: palette.border
-  })
+  if (isUser && !botUsername) {
+    builder.rect(
+      x + SPACE.messagePadX,
+      avatarY,
+      SPACE.avatar,
+      SPACE.avatar,
+      SPACE.radiusLg,
+      palette.surface2,
+      palette.border
+    )
+    builder.icon(x + SPACE.messagePadX + 6, avatarY + 6, SIZE.icon, 'user', palette.textMuted)
+  } else {
+    builder.push({
+      kind: 'image',
+      x: x + SPACE.messagePadX,
+      y: avatarY,
+      w: SPACE.avatar,
+      h: SPACE.avatar,
+      src: botUsername === HOST_USERNAME ? '__roxy__' : (botAvatarSrc ?? '__roxy__'),
+      radius: !botUsername || botUsername === HOST_USERNAME ? SPACE.radiusLg : SPACE.avatar / 4,
+      border: palette.border
+    })
+  }
 
   const nameFont = font(FONT_SIZE.small, 500, 'sans')
   builder.text(
@@ -354,13 +361,46 @@ export function layoutUserBody(
   parts: MessagePart[],
   x: number,
   y: number,
-  width: number,
-  bubble = false
+  width: number
 ): number {
   const palette = builder.palette
+  let cursor = y
   const images = parts.filter(
     (p): p is Extract<MessagePart, { type: 'image' }> => p.type === 'image'
   )
+  if (images.length > 0) {
+    const thumb = 96
+    let imageX = x
+    let rowTop = cursor
+    for (const image of images) {
+      if (imageX + thumb > x + width) {
+        imageX = x
+        rowTop += thumb + 8
+      }
+      builder.push({
+        kind: 'image',
+        x: imageX,
+        y: rowTop,
+        w: thumb,
+        h: thumb,
+        src: image.dataUrl,
+        radius: SPACE.radiusLg,
+        border: palette.border
+      })
+      builder.region(
+        imageX,
+        rowTop,
+        thumb,
+        thumb,
+        { type: 'image', src: image.dataUrl },
+        {
+          title: image.name ?? builder.t('transcript.openImage')
+        }
+      )
+      imageX += thumb + 8
+    }
+    cursor = rowTop + thumb + 8
+  }
 
   // A user message is shown verbatim, exactly as the DOM did — it is what you
   // typed, and running your own prompt through a markdown renderer would eat
@@ -368,11 +408,11 @@ export function layoutUserBody(
   const text = parts
     .map((p) => (p.type === 'text' || p.type === 'reasoning' ? p.text : ''))
     .join('')
-  const spans: InlineSpan[] = []
   if (text) {
     // ...except @mentions, which stay highlighted the way the composer showed
     // them, so a prompt that hands work to a bot reads as such in the transcript.
     const base = font(FONT_SIZE.body, 400, 'sans')
+    const spans: InlineSpan[] = []
     let last = 0
     for (const match of text.matchAll(MENTION)) {
       if (!isKnownMention(match[0], builder.botUsernames)) continue
@@ -389,62 +429,9 @@ export function layoutUserBody(
     }
     if (last < text.length)
       spans.push({ text: text.slice(last), font: base, color: palette.text, offset: last })
+    cursor += builder.paragraph(spans, x, cursor, width)
   }
-  const padX = bubble ? SPACE.bodyPadX : 0
-  const padY = bubble ? SPACE.cardPadX : 0
-  const maxWidth = Math.max(1, (bubble ? width * 0.85 : width) - padX * 2)
-  const wrapped = text ? wrapSpans(spans, maxWidth, builder.metrics) : null
-  const thumb = Math.min(96, maxWidth)
-  const columns = Math.max(1, Math.floor((maxWidth + 8) / (thumb + 8)))
-  const imageWidth = images.length ? Math.min(images.length, columns) * (thumb + 8) - 8 : 0
-  const contentWidth = bubble
-    ? Math.min(
-        maxWidth,
-        Math.max(1, imageWidth, wrapped?.lines.reduce((w, line) => Math.max(w, line.width), 0) ?? 0)
-      )
-    : width
-  const bubbleWidth = contentWidth + padX * 2
-  const left = bubble ? x + width - bubbleWidth : x
-  const contentX = left + padX
-  const imageHeight = images.length ? Math.ceil(images.length / columns) * (thumb + 8) - 8 : 0
-  const gap = images.length && text ? SPACE.headerGap : 0
-  const height = padY * 2 + imageHeight + gap + (wrapped?.height ?? 0)
-  if (bubble)
-    builder.rect(
-      left,
-      y,
-      bubbleWidth,
-      height,
-      SPACE.radiusLg,
-      mix(palette.surface2, palette.white, 0.035),
-      alpha(palette.border, 0.65)
-    )
-  images.forEach((image, index) => {
-    const imageX = contentX + (index % columns) * (thumb + 8)
-    const imageY = y + padY + Math.floor(index / columns) * (thumb + 8)
-    builder.push({
-      kind: 'image',
-      x: imageX,
-      y: imageY,
-      w: thumb,
-      h: thumb,
-      src: image.dataUrl,
-      radius: SPACE.radiusLg,
-      border: palette.border
-    })
-    builder.region(
-      imageX,
-      imageY,
-      thumb,
-      thumb,
-      { type: 'image', src: image.dataUrl },
-      {
-        title: image.name ?? builder.t('transcript.openImage')
-      }
-    )
-  })
-  if (wrapped) builder.lines(contentX, y + padY + imageHeight + gap, wrapped.lines)
-  return height
+  return cursor - y
 }
 
 /**
