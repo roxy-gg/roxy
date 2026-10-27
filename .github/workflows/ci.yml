@@ -57,6 +57,9 @@ jobs:
       - name: CLIProxyAPI packaging download retries
         run: npm run smoke:bundle-cliproxy
 
+      - name: Bundled input-hook source excludes prebuilt binaries
+        run: node test/uiohook-source.mjs
+
       - name: Renderer usage preferences and Escape regression suite
         run: npm run smoke:ui-preferences
 
