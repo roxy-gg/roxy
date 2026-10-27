@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { ArrowLeft, RotateCcw, ZoomIn, ZoomOut } from 'lucide-react'
+import { RotateCcw, X, ZoomIn, ZoomOut } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import type { WorkspaceInspectorApi } from '@shared/workspace-inspector'
 import { api } from '../lib/api'
@@ -64,11 +64,11 @@ export function WorkspaceMediaPreview({
           ref={back}
           type="button"
           onClick={onBack}
-          title={t('inspector.backToChat')}
-          aria-label={t('inspector.backToChat')}
+          title={t('common.close')}
+          aria-label={t('common.close')}
           className="press-scale shrink-0 rounded p-1 text-text-muted hover:bg-white/5 hover:text-text"
         >
-          <ArrowLeft className="h-3.5 w-3.5" />
+          <X className="h-3.5 w-3.5" />
         </button>
         <FileIcon path={selection.path} />
         <span title={selection.path} className="min-w-0 flex-1 truncate font-mono text-[11px]">
