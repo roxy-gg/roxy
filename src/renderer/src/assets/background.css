@@ -56,13 +56,12 @@
 [data-sidebar-style] .chat-background-host[data-wallpaper]::before {
   opacity: calc(1 - var(--chat-wallpaper-opacity));
 }
-[data-sidebar-style='glass'] :is([data-sidebar-frame], .sidebar-rail) {
-  position: relative;
+[data-sidebar-style='glass'] [data-sidebar-surface] {
   background: rgb(from var(--color-surface) r g b / var(--sidebar-opacity, 66%));
   isolation: isolate;
 }
 /* Blur a decorative layer, not the containing block of sidebar dialogs. */
-[data-sidebar-style='glass'] :is([data-sidebar-frame], .sidebar-rail)::before {
+[data-sidebar-style='glass'] [data-sidebar-surface]::before {
   content: '';
   position: absolute;
   inset: 0;
@@ -70,7 +69,7 @@
   pointer-events: none;
   backdrop-filter: blur(18px) saturate(1.2);
 }
-[data-sidebar-style='dimmed'] :is([data-sidebar-frame], .sidebar-rail) {
+[data-sidebar-style='dimmed'] [data-sidebar-surface] {
   background: rgb(from var(--color-surface) r g b / var(--sidebar-opacity, 88%));
 }
 .background-sidebar-glass {
@@ -138,16 +137,16 @@
   }
 }
 @media (prefers-reduced-transparency: reduce) {
-  [data-sidebar-style='glass'] :is([data-sidebar-frame], .sidebar-rail)::before,
+  [data-sidebar-style='glass'] [data-sidebar-surface]::before,
   .background-sidebar-glass {
     backdrop-filter: none;
   }
 }
 @media (prefers-contrast: more) {
-  [data-sidebar-style='glass'] :is([data-sidebar-frame], .sidebar-rail) {
+  [data-sidebar-style='glass'] [data-sidebar-surface] {
     background: rgb(from var(--color-surface) r g b / 1);
   }
-  [data-sidebar-style='dimmed'] :is([data-sidebar-frame], .sidebar-rail) {
+  [data-sidebar-style='dimmed'] [data-sidebar-surface] {
     background: rgb(from var(--color-surface) r g b / 1);
   }
   .background-sidebar-glass,
@@ -157,7 +156,7 @@
   }
 }
 @media (prefers-contrast: more) {
-  [data-sidebar-style='glass'] :is([data-sidebar-frame], .sidebar-rail)::before {
+  [data-sidebar-style='glass'] [data-sidebar-surface]::before {
     backdrop-filter: none;
   }
 }

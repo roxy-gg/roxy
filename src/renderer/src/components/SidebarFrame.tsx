@@ -57,6 +57,7 @@ export function SidebarFrame({
   return (
     <aside
       data-sidebar-frame
+      data-sidebar-surface
       style={{ '--sidebar-width': `${width}px` } as CSSProperties}
       className={cn(
         'relative flex min-h-0 shrink-0 flex-col border-border bg-surface',

@@ -142,8 +142,10 @@ export function WorkspaceSummary({
       }
       onClick={onToggle}
       className={cn(
-        'press-scale flex h-7 shrink-0 items-center gap-2 sq sq-lg rounded-lg px-2 text-xs hover:bg-white/5',
-        open ? 'bg-elevated text-text' : 'text-text-muted'
+        'press-scale flex h-7 shrink-0 items-center gap-2 sq sq-lg sq-ring edge rounded-lg border px-2 text-xs tabular-nums transition-colors',
+        open
+          ? 'border-border-strong [--sq-ring:var(--edge-strong)] bg-elevated text-text'
+          : 'border-border bg-surface text-text-muted hover:border-border-strong hover:[--sq-ring:var(--edge-strong)] hover:text-text'
       )}
     >
       {failed || summary.unavailable ? (
@@ -568,6 +570,7 @@ export function WorkspaceInspector({
       ref={panel}
       tabIndex={-1}
       id="workspace-inspector"
+      data-sidebar-surface
       aria-label={t('inspector.open')}
       onKeyDown={(event) => {
         if (event.key === 'Escape' && !event.defaultPrevented) {
@@ -576,7 +579,7 @@ export function WorkspaceInspector({
         }
       }}
       style={{ width }}
-      className="workspace-inspector absolute inset-y-0 right-0 z-30 flex max-w-full shrink-0 flex-col border-l border-border bg-bg shadow-[-12px_0_32px_#00000018] outline-none"
+      className="workspace-inspector absolute inset-y-0 right-0 z-30 flex max-w-full shrink-0 flex-col border-l border-border bg-surface shadow-[-12px_0_32px_#00000018] outline-none"
     >
       <div
         role="separator"
