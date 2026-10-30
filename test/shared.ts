@@ -120,6 +120,7 @@ const TURN_ERROR_KINDS: TurnErrorKind[] = [
   'unknown'
 ]
 import { randomSlug, uniqueSlug, slugToBranchSegment, isGeneratedSlug } from '../src/shared/slugs'
+import { matchesSessionQuery, parseSessionQuery } from '../src/shared/session-search'
 import { formatInterval } from '../src/shared/format'
 import {
   selectPromptName,
@@ -6776,6 +6777,32 @@ async function main(): Promise<void> {
         1
       ).some((b) => b.id === 'completions')
     )
+    // Sidebar session search.
+    {
+      const fields = ['roxy', 'Fix sidebar width', 'jair/sidebar-fix']
+      const match = (query: string, f: (string | null | undefined)[] = fields): boolean =>
+        matchesSessionQuery(parseSessionQuery(query), f)
+      check('session-search: blank query yields no terms', parseSessionQuery('   ').length === 0)
+      check('session-search: no terms matches everything', match(''))
+      check('session-search: substring of the title', match('sidebar'))
+      check('session-search: case-insensitive', match('FIX SIDEBAR'))
+      check('session-search: matches the branch', match('jair/'))
+      check('session-search: terms may span fields', match('roxy width'))
+      check('session-search: term order does not matter', match('width roxy'))
+      check('session-search: every term must match', !match('sidebar missing'))
+      check('session-search: no match', !match('zzz'))
+      check(
+        'session-search: accents are ignored in both directions',
+        match('sesion', ['Sesión nueva']) && match('sesión', ['Sesion nueva'])
+      )
+      check('session-search: null fields are skipped', match('fix', [null, undefined, 'Fix it']))
+      check('session-search: no fields never matches a term', !match('fix', []))
+      check(
+        'session-search: terms do not match across the field boundary',
+        !match('roxyfix', ['roxy', 'fix'])
+      )
+    }
+
     check('quota: 401 maps to a reconnect hint', /Reconnect/.test(quotaErrorMessage(401, '')))
     check(
       'quota: upstream error message is surfaced',
