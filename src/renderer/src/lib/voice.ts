@@ -52,12 +52,22 @@ export function useVoiceComposer(
   slowPhase: 'starting' | 'stopping' | null
   error: VoiceError | null
   fallback: boolean
+  /** Mic loudness (0..1) for the current recording. A subscription, not state: it
+   *  fires ~10x/s and only the meter should re-render for it, not the composer. */
+  subscribeLevel: (listener: (level: number) => void) => () => void
   toggle: () => void
   interrupt: () => void
   finish: () => Promise<boolean>
 } {
   const textTarget = useRef(target)
   textTarget.current = target
+  const levelListeners = useRef(new Set<(level: number) => void>())
+  const subscribeLevel = useRef((listener: (level: number) => void) => {
+    levelListeners.current.add(listener)
+    return () => {
+      levelListeners.current.delete(listener)
+    }
+  }).current
   const state = useVoiceState()
   const enabled =
     !!state?.settings.enabled &&
@@ -185,6 +195,10 @@ export function useVoiceComposer(
       }
       const recording = owned.current
       if (!recording || !('recordingId' in event) || event.recordingId !== recording.id) return
+      if (event.type === 'level') {
+        for (const listener of levelListeners.current) listener(event.level)
+        return
+      }
       if (event.type === 'recording') {
         if (event.phase === 'stopped') {
           recording.failed = !!event.error
@@ -245,6 +259,7 @@ export function useVoiceComposer(
     slowPhase: slowPhase === phase ? slowPhase : null,
     error,
     fallback,
+    subscribeLevel,
     toggle,
     finish,
     interrupt
