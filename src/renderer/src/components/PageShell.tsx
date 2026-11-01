@@ -62,7 +62,7 @@ export function PageShell({
     return (
       <BackgroundFrame className="min-w-0 flex-col sm:flex-row">
         <SidebarFrame responsive>
-          <div className="titlebar reserve-controls-left flex h-14 shrink-0 items-center px-3">
+          <div className="page-sidebar-header titlebar flex h-14 shrink-0 items-center px-3">
             <SidebarNavItem onClick={onBack} title={t('page.back')}>
               <ArrowLeft aria-hidden="true" className="h-4 w-4 shrink-0 opacity-80" />
               <span className="truncate">{t('page.back')}</span>
