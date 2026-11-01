@@ -3,14 +3,21 @@ import { cn } from '../lib/cn'
 import { useMotion } from '../lib/motion'
 
 const BARS = 7
-/** A bar never collapses to nothing: a flat row of dots reads as "dead mic". */
-const MIN_HEIGHT = 0.18
+/** Bar width and resting height. Equal on purpose: at rest each bar is a perfect
+ *  dot, and a flat row of dots still reads as "listening", never as a dead mic. */
+const BAR_PX = 4
+/** Tallest a bar gets; the track is exactly this tall. */
+const MAX_PX = 18
 const IDLE = Array.from({ length: BARS }, () => 0)
 
 /**
  * The classic "recording" bars: a short rolling history of microphone loudness,
  * newest on the right, so speech visibly travels through the row instead of the
  * whole thing pulsing as one block.
+ *
+ * Each bar animates its real `height`, not `scaleY`: scaling stretches the
+ * corners with the bar, so a short bar ends up with flattened tips. Animating
+ * `height` keeps `rounded-full` a true semicircle at every level.
  *
  * Colour is `currentColor`, so the caller decides it with a theme token
  * (`text-danger` in the app) and a theme switch needs no work here. Decorative:
@@ -38,17 +45,21 @@ export function VoiceMeter({
     [subscribe]
   )
   return (
-    <span aria-hidden className={cn('flex h-4 items-center gap-[3px]', className)}>
+    <span
+      aria-hidden
+      className={cn('flex items-center gap-[3px]', className)}
+      style={{ height: MAX_PX }}
+    >
       {levels.map((level, index) => (
         <span
           key={index}
           className={cn(
-            'w-[3px] origin-center rounded-full bg-current',
-            !reduced && 'transition-transform duration-100 ease-out'
+            'shrink-0 rounded-full bg-current',
+            !reduced && 'transition-[height] duration-100 ease-out'
           )}
           style={{
-            height: '100%',
-            transform: `scaleY(${MIN_HEIGHT + (1 - MIN_HEIGHT) * level})`,
+            width: BAR_PX,
+            height: BAR_PX + (MAX_PX - BAR_PX) * level,
             // Older samples fade, so the leading edge is the part you watch.
             opacity: 0.35 + (0.65 * (index + 1)) / BARS
           }}
