@@ -130,18 +130,12 @@ export function Card({ className, ...props }: HTMLAttributes<HTMLDivElement>): J
 }
 
 /**
- * Surface for a card that can be the "selected" one in a list (active theme,
- * active voice model, ...).
- *
- * The fill is ALWAYS the opaque `bg-surface`; selection only recolors the border
- * and the squircle hairline. Never express selection as a translucent fill such
- * as `bg-accent/5` on its own: with a wallpaper behind the page there is nothing
- * under that 5% tint, so the selected card goes see-through while its siblings
- * stay solid.
+ * Keep active and inactive cards on the same translucent accent surface.
+ * Selection changes the border, not whether the wallpaper can show through.
  */
 export function selectableCard(active: boolean): string {
   return cn(
-    'sq sq-xl sq-ring rounded-xl border bg-surface transition',
+    'sq sq-xl sq-ring rounded-xl border bg-accent/5 transition',
     active
       ? 'border-accent/50 [--sq-ring:color-mix(in_srgb,var(--color-accent)_50%,transparent)]'
       : 'border-border'

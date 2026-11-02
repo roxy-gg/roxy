@@ -19,6 +19,6 @@ Native traffic lights are outside `webContents.capturePage` and are not included
 
 ## Selected Voice Model
 
-| Before                                                                                             | After                                                                                     |
-| -------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| ![Selected voice card showing the fixture gradient through its translucent fill](voice-before.png) | ![Selected voice card using the same solid surface as the inactive card](voice-after.png) |
+| Before                                                                                       | After                                                                                                                         |
+| -------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| ![Only the selected voice card is translucent while its sibling is opaque](voice-before.png) | ![Both voice cards preserve the translucent accent surface with selection indicated by the border and badge](voice-after.png) |

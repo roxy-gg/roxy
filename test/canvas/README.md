@@ -1,5 +1,6 @@
 # Canvas Regression Harness
 
+- `npm run smoke:selected-cards-ui` checks matching translucent accent fills, opaque text/content and selection rings in Voice and Themes across all 13 built-in themes, including production Apply actions. Uses isolated app data and port 3107.
 - `npm run smoke:window-controls-ui` checks Back alignment and fixed native-control reservations while scrolling browser tabs, with macOS/Windows/Linux CSS at desktop and narrow widths. Runs on port 3107 with isolated app data; native controls use the host OS.
 - `npx electron test/canvas/sidebar-smoke.cjs` checks sidebar Git dots, centered multi-repo clusters, hover/focus/delete, restart cache hydration, failed lookups, and successful refreshes on port 3105. Uses isolated temporary app data; `CANVAS_TEST_URL` can point at an existing harness server.
 - `npm run canvas` opens interactive transcript, diff, and prompt-navigation fixtures on port 3114.
