@@ -582,7 +582,7 @@ export function Composer({
               </button>
             )}
             {voice.enabled && voice.phase === 'recording' && (
-              <VoiceMeter subscribe={voice.subscribeLevel} className="px-1 text-danger" />
+              <VoiceMeter subscribe={voice.subscribeLevel} className="px-1 text-accent" />
             )}
             {voice.enabled && (
               <button

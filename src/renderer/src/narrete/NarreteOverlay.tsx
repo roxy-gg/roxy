@@ -388,7 +388,7 @@ export function NarreteOverlay(): JSX.Element {
             </button>
             <div className="flex items-center gap-1.5">
               {voice.enabled && voice.phase === 'recording' && (
-                <VoiceMeter subscribe={voice.subscribeLevel} className="px-1 text-red-400" />
+                <VoiceMeter subscribe={voice.subscribeLevel} className="px-1 text-accent" />
               )}
               {voice.enabled && (
                 <button

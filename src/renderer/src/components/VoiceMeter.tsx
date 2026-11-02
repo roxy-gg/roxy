@@ -20,7 +20,7 @@ const IDLE = Array.from({ length: BARS }, () => 0)
  * `height` keeps `rounded-full` a true semicircle at every level.
  *
  * Colour is `currentColor`, so the caller decides it with a theme token
- * (`text-danger` in the app) and a theme switch needs no work here. Decorative:
+ * (`text-accent` in the app) and a theme switch needs no work here. Decorative:
  * the mic button beside it already carries the label and `aria-pressed`.
  *
  * Levels arrive ~10x/s through `subscribe`; state lives here so only this
