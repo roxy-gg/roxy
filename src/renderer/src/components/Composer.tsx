@@ -12,6 +12,7 @@ import { ArrowUp, LoaderCircle, Mic, MousePointer2, Plus, Square, X } from 'luci
 import { api } from '../lib/api'
 import { useVoiceComposer } from '../lib/voice'
 import { ModelPicker } from './ModelPicker'
+import { VoiceMeter } from './VoiceMeter'
 import { ContextMeter, ContextPicker, ThinkingPicker, AgentPicker } from './InferenceControls'
 import { imageFilesFrom, readImageFile, type ComposerImage } from '../lib/images'
 import { ImagePreview } from './ImagePreview'
@@ -579,6 +580,9 @@ export function Composer({
               >
                 <MousePointer2 aria-hidden className="h-4 w-4" />
               </button>
+            )}
+            {voice.enabled && voice.phase === 'recording' && (
+              <VoiceMeter subscribe={voice.subscribeLevel} className="px-1 text-accent" />
             )}
             {voice.enabled && (
               <button

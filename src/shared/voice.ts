@@ -147,6 +147,8 @@ export type VoiceEvent =
   | { type: 'state'; state: VoiceState }
   | { type: 'toggle' }
   | { type: 'transcript'; recordingId: string; sequence: number; text: string }
+  /** Loudness of the latest ~100 ms of microphone audio, 0..1. Drives the meter only. */
+  | { type: 'level'; recordingId: string; level: number }
   | {
       type: 'recording'
       recordingId: string
@@ -155,6 +157,19 @@ export type VoiceEvent =
       error?: VoiceError
     }
 export type VoiceResult<T = void> = { ok: true; value: T } | { ok: false; error: VoiceError }
+// Map a chunk of mono samples to a 0..1 meter level. RMS on a dB scale, because
+// loudness is perceived logarithmically: speech sits around -35..-15 dBFS, so a
+// linear scale would leave the bars nearly flat for normal talking.
+const LEVEL_FLOOR_DB = -55
+const LEVEL_RANGE_DB = 45
+export function voiceLevel(samples: ArrayLike<number>): number {
+  if (!samples.length) return 0
+  let sum = 0
+  for (let i = 0; i < samples.length; i++) sum += samples[i] * samples[i]
+  const rms = Math.sqrt(sum / samples.length)
+  if (!(rms > 0)) return 0
+  return Math.min(1, Math.max(0, (20 * Math.log10(rms) - LEVEL_FLOOR_DB) / LEVEL_RANGE_DB))
+}
 // Replace only the verified dictation-owned range, never the whole draft.
 export function mergeVoiceDraft(
   current: string,

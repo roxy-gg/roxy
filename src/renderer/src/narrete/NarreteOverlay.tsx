@@ -10,6 +10,7 @@ import {
 import { applyLanguage } from '../i18n'
 import { useVoiceComposer } from '../lib/voice'
 import { cn } from '../lib/cn'
+import { VoiceMeter } from '../components/VoiceMeter'
 
 declare global {
   interface Window {
@@ -386,6 +387,9 @@ export function NarreteOverlay(): JSX.Element {
               {t('narrete.reselect')}
             </button>
             <div className="flex items-center gap-1.5">
+              {voice.enabled && voice.phase === 'recording' && (
+                <VoiceMeter subscribe={voice.subscribeLevel} className="px-1 text-accent" />
+              )}
               {voice.enabled && (
                 <button
                   type="button"

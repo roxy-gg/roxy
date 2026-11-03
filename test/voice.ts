@@ -1,5 +1,11 @@
 import assert from 'node:assert/strict'
-import { DEFAULT_VOICE, VOICE_MODELS, mergeVoiceDraft, normalizeVoice } from '../src/shared/voice'
+import {
+  DEFAULT_VOICE,
+  VOICE_MODELS,
+  mergeVoiceDraft,
+  normalizeVoice,
+  voiceLevel
+} from '../src/shared/voice'
 
 for (const value of [
   undefined,
@@ -15,6 +21,13 @@ for (const value of [
   assert.equal(normalizeVoice(value).enabled, false)
 }
 assert.deepEqual(normalizeVoice(null), DEFAULT_VOICE)
+assert.equal(voiceLevel(new Float32Array(0)), 0)
+assert.equal(voiceLevel(new Float32Array(1600)), 0)
+assert.equal(voiceLevel(new Float32Array(1600).fill(1)), 1)
+const quiet = voiceLevel(new Float32Array(1600).fill(0.003))
+const speech = voiceLevel(new Float32Array(1600).fill(0.05))
+assert.ok(quiet > 0 && quiet < speech && speech < 1)
+assert.equal(voiceLevel([Number.NaN, Number.NaN]), 0)
 assert.deepEqual(normalizeVoice({ hotkeys: [' Ctrl+Space ', 42, 'ignored'] }).hotkeys, [
   'Ctrl+Space',
   ''
