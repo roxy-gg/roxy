@@ -129,6 +129,19 @@ export function Card({ className, ...props }: HTMLAttributes<HTMLDivElement>): J
   )
 }
 
+/**
+ * Keep active and inactive cards on the same translucent accent surface.
+ * Selection changes the border, not whether the wallpaper can show through.
+ */
+export function selectableCard(active: boolean): string {
+  return cn(
+    'sq sq-xl sq-ring rounded-xl border bg-accent/5 transition',
+    active
+      ? 'border-accent/50 [--sq-ring:color-mix(in_srgb,var(--color-accent)_50%,transparent)]'
+      : 'border-border'
+  )
+}
+
 export function Badge({
   children,
   className
