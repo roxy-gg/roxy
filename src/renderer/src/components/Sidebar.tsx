@@ -18,16 +18,19 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Plus,
+  Search,
   Settings as SettingsIcon,
   Square,
   SquarePen,
-  Trash2
+  Trash2,
+  X
 } from 'lucide-react'
 import { MorphIcon } from 'morphicons/react'
 import type { Chat } from '@shared/types'
 import { sidebarGitDot, type SidebarGitDotState } from '@shared/forge'
 import { statusKeyForSession } from '@shared/workstream'
 import { repoCountBadge } from '@shared/repos'
+import { matchesSessionQuery, parseSessionQuery } from '@shared/session-search'
 import { useRoxyStore } from '../lib/store'
 import { cn } from '../lib/cn'
 import { ContextMenuRow, ContextMenuSurface, CONTEXT_MENU_PAD, CONTEXT_ROW_H } from './ContextMenu'
@@ -158,6 +161,9 @@ export function Sidebar(): JSX.Element {
   const reorderSessions = useRoxyStore((s) => s.reorderSessions)
   const reorderProjects = useRoxyStore((s) => s.reorderProjects)
   const projectOrder = useRoxyStore((s) => s.projectOrder)
+  // Sidebar search. Deliberately not persisted: a filter that survived a restart
+  // would read as sessions having gone missing.
+  const [query, setQuery] = useState('')
   const [collapsed, setCollapsed] = useState<Set<string>>(storedCollapsedProjects)
   const [expandedSubs, setExpandedSubs] = useState<Set<string>>(new Set())
   const [railed, setRailed] = useState<boolean>(
@@ -460,6 +466,29 @@ export function Sidebar(): JSX.Element {
     return map
   }, [chats])
 
+  // Sidebar search. `projects` stays the full list - the collapse persistence and
+  // project drag-reorder above must keep seeing every folder - and only the
+  // render reads `visibleProjects`. A session stays when its project name, title
+  // or branch matches, or when one of its subagents does (so a delegate never
+  // hides behind a parent that doesn't match).
+  const terms = useMemo(() => parseSessionQuery(query), [query])
+  const searching = terms.length > 0
+  const visibleProjects = useMemo(() => {
+    if (!searching) return projects
+    const out: Project[] = []
+    for (const project of projects) {
+      const sessions = project.sessions.filter(
+        (chat) =>
+          matchesSessionQuery(terms, [project.name, chat.title, chat.branch]) ||
+          (subsByParent.get(chat.id) ?? []).some((sub) =>
+            matchesSessionQuery(terms, [project.name, sub.title])
+          )
+      )
+      if (sessions.length > 0) out.push({ ...project, sessions })
+    }
+    return out
+  }, [projects, subsByParent, terms, searching])
+
   const toggleSubs = (id: string): void =>
     setExpandedSubs((prev) => {
       const next = new Set(prev)
@@ -557,6 +586,38 @@ export function Sidebar(): JSX.Element {
         <BotsSection />
       </div>
 
+      {projects.length > 0 && (
+        <div className="px-3 pt-3">
+          <div className="flex h-8 items-center gap-2 sq sq-lg rounded-lg border border-border bg-bg px-2.5 focus-within:border-accent/60">
+            <Search className="h-3.5 w-3.5 shrink-0 text-text-subtle" />
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape' && query) {
+                  e.preventDefault()
+                  setQuery('')
+                }
+              }}
+              placeholder={t('sidebar.searchPlaceholder')}
+              aria-label={t('sidebar.searchPlaceholder')}
+              className="min-w-0 flex-1 bg-transparent text-xs text-text outline-none placeholder:text-text-subtle"
+            />
+            {query && (
+              <button
+                type="button"
+                onClick={() => setQuery('')}
+                title={t('sidebar.searchClear')}
+                aria-label={t('sidebar.searchClear')}
+                className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-text-subtle hover:bg-white/5 hover:text-text"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
       <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-3 pb-3">
         <section className="flex min-h-0 flex-1 flex-col">
           <div className="mb-2 flex items-center px-1">
@@ -564,11 +625,18 @@ export function Sidebar(): JSX.Element {
           </div>
           {projects.length === 0 ? (
             <p className="px-1 text-xs text-text-subtle">{t('sidebar.empty')}</p>
+          ) : visibleProjects.length === 0 ? (
+            <p className="px-1 text-xs text-text-subtle">
+              {t('sidebar.searchEmpty', { query: query.trim() })}
+            </p>
           ) : (
             <div className="flex flex-col gap-2">
-              {projects.map((project) => {
-                const isCollapsed = collapsed.has(project.path)
-                const canDragProject = project.path !== '(no folder)'
+              {visibleProjects.map((project) => {
+                // A search overrides collapse: a match inside a folded project
+                // would otherwise be invisible. Drag-reorder is off while
+                // filtering, since the visible subset is not the real order.
+                const isCollapsed = !searching && collapsed.has(project.path)
+                const canDragProject = project.path !== '(no folder)' && !searching
                 return (
                   <div
                     key={project.path}
@@ -647,7 +715,12 @@ export function Sidebar(): JSX.Element {
                           {project.sessions.map((chat) => {
                             const sending = !!sendingChats[chat.id] || !!runningAutomation[chat.id]
                             const subs = subsByParent.get(chat.id) ?? []
-                            const subsOpen = expandedSubs.has(chat.id)
+                            const subsOpen =
+                              expandedSubs.has(chat.id) ||
+                              (searching &&
+                                subs.some((sub) =>
+                                  matchesSessionQuery(terms, [project.name, sub.title])
+                                ))
                             // How many of this session's delegates are working
                             // right now — so a COLLAPSED parent still shows that
                             // something is happening underneath it.
@@ -662,7 +735,7 @@ export function Sidebar(): JSX.Element {
                                 key={chat.id}
                                 // Only the whole row is draggable when not renaming;
                                 // the inline input stays editable during a rename.
-                                draggable={editingId !== chat.id}
+                                draggable={editingId !== chat.id && !searching}
                                 onDragStart={(e) => {
                                   setDragId(chat.id)
                                   e.dataTransfer.effectAllowed = 'move'
