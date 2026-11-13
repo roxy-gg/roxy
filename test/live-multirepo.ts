@@ -164,6 +164,46 @@ async function main(): Promise<void> {
   const soloGone = await worktree.removeWorktreeForChat(solo.id, { force: true })
   check('single-repo: teardown still works', soloGone.ok, soloGone.error ?? '')
 
+  // Selecting a directory containing our source must not nest checkouts in it.
+  for (const source of [path.join(project, 'backend'), project]) {
+    check(
+      'root: source parent is a valid global base',
+      (await worktreeGit.setWorktreeRoot(path.dirname(source))).ok
+    )
+    const collision = repo.createChat({
+      title: 'Parent Collision',
+      workspacePath: source,
+      worktree: { mode: 'new' }
+    })
+    const result = await worktree.materializePendingWorktree(collision.id)
+    check(
+      'root: source-parent collision uses default',
+      result.ok &&
+        worktreeGit.canonicalPath(path.dirname(path.dirname(result.worktreePath!))) ===
+          worktreeGit.canonicalPath(path.join(sandbox, 'worktrees'))
+    )
+    check(
+      'root: source-parent collision keeps every repo clean',
+      ['backend', 'frontend', 'shared'].every(
+        (name) => git(['status', '--porcelain'], path.join(project, name)) === ''
+      )
+    )
+    check(
+      'root: collision teardown works',
+      (await worktree.removeWorktreeForChat(collision.id, { force: true })).ok
+    )
+  }
+  // A safe base can also contain an unrelated Git repository with the same name.
+  const unrelated = path.join(custom, 'backend')
+  git(['init', '-q'], unrelated)
+  await worktreeGit.setWorktreeRoot(custom)
+  check(
+    'root: same-name repository in custom base uses default',
+    (await worktreeGit.worktreePathFor(path.join(project, 'backend'), 'unrelated')) ===
+      path.join(sandbox, 'worktrees', 'backend', 'unrelated')
+  )
+  rmSync(path.join(unrelated, '.git'), { recursive: true, force: true })
+
   // ---- session + lazy materialization -------------------------------------
   const chat = repo.createChat({
     title: 'Cursed Ranoa King',
@@ -472,9 +512,6 @@ async function main(): Promise<void> {
   await worktreeGit.setWorktreeRoot(custom)
   repo.resetAll()
   check('root: factory reset clears custom location', repo.getSettings().worktreeRoot === null)
-
-  // Leave the sandbox on disk: the DB handle is still open and Windows will
-  // not unlink it. The OS temp dir is the right owner of that cleanup.
 
   if (fails.length) {
     console.error(`\nLIVE FAILED - ${fails.length} failing: ${fails.join(', ')}`)

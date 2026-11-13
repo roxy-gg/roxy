@@ -184,6 +184,9 @@ function execGit(
         windowsHide: true,
         env: {
           ...process.env,
+          // Stderr classifiers must not depend on the user's Git locale.
+          LC_ALL: 'C',
+          LANGUAGE: 'C',
           // Git must never stop for credentials or an editor: this runs headless
           // inside the app, and a prompt would hang the command until timeout.
           GIT_TERMINAL_PROMPT: '0',
@@ -976,8 +979,31 @@ export async function worktreePathFor(root: string, branch: string): Promise<str
   }
   if (custom) {
     const validated = await validateWorktreeRoot(custom)
-    if (validated.ok) base = validated.path
-    else console.warn('[worktree] Custom root unavailable; using default:', validated.error)
+    if (validated.ok) {
+      const projectDir = path.join(validated.path, path.basename(root))
+      const source = canonicalPath(path.resolve(root))
+      const destination = canonicalPath(projectDir)
+      const inside = (child: string, parent: string): boolean => {
+        const relative = path.relative(parent, child)
+        return (
+          relative === '' ||
+          (!path.isAbsolute(relative) && relative !== '..' && !relative.startsWith(`..${path.sep}`))
+        )
+      }
+      // The chosen base may be safe while base/<repo-name> aliases the source
+      // (or an unrelated repo). Check the actual parent before adding a checkout.
+      if (inside(destination, source) || inside(source, destination)) {
+        console.warn('[worktree] Custom root overlaps the project; using default')
+      } else {
+        const parent = await validateWorktreeRoot(projectDir)
+        if (parent.ok) base = validated.path
+        else
+          console.warn(
+            '[worktree] Custom project directory unavailable; using default:',
+            parent.error
+          )
+      }
+    } else console.warn('[worktree] Custom root unavailable; using default:', validated.error)
   }
   return path.join(base, path.basename(root), branchToDirName(branch))
 }
