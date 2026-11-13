@@ -808,6 +808,12 @@ export interface ConfigImportResult {
   error?: string
 }
 
+export type WorktreeRootError = 'notAbsolute' | 'notWritable' | 'insideRepo' | 'validationFailed'
+
+export type SetWorktreeRootResult =
+  | { ok: true; settings: AppSettings }
+  | { ok: false; error: WorktreeRootError }
+
 export interface RoxyApi {
   cheat: {
     state(): Promise<CheatState>
@@ -890,6 +896,9 @@ export interface RoxyApi {
     /** Notify when a turn finishes: chime + OS toast, or nothing. */
     setNotifyOnComplete(enabled: boolean): Promise<AppSettings>
     setNarreteEnabled(enabled: boolean): Promise<AppSettings>
+    /** Only changes where future worktrees are created; never moves existing ones. */
+    setWorktreeRoot(dir: string | null): Promise<SetWorktreeRootResult>
+    defaultWorktreeRoot(): Promise<string>
     /** Set the UI language. An unknown code falls back to English. */
     setLanguage(language: Language): Promise<AppSettings>
     setMotion(motion: MotionPreference): Promise<AppSettings>
@@ -1138,6 +1147,7 @@ export interface RoxyApi {
   }
   dialog: {
     openWorkspace(): Promise<string | null>
+    pickWorktreeRoot(): Promise<string | null>
   }
   config: {
     /** Export global skills + MCP configs to a file chosen via a save dialog. */

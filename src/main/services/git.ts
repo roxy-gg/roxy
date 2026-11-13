@@ -32,7 +32,7 @@ import {
   placeholderBranchName
 } from '../../shared/branch'
 import * as repo from '../db/repo'
-import type { RepoSyncTarget } from '../../shared/api'
+import type { RepoSyncTarget, SetWorktreeRootResult, WorktreeRootError } from '../../shared/api'
 
 /** How long any single git command may run before it's killed. */
 const GIT_TIMEOUT_MS = 30_000
@@ -955,8 +955,9 @@ function branchToDirName(branch: string): string {
 }
 
 /**
- * Where a worktree for `branch` lives: under the app's data dir, never inside
- * the repo. A worktree inside the repo would be walked by file watchers, picked
+ * Where a future worktree for `branch` lives: under the configured base directory
+ * (the app's data dir by default), never inside a repo. Nested worktrees are
+ * walked by file watchers, picked
  * up by glob/grep (the IGNORE list in harness/tools.ts doesn't know about it),
  * and would show up as an untracked directory in git status.
  *
@@ -965,9 +966,53 @@ function branchToDirName(branch: string): string {
  * land in one directory named for the project rather than N directories named
  * for each repo.
  */
-export function worktreePathFor(root: string, branch: string): string {
-  const base = app.getPath('userData')
-  return path.join(base, 'worktrees', path.basename(root), branchToDirName(branch))
+export async function worktreePathFor(root: string, branch: string): Promise<string> {
+  let base = defaultWorktreeRoot()
+  let custom: string | null = null
+  try {
+    custom = repo.getSettings().worktreeRoot
+  } catch {
+    // Early startup and tests without a DB keep the historical default.
+  }
+  if (custom) {
+    const validated = await validateWorktreeRoot(custom)
+    if (validated.ok) base = validated.path
+    else console.warn('[worktree] Custom root unavailable; using default:', validated.error)
+  }
+  return path.join(base, path.basename(root), branchToDirName(branch))
+}
+
+export function defaultWorktreeRoot(): string {
+  return path.join(app.getPath('userData'), 'worktrees')
+}
+
+/** Rechecked on creation: removable drives and directory permissions can change. */
+async function validateWorktreeRoot(
+  dir: string
+): Promise<{ ok: true; path: string } | { ok: false; error: WorktreeRootError }> {
+  if (typeof dir !== 'string' || !path.isAbsolute(dir)) return { ok: false, error: 'notAbsolute' }
+  try {
+    await fs.mkdir(dir, { recursive: true })
+    if (!(await fs.stat(dir)).isDirectory()) return { ok: false, error: 'notWritable' }
+    const resolved = canonicalPath(path.resolve(dir))
+    // --absolute-git-dir also detects bare repositories and .git directories.
+    const probe = await git(['rev-parse', '--absolute-git-dir'], resolved)
+    if (probe.ok) return { ok: false, error: 'insideRepo' }
+    if (!/not a git repository/i.test(probe.stderr)) return { ok: false, error: 'validationFailed' }
+    // Creating a directory proves we can create future checkouts here, unlike access(W_OK).
+    const temporary = await fs.mkdtemp(path.join(resolved, '.roxy-write-test-'))
+    await fs.rmdir(temporary)
+    return { ok: true, path: resolved }
+  } catch {
+    return { ok: false, error: 'notWritable' }
+  }
+}
+
+export async function setWorktreeRoot(dir: string | null): Promise<SetWorktreeRootResult> {
+  if (dir === null) return { ok: true, settings: repo.setWorktreeRoot(null) }
+  const validated = await validateWorktreeRoot(dir)
+  if (!validated.ok) return validated
+  return { ok: true, settings: repo.setWorktreeRoot(validated.path) }
 }
 
 /** Ensure the path is free, appending -2, -3, … if a directory already exists. */
@@ -1031,7 +1076,7 @@ export interface CreateWorktreeInput {
   requireNew?: boolean
   /** Commit-ish to branch from. Omitted -> freshly-fetched origin/<default>. */
   baseRef?: string
-  /** Explicit directory. Omitted -> the standard userData location. */
+  /** Explicit directory. Omitted -> the configured worktree location. */
   path?: string
   /**
    * Use `path` verbatim instead of de-duplicating it with a `-2` suffix.
@@ -1110,7 +1155,7 @@ export async function createWorktree(
     if (!baseRef) baseRef = 'HEAD'
   }
 
-  const desired = input.path ?? worktreePathFor(root, branch)
+  const desired = input.path ?? (await worktreePathFor(root, branch))
   const target = input.exactPath ? desired : await uniquePath(desired)
   if (signal?.aborted) return { ok: false, error: 'Stopped.' }
   // Once checkout starts, let git finish so cancellation cannot strand a half-created tree.
@@ -1160,7 +1205,7 @@ export async function attachWorktree(
   if (signal?.aborted) return { ok: false, error: 'Stopped.' }
   if (existing) return { ok: true, worktree: existing, attached: true }
 
-  const desired = input.path ?? worktreePathFor(root, branch)
+  const desired = input.path ?? (await worktreePathFor(root, branch))
   const target = input.exactPath ? desired : await uniquePath(desired)
   const localRef = await git(
     ['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`],

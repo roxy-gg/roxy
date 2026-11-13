@@ -310,6 +310,10 @@ export function registerIpc(): void {
   ipcMain.handle(CHANNELS.settingsSetNotifyOnComplete, (_e, enabled: boolean) =>
     repo.setNotifyOnComplete(enabled)
   )
+  ipcMain.handle(CHANNELS.settingsSetWorktreeRoot, (_e, dir: string | null) =>
+    git.setWorktreeRoot(dir)
+  )
+  ipcMain.handle(CHANNELS.settingsDefaultWorktreeRoot, () => git.defaultWorktreeRoot())
   ipcMain.handle(CHANNELS.settingsCompleteOnboarding, () => repo.completeOnboarding())
   ipcMain.handle(CHANNELS.settingsReset, async () => {
     await resetNotificationSounds()
@@ -1036,6 +1040,17 @@ export function registerIpc(): void {
   })
 
   // ---- dialogs ----
+  ipcMain.handle(CHANNELS.dialogPickWorktreeRoot, async (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    const options = {
+      defaultPath: repo.getSettings().worktreeRoot ?? git.defaultWorktreeRoot(),
+      properties: ['openDirectory', 'createDirectory'] as const
+    }
+    const result = win
+      ? await dialog.showOpenDialog(win, { ...options, properties: [...options.properties] })
+      : await dialog.showOpenDialog({ ...options, properties: [...options.properties] })
+    return result.canceled ? null : (result.filePaths[0] ?? null)
+  })
   ipcMain.handle(CHANNELS.dialogOpenWorkspace, async (event) => {
     const win = BrowserWindow.fromWebContents(event.sender)
     const options = {

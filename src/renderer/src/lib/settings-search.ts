@@ -215,6 +215,17 @@ export const SETTINGS_SEARCH = [
     target: 'settings-branch-prefix'
   },
   {
+    section: 'worktrees',
+    title: 'settings.workstreams.rootTitle',
+    description: 'settings.workstreams.rootDescription',
+    target: 'settings-worktree-root',
+    terms: [
+      'settings.workstreams.rootFootnote',
+      'settings.workstreams.rootChange',
+      'settings.workstreams.rootReset'
+    ]
+  },
+  {
     section: 'notifications',
     title: 'settings.notifications.completeTitle',
     description: 'settings.notifications.completeHint',

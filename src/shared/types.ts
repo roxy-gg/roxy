@@ -471,6 +471,8 @@ export interface AppSettings {
    * people prefer; it is a real choice, not a reason to reimpose the default.
    */
   branchPrefix: string
+  /** Base directory for future worktrees. Null keeps the app's default location. */
+  worktreeRoot: string | null
   /**
    * Language for Roxy's own interface. Defaults to English.
    *

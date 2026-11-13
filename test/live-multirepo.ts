@@ -63,6 +63,8 @@ async function main(): Promise<void> {
     require('../src/main/services/workspace') as typeof import('../src/main/services/workspace')
   const worktree =
     require('../src/main/services/worktree') as typeof import('../src/main/services/worktree')
+  const worktreeGit =
+    require('../src/main/services/git') as typeof import('../src/main/services/git')
 
   // ---- discovery ----------------------------------------------------------
   const scan = workspace.discoverRepos(project)
@@ -96,6 +98,68 @@ async function main(): Promise<void> {
   check(
     'single-repo: cwd is the worktree itself',
     workspace.sessionCwd(solo.id) === soloAfter.worktreePath
+  )
+  check('root: default is unchanged', repo.getSettings().worktreeRoot === null)
+  check(
+    'root: default worktree uses userData/worktrees',
+    soloAfter.worktreePath ===
+      worktreeGit.canonicalPath(
+        path.join(sandbox, 'worktrees', 'backend', soloAfter.branch!.replace(/\//g, '-'))
+      )
+  )
+  const custom = path.join(sandbox, 'custom worktrees')
+  const saved = await worktreeGit.setWorktreeRoot(custom)
+  check('root: accepts a writable custom directory with spaces', saved.ok)
+  check(
+    'root: setting persists',
+    repo.getSettings().worktreeRoot === worktreeGit.canonicalPath(custom)
+  )
+  check('root: validation leaves no temporary files', readdirSync(custom).length === 0)
+  check(
+    'root: changing settings does not move an existing session',
+    repo.getChat(solo.id)!.worktreePath === soloAfter.worktreePath &&
+      workspace.sessionCwd(solo.id) === soloAfter.worktreePath &&
+      existsSync(path.join(soloAfter.worktreePath!, 'README.md'))
+  )
+  const invalid = await worktreeGit.setWorktreeRoot('relative/path')
+  check('root: rejects relative paths', !invalid.ok && invalid.error === 'notAbsolute')
+  const nested = await worktreeGit.setWorktreeRoot(path.join(project, 'backend'))
+  check('root: rejects repository directories', !nested.ok && nested.error === 'insideRepo')
+  const metadata = await worktreeGit.setWorktreeRoot(path.join(project, 'backend', '.git'))
+  check('root: rejects Git metadata directories', !metadata.ok && metadata.error === 'insideRepo')
+  const notDirectory = path.join(sandbox, 'not-a-directory')
+  writeFileSync(notDirectory, 'file')
+  const unwritable = await worktreeGit.setWorktreeRoot(notDirectory)
+  check('root: rejects files', !unwritable.ok && unwritable.error === 'notWritable')
+  check(
+    'root: failed saves preserve selection',
+    repo.getSettings().worktreeRoot === worktreeGit.canonicalPath(custom)
+  )
+
+  const customSolo = repo.createChat({
+    title: 'Custom Solo',
+    workspacePath: path.join(project, 'backend'),
+    worktree: { mode: 'new' }
+  })
+  const customSoloResult = await worktree.materializePendingWorktree(customSolo.id)
+  const customSoloAfter = repo.getChat(customSolo.id)!
+  check(
+    'root: new single-repo worktrees use custom location',
+    customSoloResult.ok &&
+      path.dirname(path.dirname(customSoloAfter.worktreePath!)) ===
+        worktreeGit.canonicalPath(custom)
+  )
+  const reused = await worktreeGit.attachWorktree({
+    repoRoot: path.join(project, 'backend'),
+    branch: soloAfter.branch!
+  })
+  check(
+    'root: attaching an existing branch keeps its old path',
+    reused.attached === true && reused.worktree?.path === soloAfter.worktreePath
+  )
+  check(
+    'root: custom single teardown works',
+    (await worktree.removeWorktreeForChat(customSolo.id, { force: true })).ok
   )
   const soloGone = await worktree.removeWorktreeForChat(solo.id, { force: true })
   check('single-repo: teardown still works', soloGone.ok, soloGone.error ?? '')
@@ -131,6 +195,28 @@ async function main(): Promise<void> {
   )
 
   const composite = after.worktreePath!
+  check(
+    'root: composite worktrees also use custom location',
+    path.dirname(path.dirname(composite)) === worktreeGit.canonicalPath(custom)
+  )
+  const restored = await worktreeGit.setWorktreeRoot(null)
+  check(
+    'root: restore default clears the override',
+    restored.ok && repo.getSettings().worktreeRoot === null
+  )
+  check(
+    'root: restore does not move a live composite',
+    workspace.sessionCwd(chat.id) === composite && existsSync(composite)
+  )
+  const unavailableRoot = path.join(sandbox, 'unavailable-root')
+  writeFileSync(unavailableRoot, 'not a directory')
+  repo.setWorktreeRoot(unavailableRoot)
+  check(
+    'root: unavailable custom roots fall back to the default',
+    (await worktreeGit.worktreePathFor(project, 'fallback')) ===
+      path.join(sandbox, 'worktrees', 'project', 'fallback')
+  )
+  await worktreeGit.setWorktreeRoot(null)
   check(
     'layout: the composite holds one dir per repo',
     readdirSync(composite).sort().join(',') === 'backend,frontend,shared',
@@ -371,6 +457,24 @@ async function main(): Promise<void> {
     'fresh: off retains existing offline behavior',
     (await worktree.materializePendingWorktree(fallback.id)).ok
   )
+  const defaultAgain = await worktreeGit.createWorktree({
+    repoRoot: path.join(project, 'backend'),
+    branch: 'restored-default'
+  })
+  check(
+    'root: creation after restore uses default',
+    defaultAgain.ok &&
+      defaultAgain.worktree?.path ===
+        worktreeGit.canonicalPath(path.join(sandbox, 'worktrees', 'backend', 'restored-default'))
+  )
+  if (defaultAgain.worktree)
+    await worktreeGit.removeWorktree(defaultAgain.worktree.path, { force: true })
+  await worktreeGit.setWorktreeRoot(custom)
+  repo.resetAll()
+  check('root: factory reset clears custom location', repo.getSettings().worktreeRoot === null)
+
+  // Leave the sandbox on disk: the DB handle is still open and Windows will
+  // not unlink it. The OS temp dir is the right owner of that cleanup.
 
   if (fails.length) {
     console.error(`\nLIVE FAILED - ${fails.length} failing: ${fails.join(', ')}`)

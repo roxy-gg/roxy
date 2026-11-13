@@ -296,7 +296,9 @@ async function createComposite(
     if (signal?.aborted) return { ok: false }
 
     // Named for the PROJECT, not for any one repo — the composite holds them all.
-    const compositeRoot = await git.reserveWorktreePath(git.worktreePathFor(workspace, branch))
+    const compositeRoot = await git.reserveWorktreePath(
+      await git.worktreePathFor(workspace, branch)
+    )
     const planned = planRepoLinks(compositeRoot, roots, branch, path)
 
     const links: RepoLink[] = []
