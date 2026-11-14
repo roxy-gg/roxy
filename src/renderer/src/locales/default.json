@@ -958,6 +958,17 @@
       "freshDescription": "Power-user option. On the first message, fetch origin and start the new workstream exactly at origin/main (or the repository's default branch). If the remote cannot be refreshed, the session waits for you to retry instead of using stale code.",
       "freshFootnote": "Off by default. Only applies to new workstreams, not sessions in the project folder, forks, selected branches, or existing workstreams. Your project folder and other sessions are never reset.",
       "autoDescription": "Each session works in its own git worktree on its own branch, so parallel sessions can't overwrite each other or fight with your editor. The folder is created on the session's first message, and only in git repositories. Turn this off to run new sessions directly in the project folder.",
+      "rootTitle": "Worktree location",
+      "rootParentDescription": "Path for future worktrees. Choose a parent folder and Roxy will create a roxy subfolder inside it for new worktrees. The final path is shown below.",
+      "rootChange": "Change folder",
+      "rootReset": "Restore default",
+      "rootFootnote": "Existing worktrees stay in their current location and are not moved. If the selected folder becomes unavailable, new worktrees use the default location.",
+      "rootError": {
+        "notAbsolute": "Choose an absolute folder path.",
+        "notWritable": "This folder cannot be created or is not writable. Choose another folder.",
+        "insideRepo": "Choose a folder outside any Git repository to avoid nested worktrees.",
+        "validationFailed": "The folder could not be verified. Check that Git is available and try again."
+      },
       "prefixTitle": "Branch prefix",
       "prefixDescription": "New workstreams get a branch named after the session. This is what goes in front of it — use your initials, <code>wip</code>, or clear it for no prefix at all.",
       "prefixPlaceholder": "no prefix",
