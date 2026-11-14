@@ -1050,7 +1050,8 @@ export function registerIpc(): void {
       ? await dialog.showOpenDialog(win, { ...options, properties: [...options.properties] })
       : await dialog.showOpenDialog({ ...options, properties: [...options.properties] })
     const selected = result.canceled ? null : result.filePaths[0]
-    return selected ? path.join(selected, 'roxy') : null
+    if (!selected) return null
+    return path.basename(selected).toLowerCase() === 'roxy' ? selected : path.join(selected, 'roxy')
   })
   ipcMain.handle(CHANNELS.dialogOpenWorkspace, async (event) => {
     const win = BrowserWindow.fromWebContents(event.sender)

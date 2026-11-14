@@ -55,6 +55,15 @@ for (const [paths, parent, defaultRoot] of [
   )
   window = null
   assert.equal(await pick({ sender: {} }), finalPath, 'works without a parent window')
+  for (const name of ['roxy', 'ROXY']) {
+    const existing = paths.join(parent, name)
+    result = { canceled: false, filePaths: [existing] }
+    assert.equal(
+      await pick({ sender: {} }),
+      existing,
+      'reuse a selected roxy folder without nesting'
+    )
+  }
   result = { canceled: true, filePaths: [parent] }
   assert.equal(await pick({ sender: {} }), null, 'cancel does not change the location')
   result = { canceled: false, filePaths: [] }

@@ -137,6 +137,23 @@ async function main(): Promise<void> {
   check('root: rejects relative paths', !invalid.ok && invalid.error === 'notAbsolute')
   const nested = await worktreeGit.setWorktreeRoot(path.join(project, 'backend'))
   check('root: rejects repository directories', !nested.ok && nested.error === 'insideRepo')
+  const rejectedPath = path.join(project, 'backend', 'roxy')
+  const rejected = await worktreeGit.setWorktreeRoot(rejectedPath)
+  check(
+    'root: rejects a new subfolder inside a repository',
+    !rejected.ok && rejected.error === 'insideRepo'
+  )
+  check('root: rejected selection leaves no new roxy folder', !existsSync(rejectedPath))
+  mkdirSync(rejectedPath)
+  await worktreeGit.setWorktreeRoot(rejectedPath)
+  check('root: rejection preserves a pre-existing empty folder', existsSync(rejectedPath))
+  writeFileSync(path.join(rejectedPath, 'keep.txt'), 'existing data')
+  await worktreeGit.setWorktreeRoot(rejectedPath)
+  check(
+    'root: rejection preserves existing contents',
+    readFileSync(path.join(rejectedPath, 'keep.txt'), 'utf8') === 'existing data'
+  )
+  rmSync(rejectedPath, { recursive: true })
   const metadata = await worktreeGit.setWorktreeRoot(path.join(project, 'backend', '.git'))
   check('root: rejects Git metadata directories', !metadata.ok && metadata.error === 'insideRepo')
   const notDirectory = path.join(sandbox, 'not-a-directory')

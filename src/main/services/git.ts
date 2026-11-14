@@ -1017,8 +1017,11 @@ async function validateWorktreeRoot(
   dir: string
 ): Promise<{ ok: true; path: string } | { ok: false; error: WorktreeRootError }> {
   if (typeof dir !== 'string' || !path.isAbsolute(dir)) return { ok: false, error: 'notAbsolute' }
+  let created: string | undefined
+  let temporary: string | undefined
+  let valid = false
   try {
-    await fs.mkdir(dir, { recursive: true })
+    created = await fs.mkdir(dir, { recursive: true })
     if (!(await fs.stat(dir)).isDirectory()) return { ok: false, error: 'notWritable' }
     const resolved = canonicalPath(path.resolve(dir))
     // --absolute-git-dir also detects bare repositories and .git directories.
@@ -1026,11 +1029,18 @@ async function validateWorktreeRoot(
     if (probe.ok) return { ok: false, error: 'insideRepo' }
     if (!/not a git repository/i.test(probe.stderr)) return { ok: false, error: 'validationFailed' }
     // Creating a directory proves we can create future checkouts here, unlike access(W_OK).
-    const temporary = await fs.mkdtemp(path.join(resolved, '.roxy-write-test-'))
+    temporary = await fs.mkdtemp(path.join(resolved, '.roxy-write-test-'))
     await fs.rmdir(temporary)
+    temporary = undefined
+    valid = true
     return { ok: true, path: resolved }
   } catch {
     return { ok: false, error: 'notWritable' }
+  } finally {
+    if (temporary) await fs.rmdir(temporary).catch(() => {})
+    // Only remove our newly created, still-empty directory on validation failure.
+    // Never delete an existing folder or anything another process put inside it.
+    if (!valid && created) await fs.rmdir(dir).catch(() => {})
   }
 }
 
