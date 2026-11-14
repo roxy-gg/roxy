@@ -1147,6 +1147,7 @@ export interface RoxyApi {
   }
   dialog: {
     openWorkspace(): Promise<string | null>
+    /** Pick a parent folder and return its dedicated roxy subfolder for validation and creation. */
     pickWorktreeRoot(): Promise<string | null>
   }
   config: {

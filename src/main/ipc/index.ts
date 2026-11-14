@@ -1043,13 +1043,14 @@ export function registerIpc(): void {
   ipcMain.handle(CHANNELS.dialogPickWorktreeRoot, async (event) => {
     const win = BrowserWindow.fromWebContents(event.sender)
     const options = {
-      defaultPath: repo.getSettings().worktreeRoot ?? git.defaultWorktreeRoot(),
+      defaultPath: path.dirname(repo.getSettings().worktreeRoot ?? git.defaultWorktreeRoot()),
       properties: ['openDirectory', 'createDirectory'] as const
     }
     const result = win
       ? await dialog.showOpenDialog(win, { ...options, properties: [...options.properties] })
       : await dialog.showOpenDialog({ ...options, properties: [...options.properties] })
-    return result.canceled ? null : (result.filePaths[0] ?? null)
+    const selected = result.canceled ? null : result.filePaths[0]
+    return selected ? path.join(selected, 'roxy') : null
   })
   ipcMain.handle(CHANNELS.dialogOpenWorkspace, async (event) => {
     const win = BrowserWindow.fromWebContents(event.sender)

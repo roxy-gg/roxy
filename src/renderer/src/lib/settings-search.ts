@@ -217,7 +217,7 @@ export const SETTINGS_SEARCH = [
   {
     section: 'worktrees',
     title: 'settings.workstreams.rootTitle',
-    description: 'settings.workstreams.rootDescription',
+    description: 'settings.workstreams.rootParentDescription',
     target: 'settings-worktree-root',
     terms: [
       'settings.workstreams.rootFootnote',

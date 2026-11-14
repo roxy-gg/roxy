@@ -868,7 +868,7 @@ export default function Settings(): JSX.Element {
               {t('settings.workstreams.rootTitle')}
             </div>
             <p className="mt-0.5 text-xs text-text-muted">
-              {t('settings.workstreams.rootDescription')}
+              {t('settings.workstreams.rootParentDescription')}
             </p>
             <div className="mt-3 break-all rounded-lg border border-border bg-surface-2 px-3 py-2 font-mono text-xs text-text">
               {settings?.worktreeRoot ?? (defaultWorktreeRoot || t('common.dash'))}

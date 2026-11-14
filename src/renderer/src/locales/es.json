@@ -1072,7 +1072,6 @@
       "prefixPlaceholder": "sin prefijo",
       "prefixTitle": "Prefijo de rama",
       "rootChange": "Change folder",
-      "rootDescription": "Path for future worktrees. Choose where new worktrees will be created after this change.",
       "rootError": {
         "insideRepo": "Choose a folder outside any Git repository to avoid nested worktrees.",
         "notAbsolute": "Choose an absolute folder path.",
@@ -1080,6 +1079,7 @@
         "validationFailed": "The folder could not be verified. Check that Git is available and try again."
       },
       "rootFootnote": "Existing worktrees stay in their current location and are not moved. If the selected folder becomes unavailable, new worktrees use the default location.",
+      "rootParentDescription": "Path for future worktrees. Choose a parent folder and Roxy will create a roxy subfolder inside it for new worktrees. The final path is shown below.",
       "rootReset": "Restore default",
       "rootTitle": "Worktree location",
       "setupDescription": "Optional shell command to run in each newly created worktree, across all projects. Leave empty to run nothing. Runs in the background without waiting for it to finish.",

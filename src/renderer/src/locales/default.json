@@ -959,7 +959,7 @@
       "freshFootnote": "Off by default. Only applies to new workstreams, not sessions in the project folder, forks, selected branches, or existing workstreams. Your project folder and other sessions are never reset.",
       "autoDescription": "Each session works in its own git worktree on its own branch, so parallel sessions can't overwrite each other or fight with your editor. The folder is created on the session's first message, and only in git repositories. Turn this off to run new sessions directly in the project folder.",
       "rootTitle": "Worktree location",
-      "rootDescription": "Path for future worktrees. Choose where new worktrees will be created after this change.",
+      "rootParentDescription": "Path for future worktrees. Choose a parent folder and Roxy will create a roxy subfolder inside it for new worktrees. The final path is shown below.",
       "rootChange": "Change folder",
       "rootReset": "Restore default",
       "rootFootnote": "Existing worktrees stay in their current location and are not moved. If the selected folder becomes unavailable, new worktrees use the default location.",

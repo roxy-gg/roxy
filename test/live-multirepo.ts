@@ -107,9 +107,21 @@ async function main(): Promise<void> {
         path.join(sandbox, 'worktrees', 'backend', soloAfter.branch!.replace(/\//g, '-'))
       )
   )
-  const custom = path.join(sandbox, 'custom worktrees')
+  const customParent = path.join(sandbox, 'custom worktrees')
+  const custom = path.join(customParent, 'roxy')
   const saved = await worktreeGit.setWorktreeRoot(custom)
   check('root: accepts a writable custom directory with spaces', saved.ok)
+  check('root: saving creates the dedicated roxy subfolder', existsSync(custom))
+  writeFileSync(path.join(custom, 'keep.txt'), 'keep existing contents')
+  check(
+    'root: an existing roxy subfolder is reused',
+    (await worktreeGit.setWorktreeRoot(custom)).ok
+  )
+  check(
+    'root: reusing the folder preserves contents',
+    readFileSync(path.join(custom, 'keep.txt'), 'utf8') === 'keep existing contents'
+  )
+  rmSync(path.join(custom, 'keep.txt'))
   check(
     'root: setting persists',
     repo.getSettings().worktreeRoot === worktreeGit.canonicalPath(custom)
