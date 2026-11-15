@@ -20,7 +20,7 @@ import {
 } from '@shared/voice'
 import { api } from '../lib/api'
 import { useVoiceState } from '../lib/voice'
-import { Button, Input } from './ui'
+import { Button, Input, selectableCard } from './ui'
 import { cn } from '../lib/cn'
 
 export function VoiceSettings(): JSX.Element {
@@ -121,13 +121,7 @@ export function VoiceSettings(): JSX.Element {
             const job = state.download?.modelId === model.id ? state.download : null
             const percent = job ? Math.floor((job.received / job.total) * 100) : 0
             return (
-              <article
-                key={model.id}
-                className={cn(
-                  'rounded-xl border p-4',
-                  active ? 'border-accent/60 bg-accent/5' : 'border-border bg-surface'
-                )}
-              >
+              <article key={model.id} className={cn('p-4', selectableCard(active))}>
                 <div className="flex flex-wrap items-center gap-2">
                   <h3 className="text-sm font-medium text-text">{model.name}</h3>
                   {active && (

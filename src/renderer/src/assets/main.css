@@ -731,6 +731,12 @@ body {
   padding-right: 144px;
 }
 
+/* Keep secondary navigation aligned with its sidebar, below the traffic lights. */
+[data-platform='darwin'] .page-sidebar-header {
+  height: 104px;
+  padding-top: 48px;
+}
+
 /* On macOS the native traffic lights own the top-left corner. Rather than crowd
    them with the in-app Roxy logo (which looks tacky butted up against the
    traffic lights), hide the brand entirely on mac and let the header controls

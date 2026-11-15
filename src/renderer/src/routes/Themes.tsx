@@ -23,7 +23,7 @@ import {
 } from '@shared/theme'
 import { api } from '../lib/api'
 import { cn } from '../lib/cn'
-import { Button, Textarea } from '../components/ui'
+import { Button, Textarea, selectableCard } from '../components/ui'
 import { ColorPicker } from '../components/ColorPicker'
 
 export default function Themes(): JSX.Element {
@@ -418,14 +418,7 @@ function ThemeCard({
 }): JSX.Element {
   const { t } = useTranslation()
   return (
-    <div
-      className={cn(
-        'group flex flex-col gap-3 sq sq-xl sq-ring rounded-xl border bg-surface p-4 transition',
-        active
-          ? 'border-accent/50 [--sq-ring:color-mix(in_srgb,var(--color-accent)_50%,transparent)]'
-          : 'border-border'
-      )}
-    >
+    <div className={cn('group flex flex-col gap-3 p-4', selectableCard(active))}>
       <div className="flex items-start gap-3">
         <div className="flex h-9 w-9 shrink-0 items-center justify-center sq sq-lg sq-ring rounded-lg border border-border bg-surface-2">
           <Palette className="h-4 w-4 text-text-muted" />
