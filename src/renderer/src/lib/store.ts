@@ -23,6 +23,7 @@ import type {
   RemoteDelta,
   RemoteState,
   SessionsUpdated,
+  SetWorktreeRootResult,
   SubagentDelta
 } from '@shared/api'
 import { selectPromptName, buildEnvironment, assembleSystemPrompt } from '@shared/prompt'
@@ -258,6 +259,7 @@ interface RoxyStore {
   setBranchPrefix: (prefix: string) => Promise<void>
   setNotifyOnComplete: (enabled: boolean) => Promise<void>
   setNarreteEnabled: (enabled: boolean) => Promise<void>
+  setWorktreeRoot: (dir: string | null) => Promise<SetWorktreeRootResult>
   setLanguage: (language: Language) => Promise<void>
   setMotion: (preference: MotionPreference) => Promise<void>
   selectChat: (id: string) => Promise<void>
@@ -2058,6 +2060,12 @@ export const useRoxyStore = create<RoxyStore>((set, get) => ({
   setBranchPrefix: async (prefix) => {
     const settings = await api.settings.setBranchPrefix(prefix)
     set({ settings })
+  },
+
+  setWorktreeRoot: async (dir) => {
+    const result = await api.settings.setWorktreeRoot(dir)
+    if (result.ok) set({ settings: result.settings })
+    return result
   },
 
   setMotion: async (preference) => {

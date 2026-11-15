@@ -131,6 +131,7 @@ export function getSettings(): AppSettings {
     // `?? DEFAULT` and not `|| DEFAULT`: an EMPTY string is a deliberate
     // "no prefix", and must survive a round trip through settings.
     branchPrefix: map.get('branch_prefix') ?? DEFAULT_BRANCH_PREFIX,
+    worktreeRoot: map.get('worktree_root') ?? null,
     // Normalised on the way OUT as well as in: a row written by an older build
     // (or a language later dropped from the app) must degrade to English rather
     // than leave the UI rendering raw keys.
@@ -245,6 +246,12 @@ export function setBranchPrefix(prefix: string): AppSettings {
 export function setWorktreeSetupCommand(command: string): AppSettings {
   if (typeof command !== 'string') throw new Error('Expected a worktree setup command string.')
   setSetting('worktree_setup_command', command.trim() || null)
+  return getSettings()
+}
+
+/** The caller validates and canonicalizes custom paths before persisting them. */
+export function setWorktreeRoot(dir: string | null): AppSettings {
+  setSetting('worktree_root', dir)
   return getSettings()
 }
 

@@ -66,6 +66,9 @@ jobs:
       - name: Settings search matching, ranking and locale suite
         run: npm run smoke:settings-search
 
+      - name: Worktree location picker suite
+        run: npm run smoke:worktree-location
+
       - name: Notification presentation and activation suite
         run: npm run smoke:notifications
 

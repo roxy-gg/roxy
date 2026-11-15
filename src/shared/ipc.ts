@@ -54,6 +54,8 @@ export const CHANNELS = {
   settingsSetFreshWorkstream: 'settings:setFreshWorkstream',
   settingsSetWorktreeSetupCommand: 'settings:setWorktreeSetupCommand',
   settingsSetBranchPrefix: 'settings:setBranchPrefix',
+  settingsSetWorktreeRoot: 'settings:setWorktreeRoot',
+  settingsDefaultWorktreeRoot: 'settings:defaultWorktreeRoot',
   settingsSetLanguage: 'settings:setLanguage',
   settingsSetMotion: 'settings:setMotion',
   settingsMotionChanged: 'settings:motionChanged',
@@ -200,6 +202,7 @@ export const CHANNELS = {
   cliproxyState: 'cliproxy:state',
 
   dialogOpenWorkspace: 'dialog:openWorkspace',
+  dialogPickWorktreeRoot: 'dialog:pickWorktreeRoot',
 
   /** Portable backup: export/import global skills + MCP configs to a file. */
   configExport: 'config:export',
