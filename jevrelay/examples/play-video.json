@@ -1,0 +1,50 @@
+{
+  "version": 1,
+  "name": "play-video",
+  "permissions": {
+    "origins": ["https://www.youtube.com"]
+  },
+  "inputs": {
+    "query": "Roxy"
+  },
+  "steps": [
+    {
+      "action": "browser.goto",
+      "url": "https://www.youtube.com"
+    },
+    {
+      "action": "browser.fill",
+      "target": { "role": "combobox", "name": "Search" },
+      "value": "${input.query}"
+    },
+    {
+      "action": "browser.press",
+      "target": { "role": "combobox", "name": "Search" },
+      "key": "Enter"
+    },
+    {
+      "action": "browser.extract",
+      "target": { "selector": "ytd-video-renderer" },
+      "fields": ["id", "title"],
+      "saveAs": "videos"
+    },
+    {
+      "decide": {
+        "state": "${vars.videos}",
+        "question": "Which video best matches the user's request?",
+        "optionsFrom": "videos.id",
+        "minimumConfidence": 0.7,
+        "saveAs": "videoId"
+      }
+    },
+    {
+      "action": "browser.click",
+      "target": { "id": "${vars.videoId}" }
+    },
+    {
+      "action": "browser.assert",
+      "target": { "selector": "video" },
+      "state": "playing"
+    }
+  ]
+}
