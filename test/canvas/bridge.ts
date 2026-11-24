@@ -105,6 +105,7 @@ window.roxy = {
   },
   settings: {
     getAll: async () => ({ motion: normalizeMotion(localStorage.getItem('roxy.test.motion')) }),
+    defaultWorktreeRoot: async () => '/test/worktrees',
     setMotion: async (value: MotionPreference) => {
       if (window.__canvasTest.motionSaveFails) throw new Error('Test motion write failure')
       const motion = normalizeMotion(value)
