@@ -163,6 +163,7 @@ window.roxy.settings.setWorktreeSetupCommand = async (command) => ({
   ...useRoxyStore.getState().settings!,
   worktreeSetupCommand: command.trim()
 })
+window.roxy.settings.defaultWorktreeRoot = async () => '/tmp/worktrees'
 
 let activeId = DEFAULT_THEME_ID
 const custom: ThemeFile[] = []
