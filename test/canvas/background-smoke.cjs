@@ -475,7 +475,10 @@ async function run() {
       { name: 'prefers-reduced-motion', value: 'reduce' }
     ]
   })
+  // The motion switch first paints the undithered still, then the worker swaps
+  // in the dithered blob. Wait for the blob, or the sample below races it.
   await until(`document.documentElement.dataset.motion === 'reduced' && !document.querySelector('[aria-live="polite"]').textContent
+    && document.querySelector('#main-sidebar-harness .chat-wallpaper-shared img')?.src.startsWith('blob:')
     && document.querySelector('#main-sidebar-harness .chat-wallpaper-shared img')?.src !== ${JSON.stringify(sharedSource)}`)
   assert.equal(
     await evaluate(`const bytes=new Uint8Array(await (await fetch(document.querySelector('#main-sidebar-harness .chat-wallpaper-shared img').src)).arrayBuffer());
@@ -632,6 +635,8 @@ async function run() {
     42
   )
   await click('#background-glass')
+  // click() only sleeps a fixed 120ms; wait for the re-render, not for the clock.
+  await until(`document.querySelector('[data-wallpaper]')`)
   assert.equal(
     await evaluate(`return document.querySelector('[data-wallpaper]').hasAttribute('data-glass')`),
     false
@@ -987,6 +992,8 @@ async function run() {
       'blur(12px) saturate(0.85)'
     )
     await click('#settings-activity')
+    // The section swap remounts the host; click()'s fixed sleep can land first.
+    await until(`document.querySelector('${settingsHost}')`)
     assert.ok(
       await evaluate(
         `return document.querySelector('${settingsHost}').hasAttribute('data-wallpaper')`
