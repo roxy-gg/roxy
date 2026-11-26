@@ -953,7 +953,8 @@ async function runEdit(
   if (count > 1) {
     return { ok: false, output: `edit: "oldString" matches ${count}× in ${p}; make it unique` }
   }
-  const after = content.replace(oldString, newString)
+  // A function replacer keeps `$&`, `$$`, ... in newString as literal text.
+  const after = content.replace(oldString, () => newString)
   await fs.writeFile(abs, after, 'utf8')
   return withDiagnostics(
     { ok: true, output: `Edited ${p}`, diff: toolDiff(p, content, after) },
