@@ -882,6 +882,12 @@ async function main(): Promise<void> {
     edited.diff?.before === 'world' && edited.diff?.after === 'WORLD'
   )
   check('edit applied', (await run('read', { path: 'hello.txt' })).output === 'WORLD')
+  // `$` patterns in newString ($$, $&, $', $`) are written as-is, not expanded.
+  const dollarText = "let { ...rest } = $$props; s.replace(/x/, '$&') + `$'` + '$`'"
+  await run('write', { path: 'dollar.txt', content: 'before\nOLD\nafter' })
+  await run('edit', { path: 'dollar.txt', oldString: 'OLD', newString: dollarText })
+  const dollarRead = (await run('read', { path: 'dollar.txt' })).output
+  check('edit keeps $ in newString', dollarRead === `before\n${dollarText}\nafter`, dollarRead)
   // Image files render inline (data URL) instead of dumping raw bytes as text.
   const png1x1 =
     'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='
