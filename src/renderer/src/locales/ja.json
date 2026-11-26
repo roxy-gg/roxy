@@ -428,9 +428,13 @@
     "wrap": "折り返し"
   },
   "engineering": {
+    "advancedMode": "Advanced mode",
+    "advancedModeBody": "Show the individual tool-call switches for fine-grained control. Most people can leave this off.",
     "batch": "ツール {{total}}中{{current}}",
     "callCount_one": "共有エビデンストールを含む{{count}}件のツール呼び出し",
     "callCount_other": "共有エビデンストールを含む{{count}}件のツール呼び出し",
+    "categories": "Tool families",
+    "categoriesBody": "Turn a family on or off to choose which tools are available to the agent. Most people can leave these on.",
     "dependencies": {
       "adb": "Android Platform-Tools 37.0.1とREAが含まれます。デバイスの認証とUSBデバッグの有効化は別途必要です。エミュレーターやAndroid SDKはインストールされません。",
       "frida": "Frida 17.23.2のネイティブNodeバインディングをインストールします。リモートデバイスには、別途一致するFridaサーバーのインストールが必要な場合があります。Fridaインストールスクリプトのみ実行が許可されます。",
@@ -888,6 +892,11 @@
       "turns_one": "この期間のターン",
       "turns_other": "この期間のターン"
     },
+    "addons": {
+      "body": "Optional add-ons that extend Roxy. Pick one to set it up.",
+      "cheatDescription": "In-game memory tools for supported titles.",
+      "engineeringDescription": "Native analysis for shipped apps, binaries, Android, and saved captures."
+    },
     "backup": {
       "description": "グローバルスキルとMCPサーバー設定を単一のファイルにエクスポートし、別のコンピューターにインポートして同じように設定します。インポートすると、同じ名前のスキル/サーバーが上書きされます。",
       "heading": "バックアップと復元",
@@ -959,6 +968,7 @@
       "activity": "アクティビティ",
       "activityEmpty": "最初のエージェント応答後にアクティビティが表示されます。",
       "addOns": "アドオン",
+      "addons": "Add-Ons",
       "colors": "色",
       "general": "一般",
       "openRemote": "リモートアクセスを管理",

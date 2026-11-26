@@ -111,6 +111,10 @@
       "checking": "Checking native tool catalog"
     },
     "details": "Detailed View: Dependencies and Tool Calls",
+    "advancedMode": "Advanced mode",
+    "advancedModeBody": "Show the individual tool-call switches for fine-grained control. Most people can leave this off.",
+    "categories": "Tool families",
+    "categoriesBody": "Turn a family on or off to choose which tools are available to the agent. Most people can leave these on.",
     "installed": "Installed",
     "notInstalled": "Not installed",
     "unsupported": "Unsupported on this platform",
@@ -812,6 +816,7 @@
     "navigation": {
       "theme": "Theme",
       "addOns": "Add-Ons",
+      "addons": "Add-Ons",
       "general": "General",
       "colors": "Colors",
       "sidebar": "Sidebar",
@@ -990,6 +995,11 @@
     },
     "mcp": {
       "heading": "MCP servers"
+    },
+    "addons": {
+      "body": "Optional add-ons that extend Roxy. Pick one to set it up.",
+      "engineeringDescription": "Native analysis for shipped apps, binaries, Android, and saved captures.",
+      "cheatDescription": "In-game memory tools for supported titles."
     },
     "backup": {
       "heading": "Backup & restore",

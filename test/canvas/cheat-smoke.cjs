@@ -46,16 +46,24 @@ app
       if (level >= 3) errors.push(text)
     })
     await win.loadURL('http://127.0.0.1:3117/?appearance')
-    await until(`!!document.querySelector('#settings-cheat')`)
+    await until(`!!document.querySelector('#settings-addons')`)
     assert.equal(await evaluate(`return !!document.querySelector('#settings-anti-cheat')`), false)
-    await click('#settings-cheat')
+    await click('#settings-addons')
+    await until(`!!document.querySelector('[data-addon-card="cheat"]')`)
+    await click('[data-addon-card="cheat"]')
     await until(`!!document.querySelector('[data-cheat-control] [role="switch"]')`)
-    assert(await evaluate(`return !!document.querySelector('#settings-cheat .lucide-scan-line')`))
+    assert(
+      await evaluate(
+        `return !!document.querySelector('[data-addon-card="cheat"] .lucide-scan-line')`
+      )
+    )
     assert(
       await evaluate(`return !!document.querySelector('[data-cheat-control] .lucide-scan-line')`)
     )
     assert(
-      await evaluate(`return !!document.querySelector('#settings-engineering .lucide-scan-eye')`)
+      await evaluate(
+        `return !!document.querySelector('[data-addon-card="engineering"] .lucide-scan-eye')`
+      )
     )
     const source = '/@fs/' + path.resolve(__dirname, '../../src').replaceAll('\\', '/')
     const icons = await evaluate(`
@@ -95,8 +103,10 @@ app
       matchesHeader: true
     })
     assert.equal(
-      await evaluate(`return document.querySelector('#settings-cheat').textContent.trim()`),
-      'Cheat Engineering Tools'
+      await evaluate(
+        `return document.querySelector('[data-addon-card="cheat"]').textContent.includes('Cheat Engineering Tools')`
+      ),
+      true
     )
     assert.equal(
       await evaluate(`return document.querySelector('[data-cheat-tools] h2').textContent`),
@@ -187,7 +197,9 @@ app
       ).includes('No UI confirmation, approval ID or expiry is required')
     )
     await click('#settings-about')
-    await click('#settings-cheat')
+    await click('#settings-addons')
+    await until(`!!document.querySelector('[data-addon-card="cheat"]')`)
+    await click('[data-addon-card="cheat"]')
     assert.equal(
       await evaluate(
         `return document.querySelector(${JSON.stringify(control)}).getAttribute('aria-checked')`

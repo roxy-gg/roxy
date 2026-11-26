@@ -428,9 +428,13 @@
     "wrap": "换行"
   },
   "engineering": {
+    "advancedMode": "Advanced mode",
+    "advancedModeBody": "Show the individual tool-call switches for fine-grained control. Most people can leave this off.",
     "batch": "工具 {{current}} / {{total}}",
     "callCount_one": "{{count}} 个工具调用，包括共享证据工具",
     "callCount_other": "{{count}} 个工具调用，包括共享证据工具",
+    "categories": "Tool families",
+    "categoriesBody": "Turn a family on or off to choose which tools are available to the agent. Most people can leave these on.",
     "dependencies": {
       "adb": "包括 Android Platform-Tools 37.0.1 和 REA。您仍需授权设备并启用 USB 调试。未安装模拟器或 Android SDK。",
       "frida": "安装 Frida 17.23.2 的原生 Node 绑定。远程设备可能需要单独安装匹配的 Frida 服务器。只允许运行 Frida 安装脚本。",
@@ -888,6 +892,11 @@
       "turns_one": "此期间的轮次",
       "turns_other": "此期间的轮次"
     },
+    "addons": {
+      "body": "Optional add-ons that extend Roxy. Pick one to set it up.",
+      "cheatDescription": "In-game memory tools for supported titles.",
+      "engineeringDescription": "Native analysis for shipped apps, binaries, Android, and saved captures."
+    },
     "backup": {
       "description": "将您的全局技能和 MCP 服务器配置导出到单个文件，然后在另一台计算机上导入以进行相同的设置。导入会覆盖同名的技能/服务器。",
       "heading": "备份与恢复",
@@ -959,6 +968,7 @@
       "activity": "活动",
       "activityEmpty": "您的活动将在您的第一个代理响应后显示在此处。",
       "addOns": "附加组件",
+      "addons": "Add-Ons",
       "colors": "颜色",
       "general": "通用",
       "openRemote": "管理远程访问",

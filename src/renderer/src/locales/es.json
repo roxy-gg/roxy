@@ -428,9 +428,13 @@
     "wrap": "Ajustar"
   },
   "engineering": {
+    "advancedMode": "Advanced mode",
+    "advancedModeBody": "Show the individual tool-call switches for fine-grained control. Most people can leave this off.",
     "batch": "Herramienta {{current}} de {{total}}",
     "callCount_one": "{{count}} llamada a herramienta, incluyendo herramientas de evidencia compartida",
     "callCount_other": "{{count}} llamadas a herramientas, incluyendo herramientas de evidencia compartida",
+    "categories": "Tool families",
+    "categoriesBody": "Turn a family on or off to choose which tools are available to the agent. Most people can leave these on.",
     "dependencies": {
       "adb": "Incluye Android Platform-Tools 37.0.1 y REA. Aún debe autorizar el dispositivo y habilitar la depuración USB. No hay ningún emulador o Android SDK instalado.",
       "frida": "Instala el binding nativo de Node de Frida 17.23.2. Los dispositivos remotos pueden requerir un servidor Frida coincidente instalado por separado. Solo se permite ejecutar el script de instalación de Frida.",
@@ -888,6 +892,11 @@
       "turns_one": "interacción en este período",
       "turns_other": "interacciones en este período"
     },
+    "addons": {
+      "body": "Optional add-ons that extend Roxy. Pick one to set it up.",
+      "cheatDescription": "In-game memory tools for supported titles.",
+      "engineeringDescription": "Native analysis for shipped apps, binaries, Android, and saved captures."
+    },
     "backup": {
       "description": "Exporta tus habilidades globales y la configuración de tus servidores MCP a un único archivo y luego impórtalo en otro ordenador para dejarlo igual. Al importar se sobrescriben las habilidades y los servidores que compartan nombre.",
       "heading": "Copia de seguridad y restauración",
@@ -959,6 +968,7 @@
       "activity": "Actividad",
       "activityEmpty": "Tu actividad aparecerá aquí después de la primera respuesta del agente.",
       "addOns": "Complementos",
+      "addons": "Add-Ons",
       "colors": "Colores",
       "general": "General",
       "openRemote": "Administrar acceso remoto",

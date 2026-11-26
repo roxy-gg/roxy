@@ -119,6 +119,12 @@ export const SETTINGS_SEARCH = [
     terms: ['cheat.enable', 'cheat.toolCatalog', 'cheat.sources', 'cheat.prompt']
   },
   {
+    section: 'addons',
+    title: 'settings.navigation.addons',
+    description: 'settings.addons.body',
+    terms: ['settings.addons.engineeringDescription', 'settings.addons.cheatDescription']
+  },
+  {
     section: 'accounts',
     title: 'settings.providers.heading',
     description: 'settings.providers.description',

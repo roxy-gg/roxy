@@ -428,9 +428,13 @@
     "wrap": "التفاف"
   },
   "engineering": {
+    "advancedMode": "Advanced mode",
+    "advancedModeBody": "Show the individual tool-call switches for fine-grained control. Most people can leave this off.",
     "batch": "الأداة {{current}} من {{total}}",
     "callCount_one": "{{count}} tool call, including shared evidence tools",
     "callCount_other": "{{count}} مكالمات أداة، بما في ذلك أدوات الأدلة المشتركة",
+    "categories": "Tool families",
+    "categoriesBody": "Turn a family on or off to choose which tools are available to the agent. Most people can leave these on.",
     "dependencies": {
       "adb": "يتضمن Android Platform-Tools 37.0.1 وREA. يجب عليك لا تزال تفويض الجهاز وتمكين تصحيح أخطاء USB. لم يتم تثبيت أي محاكي أو Android SDK.",
       "frida": "يثبت ربط Node الأصلي لـ Frida 17.23.2. قد تتطلب الأجهزة البعيدة خادم Frida مطابقًا مثبتًا بشكل منفصل. يُسمح فقط بتشغيل برنامج تثبيت Frida.",
@@ -888,6 +892,11 @@
       "turns_one": "رد في هذه الفترة",
       "turns_other": "ردود في هذه الفترة"
     },
+    "addons": {
+      "body": "Optional add-ons that extend Roxy. Pick one to set it up.",
+      "cheatDescription": "In-game memory tools for supported titles.",
+      "engineeringDescription": "Native analysis for shipped apps, binaries, Android, and saved captures."
+    },
     "backup": {
       "description": "قم بتصدير مهاراتك العالمية وتكوينات خادم MCP إلى ملف واحد، ثم استوردها على جهاز كمبيوتر آخر لإعداده بنفس الطريقة. يؤدي الاستيراد إلى الكتابة فوق المهارات/الخوادم التي تشترك في نفس الاسم.",
       "heading": "النسخ الاحتياطي والاستعادة",
@@ -959,6 +968,7 @@
       "activity": "النشاط",
       "activityEmpty": "سيظهر نشاطك هنا بعد أول استجابة من الوكيل.",
       "addOns": "الوظائف الإضافية",
+      "addons": "Add-Ons",
       "colors": "الألوان",
       "general": "عام",
       "openRemote": "إدارة الوصول عن بعد",

@@ -428,9 +428,13 @@
     "wrap": "Retour à la ligne"
   },
   "engineering": {
+    "advancedMode": "Advanced mode",
+    "advancedModeBody": "Show the individual tool-call switches for fine-grained control. Most people can leave this off.",
     "batch": "Outil {{current}} sur {{total}}",
     "callCount_one": "{{count}} appel d'outil, y compris les outils de preuve partagée",
     "callCount_other": "{{count}} appels d'outils, y compris les outils de preuve partagée",
+    "categories": "Tool families",
+    "categoriesBody": "Turn a family on or off to choose which tools are available to the agent. Most people can leave these on.",
     "dependencies": {
       "adb": "Inclut Android Platform-Tools 37.0.1 et REA. Vous devez toujours autoriser l'appareil et activer le débogage USB. Aucun émulateur ou SDK Android n'est installé.",
       "frida": "Installe le binding Node natif de Frida 17.23.2. Les appareils distants peuvent nécessiter un serveur Frida correspondant installé séparément. Seul le script d'installation de Frida est autorisé à s'exécuter.",
@@ -888,6 +892,11 @@
       "turns_one": "tour durant cette période",
       "turns_other": "tours durant cette période"
     },
+    "addons": {
+      "body": "Optional add-ons that extend Roxy. Pick one to set it up.",
+      "cheatDescription": "In-game memory tools for supported titles.",
+      "engineeringDescription": "Native analysis for shipped apps, binaries, Android, and saved captures."
+    },
     "backup": {
       "description": "Exportez vos compétences globales et les configurations de vos serveurs MCP vers un seul fichier, puis importez-le sur un autre ordinateur pour le configurer de la même manière. L'importation écrase les compétences/serveurs qui partagent un nom.",
       "heading": "Sauvegarde et restauration",
@@ -959,6 +968,7 @@
       "activity": "Activité",
       "activityEmpty": "Votre activité apparaîtra ici après la première réponse de votre agent.",
       "addOns": "Extensions",
+      "addons": "Add-Ons",
       "colors": "Couleurs",
       "general": "Général",
       "openRemote": "Gérer l'accès à distance",
