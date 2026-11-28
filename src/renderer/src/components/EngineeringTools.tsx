@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Download, ExternalLink, RefreshCw } from 'lucide-react'
+import { Download, ExternalLink, RefreshCw, ScanEye, SlidersHorizontal } from 'lucide-react'
 import {
   ENGINEERING_TOOLS,
   ENGINEERING_TOOL_CALLS,
@@ -22,6 +22,7 @@ export function EngineeringTools({ active = true }: { active?: boolean }): JSX.E
   const [state, setState] = useState<EngineeringState | null>(null)
   const [busy, setBusy] = useState(false)
   const [issue, setIssue] = useState<EngineeringError | null>(null)
+  const [advanced, setAdvanced] = useState(false)
   useEffect(() => {
     if (!active) return
     let disposed = false
@@ -107,18 +108,14 @@ export function EngineeringTools({ active = true }: { active?: boolean }): JSX.E
         </p>
       </header>
       <section
-        className="space-y-4 rounded-xl border border-border bg-surface p-4"
+        className="space-y-3 rounded-xl border border-border bg-surface p-4"
         data-engineering-control
       >
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <div className="min-w-0 flex-1 basis-56">
-            <h3 className="text-sm font-medium text-text">{t('engineering.toggle')}</h3>
-            <p className="mt-1 text-xs leading-relaxed text-text-muted">
-              {ready
-                ? t('engineering.toggleBody', { count: calls.length })
-                : t('engineering.setupBody')}
-            </p>
-          </div>
+        <div className="flex flex-wrap items-center gap-3">
+          <ScanEye aria-hidden="true" className="h-5 w-5 shrink-0 text-accent" />
+          <h3 className="min-w-0 flex-1 text-sm font-medium text-text">
+            {t('engineering.heading')}
+          </h3>
           {ready ? (
             <Switch
               label={t('engineering.toggle')}
@@ -144,6 +141,11 @@ export function EngineeringTools({ active = true }: { active?: boolean }): JSX.E
             </Button>
           )}
         </div>
+        <p className="text-xs leading-relaxed text-text-muted">
+          {ready
+            ? t('engineering.toggleBody', { count: calls.length })
+            : t('engineering.setupBody')}
+        </p>
         {needsSystem && (
           <p className="text-[11px] leading-relaxed text-text-subtle">
             {t('engineering.installNotice')}
@@ -194,10 +196,30 @@ export function EngineeringTools({ active = true }: { active?: boolean }): JSX.E
           )}
         </div>
       )}
-      <details className="space-y-3" data-engineering-detail>
-        <summary className="cursor-pointer text-xs font-medium text-text-muted">
-          {t('engineering.details')}
-        </summary>
+      <div className="space-y-4">
+        <div className="space-y-3 rounded-xl border border-border bg-surface p-4">
+          <div className="flex items-center gap-3">
+            <SlidersHorizontal aria-hidden="true" className="h-5 w-5 shrink-0 text-accent" />
+            <h3 className="min-w-0 flex-1 text-sm font-medium text-text">
+              {t('engineering.advancedMode')}
+            </h3>
+            <Switch
+              label={t('engineering.advancedMode')}
+              checked={advanced}
+              disabled={working}
+              onChange={setAdvanced}
+            />
+          </div>
+          <p className="text-xs leading-relaxed text-text-muted">
+            {t('engineering.advancedModeBody')}
+          </p>
+        </div>
+        <div className="space-y-1">
+          <h3 className="text-sm font-medium text-text">{t('engineering.categories')}</h3>
+          <p className="text-xs leading-relaxed text-text-muted">
+            {t('engineering.categoriesBody')}
+          </p>
+        </div>
         <div className="flex flex-wrap items-center justify-between gap-2">
           <p className="text-xs text-text-subtle">
             {t('engineering.installedCount', {
@@ -274,37 +296,41 @@ export function EngineeringTools({ active = true }: { active?: boolean }): JSX.E
               <p className="text-xs leading-relaxed text-text-muted">
                 {t(`engineering.descriptions.${tool.id}`)}
               </p>
-              <p className="text-[11px] leading-relaxed text-text-subtle">
-                {t(`engineering.dependencies.${tool.id}`)}
-              </p>
+              {advanced && (
+                <p className="text-[11px] leading-relaxed text-text-subtle">
+                  {t(`engineering.dependencies.${tool.id}`)}
+                </p>
+              )}
               {tool.id === 'ghidra' && state.platform === 'win32' && (
                 <p className="text-xs text-warning">{t('engineering.ghidraWindows')}</p>
               )}
-              <details className="border-t border-border pt-3">
-                <summary className="cursor-pointer text-xs text-text-muted">
-                  {t('engineering.callCount', { count: names.length })}
-                </summary>
-                <div className="mt-3 space-y-2">
-                  {names.map((name) => (
-                    <div key={name} className="flex items-center justify-between gap-3">
-                      <code className="min-w-0 break-all text-[11px] text-text-muted">
-                        {engineeringName(name)}
-                      </code>
-                      <Switch
-                        label={engineeringName(name)}
-                        checked={!p.disabledCalls.includes(name)}
-                        disabled={working || !installed}
-                        onChange={(value) => toggleCall(name, value)}
-                      />
-                    </div>
-                  ))}
-                </div>
-              </details>
+              {advanced && (
+                <details className="border-t border-border pt-3">
+                  <summary className="cursor-pointer text-xs text-text-muted">
+                    {t('engineering.callCount', { count: names.length })}
+                  </summary>
+                  <div className="mt-3 space-y-2">
+                    {names.map((name) => (
+                      <div key={name} className="flex items-center justify-between gap-3">
+                        <code className="min-w-0 break-all text-[11px] text-text-muted">
+                          {engineeringName(name)}
+                        </code>
+                        <Switch
+                          label={engineeringName(name)}
+                          checked={!p.disabledCalls.includes(name)}
+                          disabled={working || !installed}
+                          onChange={(value) => toggleCall(name, value)}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </details>
+              )}
             </article>
           )
         })}
         <p className="text-xs leading-relaxed text-text-subtle">{t('engineering.lifecycleBody')}</p>
-      </details>
+      </div>
     </div>
   )
 }

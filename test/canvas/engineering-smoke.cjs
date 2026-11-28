@@ -46,13 +46,10 @@ app
       if (level >= 3) errors.push(text)
     })
     await win.loadURL('http://127.0.0.1:3107/?appearance')
-    await until(`!!document.querySelector('#settings-engineering')`)
+    await until(`!!document.querySelector('#settings-addons')`)
     assert.equal(
-      await evaluate(`return document.querySelector('#settings-engineering').textContent`),
-      'Reverse Engineering Tools'
-    )
-    assert(
-      await evaluate(`return !!document.querySelector('#settings-engineering .lucide-scan-eye')`)
+      await evaluate(`return document.querySelector('#settings-addons').textContent.trim()`),
+      'Add-Ons'
     )
     const source = '/@fs/' + path.resolve(__dirname, '../../src').replaceAll('\\', '/')
     const icons = await evaluate(`
@@ -81,7 +78,31 @@ app
       cached: true,
       painted: true
     })
-    await click('#settings-engineering')
+    await click('#settings-addons')
+    await until(`!!document.querySelector('[data-addon-card="engineering"]')`)
+    assert.equal(await evaluate(`return document.querySelectorAll('[data-addon-card]').length`), 3)
+    assert(
+      await evaluate(
+        `return !!document.querySelector('[data-addon-card="engineering"] .lucide-scan-eye') && !!document.querySelector('[data-addon-card="cheat"] .lucide-scan-line')`
+      )
+    )
+    assert.equal(
+      await evaluate(
+        `return document.querySelector('[data-addon-card="engineering"]').textContent.includes('Reverse Engineering Tools')`
+      ),
+      true
+    )
+    // Capture the Add-Ons hub for visual review.
+    await win.setSize(1101, 901)
+    await wait(200)
+    await win.setSize(1100, 900)
+    await wait(200)
+    await fs.mkdir(path.join(__dirname, '../.out'), { recursive: true })
+    await fs.writeFile(
+      path.join(__dirname, '../.out/engineering-hub-desktop.png'),
+      (await win.webContents.capturePage()).toPNG()
+    )
+    await click('[data-addon-card="engineering"]')
     await until(`!!document.querySelector('[data-engineering-tools]')`)
     const main = '[data-engineering-control] [role="switch"]'
     const bulk = '[data-engineering-control] button'
@@ -183,11 +204,33 @@ app
     await click(main)
     assert.equal((await preferences()).enabled, true)
     assert.equal((await preferences()).guidance, true)
-    await click('[data-engineering-detail] > summary')
+    // Simple mode shows the tool families directly, without per-call switches.
     assert.equal(
       await evaluate(`return document.querySelectorAll('[data-engineering-group]').length`),
       6
     )
+    assert.equal(
+      await evaluate(`return !!document.querySelector('[aria-label="rea_analyze_function"]')`),
+      false
+    )
+    // Capture the simple view (default) for visual review.
+    await until(
+      `!!document.querySelector('[aria-label="Advanced mode"]') && !document.querySelector('[data-engineering-tools]').closest('[hidden]')`
+    )
+    await evaluate(`document.querySelector('[data-engineering-tools]').scrollIntoView()`)
+    // Force a fresh paint before capturing (the headless compositor can lag).
+    await win.setSize(1101, 901)
+    await wait(200)
+    await win.setSize(1100, 900)
+    await wait(200)
+    await fs.mkdir(path.join(__dirname, '../.out'), { recursive: true })
+    await fs.writeFile(
+      path.join(__dirname, '../.out/engineering-simple-desktop.png'),
+      (await win.webContents.capturePage()).toPNG()
+    )
+    // Advanced mode reveals the individual tool-call switches.
+    await click('[aria-label="Advanced mode"]')
+    await until(`!!document.querySelector('[data-engineering-group="ghidra"] > details > summary')`)
     await click('[data-engineering-group="ghidra"] > details > summary')
     await click('[data-engineering-group="ghidra"] [aria-label="rea_analyze_function"]')
     await click('[aria-label="Enable JADX tools"]')
@@ -204,7 +247,9 @@ app
     // Revisit: derive on/off from saved preference, never automatically enable.
     await click(main)
     await click('#settings-about')
-    await click('#settings-engineering')
+    await click('#settings-addons')
+    await until(`!!document.querySelector('[data-addon-card="engineering"]')`)
+    await click('[data-addon-card="engineering"]')
     assert.equal(
       await evaluate(
         `return document.querySelector(${JSON.stringify(main)}).getAttribute('aria-checked')`

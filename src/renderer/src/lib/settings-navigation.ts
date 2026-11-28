@@ -18,7 +18,9 @@ import {
   Sparkles,
   UserRound,
   MonitorSmartphone,
-  Shield
+  Shield,
+  Blocks,
+  Clapperboard
 } from 'lucide-react'
 
 export const SETTINGS_GROUPS = [
@@ -36,8 +38,7 @@ export const SETTINGS_GROUPS = [
     items: [
       { id: 'skills', label: 'sidebar.skills', icon: Lightbulb },
       { id: 'mcp', label: 'sidebar.mcpServers', icon: Plug },
-      { id: 'engineering', label: 'engineering.heading', icon: ScanEye },
-      { id: 'cheat', label: 'cheat.title', icon: ScanLine },
+      { id: 'addons', label: 'settings.navigation.addons', icon: Blocks },
       { id: 'backup', label: 'settings.backup.heading', icon: DatabaseBackup }
     ]
   },
@@ -59,4 +60,39 @@ export const SETTINGS_GROUPS = [
   }
 ] as const
 
-export type SettingsSection = (typeof SETTINGS_GROUPS)[number]['items'][number]['id']
+/** Add-ons listed in the Add-Ons hub. Each card opens its own settings section. */
+export const ADDON_CARDS = [
+  {
+    id: 'engineering',
+    label: 'engineering.heading',
+    icon: ScanEye,
+    description: 'settings.addons.engineeringDescription'
+  },
+  {
+    id: 'cheat',
+    label: 'cheat.title',
+    icon: ScanLine,
+    description: 'settings.addons.cheatDescription'
+  },
+  {
+    id: 'video',
+    label: 'videoStudio.title',
+    icon: Clapperboard,
+    description: 'settings.addons.videoDescription'
+  }
+] as const
+
+/** Every navigable section: sidebar entries plus the add-on sections behind the hub. */
+export const SETTINGS_SECTIONS = [
+  ...SETTINGS_GROUPS.flatMap((group) =>
+    group.items.map((item) => ({ ...item, group: group.label }))
+  ),
+  ...ADDON_CARDS.map((card) => ({
+    id: card.id,
+    label: card.label,
+    icon: card.icon,
+    group: 'settings.navigation.addOns' as const
+  }))
+]
+
+export type SettingsSection = (typeof SETTINGS_SECTIONS)[number]['id']

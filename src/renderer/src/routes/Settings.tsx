@@ -1,5 +1,7 @@
 import { EngineeringTools } from '../components/EngineeringTools'
 import { CheatTools } from '../components/CheatTools'
+import { AddOnsHub } from '../components/AddOnsHub'
+import { VideoStudio } from '../components/VideoStudio'
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useTranslation, Trans } from 'react-i18next'
@@ -45,7 +47,11 @@ import { RemoteWorkspaceDialog } from '../components/RemoteWorkspaceDialog'
 import { SidebarNavItem } from '../components/SidebarFrame'
 import { SettingsSearchResults } from '../components/SettingsSearchResults'
 import { searchSettings, type SettingsSearchEntry } from '../lib/settings-search'
-import { SETTINGS_GROUPS, type SettingsSection } from '../lib/settings-navigation'
+import {
+  SETTINGS_GROUPS,
+  SETTINGS_SECTIONS,
+  type SettingsSection
+} from '../lib/settings-navigation'
 import { prefersReducedMotion } from '../lib/motion'
 import Themes from './Themes'
 import Skills from './Skills'
@@ -58,9 +64,7 @@ export default function Settings(): JSX.Element {
   const { t, i18n } = useTranslation()
   const navigate = useNavigate()
   const { section } = useParams()
-  const selected = SETTINGS_GROUPS.flatMap((group) => [...group.items]).find(
-    (item) => item.id === section
-  )
+  const selected = SETTINGS_SECTIONS.find((item) => item.id === section)
   const panel: SettingsSection = selected?.id ?? 'activity'
   const [query, setQuery] = useState('')
   const [searchTarget, setSearchTarget] = useState<SettingsSearchEntry | null>(null)
@@ -74,13 +78,11 @@ export default function Settings(): JSX.Element {
         ? searchSettings(
             query,
             t,
-            SETTINGS_GROUPS.flatMap((group) =>
-              group.items.map((item) => ({
-                section: item.id,
-                label: item.label,
-                group: group.label
-              }))
-            ),
+            SETTINGS_SECTIONS.map((item) => ({
+              section: item.id,
+              label: item.label,
+              group: item.group
+            })),
             LANGUAGES.map(({ code }) => i18n.getFixedT(code))
           )
         : [],
@@ -519,6 +521,14 @@ export default function Settings(): JSX.Element {
           {(visited.has('mcp') || panel === 'mcp') && <Mcp active={panel === 'mcp'} />}
         </div>
         <div
+          id="settings-addons-panel"
+          role="region"
+          aria-labelledby="settings-addons"
+          hidden={panel !== 'addons'}
+        >
+          {(visited.has('addons') || panel === 'addons') && <AddOnsHub onOpen={changeSection} />}
+        </div>
+        <div
           id="settings-engineering-panel"
           role="region"
           aria-labelledby="settings-engineering"
@@ -535,6 +545,14 @@ export default function Settings(): JSX.Element {
           hidden={panel !== 'cheat'}
         >
           {(visited.has('cheat') || panel === 'cheat') && <CheatTools active={panel === 'cheat'} />}
+        </div>
+        <div
+          id="settings-video-panel"
+          role="region"
+          aria-labelledby="settings-video"
+          hidden={panel !== 'video'}
+        >
+          {(visited.has('video') || panel === 'video') && <VideoStudio />}
         </div>
         <div
           id="settings-activity-panel"

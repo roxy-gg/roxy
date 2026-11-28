@@ -428,9 +428,13 @@
     "wrap": "التفاف"
   },
   "engineering": {
+    "advancedMode": "Advanced mode",
+    "advancedModeBody": "Show the individual tool-call switches for fine-grained control. Most people can leave this off.",
     "batch": "الأداة {{current}} من {{total}}",
     "callCount_one": "{{count}} tool call, including shared evidence tools",
     "callCount_other": "{{count}} مكالمات أداة، بما في ذلك أدوات الأدلة المشتركة",
+    "categories": "Tool families",
+    "categoriesBody": "Turn a family on or off to choose which tools are available to the agent. Most people can leave these on.",
     "dependencies": {
       "adb": "يتضمن Android Platform-Tools 37.0.1 وREA. يجب عليك لا تزال تفويض الجهاز وتمكين تصحيح أخطاء USB. لم يتم تثبيت أي محاكي أو Android SDK.",
       "frida": "يثبت ربط Node الأصلي لـ Frida 17.23.2. قد تتطلب الأجهزة البعيدة خادم Frida مطابقًا مثبتًا بشكل منفصل. يُسمح فقط بتشغيل برنامج تثبيت Frida.",
@@ -888,6 +892,12 @@
       "turns_one": "رد في هذه الفترة",
       "turns_other": "ردود في هذه الفترة"
     },
+    "addons": {
+      "body": "Optional add-ons that extend Roxy. Pick one to set it up.",
+      "cheatDescription": "In-game memory tools for supported titles.",
+      "engineeringDescription": "Native analysis for shipped apps, binaries, Android, and saved captures.",
+      "videoDescription": "Animated explainer videos written as code by the agent and rendered to MP4."
+    },
     "backup": {
       "description": "قم بتصدير مهاراتك العالمية وتكوينات خادم MCP إلى ملف واحد، ثم استوردها على جهاز كمبيوتر آخر لإعداده بنفس الطريقة. يؤدي الاستيراد إلى الكتابة فوق المهارات/الخوادم التي تشترك في نفس الاسم.",
       "heading": "النسخ الاحتياطي والاستعادة",
@@ -959,6 +969,7 @@
       "activity": "النشاط",
       "activityEmpty": "سيظهر نشاطك هنا بعد أول استجابة من الوكيل.",
       "addOns": "الوظائف الإضافية",
+      "addons": "Add-Ons",
       "colors": "الألوان",
       "general": "عام",
       "openRemote": "إدارة الوصول عن بعد",
@@ -1345,6 +1356,39 @@
     "tokens30d": "رموز 30 يومًا",
     "tokens7d": "رموز 7 أيام",
     "topModel": "أفضل نموذج: <1>{{model}}</1>"
+  },
+  "videoStudio": {
+    "comingSoon": "Coming soon",
+    "comingSoonBody": "This add-on is in development. Setup and controls will appear here once the rendering pipeline ships.",
+    "overview": "Ask the agent for a short explainer video. It writes the script, records the voice, codes every scene, and renders a finished MP4 with no manual editing.",
+    "pipeline": "How a video is made",
+    "steps": {
+      "render": {
+        "body": "A headless browser captures every frame and FFmpeg joins them with the audio into a vertical MP4.",
+        "title": "Render"
+      },
+      "review": {
+        "body": "The agent checks a contact sheet of frames and fixes problems before handing over the video.",
+        "title": "Self-review"
+      },
+      "scenes": {
+        "body": "Each scene is animated with HTML, CSS, SVG, or 3D, following a reusable visual style.",
+        "title": "Scenes as code"
+      },
+      "script": {
+        "body": "The agent researches the topic and writes a hook, the story beats, and a closing line.",
+        "title": "Script"
+      },
+      "timing": {
+        "body": "Every word gets a timestamp so captions and visuals land on the right word.",
+        "title": "Word timing"
+      },
+      "voice": {
+        "body": "Text-to-speech narrates the script, locally or with a voice provider.",
+        "title": "Voice"
+      }
+    },
+    "title": "Video Studio"
   },
   "voice": {
     "active": "نشط",

@@ -428,9 +428,13 @@
     "wrap": "Quebrar linha"
   },
   "engineering": {
+    "advancedMode": "Advanced mode",
+    "advancedModeBody": "Show the individual tool-call switches for fine-grained control. Most people can leave this off.",
     "batch": "Ferramenta {{current}} de {{total}}",
     "callCount_one": "{{count}} chamada de ferramenta, incluindo ferramentas de evidência compartilhada",
     "callCount_other": "{{count}} chamadas de ferramenta, incluindo ferramentas de evidência compartilhada",
+    "categories": "Tool families",
+    "categoriesBody": "Turn a family on or off to choose which tools are available to the agent. Most people can leave these on.",
     "dependencies": {
       "adb": "Inclui Android Platform-Tools 37.0.1 e REA. Você ainda deve autorizar o dispositivo e habilitar a depuração USB. Nenhum emulador ou Android SDK está instalado.",
       "frida": "Instala o binding nativo do Node do Frida 17.23.2. Dispositivos remotos podem exigir um servidor Frida correspondente instalado separadamente. Apenas o script de instalação do Frida pode ser executado.",
@@ -888,6 +892,12 @@
       "turns_one": "rodada neste período",
       "turns_other": "rodadas neste período"
     },
+    "addons": {
+      "body": "Optional add-ons that extend Roxy. Pick one to set it up.",
+      "cheatDescription": "In-game memory tools for supported titles.",
+      "engineeringDescription": "Native analysis for shipped apps, binaries, Android, and saved captures.",
+      "videoDescription": "Animated explainer videos written as code by the agent and rendered to MP4."
+    },
     "backup": {
       "description": "Exporte suas habilidades globais e configurações de servidor MCP para um único arquivo e, em seguida, importe-o em outro computador para configurá-lo da mesma forma. A importação sobrescreve habilidades/servidores que compartilham um nome.",
       "heading": "Backup e restauração",
@@ -959,6 +969,7 @@
       "activity": "Atividade",
       "activityEmpty": "Sua atividade aparecerá aqui após a primeira resposta do seu agente.",
       "addOns": "Add-Ons",
+      "addons": "Add-Ons",
       "colors": "Cores",
       "general": "Geral",
       "openRemote": "Gerenciar acesso remoto",
@@ -1345,6 +1356,39 @@
     "tokens30d": "Tokens 30d",
     "tokens7d": "Tokens 7d",
     "topModel": "Modelo principal: <1>{{model}}</1>"
+  },
+  "videoStudio": {
+    "comingSoon": "Coming soon",
+    "comingSoonBody": "This add-on is in development. Setup and controls will appear here once the rendering pipeline ships.",
+    "overview": "Ask the agent for a short explainer video. It writes the script, records the voice, codes every scene, and renders a finished MP4 with no manual editing.",
+    "pipeline": "How a video is made",
+    "steps": {
+      "render": {
+        "body": "A headless browser captures every frame and FFmpeg joins them with the audio into a vertical MP4.",
+        "title": "Render"
+      },
+      "review": {
+        "body": "The agent checks a contact sheet of frames and fixes problems before handing over the video.",
+        "title": "Self-review"
+      },
+      "scenes": {
+        "body": "Each scene is animated with HTML, CSS, SVG, or 3D, following a reusable visual style.",
+        "title": "Scenes as code"
+      },
+      "script": {
+        "body": "The agent researches the topic and writes a hook, the story beats, and a closing line.",
+        "title": "Script"
+      },
+      "timing": {
+        "body": "Every word gets a timestamp so captions and visuals land on the right word.",
+        "title": "Word timing"
+      },
+      "voice": {
+        "body": "Text-to-speech narrates the script, locally or with a voice provider.",
+        "title": "Voice"
+      }
+    },
+    "title": "Video Studio"
   },
   "voice": {
     "active": "Ativo",

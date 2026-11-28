@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { createInstance } from 'i18next'
 import { LANGUAGES } from '../src/shared/i18n'
 import { resources } from '../src/renderer/src/i18n'
-import { SETTINGS_GROUPS } from '../src/renderer/src/lib/settings-navigation'
+import { SETTINGS_SECTIONS } from '../src/renderer/src/lib/settings-navigation'
 import {
   SETTINGS_SEARCH,
   searchSettings,
@@ -17,13 +17,11 @@ async function main(): Promise<void> {
     fallbackLng: 'en',
     resources
   })
-  const pages = SETTINGS_GROUPS.flatMap((group) =>
-    group.items.map((item) => ({
-      section: item.id,
-      label: item.label,
-      group: group.label
-    }))
-  ) satisfies SettingsSearchPage[]
+  const pages = SETTINGS_SECTIONS.map((item) => ({
+    section: item.id,
+    label: item.label,
+    group: item.group
+  })) satisfies SettingsSearchPage[]
   const languages = LANGUAGES.map(({ code }) => i18n.getFixedT(code))
   const search = (query: string) => searchSettings(query, i18n.t, pages, languages)
   assert.equal(search('  ').length, 0)
