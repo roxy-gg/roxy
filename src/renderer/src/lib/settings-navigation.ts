@@ -19,7 +19,8 @@ import {
   UserRound,
   MonitorSmartphone,
   Shield,
-  Blocks
+  Blocks,
+  Clapperboard
 } from 'lucide-react'
 
 export const SETTINGS_GROUPS = [
@@ -72,6 +73,12 @@ export const ADDON_CARDS = [
     label: 'cheat.title',
     icon: ScanLine,
     description: 'settings.addons.cheatDescription'
+  },
+  {
+    id: 'video',
+    label: 'videoStudio.title',
+    icon: Clapperboard,
+    description: 'settings.addons.videoDescription'
   }
 ] as const
 

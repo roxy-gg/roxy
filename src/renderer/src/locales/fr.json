@@ -895,7 +895,8 @@
     "addons": {
       "body": "Optional add-ons that extend Roxy. Pick one to set it up.",
       "cheatDescription": "In-game memory tools for supported titles.",
-      "engineeringDescription": "Native analysis for shipped apps, binaries, Android, and saved captures."
+      "engineeringDescription": "Native analysis for shipped apps, binaries, Android, and saved captures.",
+      "videoDescription": "Animated explainer videos written as code by the agent and rendered to MP4."
     },
     "backup": {
       "description": "Exportez vos compétences globales et les configurations de vos serveurs MCP vers un seul fichier, puis importez-le sur un autre ordinateur pour le configurer de la même manière. L'importation écrase les compétences/serveurs qui partagent un nom.",
@@ -1355,6 +1356,39 @@
     "tokens30d": "Jetons 30j",
     "tokens7d": "Jetons 7j",
     "topModel": "Meilleur modèle : <1>{{model}}</1>"
+  },
+  "videoStudio": {
+    "comingSoon": "Coming soon",
+    "comingSoonBody": "This add-on is in development. Setup and controls will appear here once the rendering pipeline ships.",
+    "overview": "Ask the agent for a short explainer video. It writes the script, records the voice, codes every scene, and renders a finished MP4 with no manual editing.",
+    "pipeline": "How a video is made",
+    "steps": {
+      "render": {
+        "body": "A headless browser captures every frame and FFmpeg joins them with the audio into a vertical MP4.",
+        "title": "Render"
+      },
+      "review": {
+        "body": "The agent checks a contact sheet of frames and fixes problems before handing over the video.",
+        "title": "Self-review"
+      },
+      "scenes": {
+        "body": "Each scene is animated with HTML, CSS, SVG, or 3D, following a reusable visual style.",
+        "title": "Scenes as code"
+      },
+      "script": {
+        "body": "The agent researches the topic and writes a hook, the story beats, and a closing line.",
+        "title": "Script"
+      },
+      "timing": {
+        "body": "Every word gets a timestamp so captions and visuals land on the right word.",
+        "title": "Word timing"
+      },
+      "voice": {
+        "body": "Text-to-speech narrates the script, locally or with a voice provider.",
+        "title": "Voice"
+      }
+    },
+    "title": "Video Studio"
   },
   "voice": {
     "active": "Actif",

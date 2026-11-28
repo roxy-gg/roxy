@@ -80,7 +80,7 @@ app
     })
     await click('#settings-addons')
     await until(`!!document.querySelector('[data-addon-card="engineering"]')`)
-    assert.equal(await evaluate(`return document.querySelectorAll('[data-addon-card]').length`), 2)
+    assert.equal(await evaluate(`return document.querySelectorAll('[data-addon-card]').length`), 3)
     assert(
       await evaluate(
         `return !!document.querySelector('[data-addon-card="engineering"] .lucide-scan-eye') && !!document.querySelector('[data-addon-card="cheat"] .lucide-scan-line')`

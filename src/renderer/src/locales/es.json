@@ -895,7 +895,8 @@
     "addons": {
       "body": "Optional add-ons that extend Roxy. Pick one to set it up.",
       "cheatDescription": "In-game memory tools for supported titles.",
-      "engineeringDescription": "Native analysis for shipped apps, binaries, Android, and saved captures."
+      "engineeringDescription": "Native analysis for shipped apps, binaries, Android, and saved captures.",
+      "videoDescription": "Videos explicativos animados que el agente escribe como cÃ³digo y renderiza en MP4."
     },
     "backup": {
       "description": "Exporta tus habilidades globales y la configuración de tus servidores MCP a un único archivo y luego impórtalo en otro ordenador para dejarlo igual. Al importar se sobrescriben las habilidades y los servidores que compartan nombre.",
@@ -1355,6 +1356,39 @@
     "tokens30d": "Tokens 30 d",
     "tokens7d": "Tokens 7 d",
     "topModel": "Modelo más usado: <1>{{model}}</1>"
+  },
+  "videoStudio": {
+    "comingSoon": "PrÃ³ximamente",
+    "comingSoonBody": "Este complemento estÃ¡ en desarrollo. La configuraciÃ³n y los controles aparecerÃ¡n aquÃ­ cuando el render estÃ© listo.",
+    "overview": "PÃ­dele al agente un video explicativo corto. Escribe el guion, graba la voz, programa cada escena y entrega un MP4 terminado, sin ediciÃ³n manual.",
+    "pipeline": "CÃ³mo se crea un video",
+    "steps": {
+      "render": {
+        "body": "Un navegador sin interfaz captura cada fotograma y FFmpeg lo une con el audio en un MP4 vertical.",
+        "title": "Render"
+      },
+      "review": {
+        "body": "El agente revisa una hoja de fotogramas y corrige problemas antes de entregar el video.",
+        "title": "AutorrevisiÃ³n"
+      },
+      "scenes": {
+        "body": "Cada escena se anima con HTML, CSS, SVG o 3D, siguiendo un estilo visual reutilizable.",
+        "title": "Escenas como cÃ³digo"
+      },
+      "script": {
+        "body": "El agente investiga el tema y escribe un gancho, los bloques de la historia y un remate.",
+        "title": "Guion"
+      },
+      "timing": {
+        "body": "Cada palabra recibe una marca de tiempo para que subtÃ­tulos y visuales caigan en la palabra correcta.",
+        "title": "Tiempo por palabra"
+      },
+      "voice": {
+        "body": "Una voz sintÃ©tica narra el guion, en local o con un proveedor de voz.",
+        "title": "Voz"
+      }
+    },
+    "title": "Video Studio"
   },
   "voice": {
     "active": "Activo",

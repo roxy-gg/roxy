@@ -1,6 +1,7 @@
 import { EngineeringTools } from '../components/EngineeringTools'
 import { CheatTools } from '../components/CheatTools'
 import { AddOnsHub } from '../components/AddOnsHub'
+import { VideoStudio } from '../components/VideoStudio'
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useTranslation, Trans } from 'react-i18next'
@@ -544,6 +545,14 @@ export default function Settings(): JSX.Element {
           hidden={panel !== 'cheat'}
         >
           {(visited.has('cheat') || panel === 'cheat') && <CheatTools active={panel === 'cheat'} />}
+        </div>
+        <div
+          id="settings-video-panel"
+          role="region"
+          aria-labelledby="settings-video"
+          hidden={panel !== 'video'}
+        >
+          {(visited.has('video') || panel === 'video') && <VideoStudio />}
         </div>
         <div
           id="settings-activity-panel"

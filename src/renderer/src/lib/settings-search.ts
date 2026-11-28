@@ -122,7 +122,22 @@ export const SETTINGS_SEARCH = [
     section: 'addons',
     title: 'settings.navigation.addons',
     description: 'settings.addons.body',
-    terms: ['settings.addons.engineeringDescription', 'settings.addons.cheatDescription']
+    terms: [
+      'settings.addons.engineeringDescription',
+      'settings.addons.cheatDescription',
+      'settings.addons.videoDescription'
+    ]
+  },
+  {
+    section: 'video',
+    title: 'videoStudio.title',
+    description: 'videoStudio.overview',
+    target: 'settings-video-title',
+    terms: [
+      'videoStudio.pipeline',
+      'videoStudio.steps.voice.title',
+      'videoStudio.steps.render.title'
+    ]
   },
   {
     section: 'accounts',
